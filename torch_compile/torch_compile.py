@@ -531,6 +531,53 @@ class ConstructedMaskedSoftMax(
         return torch.softmax(score, dim=self._dim)
 
 
+class ConstructedMaskedNormalize(
+    ConstructedModule, operation_key=ops.MaskedNormalize
+):
+    """Normalize with Iverson predicates applied as zero-masks before summing.
+
+    Each Iverson factor is pre-materialised as a registered buffer.  At
+    forward time the buffer is permuted and unsqueezed (using the compile-time
+    alignment metadata) to match the input tensor shape, then positions where
+    the mask is 0 are zeroed before the sum-normalization denominator is
+    computed.  Masked output positions are therefore 0.
+    """
+
+    def __init__(self, target: cat.Broadcasted):
+        super().__init__(target)
+        op = target.operator
+        displacement = bcast.get_displacement(target)
+        self._dim = displacement if displacement is not None else -1
+        self._n_masks = len(op.iverson_factors)
+        self._alignments: list[tuple[list[int], int]] = [
+            (list(perm), n_broadcast)
+            for perm, n_broadcast in op.mask_alignments
+        ]
+        for i, factor in enumerate(op.iverson_factors):
+            try:
+                buf = materialise_iverson(factor)
+                self.register_buffer(f'_mask_{i}', buf)
+            except ValueError as e:
+                warnings.warn(
+                    f"MaskedNormalize factor {i} has unsized axes and cannot "
+                    f"be auto-materialised; it will be skipped. ({e})",
+                    stacklevel=2,
+                )
+
+    def forward(self, *xs: torch.Tensor) -> torch.Tensor:
+        x = xs[0]
+        for i, (perm, n_broadcast) in enumerate(self._alignments):
+            raw = getattr(self, f'_mask_{i}', None)
+            if raw is None:
+                continue
+            if perm:
+                raw = raw.permute(perm)
+            for _ in range(n_broadcast):
+                raw = raw.unsqueeze(0)
+            x = x * raw.float()
+        return x / x.sum(dim=self._dim, keepdim=True).clamp(min=1e-8)
+
+
 ##############
 ##   SCAN   ##
 ##############

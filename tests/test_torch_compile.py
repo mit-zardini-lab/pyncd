@@ -553,6 +553,20 @@ def test_normalize_accepts_where_kwarg():
     assert len(expr.operator.where_predicate) == 1
 
 
+def test_masked_normalize_compiles():
+    """normalize(expr, where=pred) compiles without error to a ConstructedModule."""
+    from torch_compile.torch_compile import ConstructedModule
+    from data_structure.TensorDSL import TL, real_axis, norm_axis, normalize
+
+    SEQ = 4
+    p = real_axis('p', SEQ)
+    m = norm_axis('m', SEQ)
+    tl = TL()
+    tl.Out[p, m] = normalize(tl.X[p, m], where=(m <= p))
+    mod = ConstructedModule.construct(tl.to_morphism())
+    assert mod is not None
+
+
 def test_inline_softmax_in_program():
     """softmax() inline in a TensorProgram (multi-equation) compiles correctly."""
     q = real_axis('q', 4)
