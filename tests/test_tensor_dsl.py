@@ -569,36 +569,54 @@ def test_normalization_simplification_drops_constant_bias():
 
     tl.bias[h] has free indices {h}; the norm axis is x (a NormAxis).
     Since x is not in {h}, the bias term is constant along x and must be
-    removed.  The resulting Broadcasted must have 2 input weaves (Q, K),
-    not 3 (Q, K, bias).
+    removed.  The resulting Composed einsum step must have 2 input weaves
+    (Q, K), not 3 (Q, K, bias).
     """
+    from data_structure.ProductCategory import Composed
     q, h, k = axes('q h k')
     x = norm_axis('x')
     tl = TL()
     tl.Comp[h, q, x] = softmax(tl.Q[q, h, k] * tl.K[x, h, k] + tl.bias[h])
     sig = tl.bc_signature()
-    assert len(sig.input_weaves) == 2, (
-        f"Expected 2 input weaves (Q, K); got {len(sig.input_weaves)}"
+    assert isinstance(sig, Composed), (
+        f"Expected Composed(einsum, softmax); got {type(sig).__name__}"
+    )
+    einsum = sig.content[0]
+    assert len(einsum.input_weaves) == 2, (
+        f"Expected 2 input weaves (Q, K); got {len(einsum.input_weaves)}"
     )
 
 
 def test_normalization_simplification_keeps_axis_dependent_term():
     """A term that depends on the norm axis must NOT be dropped.
 
-    The pre-existing NormAxis != RawAxis bug in _build_sum_morphism means that a
-    2-term SumExpr equation containing a NormAxis raises ValueError at assignment
-    time.  We use that as a canary: if scale[x] is correctly kept (2 terms remain),
-    the assignment crashes with the known ValueError; if scale[x] is incorrectly
-    dropped (1 term remains), the assignment succeeds with no exception, which
-    fails the pytest.raises assertion.
-
-    Once the NormAxis bug is fixed (a separate task), this test should be updated
-    to call bc_signature() directly and assert 3 input weaves (Q, K, scale).
+    tl.scale[x] has free index x (the NormAxis), so it must be kept after
+    softmax simplification.  bc_signature() must produce a Composed morphism
+    whose domain has 3 inputs (Q, K, scale).
     """
+    from data_structure.ProductCategory import Composed
     q, h, k = axes('q h k')
     x = norm_axis('x')
     tl = TL()
-    # tl.scale[x] depends on x (norm axis) → must be kept → 2-term SumExpr
-    # → _build_sum_morphism crashes with known NormAxis bug
-    with pytest.raises(ValueError, match="Elements are not all equal"):
-        tl.Comp[h, q, x] = softmax(tl.Q[q, h, k] * tl.K[x, h, k] + tl.scale[x])
+    tl.Comp[h, q, x] = softmax(tl.Q[q, h, k] * tl.K[x, h, k] + tl.scale[x])
+    sig = tl.bc_signature()
+    assert isinstance(sig, Composed), (
+        f"Expected Composed; got {type(sig).__name__}"
+    )
+    assert len(sig.dom()) == 3, (
+        f"Expected 3 input weaves (Q, K, scale); got {len(sig.dom())}"
+    )
+
+
+def test_norm_axis_softmax_compiles_to_composed():
+    """norm_axis() in the LHS of a softmax equation must compile to a Composed
+    (einsum @ SoftMax template) rather than crashing with a type-equality error."""
+    from data_structure.ProductCategory import Composed
+    q, h, k = axes('q h k')
+    x = norm_axis('x')
+    tl = TL()
+    tl.Out[h, q, x] = softmax(tl.Q[q, h, k] * tl.K[x, h, k])
+    sig = tl.bc_signature()
+    assert isinstance(sig, Composed), (
+        f"Expected Composed(einsum, softmax); got {type(sig).__name__}"
+    )

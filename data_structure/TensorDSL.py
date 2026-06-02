@@ -982,11 +982,6 @@ class TL:
         if not (isinstance(morph, bc.Broadcasted) and isinstance(morph.operator, TensorEquation)):
             return morph  # SumExpr Composed — terms already split by _build_sum_morphism
         eq = morph.operator
-        # NormAxis equations cannot be composed with a generic RawAxis-typed template
-        # (the @-composition unification would crash because NormAxis != RawAxis).
-        # Return the raw Broadcasted directly; the nonlinearity is embedded in the operator.
-        if any(isinstance(ax, NormAxis) for ax in eq.lhs_indices):
-            return morph
         return _split_nonlinearity(eq, datatype=datatype,
                                    array_datatypes=self._array_datatypes())
 

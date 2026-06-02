@@ -239,14 +239,24 @@ class EqualityClass[T:UTerm]:
     @classmethod
     def from_iter(cls, target: Iterable[T]) -> EqualityClass[T]:
         target = tuple(target)
-        _type = util.iallequals(map(type, target))
+        # Determine the most-general common type.  NormAxis and NatAxis are
+        # subclasses of RawAxis; allow them to coexist in one equality class
+        # by widening to the common base.
+        types = [type(t) for t in target]
+        _type: type = types[0]
+        for t in types[1:]:
+            if t == _type:
+                continue
+            if issubclass(_type, t):
+                _type = t        # t is more general; widen
+            elif not issubclass(t, _type):
+                raise ValueError(
+                    f"Elements are not all equal: {_type.__name__} != {t.__name__}"
+                )
         return EqualityClass(
             _type=_type,
             bucket={t.uid for t in target},
-            canonical=max(
-                target,
-                key=lambda uterm: uterm.uid
-            )
+            canonical=max(target, key=lambda uterm: uterm.uid),
         )
 
     def merge(self, other: EqualityClass[T]) -> None | EqualityClass[T]:
