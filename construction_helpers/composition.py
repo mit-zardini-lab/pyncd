@@ -87,6 +87,63 @@ def excess_product[L](
         return (cat.ProdObject.from_iter(slice_side(right, -excess_left, side)), None)
     return (None, None)
 
+def _array_signature(arr) -> tuple | None:
+    """Shape signature of an Array as (datatype_type, ((name, size),...)).
+    Returns None if arr is not an Array."""
+    if not isinstance(arr, cat.Array):
+        return None
+    return (
+        type(arr.datatype),
+        tuple(
+            (
+                ax.uid._name.body if ax.uid._name else None,
+                getattr(ax._size, '_value', None),
+            )
+            for ax in arr.shape()
+        )
+    )
+
+
+def _find_composition_reordering(
+    left_cod: cat.ProdObject,
+    right_dom: cat.ProdObject,
+) -> tuple[int, ...] | None:
+    """Find a permutation of right_dom indices putting matched elements FIRST,
+    excess elements LAST — the layout excess_product with BOTTOM expects.
+
+    Returns new_order tuple where new_order[new_pos] = orig_pos, or None
+    if reordering is unnecessary or impossible.
+    """
+    if len(left_cod) >= len(right_dom):
+        return None
+
+    left_sigs = [_array_signature(obj) for obj in left_cod]
+    if any(s is None for s in left_sigs):
+        return None
+
+    right_sigs = [_array_signature(obj) for obj in right_dom]
+
+    matched: list[int] = []
+    used: set[int] = set()
+    for left_sig in left_sigs:
+        for i, right_sig in enumerate(right_sigs):
+            if i not in used and right_sig == left_sig:
+                matched.append(i)
+                used.add(i)
+                break
+
+    if len(matched) != len(left_cod):
+        return None
+
+    excess = [i for i in range(len(right_dom)) if i not in used]
+    new_order = tuple(matched + excess)
+
+    if new_order == tuple(range(len(right_dom))):
+        return None  # Already correct order
+
+    return new_order
+
+
 def add_excess_lift[B: cat.Datatype](
     left: cat.BroadcastedCategory[B, cat.RawAxis],
     right: cat.BroadcastedCategory[B, cat.RawAxis],
@@ -134,6 +191,22 @@ def composition( # type: ignore
         )
     if isinstance(left.cod()[0], cat.Array):
         left, right = add_excess_lift(left, right)
+    if len(left.cod()) < len(right.dom()):
+        new_order = _find_composition_reordering(left.cod(), right.dom())
+        if new_order is not None:
+            # inv_order[orig_pos] = new_pos: maps from reordered inputs back to
+            # right's original slot order, needed by right's internal einsums.
+            inv_order = [0] * len(new_order)
+            for new_pos, orig_pos in enumerate(new_order):
+                inv_order[orig_pos] = new_pos
+            reordered_dom = cat.ProdObject.from_iter(
+                right.dom()[orig_pos] for orig_pos in new_order
+            )
+            rearrangement = cat.Rearrangement(
+                mapping=tuple(inv_order),
+                _dom=tuple(reordered_dom),
+            )
+            right = align_composed(rearrangement, right)
     excess_left, excess_right = excess_product(left.cod(), right.dom(), ExcessProductSide.BOTTOM)
     if excess_left is not None:
         left = chp.morphism_product((left, excess_left))

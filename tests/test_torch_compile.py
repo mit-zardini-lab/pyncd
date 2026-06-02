@@ -984,6 +984,114 @@ def test_masked_softmax_excludes_future_positions():
     )
 
 
+def test_transformer_layer_attn_ffn_composition_output_shape():
+    """attn_res() @ ffn_res() (separately constructed TL morphisms) must compile
+    and run without einsum subscript conflicts."""
+    SEQ, D, H, K, DFF = 4, 6, 2, 3, 8
+
+    def mk_attn():
+        tl = TL()
+        q = real_axis('q', SEQ); x = norm_axis('x', SEQ)
+        m = real_axis('m', D);   h = real_axis('h', H);  k = real_axis('k', K)
+        tl.Query[q, h, k]    = tl.W_Q[h, k, m] * tl.H[q, m]
+        tl.Key[x, h, k]      = tl.W_K[h, k, m] * tl.H[x, m]
+        tl.Value[x, h, k]    = tl.W_V[h, k, m] * tl.H[x, m]
+        tl.S[h, q, x]        = softmax(tl.Query[q, h, k] * tl.Key[x, h, k],
+                                        where=(x <= q))
+        tl.AttnOut[q, h, k]  = tl.S[h, q, x] * tl.Value[x, h, k]
+        tl.Attn[q, m]        = tl.W_O[m, h, k] * tl.AttnOut[q, h, k]
+        tl.A[q, m]           = normalize(tl.Attn[q, m] + tl.H[q, m])
+        return tl.to_morphism()
+
+    def mk_ffn():
+        tl = TL()
+        q = real_axis('q', SEQ); m = real_axis('m', D)
+        d = real_axis('d_{ff}', DFF)
+        tl.F[q, d]   = relu(tl.W_in[d, m] * tl.A[q, m])
+        tl.Y[q, m]   = tl.W_out[m, d] * tl.F[q, d]
+        tl.Out[q, m] = normalize(tl.Y[q, m] + tl.A[q, m])
+        return tl.to_morphism()
+
+    layer = mk_attn() @ mk_ffn()
+    mod = ConstructedModule.construct(layer)
+
+    torch.manual_seed(0)
+    W_Q = torch.randn(H, K, D); H0 = torch.randn(SEQ, D)
+    W_K = torch.randn(H, K, D); W_V = torch.randn(H, K, D)
+    W_O = torch.randn(D, H, K)
+    W_in = torch.randn(DFF, D); W_out = torch.randn(D, DFF)
+
+    out = mod(W_Q, H0, W_K, W_V, W_O, W_in, W_out)
+    out = out[0] if isinstance(out, tuple) else out
+    assert out.shape == torch.Size([SEQ, D]), f"Expected ({SEQ},{D}), got {out.shape}"
+
+
+def test_transformer_layer_composition_matches_single_tl_program():
+    """attn @ ffn composition must produce numerically identical output to
+    a single TL program that encodes both sub-layers."""
+    SEQ, D, H, K, DFF = 4, 6, 2, 3, 8
+
+    def mk_attn():
+        tl = TL()
+        q = real_axis('q', SEQ); x = norm_axis('x', SEQ)
+        m = real_axis('m', D);   h = real_axis('h', H);  k = real_axis('k', K)
+        tl.Query[q, h, k]    = tl.W_Q[h, k, m] * tl.H[q, m]
+        tl.Key[x, h, k]      = tl.W_K[h, k, m] * tl.H[x, m]
+        tl.Value[x, h, k]    = tl.W_V[h, k, m] * tl.H[x, m]
+        tl.S[h, q, x]        = softmax(tl.Query[q, h, k] * tl.Key[x, h, k],
+                                        where=(x <= q))
+        tl.AttnOut[q, h, k]  = tl.S[h, q, x] * tl.Value[x, h, k]
+        tl.Attn[q, m]        = tl.W_O[m, h, k] * tl.AttnOut[q, h, k]
+        tl.A[q, m]           = normalize(tl.Attn[q, m] + tl.H[q, m])
+        return tl.to_morphism()
+
+    def mk_ffn():
+        tl = TL()
+        q = real_axis('q', SEQ); m = real_axis('m', D)
+        d = real_axis('d_{ff}', DFF)
+        tl.F[q, d]   = relu(tl.W_in[d, m] * tl.A[q, m])
+        tl.Y[q, m]   = tl.W_out[m, d] * tl.F[q, d]
+        tl.Out[q, m] = normalize(tl.Y[q, m] + tl.A[q, m])
+        return tl.to_morphism()
+
+    def mk_full():
+        tl = TL()
+        q = real_axis('q', SEQ); x = norm_axis('x', SEQ)
+        m = real_axis('m', D);   h = real_axis('h', H)
+        k = real_axis('k', K);   d = real_axis('d_{ff}', DFF)
+        tl.Query[q, h, k]    = tl.W_Q[h, k, m] * tl.H[q, m]
+        tl.Key[x, h, k]      = tl.W_K[h, k, m] * tl.H[x, m]
+        tl.Value[x, h, k]    = tl.W_V[h, k, m] * tl.H[x, m]
+        tl.S[h, q, x]        = softmax(tl.Query[q, h, k] * tl.Key[x, h, k],
+                                        where=(x <= q))
+        tl.AttnOut[q, h, k]  = tl.S[h, q, x] * tl.Value[x, h, k]
+        tl.Attn[q, m]        = tl.W_O[m, h, k] * tl.AttnOut[q, h, k]
+        tl.A[q, m]           = normalize(tl.Attn[q, m] + tl.H[q, m])
+        tl.F[q, d]           = relu(tl.W_in[d, m] * tl.A[q, m])
+        tl.Y[q, m]           = tl.W_out[m, d] * tl.F[q, d]
+        tl.Out[q, m]         = normalize(tl.Y[q, m] + tl.A[q, m])
+        return tl.to_morphism()
+
+    torch.manual_seed(7)
+    W_Q = torch.randn(H, K, D); H0 = torch.randn(SEQ, D)
+    W_K = torch.randn(H, K, D); W_V = torch.randn(H, K, D)
+    W_O = torch.randn(D, H, K)
+    W_in = torch.randn(DFF, D); W_out_t = torch.randn(D, DFF)
+
+    mod_comp = ConstructedModule.construct(mk_attn() @ mk_ffn())
+    out_comp = mod_comp(W_Q, H0, W_K, W_V, W_O, W_in, W_out_t)
+    out_comp = out_comp[0] if isinstance(out_comp, tuple) else out_comp
+
+    mod_full = ConstructedModule.construct(mk_full())
+    out_full = mod_full(W_Q, H0, W_K, W_V, W_O, W_in, W_out_t)
+    out_full = out_full[0] if isinstance(out_full, tuple) else out_full
+
+    assert torch.allclose(out_comp, out_full, atol=1e-5), (
+        f"Composition output differs from single-TL reference: "
+        f"max diff {(out_comp - out_full).abs().max().item():.4f}"
+    )
+
+
 def test_attn_res_with_where_is_exactly_causally_invariant():
     """Full attn_res using norm_axis + softmax(where=) must be exactly causal-invariant.
 
