@@ -485,6 +485,52 @@ class ConstructedNorm[B: cat.Datatype, A: cat.Axis](ConstructedModule, operation
         return x / x.sum(dim=self._dim, keepdim=True).clamp(min=1e-8)
 
 
+class ConstructedMaskedSoftMax(
+    ConstructedModule, operation_key=ops.MaskedSoftMax
+):
+    """Softmax with Iverson predicates applied as -inf masks before exponentiation.
+
+    Each Iverson factor is pre-materialised as a registered buffer.  At
+    forward time the buffer is permuted and unsqueezed (using the compile-time
+    alignment metadata) to match the score tensor shape, then masked_fill
+    sets excluded positions to -inf before torch.softmax.
+    """
+
+    def __init__(self, target: cat.Broadcasted):
+        super().__init__(target)
+        op = target.operator
+        displacement = bcast.get_displacement(target)
+        self._dim = displacement if displacement is not None else -1
+        self._n_masks = len(op.iverson_factors)
+        self._alignments: list[tuple[list[int], int]] = [
+            (list(perm), n_broadcast)
+            for perm, n_broadcast in op.mask_alignments
+        ]
+        for i, factor in enumerate(op.iverson_factors):
+            try:
+                buf = materialise_iverson(factor)
+                self.register_buffer(f'_mask_{i}', buf)
+            except ValueError as e:
+                warnings.warn(
+                    f"MaskedSoftMax factor {i} has unsized axes and cannot "
+                    f"be auto-materialised; it will be skipped. ({e})",
+                    stacklevel=2,
+                )
+
+    def forward(self, *xs: torch.Tensor) -> torch.Tensor:
+        score = xs[0]
+        for i, (perm, n_broadcast) in enumerate(self._alignments):
+            raw = getattr(self, f'_mask_{i}', None)
+            if raw is None:
+                continue
+            if perm:
+                raw = raw.permute(perm)
+            for _ in range(n_broadcast):
+                raw = raw.unsqueeze(0)
+            score = score.masked_fill(raw == 0, float('-inf'))
+        return torch.softmax(score, dim=self._dim)
+
+
 ##############
 ##   SCAN   ##
 ##############

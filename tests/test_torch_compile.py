@@ -1,7 +1,7 @@
 import pytest
 import torch
 import data_structure.Category as cat
-from data_structure.TensorDSL import TL, axes, real_axis, relu, softmax, normalize
+from data_structure.TensorDSL import TL, axes, real_axis, norm_axis, relu, softmax, normalize
 from data_structure.TensorExpr import IversonConst, ieq, iabs
 from data_structure.Numeric import Integer
 from torch_compile.torch_compile import (
@@ -912,12 +912,14 @@ def test_causal_mask_renormalize_is_lower_triangular():
     For uniform Comp (all-ones), S[h, q, x] should give equal weight to
     each causal position (x <= q) and zero weight to future positions.
 
-    NOTE: the full attn_res module (which applies softmax first, then masks) is
-    not exactly causal-invariant in floating point — changing future keys shifts
-    the softmax denominator, which shifts the masked weights before renorm. The
-    standard transformer avoids this by masking *before* softmax (scores masked
-    to -inf). The TL example uses the post-softmax formulation; causal invariance
-    is exact only at the mask+normalize step in isolation.
+    NOTE: normalize(softmax(QK) * mask) is mathematically equivalent to masked
+    softmax in exact arithmetic — the full-softmax denominator D_full cancels in
+    the renormalization step.  However, it has a real numerical failure mode: if
+    a future key position receives a large score, it dominates the softmax and
+    the causal values underflow to near machine-epsilon.  The clamp_min in
+    normalize() then activates and the renormalized weights no longer sum to 1,
+    producing incorrect attention.  The masked-softmax formulation (causal_softmax)
+    avoids this entirely by masking before exponentiation.
     """
     SEQ, H = 5, 2
     tl = TL()
@@ -950,4 +952,33 @@ def test_causal_mask_renormalize_is_lower_triangular():
     S2 = S2[0] if isinstance(S2, tuple) else S2
     assert torch.allclose(S[:, 0, :], S2[:, 0, :], atol=1e-5), (
         "Mask+normalize is not causal at q=0: changing future Comp changed S[:,0,:]"
+    )
+
+
+def test_masked_softmax_excludes_future_positions():
+    """softmax(QK, where=(x<=q)) must give S[h,q,x]=0 for x>q and rows summing to 1."""
+    SEQ, H = 5, 2
+    q_ax = real_axis('q', SEQ)
+    h_ax = real_axis('h', H)
+    k_ax = real_axis('k', 3)
+    x_ax = norm_axis('x', SEQ)
+    tl = TL()
+    tl.S[h_ax, q_ax, x_ax] = softmax(
+        tl.Q[q_ax, h_ax, k_ax] * tl.K[x_ax, h_ax, k_ax],
+        where=(x_ax <= q_ax),
+    )
+    mod = ConstructedModule.construct(tl.to_morphism())
+
+    torch.manual_seed(0)
+    Q_t = torch.randn(SEQ, H, 3)
+    K_t = torch.randn(SEQ, H, 3)
+    S = mod(Q_t, K_t)
+    S = S[0] if isinstance(S, tuple) else S    # shape (H, Q, X)
+
+    upper = torch.triu(torch.ones(SEQ, SEQ, dtype=torch.bool), diagonal=1)
+    assert S[:, upper].abs().max() < 1e-6, (
+        f"Non-zero upper-triangle: max={S[:, upper].abs().max().item()}"
+    )
+    assert torch.allclose(S.sum(dim=-1), torch.ones(H, SEQ), atol=1e-5), (
+        f"Rows do not sum to 1: {S.sum(dim=-1)}"
     )
