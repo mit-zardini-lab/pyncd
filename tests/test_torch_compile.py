@@ -883,3 +883,71 @@ def test_ffn_projection_numerical():
     assert torch.allclose(Y_tl, Y_ref, atol=1e-5), (
         f"FFN projection mismatch: max diff {(Y_tl - Y_ref).abs().max().item()}"
     )
+
+
+# ---------------------------------------------------------------------------
+# normalize() semantics — sum-normalization (x / x.sum(dim))
+# ---------------------------------------------------------------------------
+
+def test_normalize_row_sums_to_one():
+    """normalize(In[q, x]) over x should produce rows summing to 1.
+
+    This tests that normalize() compiles to x / x.sum(dim=-1), not LayerNorm.
+    """
+    tl = TL()
+    q = real_axis('q', 3); x = real_axis('x', 5)
+    tl.Out[q, x] = normalize(tl.In[q, x])
+    mod = ConstructedModule.construct(tl.to_morphism())
+    inp = torch.rand(3, 5) + 0.1   # all positive, avoid divide-by-zero
+    out = mod(inp)
+    out = out[0] if isinstance(out, tuple) else out
+    assert torch.allclose(out.sum(dim=-1), torch.ones(3), atol=1e-5), (
+        f"Row sums: {out.sum(dim=-1).tolist()} — expected all 1.0"
+    )
+
+
+def test_causal_mask_renormalize_is_lower_triangular():
+    """The mask+normalize step alone produces correct causal attention weights.
+
+    For uniform Comp (all-ones), S[h, q, x] should give equal weight to
+    each causal position (x <= q) and zero weight to future positions.
+
+    NOTE: the full attn_res module (which applies softmax first, then masks) is
+    not exactly causal-invariant in floating point — changing future keys shifts
+    the softmax denominator, which shifts the masked weights before renorm. The
+    standard transformer avoids this by masking *before* softmax (scores masked
+    to -inf). The TL example uses the post-softmax formulation; causal invariance
+    is exact only at the mask+normalize step in isolation.
+    """
+    SEQ, H = 5, 2
+    tl = TL()
+    q = real_axis('q', SEQ); x = real_axis('x', SEQ); h = real_axis('h', H)
+    tl.S[h, q, x] = normalize(tl.Comp[h, q, x] * (x <= q))
+    mod = ConstructedModule.construct(tl.to_morphism())
+
+    Comp = torch.ones(H, SEQ, SEQ)
+    S = mod(Comp)
+    S = S[0] if isinstance(S, tuple) else S
+
+    # All upper-triangle entries must be zero (causal mask)
+    upper = torch.triu(torch.ones(SEQ, SEQ, dtype=torch.bool), diagonal=1)
+    assert S[:, upper].abs().max() < 1e-6, (
+        f"Non-zero upper-triangle entry: max={S[:, upper].abs().max().item()}"
+    )
+
+    # Rows must sum to 1 (renormalized)
+    assert torch.allclose(S.sum(dim=-1), torch.ones(H, SEQ), atol=1e-5), (
+        f"Row sums not 1: {S.sum(dim=-1)}"
+    )
+
+    # Causal invariance for q=0: x=1..SEQ-1 are all future for q=0, so
+    # changing Comp[:, 0, 1:] must not affect S[:, 0, :].
+    # (We check q=0 specifically: for q=0, only x=0 is causal, so any change
+    # to Comp[:, 0, 1:] must leave S[:, 0, :] = [1, 0, 0, ...] unchanged.)
+    Comp_q0_future_changed = Comp.clone()
+    Comp_q0_future_changed[:, 0, 1:] = torch.rand(H, SEQ - 1) * 10
+    S2 = mod(Comp_q0_future_changed)
+    S2 = S2[0] if isinstance(S2, tuple) else S2
+    assert torch.allclose(S[:, 0, :], S2[:, 0, :], atol=1e-5), (
+        "Mask+normalize is not causal at q=0: changing future Comp changed S[:,0,:]"
+    )

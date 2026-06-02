@@ -477,11 +477,12 @@ class ConstructedEmbedding[
 class ConstructedNorm[B: cat.Datatype, A: cat.Axis](ConstructedModule, operation_key=ops.Normalize):
     def __init__(self, target: cat.Broadcasted[B, A, ops.Normalize]):
         super().__init__(target)
-        self.module = nn.LayerNorm(target.input_weaves[0]._shape[-1].local_size()._value) # type: ignore
-        self.func = broadcast_func(target, self.module.forward)
+        displacement = bcast.get_displacement(target)
+        self._dim = displacement if displacement is not None else -1
 
-    def forward(self, *xs: torch.Tensor):
-        return self.func(xs[0])
+    def forward(self, *xs: torch.Tensor) -> torch.Tensor:
+        x = xs[0]
+        return x / x.sum(dim=self._dim, keepdim=True).clamp(min=1e-8)
 
 
 ##############
