@@ -455,7 +455,9 @@ The base operation $f$ is unchanged; the lift only enlarges the loop domain and 
 
 **Paper:** Section 5.1.1 — **Python:** [construction_helpers/composition.py](../construction_helpers/composition.py)
 
-The `@` operator overloads `Morphism.__matmul__` to compose two morphisms $f; g$ (the left and right operands) with automatic axis alignment. When $\text{cod}(f)$ and $\text{dom}(g)$ differ in the number of axes, identity morphisms are inserted via `morphism_object_lift` to reconcile the mismatch. Once both sides have the same number of axes, a `Context` is built by pairing axes positionally and adding equality classes. Applying the context substitutes canonical UIDs throughout the composed expression, unifying named axes.
+The `@` operator overloads `Morphism.__matmul__` to compose two morphisms $f; g$ (the left and right operands) with automatic axis alignment. When $\text{cod}(f)$ and $\text{dom}(g)$ differ in the number of axes, excess inputs are identified and identity morphisms inserted to reconcile the mismatch before a `Context` is built. Once boundaries have compatible sizes, axes are paired positionally and added to equality classes; applying the context substitutes canonical UIDs throughout the composed expression, unifying named axes.
+
+**Shape-based matching.** When morphisms are built from separate `TL()` instances their axis UIDs differ even if the axes have the same name and size. `composition()` handles this by first attempting to match elements of $\text{dom}(g)$ to elements of $\text{cod}(f)$ by *axis shape signature* — a tuple of (name, size) pairs for each axis of the array. If the shared element is not already at the positionally expected location, a `Rearrangement` is prepended to $g$ to reorder its domain so matched elements come first; the standard positional alignment then proceeds correctly. This allows `attn_res() @ ffn_res()` to work even when the two functions were built from separate `TL()` instances with independent axis UIDs.
 
 For example:
 
@@ -510,12 +512,13 @@ Operators are `Operator` subclasses (frozen dataclasses) that implement `templat
 | --- | --- |
 | `Einops.template('q h k, x h k -> h q x')` | General einsum; parses signature into weaves and reindexings |
 | `Linear.template(input_size, output_size, name)` | Learned linear layer |
-| `SoftMax.template()` | Normalization along one target axis |
+| `SoftMax.template()` | Softmax along one target axis |
+| `MaskedSoftMax.template(iverson_factors, mask_alignments)` | Softmax with Iverson predicates applied as $-\infty$ masks before exponentiation. In the TL DSL use `softmax(expr, where=pred)` with `norm_axis()` in the LHS; `_split_nonlinearity` routes to this operator automatically. |
 | `Elementwise.template()` | Elementwise nonlinearity ($\sigma$, ReLU, etc.) |
-| `Normalize.template()` | RMSNorm; same shape in and out |
+| `Normalize.template()` | Sum normalization: $x / \sum_\text{dim}(x)$; same shape in and out. Applied via `normalize()` in the TL DSL. |
 | `Embedding.template(embedding_size)` | Discrete $\to$ real; input datatype is `Natural` |
 | `AdditionOp.template()` | Elementwise addition of $n \geq 2$ arrays of the same shape |
-| `WeightedTriangularLower.template()` | Causal mask; used in attention |
+| `WeightedTriangularLower.template()` | Lower-triangular masking followed by sum normalization; legacy attention masking |
 
 `TensorEquation` is an additional `Operator` subclass defined in `data_structure/TensorLogic.py`. Unlike the operators above, it is not constructed via `template()` but via `bc_signature()`, which derives weaves and reindexings from the equation's axis UID graph rather than from a string signature. It is stored as the `Broadcasted.operator` field and carries the full contraction structure — `lhs_indices`, `rhs` as `TensorRef` / Iverson objects, and an optional nonlinearity — while remaining traversable by `Context.apply`. See [tensorLogicNCDIntegration.md](tensorLogicNCDIntegration.md) for the full treatment.
 
@@ -548,15 +551,11 @@ $$Q[\ell, x, h, k] = W_q[\ell, h, k, m] \, X[\ell, x, m]$$
 $$K[\ell, x, h, k] = W_k[\ell, h, k, m] \, X[\ell, x, m]$$
 $$V[\ell, x, h, k] = W_v[\ell, h, k, m] \, X[\ell, x, m]$$
 
-**QK multiply + softmax** — contracts $k$; normalizes over key positions $x'$:
+**Causal masked softmax** — contracts $k$; restricts softmax to causal positions $x' \leq x$ by subtracting $\infty$ from future positions before exponentiation:
 
-$$\text{Comp}[\ell, h, x, x'.] = \text{softmax}(Q[\ell, x, h, k] \, K[\ell, x', h, k])$$
+$$S[\ell, h, x, x'.] = \text{softmax}(Q[\ell, x, h, k] \, K[\ell, x', h, k] - \infty \cdot [x' > x])$$
 
-**Causal mask** — zero out future positions via Iverson bracket, then renormalize:
-
-$$S[\ell, h, x, x'.] = \text{normalize}(\text{Comp}[\ell, h, x, x'] \, [x' \leq x])$$
-
-where $[x' \leq x]$ is a fixed binary tensor (1 if key position $x' \leq$ query position $x$, 0 otherwise) whose definition requires the ordering structure of the axes in **St**, and $\text{normalize}$ divides each element by the sum over the norm axis: $S[\ell, h, x, x'] = \tilde{S}[\ell, h, x, x'] \,/\, \sum_{x''} \tilde{S}[\ell, h, x, x'']$.
+where $[x' > x]$ is 1 when the key position is strictly after the query position (a future position that must not be attended to) and 0 otherwise. Applying $-\infty$ before the softmax exponentiation ensures future positions receive exactly zero attention weight, regardless of the raw score magnitude. This is the **masked softmax** formulation; computing softmax first over all positions and then masking and renormalizing is mathematically equivalent in exact arithmetic but numerically unstable when future keys produce large dot-product scores. In the TL DSL this is expressed as `softmax(QK_expr, where=(x <= q))` with `x = norm_axis('x', SEQ)`.
 
 **SV multiply** — contracts $x'$:
 
@@ -598,7 +597,6 @@ graph TD
     Q["Q[ℓ, x, h, k]"]
     K["K[ℓ, x, h, k]"]
     V["V[ℓ, x, h, k]"]
-    Comp["Comp[ℓ, h, x, x'.]"]
     S["S[ℓ, h, x, x'.]"]
     Out["Out[ℓ, x, h, k]"]
     Attn["Attn[ℓ, x, m]"]
@@ -611,8 +609,7 @@ graph TD
     X -->|"× W_q"| Q
     X -->|"× W_k"| K
     X -->|"× W_v"| V
-    Q & K -->|"contract k, softmax"| Comp
-    Comp -->|"[x'≤x], normalize"| S
+    Q & K -->|"contract k, masked softmax (−∞·[x'>x])"| S
     S & V -->|"contract x'"| Out
     Out -->|"× W_o"| Attn
     Attn & X -->|"+, rmsnorm"| A
@@ -687,7 +684,6 @@ graph LR
 
         subgraph attn["Attention Core"]
             direction TB
-            Comp["Comp : [ℝ, ℓ⊗h⊗x⊗x'.]"]
             S["S : [ℝ, ℓ⊗h⊗x⊗x'.]"]
             SotV["S⊗V : [ℝ, ℓ⊗h⊗x⊗x'.] ⊗ [ℝ, ℓ⊗x'⊗h⊗k]"]
             Out["Out : [ℝ, ℓ⊗x⊗h⊗k]"]
@@ -723,8 +719,7 @@ graph LR
     X -->|"Broadcasted(Linear_v)"| V
     QotK -->|"π<sub>Q</sub>"| Q
     QotK -->|"π<sub>K</sub>"| K
-    QotK -->|"Broadcasted(Einops: ℓ x h k, ℓ x' h k → ℓ h x x'.) ; Broadcasted(SoftMax)"| Comp
-    Comp -->|"Broadcasted(normalize([x'≤x]))"| S
+    QotK -->|"Broadcasted(MaskedSoftMax: contract k, −∞·[x'>x] before softmax)"| S
     SotV -->|"π<sub>S</sub>"| S
     SotV -->|"π<sub>V</sub>"| V
     SotV -->|"Broadcasted(Einops: ℓ h x x', ℓ x' h k → ℓ x h k)"| Out
@@ -741,7 +736,7 @@ graph LR
     Lagg -->|"Broadcasted(SoftMax)"| Logits
 
     classDef obj fill:#ffffff,stroke:#555555
-    class X,QotK,Q,K,V,Comp,S,SotV,Out,Attn,AttnX,A,H,FFNnode,FFNwA,Xnext,Lagg,Logits obj
+    class X,QotK,Q,K,V,S,SotV,Out,Attn,AttnX,A,H,FFNnode,FFNwA,Xnext,Lagg,Logits obj
 
     style transformer fill:#f5f9fe,stroke:#6688bb,stroke-width:2px
 ```

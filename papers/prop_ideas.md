@@ -160,6 +160,17 @@ contractions into maximal einsum expressions), then apply `opt_einsum` to each f
 expression. Fusion enlarges the search space available to `opt_einsum`, so the combined
 effect is strictly better than either pass alone.
 
+**Cross-TL-instance composition (resolved).** When two morphisms are built from separate
+`TL()` instances — e.g. `attn_res() @ ffn_res()` — their axis UIDs differ even though the
+axes have the same names and sizes. The `@` operator's `excess_product` step used to fail
+because it located "excess" inputs by positional slicing from one end, which incorrectly
+identified the shared axis (A) as excess when it sat in the middle of `ffn.dom()`. The fix
+adds shape-signature matching (`(axis_name, axis_size)` tuples) to `composition()` in
+`construction_helpers/composition.py`: when the matched element is not already at the
+front of `right.dom()`, a `Rearrangement` is prepended to reorder the domain so positional
+alignment proceeds correctly. This makes the modular transformer pattern
+(`attn_res() @ ffn_res()`) work out of the box without requiring shared axis objects.
+
 ---
 
 ## TL as the Internal Language of Br
@@ -303,6 +314,26 @@ additive terms whose free index set is disjoint from the normalisation axis are 
 before `bc_signature()` is called. No new infrastructure is needed — the free-index sets
 are already available from the axis information that `TL` uses to construct einsum
 strings.
+
+**`normalize()` semantics.** The `Normalize` operator compiles to sum normalization
+(`x / x.sum(dim)`, i.e. L1 renormalization), not to `nn.LayerNorm`. This matches the
+correct Markov category semantics where `normalize(v)` produces a distribution summing to
+1 over the normalization axis. The earlier (incorrect) LayerNorm implementation produced
+zero-mean/unit-variance output, breaking causal attention masks.
+
+**Masked softmax via `where=`.** A companion fix implements the correct causal attention
+semantics. Writing `softmax(QK, where=(x <= q))` with `x = norm_axis('x', SEQ)` applies
+the causal predicate as a $-\infty$ mask to the logits *before* exponentiation — the
+correct Markov category formulation where the softmax domain is restricted to causal
+positions. The alternative (`softmax(QK)` followed by `normalize(Comp * mask)`) is
+mathematically equivalent in exact arithmetic but numerically unstable when future keys
+produce large dot-product scores: the softmax denominator is dominated by the future
+key's exponential, causing causal values to underflow and the clamp floor in `normalize()`
+to corrupt the result. The implementation routes `softmax(expr, where=pred)` through a new
+`MaskedSoftMax` operator that pre-materialises the Iverson predicate as a buffer and
+applies `masked_fill(-inf)` followed by `torch.softmax`. This works for any Iverson
+predicate supported by the existing `materialise_iverson` machinery — not just the
+lower-triangular causal mask.
 
 ### Dead code elimination and memory planning via comonoid structure
 
