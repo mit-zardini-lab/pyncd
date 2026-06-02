@@ -6,6 +6,7 @@ from data_structure.StrideCategory import RawAxis, StrideMorphism
 from data_structure.Numeric import Integer
 from data_structure.TensorLogic import TensorEquation, TensorProgram
 from data_structure.TensorExpr import TensorRef, IversonBinOp, _factor_axes
+import data_structure.Operators as ops
 from data_structure.Operators import (
     Identity, SoftMax, Linear, Elementwise,
     Normalize, Embedding, AdditionOp, WeightedTriangularLower,
