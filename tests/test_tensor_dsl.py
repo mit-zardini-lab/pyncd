@@ -651,3 +651,57 @@ def test_softmax_no_where_has_empty_predicate():
     tl = TL()
     expr = softmax(tl.A[q, x])
     assert expr.operator.where_predicate == ()
+
+
+# ---------------------------------------------------------------------------
+# _compute_mask_alignment
+# ---------------------------------------------------------------------------
+
+def test_compute_mask_alignment_causal():
+    """For (x <= q) with LHS [h, q, x]:
+    - Iverson DFS order: [x(pos=0), q(pos=1)], shape (X, Q)
+    - Score LHS order: [h, q, x]
+    - q is at iverson pos 1, lhs pos 1
+    - x is at iverson pos 0, lhs pos 2
+    - h is not in iverson -> n_broadcast = 1
+    - perm = (1, 0)  (put iverson dim 1 first, then dim 0)
+    """
+    from data_structure.TensorLogic import _compute_mask_alignment
+    h = real_axis('h', 2)
+    q = real_axis('q', 4)
+    x = real_axis('x', 4)
+    pred = x <= q   # IversonBinOp('<=', x, q); DFS order: [x, q]
+    perm, n_broadcast = _compute_mask_alignment(pred, (h, q, x))
+    assert perm == (1, 0), f"Expected (1, 0), got {perm}"
+    assert n_broadcast == 1, f"Expected 1, got {n_broadcast}"
+
+
+def test_compute_mask_alignment_no_broadcast():
+    """For (a == b) with LHS [a, b]: no broadcast dims, perm = (0, 1) (identity)."""
+    from data_structure.TensorLogic import _compute_mask_alignment
+    a = real_axis('a', 3)
+    b = real_axis('b', 3)
+    pred = ieq(a, b)  # IversonBinOp('==', a, b); DFS: [a, b]
+    perm, n_broadcast = _compute_mask_alignment(pred, (a, b))
+    assert perm == (0, 1)
+    assert n_broadcast == 0
+
+
+# ---------------------------------------------------------------------------
+# MaskedSoftMax operator
+# ---------------------------------------------------------------------------
+
+def test_masked_softmax_operator_template_is_broadcasted():
+    """MaskedSoftMax.template() must return a Broadcasted with 1-axis weaves."""
+    import data_structure.Operators as ops
+    import data_structure.BroadcastedCategory as bc
+    q, x = axes('q x')
+    pred = x <= q
+    perm, n_broadcast = (1, 0), 1
+    template = ops.MaskedSoftMax.template(
+        iverson_factors=(pred,),
+        mask_alignments=((perm, n_broadcast),),
+    )
+    assert isinstance(template, bc.Broadcasted)
+    assert len(template.input_weaves) == 1
+    assert len(template.output_weaves) == 1

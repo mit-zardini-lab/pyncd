@@ -152,6 +152,43 @@ class TensorEquation(bc.Operator):
         )
 
 
+def _compute_mask_alignment(
+    iverson_factor,   # IversonBinOp | IversonUnaryOp
+    lhs_indices: tuple,   # tuple of sc.RawAxis
+) -> tuple:
+    """Compute axis permutation and broadcast count to align a materialised
+    Iverson mask with the score tensor produced by an einsum.
+
+    materialise_iverson(factor) returns a tensor whose shape matches
+    _iverson_axes(factor) in DFS order.  The score tensor's shape matches
+    lhs_indices in that order.  Returns (perm, n_broadcast) such that:
+
+        mask = materialise_iverson(factor)
+        mask = mask.permute(list(perm))
+        for _ in range(n_broadcast):
+            mask = mask.unsqueeze(0)
+        # mask now broadcasts correctly with the score tensor
+
+    Axes that appear in lhs_indices but not in the Iverson contribute one
+    leading broadcast dimension each.
+    """
+    from data_structure.TensorExpr import _iverson_axes
+    iverson_axes = _iverson_axes(iverson_factor)
+    uid_to_iverson_pos = {ax.uid: i for i, ax in enumerate(iverson_axes)}
+
+    in_iverson = []   # (iverson_pos, lhs_pos)
+    n_broadcast = 0
+    for lhs_pos, lhs_ax in enumerate(lhs_indices):
+        if lhs_ax.uid in uid_to_iverson_pos:
+            in_iverson.append((uid_to_iverson_pos[lhs_ax.uid], lhs_pos))
+        else:
+            n_broadcast += 1
+
+    in_iverson.sort(key=lambda t: t[1])
+    perm = tuple(iverson_pos for iverson_pos, _ in in_iverson)
+    return perm, n_broadcast
+
+
 def _split_nonlinearity(
     eq: TensorEquation,
     array_datatypes: dict | None = None,
