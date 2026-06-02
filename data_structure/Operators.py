@@ -265,6 +265,7 @@ class AdditionOp(cat.Operator):
 @dataclass(frozen=True)
 class Normalize(cat.Operator):
     name: fd.DynamicName | None = fd.DynamicName('RMSNorm')
+    where_predicate: tuple = ()   # IversonExpr objects; empty = plain normalize
     @classmethod
     def template[B: cat.Datatype = cat.Reals](
         cls,
@@ -277,7 +278,42 @@ class Normalize(cat.Operator):
             None,
             datatype
         )
-    
+
+@dataclass(frozen=True)
+class MaskedNormalize(cat.Operator):
+    """Normalize with Iverson predicates applied as zero-masks before summing.
+
+    Positions where the predicate is False are zeroed before the sum-normalization
+    denominator is computed, so they contribute zero weight and are zeroed in output.
+
+    iverson_factors: tuple of IversonExpr objects (one per predicate).
+    mask_alignments: tuple of (perm: tuple[int,...], n_broadcast: int) — one
+        entry per factor.  ConstructedMaskedNormalize uses these to permute and
+        unsqueeze the materialised mask so it broadcasts correctly with the input.
+    """
+    name: fd.DynamicName | None = fd.DynamicName('MaskedNormalize')
+    iverson_factors: tuple = ()
+    mask_alignments: tuple = ()
+
+    @classmethod
+    def template(
+        cls,
+        iverson_factors: tuple,
+        mask_alignments: tuple,
+        base: cat.Datatype = cat.Reals(),
+    ) -> cat.Broadcasted:
+        """Return a 1-axis Broadcasted for composition with the input einsum."""
+        axis = cat.RawAxis()
+        return cat.Broadcasted(
+            operator=cls(
+                iverson_factors=iverson_factors,
+                mask_alignments=mask_alignments,
+            ),
+            input_weaves=(cat.Weave(base, (axis,)),),
+            output_weaves=(cat.Weave(base, (axis,)),),
+            reindexings=(cat.ProdObject().identity(),),
+        )
+
 @dataclass(frozen=True)
 class WeightedTriangularLower(cat.Operator):
     name: fd.DynamicName | None = fd.DynamicName('wtril')

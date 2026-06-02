@@ -531,6 +531,14 @@ def test_inline_normalize_compiles_and_runs():
     assert out.shape == (8, 16)
 
 
+def test_masked_normalize_operator_exists():
+    """MaskedNormalize operator can be constructed with iverson_factors and mask_alignments."""
+    import data_structure.Operators as ops
+    op = ops.MaskedNormalize(iverson_factors=(), mask_alignments=())
+    assert op.iverson_factors == ()
+    assert op.mask_alignments == ()
+
+
 def test_inline_softmax_in_program():
     """softmax() inline in a TensorProgram (multi-equation) compiles correctly."""
     q = real_axis('q', 4)
