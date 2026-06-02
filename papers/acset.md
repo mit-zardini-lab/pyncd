@@ -132,7 +132,7 @@ Five entity types, six attribute types ($\mathbb{N}$, $\mathbb{N}_{>0}$, $\mathb
 | --- | --- | --- |
 | `size` | `Axis → ℕ_{>0}` | axis size |
 | `coeff` | `Sample → ℕ` | reindexing coefficient |
-| `is_target` | `ArrayAxis → Bool` | For input arrays: True = axis consumed by the base operation (contracted for sum operations, normalized for SoftMax/Normalize); False = degree axis supplied by the outer loop. For output arrays: always False — every axis in `lhs_indices` is a degree axis produced by the outer loop; the normalization dimension is identified separately by `norm_axis` on `Array` |
+| `is_target` | `ArrayAxis → Bool` | For input arrays: True = axis consumed by the base operation (contracted for sum operations, normalized for SoftMax/MaskedSoftMax/Normalize); False = degree axis supplied by the outer loop. For output arrays: always False — every axis in `lhs_indices` is a degree axis produced by the outer loop; the normalization dimension is identified separately by `norm_axis` on `Array` |
 | `position` | `ArrayAxis → ℕ` | 0-indexed dimension position within the array's physical layout; encodes the axis interleaving of `Weave._shape` |
 | `is_input` | `Array → Bool` | input array (True) or output array (False) |
 | `datatype_tag` | `Array → DataTag` | total map; `REALS` for floating-point arrays, `NATURAL` for discrete vocabulary arrays, `BOOL` for Boolean predicate arrays whose output is thresholded by $H$ |
@@ -150,7 +150,7 @@ The **C-set part** (structure) consists of:
 - the reindexing multigraph on `Axis` via `Sample ⇉ Axis` (analogous to `Entry ⇉ Axis` in $\mathcal{S}_{St}$)
 - the bipartite graph linking each `ArrayAxis` to its `Array` and its `Axis` via `array_slot` and `axis`
 - the `reindexing_slot` map assigning each `Sample` to the array whose reindexing it belongs to
-- the `norm_axis` map (partial) pointing each SoftMax/Normalize output array to its normalisation axis
+- the `norm_axis` map (partial) pointing each SoftMax/MaskedSoftMax/Normalize output array to its normalisation axis
 
 The **degree** of a `Broadcasted` morphism is the tuple of loop axes — the axes iterated in the outer degree loop, shared across all inputs. In tabular form the degree is the image of `src` across all `Sample` rows.
 
@@ -414,7 +414,9 @@ These fields map to the four tables of `SBrInstance`: `arrays: list[ArrayRow]`, 
 | Index of `axis` in its containing tuple (`lhs_indices` or `rhs` axes) | `position` attribute on the `ArrayAxis` row |
 | `ArrayAxis` belonging to the $p$-th `Array` | `array_slot = p` on the `ArrayAxis` row |
 | Retained axis $i \in$ `lhs_indices` appearing in input $X$ at slot $p$ | `Sample` row: `equation_idx` from above, `src` $= i$, `tgt` $= i$, `coeff` $= 1$, `reindexing_slot` $= p$ |
-| `operator` field | `operator_tag` attribute on the output `Array` row |
+| `operator` field (`None` or `Identity()`) | `IDENTITY` for `operator_tag` on the output `Array` row |
+| `operator = SoftMax()` with empty `where_predicate` | `SOFTMAX` for `operator_tag`; `norm_axis` FK set to the `NormAxis` axis |
+| `operator = SoftMax(where_predicate=...)` | `MASKED_SOFTMAX` for `operator_tag`; `norm_axis` FK set; Iverson predicate **not** stored in the schema |
 | `operator.bias` (when `Linear`) | `bias` attribute on the output `Array` row |
 | `operator.operator` (when `Elementwise`) | `elementwise_fn` attribute on the output `Array` row |
 | Array datatype (from `array_datatypes` parameter) | `datatype_tag` attribute on the `Array` row |
@@ -520,7 +522,9 @@ $H$ appears as output in equation 0 (`equation_idx=0`, `slot=0`) and as input in
 
 ### The operator_tag Attribute
 
-The `TensorEquation.operator` field — which distinguishes an `Identity` reindexing from a `SoftMax`, `Elementwise`, `Linear`, or `Embedding` — maps to the `operator_tag` attribute on output `Array` rows (part of $\mathcal{S}_{Br}$ as defined above). By convention, `operator = None` (the default in `TensorEquation`) is treated identically to `Identity()`: both map to `OpTag.IDENTITY`, meaning pure reindexing with no base computation. `operator_tag` is undefined for input arrays.
+The `TensorEquation.operator` field — which distinguishes an `Identity` reindexing from a `SoftMax`, `MaskedSoftMax`, `Elementwise`, `Linear`, or `Embedding` — maps to the `operator_tag` attribute on output `Array` rows (part of $\mathcal{S}_{Br}$ as defined above). By convention, `operator = None` (the default in `TensorEquation`) is treated identically to `Identity()`: both map to `OpTag.IDENTITY`, meaning pure reindexing with no base computation. `operator_tag` is undefined for input arrays.
+
+`SoftMax` maps to `SOFTMAX`; `SoftMax(where_predicate=(...))` (a softmax written with the `where=` argument in the TL DSL) maps to `MASKED_SOFTMAX`. The `norm_axis` FK is populated for both. **Schema limitation:** the Iverson predicate carried by `MaskedSoftMax.iverson_factors` is not representable in the current `SBrInstance` schema — the masking condition (e.g. `x <= q`) is lost during serialization and cannot be recovered from the CSV tables alone. Structural pattern-matching on `MASKED_SOFTMAX` rows remains possible; reconstruction of the full executable operator requires consulting the term layer.
 
 | `OpTag` | Pyncd class | Role |
 | --- | --- | --- |
@@ -531,7 +535,7 @@ The `TensorEquation.operator` field — which distinguishes an `Identity` reinde
 | `NORMALIZE` | `Normalize()` | Sum normalization: $x / \sum_\text{dim}(x)$ |
 | `EMBEDDING` | `Embedding(...)` | Discrete lookup ($\mathbb{N} \to \mathbb{R}$) |
 | `ADDITION_OP` | `AdditionOp()` | Elementwise addition |
-| `WEIGHTED_TRIANGULAR_LOWER` | `WeightedTriangularLower()` | Causal mask |
+| `WEIGHTED_TRIANGULAR_LOWER` | `WeightedTriangularLower()` | Legacy causal mask (lower-triangular + sum normalization); superseded by `MASKED_SOFTMAX` in the TL DSL |
 | `LINEAR` | `Linear(...)` | Weight matrix application |
 
 Adding a new operator subclass means adding one row to this table.
@@ -572,6 +576,8 @@ inst = read_sbr(Path('out/my_program'))   # reconstructs from those files
 - *Names* (`lhs_name`, array `name`) use `_` as the subscript separator, matching `DynamicName.from_str`. Display metadata (`DynamicName.settings`: bold, overline, absolute) is not preserved — names serve as labels for Lean interop and display rendering is not needed.
 
 **Known limitations.**
+
+- `MaskedSoftMax` Iverson predicates are not serialized. The `iverson_factors` and `mask_alignments` fields of `MaskedSoftMax` carry arbitrary Iverson expressions (e.g. `x <= q`) that are not reducible to the `axis_uid`/`coeff` vocabulary of `SBrInstance`. The `arrays.csv` row records `MASKED_SOFTMAX` as `operator_tag` and the normalization axis as `norm_axis`, but the masking condition itself is absent. A future schema extension would add a `predicate_expr` attribute on `Array` rows of type `String` (serialized Iverson expression) to close this gap.
 
 - `FreeNumeric` sizes created by `RawAxis.named()` carry a display name on their `uid._name`. Only `uid._id` is serialized, so the display name is lost. As a consequence, `original_size == deserialized_size` returns `False` for such sizes: `FreeNumeric.__eq__` hashes `uid` including `_name`, and the reconstructed uid has `_name=None`. Internal consistency within a round-tripped instance is unaffected — all reconstructed UIDs are mutually consistent — but cross-instance comparison with the original fails. The correct fix is to base `FreeNumeric.numeric_hash()` on `uid._id` alone, which is a change to `data_structure/Numeric.py` deferred for now.
 - Compound `Numeric` expressions (`Addition`, `Multiplication`, `Power`) cannot be serialized. These do not appear in acset instances produced by `convert.py`: axis sizes are always `Integer` or `FreeNumeric`, and all coefficients are `Integer`.
