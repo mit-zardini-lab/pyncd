@@ -11,6 +11,7 @@ class OpTag(Enum):
     """Base operation type for an output Array."""
     IDENTITY                  = 'identity'
     SOFTMAX                   = 'softmax'
+    MASKED_SOFTMAX            = 'masked_softmax'
     ELEMENTWISE               = 'elementwise'
     NORMALIZE                 = 'normalize'
     EMBEDDING                 = 'embedding'

@@ -625,3 +625,78 @@ def test_iverson_factor_axes_are_registered():
     inst = from_tensor_equation(eq)
     assert q.uid in inst.axis_sizes
     assert x.uid in inst.axis_sizes
+
+
+def test_masked_softmax_operator_tag():
+    """softmax(where=pred) must produce MASKED_SOFTMAX operator_tag on the output array."""
+    from data_structure.TensorDSL import norm_axis, real_axis, softmax
+    q = real_axis('q', 4)
+    x = norm_axis('x', 4)
+    eq = TensorEquation(
+        lhs_name=fd.DynamicName('S'),
+        lhs_indices=(x, q),
+        rhs=(
+            TensorRef(fd.DynamicName('Q'), (q,)),
+            TensorRef(fd.DynamicName('K'), (x,)),
+        ),
+        operator=ops.SoftMax(where_predicate=(x <= q,)),
+    )
+    inst = from_tensor_equation(eq)
+    out = next(a for a in inst.arrays if not a.is_input)
+    assert out.operator_tag == OpTag.MASKED_SOFTMAX
+
+
+def test_masked_softmax_iverson_expr_populated():
+    """The output array for MASKED_SOFTMAX must have iverson_expr set to the serialized predicate."""
+    from data_structure.TensorDSL import norm_axis, real_axis
+    q = real_axis('q', 4)
+    x = norm_axis('x', 4)
+    pred = x <= q   # IversonBinOp('<=', x, q)
+    eq = TensorEquation(
+        lhs_name=fd.DynamicName('S'),
+        lhs_indices=(x, q),
+        rhs=(TensorRef(fd.DynamicName('Score'), (x, q)),),
+        operator=ops.SoftMax(where_predicate=(pred,)),
+    )
+    inst = from_tensor_equation(eq)
+    out = next(a for a in inst.arrays if not a.is_input)
+    assert out.iverson_expr is not None
+    assert '<=' in out.iverson_expr
+
+
+def test_plain_softmax_is_still_softmax():
+    """softmax() without where= must still produce SOFTMAX (not MASKED_SOFTMAX)."""
+    q = RawAxis.named('q')
+    x = RawAxis.named('x')
+    eq = TensorEquation(
+        lhs_name=fd.DynamicName('S'),
+        lhs_indices=(x, q),
+        rhs=(TensorRef(fd.DynamicName('Score'), (x, q)),),
+        operator=ops.SoftMax(),
+    )
+    inst = from_tensor_equation(eq)
+    out = next(a for a in inst.arrays if not a.is_input)
+    assert out.operator_tag == OpTag.SOFTMAX
+    assert out.iverson_expr is None
+
+
+def test_masked_softmax_roundtrips_through_csv(tmp_path):
+    """MASKED_SOFTMAX with iverson_expr round-trips through write_sbr/read_sbr."""
+    from acset.csv_io import write_sbr, read_sbr
+    from data_structure.TensorDSL import norm_axis, real_axis
+    q = real_axis('q', 4)
+    x = norm_axis('x', 4)
+    pred = x <= q
+    eq = TensorEquation(
+        lhs_name=fd.DynamicName('S'),
+        lhs_indices=(x, q),
+        rhs=(TensorRef(fd.DynamicName('Score'), (x, q)),),
+        operator=ops.SoftMax(where_predicate=(pred,)),
+    )
+    inst = from_tensor_equation(eq)
+    write_sbr(inst, tmp_path)
+    inst2 = read_sbr(tmp_path)
+    out2 = next(a for a in inst2.arrays if not a.is_input)
+    assert out2.operator_tag == OpTag.MASKED_SOFTMAX
+    assert out2.iverson_expr is not None
+    assert '<=' in out2.iverson_expr

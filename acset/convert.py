@@ -32,10 +32,10 @@ class _OpFields:
     tag: OpTag
     bias: bool | None
     elementwise_fn: str | None
+    iverson_expr: str | None = None
 
 
 _TAG_FROM_TYPE: dict[type, OpTag] = {
-    ops.SoftMax:                 OpTag.SOFTMAX,
     ops.Normalize:               OpTag.NORMALIZE,
     ops.Embedding:               OpTag.EMBEDDING,
     ops.AdditionOp:              OpTag.ADDITION_OP,
@@ -47,7 +47,9 @@ def _operator_fields(op) -> _OpFields:
     """Extract all operator-derived ArrayRow fields in one place.
 
     Identity is checked before Elementwise because Identity is a subclass of
-    Elementwise; all other operator types are disjoint.
+    Elementwise; all other operator types are disjoint.  SoftMax is checked
+    before the generic tag lookup so that where_predicate (masked softmax)
+    is handled separately from plain softmax.
     """
     if op is None or isinstance(op, ops.Identity):
         return _OpFields(OpTag.IDENTITY, None, None)
@@ -56,6 +58,16 @@ def _operator_fields(op) -> _OpFields:
         return _OpFields(OpTag.ELEMENTWISE, None, op.operator)
     if isinstance(op, ops.Linear):
         return _OpFields(OpTag.LINEAR, op.bias, None)
+    if isinstance(op, ops.SoftMax):
+        if op.where_predicate:
+            preds = op.where_predicate
+            if len(preds) == 1:
+                expr = _serialize_iverson(preds[0])
+            else:
+                parts = ' '.join(_serialize_iverson(p) for p in preds)
+                expr = f'(and {parts})'
+            return _OpFields(OpTag.MASKED_SOFTMAX, None, None, iverson_expr=expr)
+        return _OpFields(OpTag.SOFTMAX, None, None)
     tag = _TAG_FROM_TYPE.get(type(op))
     if tag is None:
         raise ValueError(f"unrecognised operator type: {type(op)}")
@@ -104,6 +116,7 @@ def _add_equation(
         max_value=out_max_value,
         bias=op.bias,
         elementwise_fn=op.elementwise_fn,
+        iverson_expr=op.iverson_expr,
     ))
     for pos, ax in enumerate(eq.lhs_indices):
         inst.axis_sizes[ax.uid] = ax.local_size()
