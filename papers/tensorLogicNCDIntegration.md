@@ -234,12 +234,15 @@ The domain of each input array is reconstructed by filling its weave's TILED pos
 | Operator | Description |
 | --- | --- |
 | `Einops` | General einsum; degree = retained (output) indices |
-| `Elementwise` (e.g. ReLU, σ) / `SoftMax` | Pointwise and normalisation nonlinearities |
+| `Elementwise` (e.g. ReLU, σ) | Pointwise nonlinearities |
+| `SoftMax` | Softmax along the `NormAxis` dimension; no masking |
+| `MaskedSoftMax` | Softmax with Iverson predicate applied as $-\infty$ mask before exponentiation; TL DSL: `softmax(expr, where=pred)` |
 | `Linear` | Weight matrix application |
 | `Embedding` | Lookup table: `Natural → Reals` |
 | `AdditionOp` | Elementwise sum of matching arrays |
-| `Normalize` | RMSNorm / LayerNorm |
-| `WeightedTriangularLower` | Causal mask; used in attention |
+| `Normalize` | Sum normalization: $x / \sum_\text{dim}(x)$; TL DSL: `normalize(expr)` |
+| `MaskedNormalize` | Sum normalization with Iverson predicate applied as zero-mask before the denominator sum; TL DSL: `normalize(expr, where=pred)` |
+| `WeightedTriangularLower` | Legacy causal mask (lower-triangular + sum normalization); superseded by `MaskedSoftMax` |
 
 The following terms are proposed as part of the tensor logic integration and are discussed in detail in §5:
 
@@ -276,7 +279,7 @@ This section maps tensor logic concepts onto pyncd and identifies where the corr
 
 **Einsum → `Einops`.** A tensor logic equation `Y[i,j] = W[i,k] X[k,j]` corresponds directly to an `Einops` operator with index annotation `i k, k j -> i j`. The retained indices `i, j` form the degree and occupy `WeaveMode.TILED` positions in both input weaves and the output weave. The contracted index `k` occupies target (non-TILED) positions in each input weave, and the `Einops` operator performs the summation over it. The reindexings are `Rearrangement` terms selecting which degree axes each input contributes: W contributes `i` and X contributes `j`.
 
-**Elementwise nonlinearity → `Elementwise` / `ReLU` / `SoftMax`.** The optional nonlinearity in `Y[i] = relu(W[i,k] X[k])` selects the `Operator` subclass. The `.`-suffixed normalization axis maps to `SoftMax` or `Normalize`.
+**Elementwise nonlinearity → `Elementwise` / `ReLU` / `SoftMax` / `Normalize`.** The optional nonlinearity in `Y[i] = relu(W[i,k] X[k])` selects the `Operator` subclass. The `.`-suffixed normalization axis maps to `SoftMax`, `MaskedSoftMax`, `Normalize`, or `MaskedNormalize` depending on whether a `where=` predicate is present.
 
 **Contraction structure and execution layout → degree, weaves, and reindexings.** Retained indices (those on the LHS) form the degree of the `Broadcasted` and occupy `WeaveMode.TILED` positions in every weave where they appear. Contracted indices (those on the RHS but not the LHS) become concrete target positions in input weaves, and the `Einops` operator sums over them. Per-input `Rearrangement` reindexings follow directly from which degree axes each input carries. The full weave structure is therefore derivable from the equation's index structure — tensor logic covers execution layout implicitly. pyncd makes it explicit by reifying it as typed `Weave` and `Rearrangement` objects that code generation can consume directly.
 
@@ -306,7 +309,7 @@ The following gaps in tensor logic are addressed by the term-based embedding des
 | --- | --- | --- |
 | Single einsum | `Y[i,j] = W[i,k] X[k,j]` | `TensorEquation` → `Broadcasted` via `bc_signature()` |
 | Elementwise nonlinearity | `relu(...)` in equation | `operator` field on `TensorEquation` |
-| Normalization axis | `t.` suffix | `SoftMax` / `Normalize` operator |
+| Normalization axis | `t.` suffix | `SoftMax` / `MaskedSoftMax` / `Normalize` / `MaskedNormalize` operator |
 | Sequential composition | Feed-forward equation chain | `TensorProgram.to_morphism()` → `ThreadedComposed` |
 | Parallel composition | None | `ProductOfMorphisms([...])` |
 | Axis identity | Syntactic name sharing | `Axis(UTerm)` with UID — object sharing |
@@ -368,17 +371,17 @@ For an equation with a nonlinearity,
 Y[b, p, t.] = softmax(W_O[t, d] Stream[b, p, d])
 ```
 
-the `operator` field carries the `SoftMax` instance and the `.`-suffixed axis `t` requires a way to distinguish it from a plain retained index. This would be handled by a proposed new `Axis` subclass, `NormAxis`, not currently in the codebase, that marks the normalisation dimension:
+the `operator` field carries the `SoftMax` instance and the `.`-suffixed axis `t` is distinguished from plain retained indices by using `NormAxis` — a zero-field frozen dataclass subclass of `RawAxis` that marks the normalisation dimension. `NormAxis` is constructed via `norm_axis(name)` or `norm_axis(name, size)` in the DSL:
 
 ```python
 b      = RawAxis.named('b')   # batch
 p      = RawAxis.named('p')   # sequence position
 d      = RawAxis.named('d')   # model dimension (contracted)
-t_norm = NormAxis.named('t')  # proposed new RawAxis subclass — marks the normalisation dimension
+t_norm = norm_axis('t')       # NormAxis — marks the normalisation dimension
 
 eq = TensorEquation(
     lhs_name=DynamicName('Y'),
-    lhs_indices=(b, p, t_norm),   # t_norm: Axis with kind=NORM
+    lhs_indices=(b, p, t_norm),
     rhs=(
         (DynamicName('W_O'), (t_norm, d)),
         (DynamicName('Stream'), (b, p, d)),
@@ -528,13 +531,27 @@ eq    = tl.to_equation()     # TensorEquation — extracted from morph.operator
 
 `TL.__getattr__` returns a `TensorProxy` for any tensor name. Subscripting a proxy (`tl.W[i, k]`) returns an `IndexedTensor`. The `*` operator accumulates factors into an `RHSExpression`. Assignment (`tl.Y[i,j] = ...`) **immediately builds a `Broadcasted` morphism** and stores it — no equation accumulation, no deferred conversion step.
 
-`relu()` and `softmax()` wrap an expression with the corresponding `Operator`. `softmax` normalizes over the axis in the LHS constructed with `norm_axis()` — that axis is typed as `NormAxis`, a frozen zero-field subclass of `RawAxis`, and its presence in `lhs_indices` signals the normalization dimension to downstream display and code generation:
+`relu()`, `softmax()`, and `normalize()` wrap an expression with the corresponding `Operator`. Both normalizing functions operate over the axis in the LHS constructed with `norm_axis()` — that axis is typed as `NormAxis`, a frozen zero-field subclass of `RawAxis`, and its presence in `lhs_indices` signals the normalization dimension to downstream display and code generation. `norm_axis` accepts an optional concrete size:
 
 ```python
-x = norm_axis('x')           # NormAxis — marks the softmax dimension
+x = norm_axis('x', SEQ)      # NormAxis — marks the normalization dimension; size = SEQ
 q, h, k = axes('q h k')
 tl.Comp[h, q, x] = softmax(tl.Query[q, h, k] * tl.Key[x, h, k])
 ```
+
+Both `softmax()` and `normalize()` accept an optional `where=` keyword argument taking an `IversonExpr`. When supplied, positions where the predicate is False are masked before the normalization denominator is computed — masked to $-\infty$ for softmax (so `exp(-∞) = 0`) and to $0$ for normalize — and those positions output zero:
+
+```python
+x = norm_axis('x', SEQ)
+q = real_axis('q', SEQ)
+tl.S[h, q, x] = softmax(tl.Q[q, h, k] * tl.K[x, h, k], where=(x <= q))  # causal mask
+tl.A[q, m]    = normalize(tl.Attn[q, m] + tl.H[q, m])                    # plain normalize
+tl.B[q, m]    = normalize(tl.Attn[q, m], where=(q <= some_axis))          # masked normalize
+```
+
+`_split_nonlinearity()` in `TensorLogic.py` detects a `SoftMax` or `Normalize` operator with a non-empty `where_predicate` and routes to `MaskedSoftMax.template()` or `MaskedNormalize.template()` respectively. The helper `_compute_mask_alignment(iverson_factor, lhs_indices)` computes the permutation and broadcast count needed to align a materialised Iverson mask with the score tensor at runtime; `ConstructedMaskedSoftMax` and `ConstructedMaskedNormalize` in `torch_compile.py` use these alignments in `forward()`.
+
+**`normalize()` semantics.** `normalize()` compiles to sum-normalization: $x / \sum_\text{dim}(x)$ (clamped to avoid division by zero). It is **not** RMSNorm or LayerNorm. For a row of attention weights, `normalize()` renormalises so the unmasked positions sum to 1 — the correct operation after a causal mask has zeroed future positions.
 
 **Additive expressions.** The `+` operator on `IndexedTensor` and `RHSExpression` produces a `SumExpr` — a flat list of `RHSExpression` terms. Assigning a `SumExpr` builds a `Composed(ProductOfMorphisms(terms), add_br)` where `add_br` is a `Broadcasted(AdditionOp(), ...)` that sums the term outputs element-wise:
 
@@ -543,7 +560,9 @@ tl.Out[i] = tl.A[i] + tl.B[i]
 tl.Out[i] = relu(tl.H[i, k] * tl.W[k]) + tl.Bias[i]
 ```
 
-**Eager axis unification.** The `TL` instance holds a single `_ctx: Context` shared across all assignments. When a tensor appears on the RHS that was defined by a prior assignment, its axes are unified with the prior output axes via `_ctx.append_iter` before building the morphism. `tl.to_morphism()` builds a live-pool routing table from per-entry `input_names` and returns a `ThreadedComposed` — or falls back to `Composed` when any entry is a scan/iteration entry. No topological sort is required; equations are already recorded in assignment order.
+**Eager axis unification.** The `TL` instance holds a single `_ctx: Context` shared across all assignments. When a tensor appears on the RHS that was defined by a prior assignment, its axes are unified with the prior output axes via `_ctx.append_iter` before building the morphism. `tl.to_morphism()` builds a live-pool routing table from per-entry `input_names` and returns a `ThreadedComposed` — or falls back to `Composed` for coupled Scan entries. No topological sort is required; equations are already recorded in assignment order.
+
+**Cross-`TL` composition.** When two morphisms built from separate `TL()` instances are composed via `@`, their boundary axes have different UIDs even if they share names and sizes. `composition()` handles this via shape-based matching: it matches elements of `dom(g)` to elements of `cod(f)` by axis shape signature (a tuple of (name, size) pairs). If the shared element is not at the positionally expected location, a `Rearrangement` is prepended to `g` so that matched elements come first before standard positional alignment proceeds. This allows `attn_res() @ ffn_res()` to work when the two functions were built from separate `TL()` instances.
 
 For programs that need to inspect or re-process the underlying `TensorEquation` objects (e.g. for serialisation via `from_tensor_program`), `tl.to_program()` extracts them from the stored morphisms and wraps them in a `TensorProgram`. `TensorProgram.to_morphism()` remains available as an alternative build path and performs its own `Context`-mediated unification on the extracted equations.
 
@@ -605,9 +624,13 @@ tl.A[q, m]          = normalize(tl.Attn[q, m] + tl.H[q, m])   # H threaded, no f
 
 **`TL._entries` 4-tuple.** Each completed assignment is stored as `(lhs_name, morph, out_axes, input_names)` where `input_names: tuple[DynamicName | None, ...]` records one name per domain slot of `morph` (`None` for unsized Iverson predicates). `to_morphism()` walks these names to build `external_order` and the routing table.
 
-**`_compiled()` helper.** Within `to_morphism()`, a `_compiled()` helper applies `_split_nonlinearity` to any entry whose stored morphism is a `Broadcasted(operator=TensorEquation(operator=SoftMax|ReLU|Normalize))`. This ensures inline nonlinearities such as `softmax(Q * K)` are split into an einsum step followed by the nonlinearity template before being placed in the `ThreadedComposed` chain. The `_entries` list is left untouched; the split is applied only when building the final `content` tuple.
+**`_compiled()` helper.** Within `to_morphism()`, a `_compiled()` helper applies `_split_nonlinearity` to any entry whose stored morphism is a `Broadcasted(operator=TensorEquation(operator=SoftMax|ReLU|Normalize|...))`. This ensures inline nonlinearities such as `softmax(Q * K)` are split into an einsum step followed by the nonlinearity template before being placed in the `ThreadedComposed` chain. The `_entries` list is left untouched; the split is applied only when building the final `content` tuple.
 
-**Scan fallback.** Scan/iteration entries produced by `_finalize_iter()` are appended to `_entries` with `input_names = ()` because their step inputs are wired internally inside the `Scan` term rather than in the outer domain. When any entry has `input_names = ()`, `to_morphism()` falls back to a plain `Composed` instead of `ThreadedComposed`.
+**Norm-axis-invariant term dropping.** Before `bc_signature()` is called for equations with a `NormAxis` in the LHS (softmax and normalize equations), `_register_entry()` runs a pre-pass over `SumExpr` operands: any additive term whose factor indices are disjoint from the `NormAxis` UID is a constant along the normalization axis and is dropped. This realises the algebraic identity `softmax(f + c) = softmax(f)` — the constant `c` does not change the output — without requiring `bc_signature()` to handle the additive structure.
+
+**Dead code elimination.** `to_morphism()` runs a backward BFS from the final entry over `input_names` before building the routing table. Equations whose output is never consumed by any downstream step (dead code) are dropped from the compiled `content` tuple, so the resulting `ThreadedComposed` contains no unreachable steps.
+
+**Scan in the live pool.** Uncoupled `Scan` entries (a single recurrent state, `n_states == 1`) now populate `input_names` via `_external_names_from_value()` and participate in the `ThreadedComposed` live-pool routing table like any other step. The plain `Composed` fallback in `to_morphism()` is only triggered for coupled Scans (`n_states > 1`) whose `input_names` remain empty.
 
 #### Parallel product from dependency analysis
 
@@ -789,7 +812,7 @@ Tensor Logic (Domingos 2025) provides a compact notation for individual operator
 
 The integration boundary is clean: `TensorProgram.to_morphism()` produces a morphism in `BroadcastedCategory`; above that level, `ProductOfMorphisms`, type-level datatypes, symbolic shape propagation, and `Block` structure are the caller's responsibility — categorical structures that tensor logic deliberately omits.
 
-Beyond this core integration, §5.6 describes the Python DSL layer implemented on top of `TensorProgram` and the remaining gaps. The `TL` registry builds `Broadcasted` morphisms eagerly as equations are assigned, using a single shared `Context` for axis unification across all assignments. Per-entry `input_names` tuples record the domain tensor names; `to_morphism()` uses these to build the live-pool routing table and returns `ThreadedComposed`, falling back to `Composed` for entries containing scan/iteration steps. The `+` operator produces additive expressions (`SumExpr`) compiled to `Composed(ProductOfMorphisms(terms), AdditionOp Broadcasted)`. Tensor declarations (`.tensor()`, `.selection()`, `.predicate()`) record kind and positional shape, promoting axis subtypes (`NatAxis`) and enforcing arity at indexing time.
+Beyond this core integration, §5.6 describes the Python DSL layer implemented on top of `TensorProgram` and the remaining gaps. The `TL` registry builds `Broadcasted` morphisms eagerly as equations are assigned, using a single shared `Context` for axis unification across all assignments. Per-entry `input_names` tuples record the domain tensor names; `to_morphism()` uses these to build the live-pool routing table and returns `ThreadedComposed`, falling back to `Composed` only for coupled Scan entries. The `+` operator produces additive expressions (`SumExpr`) compiled to `Composed(ProductOfMorphisms(terms), AdditionOp Broadcasted)`. Tensor declarations (`.tensor()`, `.selection()`, `.predicate()`) record kind and positional shape, promoting axis subtypes (`NatAxis`) and enforcing arity at indexing time. `softmax(expr, where=pred)` and `normalize(expr, where=pred)` produce `MaskedSoftMax` and `MaskedNormalize` operators respectively; `_split_nonlinearity()` routes these via `_compute_mask_alignment()` to the appropriate masked compiled operator. `to_morphism()` includes a norm-axis-invariant additive term pre-pass (`softmax(f+c) = softmax(f)`) and a dead-code-elimination pass before building the routing table. Shape-based axis matching in `composition()` allows morphisms from separate `TL()` instances to compose correctly via `@`.
 
 §6 describes how the DSL extends to iterative (recurrent) tensor equations via `.iteration_axis()`. A `Scan` term — a new construction rule alongside `Block` in the pyncd grammar — represents the recurrence and is compiled to a sequential PyTorch loop with an optional `associative_scan` fast path for affine recurrences. The `TL` registry defers assembly of scan morphisms until `to_morphism()`, where `_finalize_iter()` runs consistency checks and constructs the `Scan` term.
 
