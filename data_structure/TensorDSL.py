@@ -1227,9 +1227,16 @@ def axes(*names: str) -> tuple[sc.RawAxis, ...]:
     return tuple(sc.RawAxis.named(n) for n in flat)
 
 
-def norm_axis(name: str) -> NormAxis:
-    """Return a NormAxis — marks the normalisation dimension (e.g. softmax axis)."""
-    return NormAxis.named(name)
+def norm_axis(name: str, size: int | None = None) -> NormAxis:
+    """Return a NormAxis — marks the normalisation dimension (e.g. softmax axis).
+
+    When size is provided, the axis carries a concrete integer size, which is
+    required for auto-materialising Iverson predicates that reference this axis.
+    """
+    base = NormAxis.named(name)
+    if size is None:
+        return base
+    return NormAxis(uid=base.uid, _size=nm.Integer(size))
 
 
 def nat_axis(name: str, size: int | None = None) -> NatAxis:

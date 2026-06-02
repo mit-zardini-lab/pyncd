@@ -37,6 +37,18 @@ def test_norm_axis_type():
     assert isinstance(x, NormAxis)
     assert isinstance(x, sc.RawAxis)
 
+def test_norm_axis_accepts_optional_size():
+    """norm_axis('x', 5) must produce a NormAxis with concrete Integer size."""
+    x = norm_axis('x', 5)
+    assert isinstance(x, NormAxis)
+    assert x._size == nm.Integer(5)
+
+def test_norm_axis_no_size_unchanged():
+    """norm_axis('x') without size must still work as before (free size)."""
+    x = norm_axis('x')
+    assert isinstance(x, NormAxis)
+    assert isinstance(x._size, nm.FreeNumeric)
+
 
 # ---------------------------------------------------------------------------
 # TL / TensorProxy
