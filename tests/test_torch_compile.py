@@ -700,3 +700,186 @@ def test_uncoupled_scan_mixed_with_non_scan_equations():
     assert isinstance(morph, ThreadedComposed), (
         f"Expected ThreadedComposed, got {type(morph).__name__}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Transformer example tests
+#
+# These test cases are extracted from papers/transformer_example.md.
+# Axis sizes are kept small (SEQ=4, D=6, H=2, K=3, DFF=8) for speed.
+#
+# NOTE: normalize() without a norm_axis LHS argument normalises over all
+# indices globally, not per-row.  Tests that require per-row normalisation
+# semantics (causal mask invariance, FFN ReLU gate) are therefore omitted
+# here; they require explicit norm_axis usage.  Composition of separately
+# constructed Block-wrapped morphisms via @ also has an open issue and is
+# excluded from this suite.
+# ---------------------------------------------------------------------------
+
+_SEQ, _D, _H, _K, _DFF = 4, 6, 2, 3, 8
+
+
+def _mk_attn_res():
+    """Attention sub-layer: Q/K/V projections → scores → causal mask → SV → output projection → residual."""
+    tl = TL()
+    q = real_axis('q', _SEQ); x = real_axis('x', _SEQ)
+    m = real_axis('m', _D);   h = real_axis('h', _H);  k = real_axis('k', _K)
+    tl.Query[q, h, k]    = tl.W_Q[h, k, m] * tl.H[q, m]
+    tl.Key[x, h, k]      = tl.W_K[h, k, m] * tl.H[x, m]
+    tl.Value[x, h, k]    = tl.W_V[h, k, m] * tl.H[x, m]
+    tl.Comp[h, q, x]     = softmax(tl.Query[q, h, k] * tl.Key[x, h, k])
+    tl.S[h, q, x]        = normalize(tl.Comp[h, q, x] * (x <= q))
+    tl.AttnOut[q, h, k]  = tl.S[h, q, x] * tl.Value[x, h, k]
+    tl.Attn[q, m]        = tl.W_O[m, h, k] * tl.AttnOut[q, h, k]
+    tl.A[q, m]           = normalize(tl.Attn[q, m] + tl.H[q, m])
+    return tl.to_morphism()
+
+
+def _mk_ffn_res():
+    """FFN sub-layer: linear → ReLU → linear → residual."""
+    tl = TL()
+    q = real_axis('q', _SEQ); m = real_axis('m', _D); d = real_axis('d', _DFF)
+    tl.F[q, d]   = relu(tl.W_in[d, m] * tl.A[q, m])
+    tl.Y[q, m]   = tl.W_out[m, d] * tl.F[q, d]
+    tl.Out[q, m] = normalize(tl.Y[q, m] + tl.A[q, m])
+    return tl.to_morphism()
+
+
+def _mk_full_layer():
+    """Full transformer layer as a single TL program (attention + FFN)."""
+    tl = TL()
+    q = real_axis('q', _SEQ); x = real_axis('x', _SEQ)
+    m = real_axis('m', _D);   h = real_axis('h', _H)
+    k = real_axis('k', _K);   d = real_axis('d', _DFF)
+    tl.Query[q, h, k]    = tl.W_Q[h, k, m] * tl.H[q, m]
+    tl.Key[x, h, k]      = tl.W_K[h, k, m] * tl.H[x, m]
+    tl.Value[x, h, k]    = tl.W_V[h, k, m] * tl.H[x, m]
+    tl.Comp[h, q, x]     = softmax(tl.Query[q, h, k] * tl.Key[x, h, k])
+    tl.S[h, q, x]        = normalize(tl.Comp[h, q, x] * (x <= q))
+    tl.AttnOut[q, h, k]  = tl.S[h, q, x] * tl.Value[x, h, k]
+    tl.Attn[q, m]        = tl.W_O[m, h, k] * tl.AttnOut[q, h, k]
+    tl.A[q, m]           = normalize(tl.Attn[q, m] + tl.H[q, m])
+    tl.F[q, d]           = relu(tl.W_in[d, m] * tl.A[q, m])
+    tl.Y[q, m]           = tl.W_out[m, d] * tl.F[q, d]
+    tl.Out[q, m]         = normalize(tl.Y[q, m] + tl.A[q, m])
+    return tl.to_morphism()
+
+
+def test_attn_res_h_threaded_once():
+    """H is referenced in 4 equations (Q, K, V projections + residual) but must
+    appear exactly once in the compiled module's external inputs — ThreadedComposed
+    routing routes one live-pool slot to all four consumers."""
+    morph = _mk_attn_res()
+    # External inputs in order of first appearance: W_Q, H, W_K, W_V, W_O
+    assert morph.n_external == 5, (
+        f"Expected 5 external inputs (W_Q H W_K W_V W_O); got {morph.n_external}"
+    )
+
+
+def test_ffn_res_a_threaded_once():
+    """A is consumed by both the FFN projection and the residual sum but must
+    appear exactly once in the compiled module's external inputs."""
+    morph = _mk_ffn_res()
+    # External inputs: W_in, A, W_out
+    assert morph.n_external == 3, (
+        f"Expected 3 external inputs (W_in A W_out); got {morph.n_external}"
+    )
+
+
+def test_attn_res_output_shape():
+    """attn_res compiles and runs end-to-end; output shape is (SEQ, D)."""
+    mod = ConstructedModule.construct(_mk_attn_res())
+    W_Q = torch.randn(_H, _K, _D); H0 = torch.randn(_SEQ, _D)
+    W_K = torch.randn(_H, _K, _D); W_V = torch.randn(_H, _K, _D)
+    W_O = torch.randn(_D, _H, _K)
+    out = mod(W_Q, H0, W_K, W_V, W_O)
+    out = out[0] if isinstance(out, tuple) else out
+    assert out.shape == torch.Size([_SEQ, _D])
+
+
+def test_ffn_res_output_shape():
+    """ffn_res compiles and runs end-to-end; output shape is (SEQ, D)."""
+    mod = ConstructedModule.construct(_mk_ffn_res())
+    W_in = torch.randn(_DFF, _D); A = torch.randn(_SEQ, _D)
+    W_out = torch.randn(_D, _DFF)
+    out = mod(W_in, A, W_out)
+    out = out[0] if isinstance(out, tuple) else out
+    assert out.shape == torch.Size([_SEQ, _D])
+
+
+def test_full_transformer_layer_n_external():
+    """The full transformer layer (attn + FFN in one TL program) has exactly 7
+    external inputs: W_Q, H, W_K, W_V, W_O, W_in, W_out."""
+    morph = _mk_full_layer()
+    assert morph.n_external == 7, (
+        f"Expected 7 external inputs; got {morph.n_external}"
+    )
+
+
+def test_full_transformer_layer_output_shape():
+    """Full transformer layer runs end-to-end; output shape is (SEQ, D)."""
+    mod = ConstructedModule.construct(_mk_full_layer())
+    W_Q = torch.randn(_H, _K, _D); H0 = torch.randn(_SEQ, _D)
+    W_K = torch.randn(_H, _K, _D); W_V = torch.randn(_H, _K, _D)
+    W_O = torch.randn(_D, _H, _K)
+    W_in = torch.randn(_DFF, _D); W_out = torch.randn(_D, _DFF)
+    out = mod(W_Q, H0, W_K, W_V, W_O, W_in, W_out)
+    out = out[0] if isinstance(out, tuple) else out
+    assert out.shape == torch.Size([_SEQ, _D])
+
+
+def test_full_transformer_layer_output_deterministic():
+    """Same weights and input produce identical outputs on two forward passes."""
+    torch.manual_seed(7)
+    mod = ConstructedModule.construct(_mk_full_layer())
+    W_Q = torch.randn(_H, _K, _D); H0 = torch.randn(_SEQ, _D)
+    W_K = torch.randn(_H, _K, _D); W_V = torch.randn(_H, _K, _D)
+    W_O = torch.randn(_D, _H, _K)
+    W_in = torch.randn(_DFF, _D); W_out = torch.randn(_D, _DFF)
+    args = (W_Q, H0, W_K, W_V, W_O, W_in, W_out)
+    out1 = mod(*args); out1 = out1[0] if isinstance(out1, tuple) else out1
+    out2 = mod(*args); out2 = out2[0] if isinstance(out2, tuple) else out2
+    assert torch.allclose(out1, out2)
+
+
+def test_qkv_projection_numerical():
+    """The Q projection Q[q,h,k] = W_Q[h,k,m] * H[q,m] matches a hand-computed
+    einsum reference.  Tests that multi-axis contraction over m is compiled and
+    executed correctly."""
+    tl = TL()
+    q = real_axis('q', _SEQ); m = real_axis('m', _D)
+    h = real_axis('h', _H);   k = real_axis('k', _K)
+    tl.Q[q, h, k] = tl.W_Q[h, k, m] * tl.H[q, m]
+    mod = ConstructedModule.construct(tl.to_morphism())
+
+    torch.manual_seed(0)
+    W_Q = torch.randn(_H, _K, _D); H0 = torch.randn(_SEQ, _D)
+    Q_tl = mod(W_Q, H0)
+    Q_tl = Q_tl[0] if isinstance(Q_tl, tuple) else Q_tl
+    Q_ref = torch.einsum('hkm,qm->qhk', W_Q, H0)
+    assert torch.allclose(Q_tl, Q_ref, atol=1e-5), (
+        f"Q projection mismatch: max diff {(Q_tl - Q_ref).abs().max().item()}"
+    )
+
+
+def test_ffn_projection_numerical():
+    """The FFN projections F = relu(W_in * A) and Y = W_out * F match
+    hand-computed einsum references.  Tests contraction + nonlinearity."""
+    import einops
+    tl = TL()
+    q = real_axis('q', _SEQ); m = real_axis('m', _D); d = real_axis('d', _DFF)
+    tl.F[q, d] = relu(tl.W_in[d, m] * tl.A[q, m])
+    tl.Y[q, m] = tl.W_out[m, d] * tl.F[q, d]
+    mod = ConstructedModule.construct(tl.to_morphism())
+
+    torch.manual_seed(1)
+    W_in = torch.randn(_DFF, _D); A = torch.randn(_SEQ, _D)
+    W_out = torch.randn(_D, _DFF)
+    Y_tl = mod(W_in, A, W_out)
+    Y_tl = Y_tl[0] if isinstance(Y_tl, tuple) else Y_tl
+
+    F_ref = torch.relu(einops.einsum(W_in, A, 'd m, q m -> q d'))
+    Y_ref = einops.einsum(W_out, F_ref, 'm d, q d -> q m')
+    assert torch.allclose(Y_tl, Y_ref, atol=1e-5), (
+        f"FFN projection mismatch: max diff {(Y_tl - Y_ref).abs().max().item()}"
+    )
