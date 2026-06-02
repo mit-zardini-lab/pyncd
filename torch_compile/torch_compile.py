@@ -406,6 +406,23 @@ class ConstructedTensorEquation[B: cat.Datatype, A: cat.Axis](
 
 
 ConstructedModule.add_function(ops.SoftMax, torch.softmax, dim=True)
+
+
+def _causal_softmax_fn(x: torch.Tensor) -> torch.Tensor:
+    """Softmax with a lower-triangular causal mask over the last two dimensions.
+
+    Sets positions where col_idx > row_idx to -inf before taking softmax over
+    the last dimension.  This is the standard masked-softmax for autoregressive
+    attention; it guarantees that query position q attends only to key positions
+    x <= q regardless of the raw QK score at future positions.
+    """
+    q_len, s_len = x.shape[-2], x.shape[-1]
+    mask = torch.tril(torch.ones(q_len, s_len, device=x.device, dtype=torch.bool))
+    x = x.masked_fill(~mask, float('-inf'))
+    return torch.softmax(x, dim=-1)
+
+
+ConstructedModule.add_function(ops.CausalSoftMax, _causal_softmax_fn)
 ConstructedModule.add_function(ops.AdditionOp, lambda x, y: x + y, semantic=True)
 ConstructedModule.add_function(ops.Elementwise, torch.relu)
 

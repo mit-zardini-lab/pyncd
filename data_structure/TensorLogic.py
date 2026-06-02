@@ -177,6 +177,8 @@ def _split_nonlinearity(
     br = bare_eq.bc_signature(datatype=datatype, array_datatypes=array_datatypes)
     if isinstance(op, ops.SoftMax):
         return br @ ops.SoftMax.template()
+    elif isinstance(op, ops.CausalSoftMax):
+        return br @ ops.CausalSoftMax.template()
     elif isinstance(op, ops.Normalize):
         return br @ ops.Normalize.template()
     elif isinstance(op, ops.Elementwise):   # catches ReLU (subclass)

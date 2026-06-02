@@ -1,7 +1,7 @@
 import pytest
 import torch
 import data_structure.Category as cat
-from data_structure.TensorDSL import TL, axes, real_axis, relu, softmax, normalize
+from data_structure.TensorDSL import TL, axes, real_axis, relu, softmax, causal_softmax, normalize
 from data_structure.TensorExpr import IversonConst, ieq, iabs
 from data_structure.Numeric import Integer
 from torch_compile.torch_compile import (
@@ -720,15 +720,14 @@ _SEQ, _D, _H, _K, _DFF = 4, 6, 2, 3, 8
 
 
 def _mk_attn_res():
-    """Attention sub-layer: Q/K/V projections → scores → causal mask → SV → output projection → residual."""
+    """Attention sub-layer: Q/K/V projections → causal masked softmax → SV → output projection → residual."""
     tl = TL()
     q = real_axis('q', _SEQ); x = real_axis('x', _SEQ)
     m = real_axis('m', _D);   h = real_axis('h', _H);  k = real_axis('k', _K)
     tl.Query[q, h, k]    = tl.W_Q[h, k, m] * tl.H[q, m]
     tl.Key[x, h, k]      = tl.W_K[h, k, m] * tl.H[x, m]
     tl.Value[x, h, k]    = tl.W_V[h, k, m] * tl.H[x, m]
-    tl.Comp[h, q, x]     = softmax(tl.Query[q, h, k] * tl.Key[x, h, k])
-    tl.S[h, q, x]        = normalize(tl.Comp[h, q, x] * (x <= q))
+    tl.S[h, q, x]        = causal_softmax(tl.Query[q, h, k] * tl.Key[x, h, k])
     tl.AttnOut[q, h, k]  = tl.S[h, q, x] * tl.Value[x, h, k]
     tl.Attn[q, m]        = tl.W_O[m, h, k] * tl.AttnOut[q, h, k]
     tl.A[q, m]           = normalize(tl.Attn[q, m] + tl.H[q, m])
@@ -754,8 +753,7 @@ def _mk_full_layer():
     tl.Query[q, h, k]    = tl.W_Q[h, k, m] * tl.H[q, m]
     tl.Key[x, h, k]      = tl.W_K[h, k, m] * tl.H[x, m]
     tl.Value[x, h, k]    = tl.W_V[h, k, m] * tl.H[x, m]
-    tl.Comp[h, q, x]     = softmax(tl.Query[q, h, k] * tl.Key[x, h, k])
-    tl.S[h, q, x]        = normalize(tl.Comp[h, q, x] * (x <= q))
+    tl.S[h, q, x]        = causal_softmax(tl.Query[q, h, k] * tl.Key[x, h, k])
     tl.AttnOut[q, h, k]  = tl.S[h, q, x] * tl.Value[x, h, k]
     tl.Attn[q, m]        = tl.W_O[m, h, k] * tl.AttnOut[q, h, k]
     tl.A[q, m]           = normalize(tl.Attn[q, m] + tl.H[q, m])
@@ -950,4 +948,34 @@ def test_causal_mask_renormalize_is_lower_triangular():
     S2 = S2[0] if isinstance(S2, tuple) else S2
     assert torch.allclose(S[:, 0, :], S2[:, 0, :], atol=1e-5), (
         "Mask+normalize is not causal at q=0: changing future Comp changed S[:,0,:]"
+    )
+
+
+def test_attn_res_causal_invariance():
+    """Changing future token inputs must not affect past query positions.
+
+    H[2:] is changed; the output at positions 0 and 1 must be identical,
+    because causal_softmax ensures query q attends only to keys x <= q.
+    Positions 2 and 3 must differ (they can see H[2:] via their own keys).
+    """
+    mod = ConstructedModule.construct(_mk_attn_res())
+    torch.manual_seed(42)
+    W_Q = torch.randn(_H, _K, _D); H0 = torch.randn(_SEQ, _D)
+    W_K = torch.randn(_H, _K, _D); W_V = torch.randn(_H, _K, _D)
+    W_O = torch.randn(_D, _H, _K)
+
+    out0 = mod(W_Q, H0, W_K, W_V, W_O)
+    out0 = out0[0] if isinstance(out0, tuple) else out0
+
+    H1 = H0.clone()
+    H1[2:] = torch.randn(2, _D)
+    out1 = mod(W_Q, H1, W_K, W_V, W_O)
+    out1 = out1[0] if isinstance(out1, tuple) else out1
+
+    assert torch.allclose(out0[:2], out1[:2], atol=1e-5), (
+        f"Causal invariance violated: output at pos 0,1 changed when H[2:] changed.\n"
+        f"Max diff: {(out0[:2] - out1[:2]).abs().max().item()}"
+    )
+    assert not torch.allclose(out0[2:], out1[2:], atol=1e-5), (
+        "Expected output at pos 2,3 to differ when H[2:] changed"
     )
