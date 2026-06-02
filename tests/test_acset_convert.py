@@ -700,3 +700,19 @@ def test_masked_softmax_roundtrips_through_csv(tmp_path):
     assert out2.operator_tag == OpTag.MASKED_SOFTMAX
     assert out2.iverson_expr is not None
     assert '<=' in out2.iverson_expr
+
+
+def test_masked_normalize_serialises_to_masked_normalize_tag():
+    """from_tensor_equation with normalize(where=...) produces OpTag.MASKED_NORMALIZE."""
+    from data_structure.TensorDSL import TL, real_axis, norm_axis, normalize
+
+    SEQ = 4
+    p = real_axis('p', SEQ)
+    m = norm_axis('m', SEQ)
+    tl = TL()
+    tl.Out[p, m] = normalize(tl.X[p, m], where=(m <= p))
+    eq = tl._equations[0]
+    inst = from_tensor_equation(eq)
+    out_row = next(r for r in inst.arrays if not r.is_input)
+    assert out_row.operator_tag == OpTag.MASKED_NORMALIZE
+    assert out_row.iverson_expr is not None

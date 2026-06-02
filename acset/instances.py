@@ -14,6 +14,7 @@ class OpTag(Enum):
     MASKED_SOFTMAX            = 'masked_softmax'
     ELEMENTWISE               = 'elementwise'
     NORMALIZE                 = 'normalize'
+    MASKED_NORMALIZE          = 'masked_normalize'
     EMBEDDING                 = 'embedding'
     ADDITION_OP               = 'addition'
     WEIGHTED_TRIANGULAR_LOWER = 'weighted_triangular_lower'

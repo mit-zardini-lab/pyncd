@@ -36,7 +36,6 @@ class _OpFields:
 
 
 _TAG_FROM_TYPE: dict[type, OpTag] = {
-    ops.Normalize:               OpTag.NORMALIZE,
     ops.Embedding:               OpTag.EMBEDDING,
     ops.AdditionOp:              OpTag.ADDITION_OP,
     ops.WeightedTriangularLower: OpTag.WEIGHTED_TRIANGULAR_LOWER,
@@ -68,6 +67,16 @@ def _operator_fields(op) -> _OpFields:
                 expr = f'(and {parts})'
             return _OpFields(OpTag.MASKED_SOFTMAX, None, None, iverson_expr=expr)
         return _OpFields(OpTag.SOFTMAX, None, None)
+    if isinstance(op, ops.Normalize):
+        if op.where_predicate:
+            preds = op.where_predicate
+            if len(preds) == 1:
+                expr = _serialize_iverson(preds[0])
+            else:
+                parts = ' '.join(_serialize_iverson(p) for p in preds)
+                expr = f'(and {parts})'
+            return _OpFields(OpTag.MASKED_NORMALIZE, None, None, iverson_expr=expr)
+        return _OpFields(OpTag.NORMALIZE, None, None)
     tag = _TAG_FROM_TYPE.get(type(op))
     if tag is None:
         raise ValueError(f"unrecognised operator type: {type(op)}")
