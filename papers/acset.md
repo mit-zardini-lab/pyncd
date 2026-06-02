@@ -122,7 +122,7 @@ $$\texttt{Array} \xrightarrow{\texttt{is\_input}} \mathbb{B} \qquad \texttt{Arra
 
 $$\texttt{Array} \xrightarrow{\texttt{bias}} \mathbb{B} \qquad \texttt{Array} \xrightarrow{\texttt{elementwise\_fn}} \texttt{String} \qquad \texttt{Array} \xrightarrow{\texttt{slot}} \mathbb{N} \qquad \texttt{Array} \xrightarrow{\texttt{name}} \texttt{String}$$
 
-Five entity types, six attribute types ($\mathbb{N}$, $\mathbb{N}_{>0}$, $\mathbb{B}$, $\texttt{OpTag}$, $\texttt{DataTag}$, $\texttt{String}$), twenty maps. `max_value` is a partial map defined only for `Natural`-typed arrays. `operator_tag`, `norm_axis`, `bias`, and `elementwise_fn` are partial maps defined only for output arrays (`is_input = False`); `norm_axis` is further restricted to operators in $\{\texttt{SoftMax}, \texttt{Normalize}\}$; `bias` is restricted to `Linear` output arrays; `elementwise_fn` is restricted to `Elementwise` output arrays. `lhs_name` is partial — may be `None` for anonymous equations.
+Five entity types, six attribute types ($\mathbb{N}$, $\mathbb{N}_{>0}$, $\mathbb{B}$, $\texttt{OpTag}$, $\texttt{DataTag}$, $\texttt{String}$), twenty maps. `max_value` is a partial map defined only for `Natural`-typed arrays. `operator_tag`, `norm_axis`, `bias`, and `elementwise_fn` are partial maps defined only for output arrays (`is_input = False`); `norm_axis` is further restricted to operators in $\{\texttt{SoftMax}, \texttt{MaskedSoftMax}, \texttt{Normalize}\}$; `bias` is restricted to `Linear` output arrays; `elementwise_fn` is restricted to `Elementwise` output arrays. `lhs_name` is partial — may be `None` for anonymous equations.
 
 `norm_axis` is necessary even though the source representation (a `TensorEquation`) marks the normalisation axis via the `NormAxis` subtype of `RawAxis` in `lhs_indices`. Once converted to an instance, all axes in `lhs_indices` appear as `ArrayAxis` rows with `is_target = False` — degree axes and the norm axis are indistinguishable without the explicit pointer. `norm_axis` is what preserves this distinction in the standalone instance.
 
@@ -525,9 +525,10 @@ The `TensorEquation.operator` field — which distinguishes an `Identity` reinde
 | `OpTag` | Pyncd class | Role |
 | --- | --- | --- |
 | `IDENTITY` | `Identity()` | Pure reindexing — no base computation |
-| `SOFTMAX` | `SoftMax()` | Normalisation along `NormAxis` |
+| `SOFTMAX` | `SoftMax()` | Softmax along `NormAxis`; no masking |
+| `MASKED_SOFTMAX` | `MaskedSoftMax(iverson_factors, mask_alignments)` | Softmax with Iverson predicate applied as $-\infty$ mask before exponentiation; TL DSL: `softmax(expr, where=pred)` |
 | `ELEMENTWISE` | `Elementwise()` | Pointwise nonlinearity |
-| `NORMALIZE` | `Normalize()` | RMSNorm / LayerNorm |
+| `NORMALIZE` | `Normalize()` | Sum normalization: $x / \sum_\text{dim}(x)$ |
 | `EMBEDDING` | `Embedding(...)` | Discrete lookup ($\mathbb{N} \to \mathbb{R}$) |
 | `ADDITION_OP` | `AdditionOp()` | Elementwise addition |
 | `WEIGHTED_TRIANGULAR_LOWER` | `WeightedTriangularLower()` | Causal mask |
