@@ -107,6 +107,40 @@ class SoftMax(cat.Operator):
         )
 
 @dataclass(frozen=True)
+class MaskedSoftMax(cat.Operator):
+    """Softmax with Iverson predicates applied as -inf masks before exponentiation.
+
+    iverson_factors: tuple of IversonExpr objects (one per predicate).
+    mask_alignments: tuple of (perm: tuple[int,...], n_broadcast: int) — one
+        entry per factor.  ConstructedMaskedSoftMax uses these to permute and
+        unsqueeze the materialised mask so it broadcasts correctly with the
+        score tensor.
+    """
+    name: fd.DynamicName | None = fd.DynamicName('MaskedSoftMax')
+    iverson_factors: tuple = ()
+    mask_alignments: tuple = ()   # tuple of (perm: tuple, n_broadcast: int)
+
+    @classmethod
+    def template(
+        cls,
+        iverson_factors: tuple,
+        mask_alignments: tuple,
+        base: cat.Datatype = cat.Reals(),
+    ) -> cat.Broadcasted:
+        """Return a 1-axis Broadcasted for composition with the score einsum."""
+        axis = cat.RawAxis()
+        return cat.Broadcasted(
+            operator=cls(
+                iverson_factors=iverson_factors,
+                mask_alignments=mask_alignments,
+            ),
+            input_weaves=(cat.Weave(base, (axis,)),),
+            output_weaves=(cat.Weave(base, (axis,)),),
+            reindexings=(cat.ProdObject().identity(),),
+        )
+
+
+@dataclass(frozen=True)
 class Einops(cat.Operator):
     name: fd.DynamicName | None = fd.DynamicName('einops')
     # Each integer corresponds to a contraction group.
