@@ -1274,21 +1274,6 @@ def softmax(expr: IndexedTensor | RHSExpression | SumExpr) -> RHSExpression | Su
     return RHSExpression(expr.factors, ops.SoftMax())
 
 
-def causal_softmax(expr: IndexedTensor | RHSExpression | SumExpr) -> RHSExpression | SumExpr:
-    """Wrap a QK score expression with a CausalSoftMax nonlinearity.
-
-    Compiles to: set future positions (x > q in the last two dims) to -inf,
-    then apply softmax over the last dimension.  Use this instead of softmax()
-    for causal (autoregressive) attention so that the mask is applied before
-    exponentiation rather than as a post-hoc multiplicative renormalization.
-    """
-    if isinstance(expr, SumExpr):
-        return SumExpr(expr.terms, ops.CausalSoftMax())
-    if isinstance(expr, IndexedTensor):
-        expr = RHSExpression([expr], ops.Identity())
-    return RHSExpression(expr.factors, ops.CausalSoftMax())
-
-
 def normalize(expr: IndexedTensor | RHSExpression | SumExpr) -> RHSExpression | SumExpr:
     """Wrap an expression with a Normalize (RMSnorm) nonlinearity."""
     if isinstance(expr, SumExpr):

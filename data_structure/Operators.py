@@ -106,29 +106,6 @@ class SoftMax(cat.Operator):
         )
 
 @dataclass(frozen=True)
-class CausalSoftMax(cat.Operator):
-    """Softmax with a lower-triangular causal mask applied before exponentiation.
-
-    Semantics: scores at future positions (x > q) are set to -inf before
-    softmax, so they receive exactly zero attention weight.  This is the
-    standard masked-softmax used in autoregressive transformers; it differs
-    from SoftMax in that the causal mask is baked into the operator rather
-    than being applied as a post-hoc multiplicative renormalization.
-    """
-    name: fd.DynamicName | None = fd.DynamicName('CausalSoftMax')
-
-    @classmethod
-    def template[B: cat.Datatype = cat.Reals](cls, base: B = cat.Reals()):
-        axis = cat.RawAxis()
-        return cat.Broadcasted[B, cat.RawAxis](
-            operator=CausalSoftMax(name=fd.DynamicName('CausalSoftMax')),
-            input_weaves=(cat.Weave(base, (axis,)),),
-            output_weaves=(cat.Weave(base, (axis,)),),
-            reindexings=(cat.ProdObject().identity(),)
-        )
-
-
-@dataclass(frozen=True)
 class Einops(cat.Operator):
     name: fd.DynamicName | None = fd.DynamicName('einops')
     # Each integer corresponds to a contraction group.
