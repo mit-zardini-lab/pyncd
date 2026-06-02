@@ -539,6 +539,20 @@ def test_masked_normalize_operator_exists():
     assert op.mask_alignments == ()
 
 
+def test_normalize_accepts_where_kwarg():
+    """normalize(expr, where=pred) produces an RHSExpression whose operator
+    has a non-empty where_predicate."""
+    import data_structure.Operators as ops
+    from data_structure.TensorDSL import TL, real_axis, norm_axis, normalize
+
+    p = real_axis('p', 4)
+    m = norm_axis('m', 8)
+    tl = TL()
+    expr = normalize(tl.X[p, m], where=(p <= p))
+    assert isinstance(expr.operator, ops.Normalize)
+    assert len(expr.operator.where_predicate) == 1
+
+
 def test_inline_softmax_in_program():
     """softmax() inline in a TensorProgram (multi-equation) compiles correctly."""
     q = real_axis('q', 4)

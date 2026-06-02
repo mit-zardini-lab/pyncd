@@ -1287,10 +1287,20 @@ def softmax(
     return RHSExpression(expr.factors, op)
 
 
-def normalize(expr: IndexedTensor | RHSExpression | SumExpr) -> RHSExpression | SumExpr:
-    """Wrap an expression with a Normalize (RMSnorm) nonlinearity."""
+def normalize(
+    expr: IndexedTensor | RHSExpression | SumExpr,
+    where: IversonExpr | None = None,
+) -> RHSExpression | SumExpr:
+    """Wrap an expression with a Normalize (sum-norm) nonlinearity.
+
+    where: optional Iverson predicate.  Positions where the predicate is False
+           are zeroed before the sum-normalization denominator is computed, so
+           they receive zero weight and are zeroed in the output.
+           The normalization axis must be marked with norm_axis() in the LHS.
+    """
+    op = ops.Normalize(where_predicate=((where,) if where is not None else ()))
     if isinstance(expr, SumExpr):
-        return SumExpr(expr.terms, ops.Normalize())
+        return SumExpr(expr.terms, op)
     if isinstance(expr, IndexedTensor):
         expr = RHSExpression([expr], ops.Identity())
-    return RHSExpression(expr.factors, ops.Normalize())
+    return RHSExpression(expr.factors, op)
