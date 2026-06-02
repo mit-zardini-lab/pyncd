@@ -982,3 +982,52 @@ def test_masked_softmax_excludes_future_positions():
     assert torch.allclose(S.sum(dim=-1), torch.ones(H, SEQ), atol=1e-5), (
         f"Rows do not sum to 1: {S.sum(dim=-1)}"
     )
+
+
+def test_attn_res_with_where_is_exactly_causally_invariant():
+    """Full attn_res using norm_axis + softmax(where=) must be exactly causal-invariant.
+
+    Changing H[2:] must not affect output at positions 0 and 1.
+    This test fails with the old softmax(QK) * mask approach because future
+    keys with large scores dominate the softmax denominator, causing causal
+    values to underflow and normalize()'s clamp_min to corrupt the result.
+    """
+    SEQ, D, H, K = 4, 6, 2, 3
+    q_ax = real_axis('q', SEQ)
+    x_ax = norm_axis('x', SEQ)    # norm_axis marks the softmax normalization axis
+    m_ax = real_axis('m', D)
+    h_ax = real_axis('h', H)
+    k_ax = real_axis('k', K)
+    tl = TL()
+    tl.Query[q_ax, h_ax, k_ax]    = tl.W_Q[h_ax, k_ax, m_ax] * tl.H[q_ax, m_ax]
+    tl.Key[x_ax, h_ax, k_ax]      = tl.W_K[h_ax, k_ax, m_ax] * tl.H[x_ax, m_ax]
+    tl.Value[x_ax, h_ax, k_ax]    = tl.W_V[h_ax, k_ax, m_ax] * tl.H[x_ax, m_ax]
+    tl.S[h_ax, q_ax, x_ax]        = softmax(
+        tl.Query[q_ax, h_ax, k_ax] * tl.Key[x_ax, h_ax, k_ax],
+        where=(x_ax <= q_ax),
+    )
+    tl.AttnOut[q_ax, h_ax, k_ax]  = tl.S[h_ax, q_ax, x_ax] * tl.Value[x_ax, h_ax, k_ax]
+    tl.Attn[q_ax, m_ax]           = tl.W_O[m_ax, h_ax, k_ax] * tl.AttnOut[q_ax, h_ax, k_ax]
+    tl.A[q_ax, m_ax]              = normalize(tl.Attn[q_ax, m_ax] + tl.H[q_ax, m_ax])
+
+    mod = ConstructedModule.construct(tl.to_morphism())
+    torch.manual_seed(42)
+    W_Q = torch.randn(H, K, D);  H0 = torch.randn(SEQ, D)
+    W_K = torch.randn(H, K, D);  W_V = torch.randn(H, K, D)
+    W_O = torch.randn(D, H, K)
+
+    out0 = mod(W_Q, H0, W_K, W_V, W_O)
+    out0 = out0[0] if isinstance(out0, tuple) else out0
+
+    H1 = H0.clone()
+    H1[2:] = torch.randn(2, D)
+    out1 = mod(W_Q, H1, W_K, W_V, W_O)
+    out1 = out1[0] if isinstance(out1, tuple) else out1
+
+    assert torch.allclose(out0[:2], out1[:2], atol=1e-5), (
+        f"Causal invariance violated: max diff "
+        f"{(out0[:2] - out1[:2]).abs().max().item():.4f}"
+    )
+    assert not torch.allclose(out0[2:], out1[2:], atol=1e-5), (
+        "Expected output at pos 2,3 to differ when H[2:] changed"
+    )
