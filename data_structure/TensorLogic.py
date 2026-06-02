@@ -213,6 +213,27 @@ def _split_nonlinearity(
     )
     br = bare_eq.bc_signature(datatype=datatype, array_datatypes=array_datatypes)
     if isinstance(op, ops.SoftMax):
+        if op.where_predicate:
+            # Build score einsum from tensor-only factors; Iverson factors
+            # are handled separately as -inf masks before exponentiation.
+            tensor_rhs = tuple(f for f in eq.rhs if isinstance(f, TensorRef))
+            score_eq = TensorEquation(
+                lhs_name=eq.lhs_name,
+                lhs_indices=eq.lhs_indices,
+                rhs=tensor_rhs,
+                operator=None,
+            )
+            score_br = score_eq.bc_signature(
+                datatype=datatype, array_datatypes=array_datatypes
+            )
+            alignments = tuple(
+                _compute_mask_alignment(factor, eq.lhs_indices)
+                for factor in op.where_predicate
+            )
+            return score_br @ ops.MaskedSoftMax.template(
+                iverson_factors=op.where_predicate,
+                mask_alignments=alignments,
+            )
         return br @ ops.SoftMax.template()
     elif isinstance(op, ops.Normalize):
         return br @ ops.Normalize.template()

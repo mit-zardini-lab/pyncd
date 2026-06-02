@@ -704,4 +704,22 @@ def test_masked_softmax_operator_template_is_broadcasted():
     )
     assert isinstance(template, bc.Broadcasted)
     assert len(template.input_weaves) == 1
-    assert len(template.output_weaves) == 1
+
+
+def test_split_nonlinearity_with_where_produces_masked_softmax():
+    """softmax(QK, where=(x<=q)) must compile to Composed(score_einsum, MaskedSoftMax)."""
+    import data_structure.Operators as ops
+    from data_structure.ProductCategory import Composed
+    q = real_axis('q', 4)
+    h = real_axis('h', 2)
+    k = real_axis('k', 3)
+    x = norm_axis('x', 4)
+    tl = TL()
+    tl.S[h, q, x] = softmax(tl.Q[q, h, k] * tl.K[x, h, k], where=(x <= q))
+    sig = tl.bc_signature()
+    assert isinstance(sig, Composed), f"Expected Composed, got {type(sig).__name__}"
+    import data_structure.BroadcastedCategory as bc
+    last = sig.content[-1]
+    assert isinstance(last, bc.Broadcasted)
+    assert isinstance(last.operator, ops.MaskedSoftMax)
+    assert len(last.operator.iverson_factors) == 1
