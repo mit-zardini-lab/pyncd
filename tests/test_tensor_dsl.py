@@ -632,3 +632,22 @@ def test_norm_axis_softmax_compiles_to_composed():
     assert isinstance(sig, Composed), (
         f"Expected Composed(einsum, softmax); got {type(sig).__name__}"
     )
+
+
+def test_softmax_where_stores_predicate():
+    """softmax(expr, where=pred) must store the predicate in the operator."""
+    q, x = axes('q x')
+    tl = TL()
+    pred = x <= q   # IversonBinOp('<=', x, q)
+    expr = softmax(tl.A[q, x], where=pred)
+    assert len(expr.operator.where_predicate) == 1
+    assert isinstance(expr.operator.where_predicate[0], IversonBinOp)
+    assert expr.operator.where_predicate[0].op == '<='
+
+
+def test_softmax_no_where_has_empty_predicate():
+    """softmax(expr) without where= must have empty where_predicate."""
+    q, x = axes('q x')
+    tl = TL()
+    expr = softmax(tl.A[q, x])
+    assert expr.operator.where_predicate == ()

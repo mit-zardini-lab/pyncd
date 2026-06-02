@@ -12,6 +12,7 @@ import data_structure.Operators as ops
 from data_structure.TensorLogic import TensorEquation, TensorProgram
 from data_structure.TensorExpr import (
     TensorRef, IversonBinOp, IversonUnaryOp,
+    IversonExpr,
     ieq, imul, iabs,
 )
 from data_structure.AxisAnnotations import NormAxis, NatAxis
@@ -1267,13 +1268,23 @@ def relu(expr: IndexedTensor | RHSExpression | SumExpr) -> RHSExpression | SumEx
     return RHSExpression(expr.factors, ops.ReLU())
 
 
-def softmax(expr: IndexedTensor | RHSExpression | SumExpr) -> RHSExpression | SumExpr:
-    """Wrap an expression with a SoftMax nonlinearity."""
+def softmax(
+    expr: IndexedTensor | RHSExpression | SumExpr,
+    where: IversonExpr | None = None,
+) -> RHSExpression | SumExpr:
+    """Wrap a score expression with a SoftMax nonlinearity.
+
+    where: optional Iverson predicate.  Positions where the predicate is False
+           are masked to -inf before exponentiation (masked softmax), so they
+           receive zero attention weight regardless of the raw score.
+           The normalization axis must be marked with norm_axis() in the LHS.
+    """
+    op = ops.SoftMax(where_predicate=((where,) if where is not None else ()))
     if isinstance(expr, SumExpr):
-        return SumExpr(expr.terms, ops.SoftMax())
+        return SumExpr(expr.terms, op)
     if isinstance(expr, IndexedTensor):
         expr = RHSExpression([expr], ops.Identity())
-    return RHSExpression(expr.factors, ops.SoftMax())
+    return RHSExpression(expr.factors, op)
 
 
 def normalize(expr: IndexedTensor | RHSExpression | SumExpr) -> RHSExpression | SumExpr:

@@ -92,6 +92,7 @@ class Identity(Elementwise):
 class SoftMax(cat.Operator):
     name: fd.DynamicName | None = fd.DynamicName('SoftMax')
     contracted: bool = False
+    where_predicate: tuple = ()   # IversonExpr objects; empty = plain softmax
     @classmethod
     def template[B:cat.Datatype=cat.Reals](
         cls,
