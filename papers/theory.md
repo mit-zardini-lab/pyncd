@@ -515,7 +515,8 @@ Operators are `Operator` subclasses (frozen dataclasses) that implement `templat
 | `SoftMax.template()` | Softmax along one target axis |
 | `MaskedSoftMax.template(iverson_factors, mask_alignments)` | Softmax with Iverson predicates applied as $-\infty$ masks before exponentiation. In the TL DSL use `softmax(expr, where=pred)` with `norm_axis()` in the LHS; `_split_nonlinearity` routes to this operator automatically. |
 | `Elementwise.template()` | Elementwise nonlinearity ($\sigma$, ReLU, etc.) |
-| `Normalize.template()` | Sum normalization: $x / \sum_\text{dim}(x)$; same shape in and out. Applied via `normalize()` in the TL DSL. |
+| `Normalize.template()` | Sum normalization: $x / \sum_\text{dim}(x)$; same shape in and out. Applied via `normalize(expr)` in the TL DSL. |
+| `MaskedNormalize.template(iverson_factors, mask_alignments)` | Sum normalization with Iverson predicate applied as a zero-mask before the denominator sum; masked positions receive zero output. In the TL DSL use `normalize(expr, where=pred)` with `norm_axis()` in the LHS; `_split_nonlinearity` routes to this operator automatically. |
 | `Embedding.template(embedding_size)` | Discrete $\to$ real; input datatype is `Natural` |
 | `AdditionOp.template()` | Elementwise addition of $n \geq 2$ arrays of the same shape |
 | `WeightedTriangularLower.template()` | Lower-triangular masking followed by sum normalization; legacy attention masking |

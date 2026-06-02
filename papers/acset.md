@@ -122,7 +122,7 @@ $$\texttt{Array} \xrightarrow{\texttt{is\_input}} \mathbb{B} \qquad \texttt{Arra
 
 $$\texttt{Array} \xrightarrow{\texttt{bias}} \mathbb{B} \qquad \texttt{Array} \xrightarrow{\texttt{elementwise\_fn}} \texttt{String} \qquad \texttt{Array} \xrightarrow{\texttt{slot}} \mathbb{N} \qquad \texttt{Array} \xrightarrow{\texttt{name}} \texttt{String}$$
 
-Five entity types, six attribute types ($\mathbb{N}$, $\mathbb{N}_{>0}$, $\mathbb{B}$, $\texttt{OpTag}$, $\texttt{DataTag}$, $\texttt{String}$), twenty maps. `max_value` is a partial map defined only for `Natural`-typed arrays. `operator_tag`, `norm_axis`, `bias`, and `elementwise_fn` are partial maps defined only for output arrays (`is_input = False`); `norm_axis` is further restricted to operators in $\{\texttt{SoftMax}, \texttt{MaskedSoftMax}, \texttt{Normalize}\}$; `bias` is restricted to `Linear` output arrays; `elementwise_fn` is restricted to `Elementwise` output arrays. `lhs_name` is partial — may be `None` for anonymous equations.
+Five entity types, six attribute types ($\mathbb{N}$, $\mathbb{N}_{>0}$, $\mathbb{B}$, $\texttt{OpTag}$, $\texttt{DataTag}$, $\texttt{String}$), twenty maps. `max_value` is a partial map defined only for `Natural`-typed arrays. `operator_tag`, `norm_axis`, `bias`, and `elementwise_fn` are partial maps defined only for output arrays (`is_input = False`); `norm_axis` is further restricted to operators in $\{\texttt{SoftMax}, \texttt{MaskedSoftMax}, \texttt{Normalize}, \texttt{MaskedNormalize}\}$; `bias` is restricted to `Linear` output arrays; `elementwise_fn` is restricted to `Elementwise` output arrays. `lhs_name` is partial — may be `None` for anonymous equations.
 
 `norm_axis` is necessary even though the source representation (a `TensorEquation`) marks the normalisation axis via the `NormAxis` subtype of `RawAxis` in `lhs_indices`. Once converted to an instance, all axes in `lhs_indices` appear as `ArrayAxis` rows with `is_target = False` — degree axes and the norm axis are indistinguishable without the explicit pointer. `norm_axis` is what preserves this distinction in the standalone instance.
 
@@ -150,7 +150,7 @@ The **C-set part** (structure) consists of:
 - the reindexing multigraph on `Axis` via `Sample ⇉ Axis` (analogous to `Entry ⇉ Axis` in $\mathcal{S}_{St}$)
 - the bipartite graph linking each `ArrayAxis` to its `Array` and its `Axis` via `array_slot` and `axis`
 - the `reindexing_slot` map assigning each `Sample` to the array whose reindexing it belongs to
-- the `norm_axis` map (partial) pointing each SoftMax/MaskedSoftMax/Normalize output array to its normalisation axis
+- the `norm_axis` map (partial) pointing each SoftMax/MaskedSoftMax/Normalize/MaskedNormalize output array to its normalisation axis
 
 The **degree** of a `Broadcasted` morphism is the tuple of loop axes — the axes iterated in the outer degree loop, shared across all inputs. In tabular form the degree is the image of `src` across all `Sample` rows.
 
@@ -416,7 +416,9 @@ These fields map to the four tables of `SBrInstance`: `arrays: list[ArrayRow]`, 
 | Retained axis $i \in$ `lhs_indices` appearing in input $X$ at slot $p$ | `Sample` row: `equation_idx` from above, `src` $= i$, `tgt` $= i$, `coeff` $= 1$, `reindexing_slot` $= p$ |
 | `operator` field (`None` or `Identity()`) | `IDENTITY` for `operator_tag` on the output `Array` row |
 | `operator = SoftMax()` with empty `where_predicate` | `SOFTMAX` for `operator_tag`; `norm_axis` FK set to the `NormAxis` axis |
-| `operator = SoftMax(where_predicate=...)` | `MASKED_SOFTMAX` for `operator_tag`; `norm_axis` FK set; Iverson predicate **not** stored in the schema |
+| `operator = SoftMax(where_predicate=...)` | `MASKED_SOFTMAX` for `operator_tag`; `norm_axis` FK set; Iverson predicate serialised into `iverson_expr` on the output `Array` row |
+| `operator = Normalize()` with empty `where_predicate` | `NORMALIZE` for `operator_tag`; `norm_axis` FK set to the `NormAxis` axis |
+| `operator = Normalize(where_predicate=...)` | `MASKED_NORMALIZE` for `operator_tag`; `norm_axis` FK set; Iverson predicate serialised into `iverson_expr` on the output `Array` row |
 | `operator.bias` (when `Linear`) | `bias` attribute on the output `Array` row |
 | `operator.operator` (when `Elementwise`) | `elementwise_fn` attribute on the output `Array` row |
 | Array datatype (from `array_datatypes` parameter) | `datatype_tag` attribute on the `Array` row |
@@ -524,7 +526,7 @@ $H$ appears as output in equation 0 (`equation_idx=0`, `slot=0`) and as input in
 
 The `TensorEquation.operator` field — which distinguishes an `Identity` reindexing from a `SoftMax`, `MaskedSoftMax`, `Elementwise`, `Linear`, or `Embedding` — maps to the `operator_tag` attribute on output `Array` rows (part of $\mathcal{S}_{Br}$ as defined above). By convention, `operator = None` (the default in `TensorEquation`) is treated identically to `Identity()`: both map to `OpTag.IDENTITY`, meaning pure reindexing with no base computation. `operator_tag` is undefined for input arrays.
 
-`SoftMax` maps to `SOFTMAX`; `SoftMax(where_predicate=(...))` (a softmax written with the `where=` argument in the TL DSL) maps to `MASKED_SOFTMAX`. The `norm_axis` FK is populated for both. The Iverson predicate from `SoftMax.where_predicate` is serialized via `_serialize_iverson` into the `iverson_expr` field of the output `Array` row — e.g. `"(x <= q)"` — and round-trips through `arrays.csv`. `mask_alignments` is not stored; it is recomputable from `_compute_mask_alignment(predicate, lhs_axes)` at reconstruction time.
+`SoftMax` maps to `SOFTMAX`; `SoftMax(where_predicate=(...))` maps to `MASKED_SOFTMAX`. `Normalize` maps to `NORMALIZE`; `Normalize(where_predicate=(...))` maps to `MASKED_NORMALIZE`. The `norm_axis` FK is populated for all four. The Iverson predicate from `where_predicate` is serialized via `_serialize_iverson` into the `iverson_expr` field of the output `Array` row — e.g. `"(x <= q)"` — and round-trips through `arrays.csv` for both masked variants. `mask_alignments` is not stored; it is recomputable from `_compute_mask_alignment(predicate, lhs_axes)` at reconstruction time.
 
 | `OpTag` | Pyncd class | Role |
 | --- | --- | --- |
@@ -532,7 +534,8 @@ The `TensorEquation.operator` field — which distinguishes an `Identity` reinde
 | `SOFTMAX` | `SoftMax()` | Softmax along `NormAxis`; no masking |
 | `MASKED_SOFTMAX` | `MaskedSoftMax(iverson_factors, mask_alignments)` | Softmax with Iverson predicate applied as $-\infty$ mask before exponentiation; TL DSL: `softmax(expr, where=pred)` |
 | `ELEMENTWISE` | `Elementwise()` | Pointwise nonlinearity |
-| `NORMALIZE` | `Normalize()` | Sum normalization: $x / \sum_\text{dim}(x)$ |
+| `NORMALIZE` | `Normalize()` | Sum normalization: $x / \sum_\text{dim}(x)$; no masking |
+| `MASKED_NORMALIZE` | `MaskedNormalize(iverson_factors, mask_alignments)` | Sum normalization with Iverson predicate applied as zero-mask before the denominator sum; masked positions receive zero output; TL DSL: `normalize(expr, where=pred)` |
 | `EMBEDDING` | `Embedding(...)` | Discrete lookup ($\mathbb{N} \to \mathbb{R}$) |
 | `ADDITION_OP` | `AdditionOp()` | Elementwise addition |
 | `WEIGHTED_TRIANGULAR_LOWER` | `WeightedTriangularLower()` | Legacy causal mask (lower-triangular + sum normalization); superseded by `MASKED_SOFTMAX` in the TL DSL |
@@ -577,7 +580,7 @@ inst = read_sbr(Path('out/my_program'))   # reconstructs from those files
 
 **Known limitations.**
 
-- `MaskedSoftMax` Iverson predicates are serialized using the existing `iverson_expr` field on `Array` rows (already present for BOOL input array rows). `_operator_fields` in `convert.py` calls `_serialize_iverson` on the `where_predicate` and stores the result — e.g. `"(x <= q)"` — in `iverson_expr` on the output array row. `mask_alignments` (the compile-time permutation) is not stored; it is derivable from `_compute_mask_alignment(predicate, lhs_axes)` at reconstruction time. The `iverson_expr` field and its csv read/write were already in place from the earlier BOOL-input-array path; no schema extension was needed.
+- `MaskedSoftMax` and `MaskedNormalize` Iverson predicates are serialized using the `iverson_expr` field on `Array` rows (shared with BOOL input array rows). `_operator_fields` in `convert.py` calls `_serialize_iverson` on the `where_predicate` and stores the result — e.g. `"(x <= q)"` — in `iverson_expr` on the output array row. `mask_alignments` (the compile-time permutation) is not stored; it is derivable from `_compute_mask_alignment(predicate, lhs_axes)` at reconstruction time. The `iverson_expr` field and its csv read/write were already in place from the BOOL-input-array path; no schema extension was needed for either masked operator.
 
 - `FreeNumeric` sizes created by `RawAxis.named()` carry a display name on their `uid._name`. Only `uid._id` is serialized, so the display name is lost. As a consequence, `original_size == deserialized_size` returns `False` for such sizes: `FreeNumeric.__eq__` hashes `uid` including `_name`, and the reconstructed uid has `_name=None`. Internal consistency within a round-tripped instance is unaffected — all reconstructed UIDs are mutually consistent — but cross-instance comparison with the original fails. The correct fix is to base `FreeNumeric.numeric_hash()` on `uid._id` alone, which is a change to `data_structure/Numeric.py` deferred for now.
 - Compound `Numeric` expressions (`Addition`, `Multiplication`, `Power`) cannot be serialized. These do not appear in acset instances produced by `convert.py`: axis sizes are always `Integer` or `FreeNumeric`, and all coefficients are `Integer`.
