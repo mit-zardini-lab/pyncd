@@ -14,6 +14,7 @@ This document fuses three lines of thinking developed in [theory.md](theory.md) 
    - [Autoalignment is the pushout is the cup morphism](#21-autoalignment-is-the-pushout-is-the-cup-morphism)
    - [The weave is a Grothendieck element is the initial algebra](#22-the-weave-is-a-grothendieck-element-is-the-initial-algebra)
    - [BrGraph and SBrInstance are dual views of one DAG](#23-brgraph-and-sbrinstance-are-dual-views-of-one-dag)
+   - [Weaves are the cartesian-lift datum of a graded PROP](#24-weaves-are-not-a-br-thing--they-are-the-cartesian-lift-datum-of-a-graded-prop)
 3. [Layer II — Compilation and the Para Functor](#3-layer-ii--compilation-and-the-para-functor)
    - [construct() is a Para functor over the Grothendieck integral](#31-construct-is-a-para-functor-over-the-grothendieck-integral)
    - [Shape inference is the right Kan extension is partial evaluation](#32-shape-inference-is-the-right-kan-extension-is-partial-evaluation)
@@ -31,6 +32,7 @@ This document fuses three lines of thinking developed in [theory.md](theory.md) 
    - [The Bool semiring and Interacting Hopf Algebras](#61-the-bool-semiring-and-interacting-hopf-algebras)
    - [Model compression as approximate algebra morphisms](#62-model-compression-as-approximate-algebra-morphisms)
    - [Free algebras and certified initialization](#63-free-algebras-and-certified-initialization)
+   - [Stacking levels: weaves over models (MoE, ensembles)](#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles)
 7. [The Deepest Structural Connection](#7-the-deepest-structural-connection)
 8. [Prioritized Implementation Roadmap](#8-prioritized-implementation-roadmap)
    - [Tier 1 — High impact, low cost, foundations exist](#tier-1--high-impact-low-cost-foundations-exist)
@@ -164,6 +166,35 @@ A practical consequence: the structural skeleton can be extracted from any `Weav
 3. **Wire colors are `ArrayRow` attributes.** `BrGraph`'s wire-color requirement (`Array[Datatype, shape]` plus optional predicate) maps onto `ArrayRow`'s `datatype_tag`, the axis sizes via `ArrayAxisRow`/`axis_sizes`, and `iverson_expr` for Bool/masked wires. The graph API's `color(wire)` and `predicate(wire)` methods are projections of the acset tables.
 
 **The fused data model.** The recommended `BrNode` carries: its `operator_tag` (from `ArrayRow`), its degree (the `is_target = False` axes sorted by `position`), and its input/output weaves (reconstructed from `ArrayAxisRow.is_target`). The recommended `Wire` carries the full Br color and, for `Bool` and masked-operator wires, the `iverson_expr` string. Both are pure functions of the `SBrInstance` tables — no new data, only a new access path.
+
+### 2.4 Weaves are not a Br thing — they are the cartesian-lift datum of a graded PROP
+
+`theory.md` introduces weaves exclusively as a feature of Br. But nothing in the construction is Br-specific; the weave is the right level of abstraction *one level up*, and seeing this clarifies what weaves are for and suggests where else they apply.
+
+**What a weave abstractly is.** Strip the Br language and a weave on a single wire is two pieces of data:
+
+1. A **partition** of the wire's *sub-wires* into `target` (the base operation acts on them) and `tiling` (the degree loop carries them).
+2. A **permutation** `Ω_w` relating the canonical split order (targets first, tilings second) to the actual interleaved memory order.
+
+The second piece is pure symmetric-monoidal structure — the symmetry morphisms `σ` of any PROP supply `Ω_w` for free. The genuinely structural piece is the first: the target/tiling labelling. And it only makes sense if a single wire *has sub-wires to partition*. In Br this holds because a Br color — an array `[a, A]` — is itself a product of St objects (the axes of `A`); the weave classifies those axes. The weave therefore lives not in Br alone but **at the interface between two levels**: Br's colors are St's objects.
+
+**The condition for generalization.** A colored PROP `C` admits weave machinery exactly when:
+
+1. **Thick wires.** Each color of `C` is an object of an underlying symmetric monoidal *index* category `D`, so every wire factors as a product of sub-colors `c = d₁ ⊗ ⋯ ⊗ dₙ` with `dᵢ ∈ D`. (In Br: `D = St`, sub-colors = axes.)
+2. **A lift / broadcast structure.** `C` carries a batch lift `[−, P]` for degree objects `P ∈ D`, satisfying the naturality law `[f,P] ; [Y,p] = [X,p] ; f` (theory.md Eq. 3 / Def 11) — equivalently, `C` is *graded over* `D` and the lift is the reindexing functor, with per-input reindexings `ηᵢ : P → Qᵢ` in `D`.
+
+Given (1) and (2), a weave on color `c` relative to degree `P` is exactly a map `sub-wires(c) → {target, tiling}` plus the induced `Ω_w`: tiling sub-wires are those supplied by the reindexing `ηᵢ`, target sub-wires are those the base morphism sees. This is the Br definition *verbatim*, with "axis" replaced by "sub-color in `D`." The proper name for the resulting setting is a **`D`-graded symmetric monoidal PROP**, and **the weave is the cartesian-lift datum of the grading fibration `C → D`** — the bookkeeping witnessing how each `C`-color sits over a `D`-object under the lift.
+
+**The sanity check that confirms the condition discriminates.** St itself does *not* admit weaves, and it shouldn't: St's colors are axis *lengths*, which are atomic — a single St wire carries one axis with no internal product, so condition (1) fails and there is nothing to partition. Weaves require *thick* wires (Br), not *thin* ones (St). The two-level St→Br structure is precisely what makes Br thick. This is a useful negative test for any future level: a PROP whose colors are atomic gets no weaves.
+
+**What does not generalize.** Two parts of `theory.md`'s weave story are interpretation, not categorical structure, and must not be carried over blindly:
+
+- **The GPU reading** ("tiling = distributed across cores, target = fits in SMEM") is a property of the specific algebra `F : Br → PyTorch`, not of the weave. A different algebra could read the same partition differently.
+- **The reindexing arithmetic** (strides, affine `Λ^η`) is St-specific — St morphisms happen to be affine. A different index category `D` has different reindexings; only the *naturality law* of the lift is universal.
+
+**Connection to §2.2.** The two halves of the weave-as-Grothendieck-element identification (§2.2) split cleanly along this generalization. The **structure/data half** — a weave is an element of `∫D`, structure paired with axis data — is generic to *any* acset schema; `acset.md`'s Grothendieck construction never assumes Br. The **target/tiling half** is the extra ingredient contributed by the lift: it is exactly the part of `C♯` that records the grading of `C` over `D`. So weaves are where the two halves of the pipeline (§1.1) meet — simultaneously a Grothendieck element (acset) and the cartesian-lift datum of the `C → D` fibration (lift structure). That is why the same object surfaces under three names.
+
+**The payoff is a third level** — developed as a speculative frontier in §6.4: because `D` is a parameter, taking `D = Br` (colors are whole arrays-with-operators) yields weaves that *tile over models*, the natural home for mixture-of-experts and ensembles. Formalizing weaves generically over any `D`-graded SMC, rather than hard-coding St→Br, would make that third level inherit lifts, autoalignment, and the Layer III–IV analyses for free.
 
 ---
 
@@ -380,6 +411,24 @@ These are the research-grade opportunities. They are less certain but, if they l
 
 **What it buys.** An initialization scheme can be certified to respect the architecture: the claim "this random init produces a valid GPT-2" becomes the structural check "the skeleton is isomorphic to the GPT-2 architecture skeleton," verifiable on the acset tables before training. This is initialization correctness as a static, pre-training audit.
 
+### 6.4 Stacking levels: weaves over models (mixture-of-experts, ensembles)
+
+**The framing.** §2.4 shows that weaves are not specific to Br — they are the cartesian-lift datum of a PROP `C` graded over an index category `D`, and Br is the instance with `D = St` (sub-wires = axes). The index `D` is a *parameter*. Taking `D = Br` — so the colors of the new top-level PROP are themselves whole Br objects (arrays-with-operators) — yields weaves whose sub-wires are **entire sub-morphisms**. Tiling at this level means looping the degree over a family of models rather than over a family of axis coordinates.
+
+**The two natural applications.**
+
+- **Mixture-of-experts.** The tiling axis is the expert index; each expert is a full Br morphism, and the base operation at this level selects (or gates) among them. A MoE layer is then a single top-level broadcasted operation: degree `P` = the token-to-expert routing, reindexings `ηᵢ` select which expert each token reads, and the target sub-wires are the per-expert computations. The router is a reindexing in `D = Br`, exactly as a stride is a reindexing in `D = St` one level down.
+
+- **Ensembles.** Tile a whole model over an ensemble axis. The degree is the ensemble index; each member is the same Br morphism with independent weights (or the same weights under tying, §5.2). The output weave aggregates members — averaging is an `AdditionOp` at the top level followed by a scale.
+
+**Why this is more than an analogy.** Because §2.4's two conditions (thick wires + a lift with naturality) are the *only* requirements, a top-level PROP over `D = Br` automatically inherits every piece of machinery developed for the St→Br level:
+
+- **Lifts** (§3.3) — batch a MoE layer over a sequence/batch axis by the same `Σ_φ` that batches a linear layer.
+- **Autoalignment** (§2.1) — compose two MoE layers by the same pushout that composes two einsums; the boundary "axes" are now whole model wires.
+- **Fusion, Markov, equivariance** (§§4–5) — apply at the model level: fusing adjacent expert selections, dropping a routing-invariant term, auditing whether an ensemble is permutation-equivariant in its member index.
+
+**The cost and the open question.** The machinery is generic only if it is *written* generically — over an arbitrary `D`-graded SMC rather than hard-coded for `St`. The current `Weave`/`Broadcasted`/`bc_signature()` implementation bakes in `D = St` (axes, affine strides). The research question is whether the reindexing layer can be abstracted over `D` cleanly: St's reindexings are affine `StrideMorphism`s, but `D = Br`'s reindexings (routers, gates) are not affine — they are themselves Br morphisms, possibly data-dependent. Whether the naturality law (condition 2 of §2.4) survives data-dependent routing is the crux: static MoE (fixed routing) clearly satisfies it; learned top-k routing may break Eq. 3 the same way `Scan` breaks it for its recurrence axis (theory.md's `Scan` note). If so, MoE-tiling would need its own construction rule alongside `Scan`, not a plain weave — a precise and testable conjecture.
+
 ---
 
 ## 7. The Deepest Structural Connection
@@ -522,6 +571,12 @@ Genuine research, uncertain payoff, potentially high.
 *Cost:* moderate, research — structural conformance check against a target architecture skeleton.
 *Justification:* free algebra = `C♯`; `construct()` = graph homomorphism; factorization is inspectable.
 *Prerequisite:* 3.2 (architectural identity is the conformance check).
+
+**4.4 — Generic weaves over a `D`-graded PROP; MoE/ensemble level (§2.4, §6.4).**
+*Win:* weaves, lifts, autoalignment, and the Layer III–IV analyses become parametric in the index category `D`; taking `D = Br` gives mixture-of-experts and ensembles as first-class top-level broadcasted operations.
+*Cost:* high, research — abstract the reindexing layer (currently affine `StrideMorphism`, `D = St`-specific) over an arbitrary index category; resolve whether data-dependent routing preserves the lift naturality law (Eq. 3) or needs a `Scan`-like dedicated construction rule.
+*Justification:* the weave is the cartesian-lift datum of the grading fibration `C → D`; St→Br is one instance.
+*Prerequisite:* conceptual only — orthogonal to the `BrGraph` line; benefits from 3.1 (the `Scan` precedent for a non-naturality-respecting axis is the model for data-dependent routing).
 
 ### Roadmap summary
 
