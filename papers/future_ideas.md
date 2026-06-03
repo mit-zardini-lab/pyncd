@@ -433,6 +433,21 @@ These are the research-grade opportunities. They are less certain but, if they l
 
 **Worked example — a 2-expert feed-forward MoE.** Take two experts `E₀, E₁ : [ℝ, m] → [ℝ, m]`, each a full Br morphism (say `Linear ; ReLU ; Linear`), a token wire `H : [ℝ, t ⊗ m]`, and a gate `g : [ℝ, t ⊗ e]` (a softmax over the expert axis `e ∈ [0..2)`). At the model level `D = Br`, the *base operation* is "apply one expert to one token-slice," and the new degree axis is the expert index `e`. The two routing regimes fall on opposite sides of the §2.4 litmus test.
 
+**Symbols.** `[ℝ, A]` is the Br color of a real-valued array of shape `A` (the `Array[Reals, A]` of theory.md), and `⊗` joins axes into a shape. The axes and arrays here:
+
+| Symbol | Meaning |
+| --- | --- |
+| `t` | token / sequence-position axis; `H[t, ·]` is one token's embedding slice |
+| `m` | model (embedding) dimension — the per-token feature axis |
+| `e` | expert-index axis, of size `E` (here `E = 2`); `[0..E)` is its index set |
+| `H : [ℝ, t ⊗ m]` | input hidden states — the tokens entering the MoE layer |
+| `E_e : [ℝ, m] → [ℝ, m]` | expert `e`, a full Br morphism applied to a single token slice |
+| `g : [ℝ, t ⊗ e]` | gate weights; `g[t, e]` = token `t`'s affinity for expert `e`, softmax-normalized over `e` |
+| `Y : [ℝ, t ⊗ m]` | the layer output |
+| `P` | the degree (the loop domain of the broadcasted operation) |
+| `η` | a reindexing (which slice each input contributes per degree coordinate); `η = ()` is the deletion that broadcasts an input across the whole degree |
+| `r(t)` | the hard routing function `r(t) = argmax_e g[t, e]` (sparse case only) |
+
 *Dense (soft) MoE — a genuine weave.* Run every expert on every token and combine by the gate:
 
 ```text
