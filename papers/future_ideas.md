@@ -169,7 +169,7 @@ A practical consequence: the structural skeleton can be extracted from any `Weav
 
 ### 2.4 Weaves are not a Br thing — they are the cartesian-lift datum of a graded PROP
 
-`theory.md` introduces weaves exclusively as a feature of Br. But nothing in the construction is Br-specific; the weave is the right level of abstraction *one level up*, and seeing this clarifies what weaves are for and suggests where else they apply.
+`theory.md` introduces weaves exclusively as a feature of Br. But nothing in the construction is Br-specific; the weave is the right level of abstraction *one level up*, and seeing this clarifies what weaves are for and suggests where else they apply. The full categorical formalization of this generalization — the **`D`-graded colored PROP**, with St→Br as one instantiation — is developed as a Lean-formalizable structure in [graded_prop.md](graded_prop.md); this section is its informal motivation.
 
 **What a weave abstractly is.** Strip the Br language and a weave on a single wire is two pieces of data:
 
