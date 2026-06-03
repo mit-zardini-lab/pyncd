@@ -158,14 +158,18 @@ recovers the fully-sized graded PROP. An **acset instance** (acset.md's `SBrInst
 
 ## 6. Composition as Pushout
 
-Autoalignment (`@`, `Context`) builds a composite from separately-constructed pieces by unifying boundary colors. Formally:
+Autoalignment (`@`, `Context`) builds a composite from separately-constructed pieces by gluing them along a shared boundary. This is **not** the (primitive) composition of morphisms in `C`; it is the composition of **open systems** — *structured cospans* of acsets (Baez–Courser; Patterson), where each piece carries explicit input/output interfaces. That composition has two stages, and **only the second is a pushout**.
 
-**Definition 6.1 (Open morphisms).** Work in the category `Inst(C♯)` of finite acset presentations (instances) and their morphisms (natural transformations of presentations; [acset.md §Instances as Functors](acset.md#instances-as-functors-phi_a-at-the-instance-category-level)). Composition of two instances sharing a boundary is the **pushout**
+**Definition 6.1 (Open instances and their gluing).** Work in the category `Inst(C♯)` of finite acset presentations and their morphisms (natural transformations of presentations; [acset.md §Instances as Functors](acset.md#instances-as-functors-phi_a-at-the-instance-category-level)). An *open* instance carries interface legs into its boundary colors (the cospan feet). Composing two of them proceeds in two stages.
+
+**Stage 1 — interface discovery (heuristic; not categorical).** Decide *which* boundary colors of `cod(f)` and `dom(g)` are identified — i.e. construct the span `B → inst f`, `B → inst g`. pyncd does this by positional pairing plus shape-based `(name, size)` matching, inserting identities and prepending `Rearrangement`s to reconcile arity and order ([future_ideas.md §2.1](future_ideas.md#21-autoalignment-is-the-pushout-is-the-cup-morphism)). This step is a *choice*: it is correct exactly when the `(name, size)` signature determines the axis (no two distinct boundary axes collide), and a wrong choice silently over- or under-glues. Nothing here is a pushout — it is the construction of the span the pushout will then act on. The interesting, failure-prone part of composition lives here, *outside* the colimit.
+
+**Stage 2 — gluing (the pushout).** Given the span, the composite is the **pushout**
 
 ```mermaid
 %%{init: {'theme': 'default', 'themeVariables': {'edgeLabelBackground': '#ffffff00'}}}%%
 graph TD
-    B["boundary <b>B</b>"]
+    B["interface <b>B</b>"]
     F["inst <i>f</i>"]
     G["inst <i>g</i>"]
     P["<b>f ;<sub>B</sub> g</b><br/>(pushout)"]
@@ -183,9 +187,13 @@ graph TD
     class P po
 ```
 
-identifying the shared boundary colors `B` (the cup). The `Context` union-find computes the pushout's coequalizer on `UID`s; the canonical class representative is the universal cocone vertex ([future_ideas.md §2.1](future_ideas.md#21-autoalignment-is-the-pushout-is-the-cup-morphism)).
+The pushout identifies the matched boundary colors `B` (the cup) and is computed componentwise over the schema. On the `Axis` component it is a coequalizer of `UID`s — exactly what `Context` union-find computes; the canonical class representative is the universal cocone vertex ([future_ideas.md §2.1](future_ideas.md#21-autoalignment-is-the-pushout-is-the-cup-morphism)). Because pyncd chooses *canonical* representatives, the pushout is taken on the nose: this **strictifies** what is otherwise associativity only up to isomorphism (cospan composition forms a bicategory), so `;` is *strictly* associative.
 
-**Lean shape.** `Inst(C♯)` is a finitely-cocomplete category; composition-as-pushout is `CategoryTheory.Limits.pushout`. Associativity of `;` follows from the pasting lemma for pushouts (`pushout` composition coherence) — no bespoke proof over `Context` is needed ([future_ideas.md §2.1](future_ideas.md#21-autoalignment-is-the-pushout-is-the-cup-morphism), consequence 1).
+**The failure mode is in the attributes, not the structure.** The full pushout glues every schema entity (`Axis`, `Array`, `Sample`, …) *and* requires the **attribute data to agree on glued axes**: the sizes and datatypes of two identified axes must unify. This attribute pushout is where composition actually *fails* — a dimension mismatch — and where shape inference (`Π_φ`, [future_ideas.md §3.2](future_ideas.md#32-shape-inference-is-the-right-kan-extension-is-partial-evaluation)) does its work. `Context` handles the `Axis`-component coequalizer; the size-consistency check is the remainder of the pushout, and "no consistent attribute assignment" is precisely "the pushout does not exist."
+
+**Lean shape.** `Inst(C♯)` is a finitely-cocomplete copresheaf category, so the Stage-2 pushout is `CategoryTheory.Limits.pushout`; Stage 1 (span construction) is *not* part of it and is implemented separately. Associativity of `;` is the pasting lemma for pushouts, strictified by the canonical-representative choice — no bespoke proof over `Context` is needed.
+
+**What the framing does and does not buy.** It *certifies* the gluing — associativity, precise error semantics ("no cocone" = alignment failure; "inconsistent attributes" = size mismatch), and the hook into data migration — and it *is* the union-find, computed in near-linear time. It does **not** choose the interface (Stage 1). So §6 is a **correctness/specification lens, not a composition algorithm**: pyncd already computes the pushout efficiently as union-find and would never invoke a generic colimit solver. The pushout explains and certifies what `Context` does; it does not replace it.
 
 ---
 
@@ -354,6 +362,7 @@ The pieces scattered across theory.md, acset.md, and prop_ideas.md are one struc
 - [future_ideas.md](future_ideas.md) — the informal synthesis this document formalizes; §2.4 (weaves as cartesian-lift data) and §6.4 (the third level).
 - Mac Lane, *Categories for the Working Mathematician*, Ch. VII (monoidal categories), XI (symmetry).
 - Fong & Spivak, *Seven Sketches in Compositionality*, Ch. 5 (PROPs and presentations).
+- Baez & Courser, "Structured Cospans", *Theory and Applications of Categories* 35, 2020 (composition of open systems by pushout — §6).
 - Capucci & Gavranović, "Actegories for the Working Amthematician", arXiv:2203.16351 (actegories / monoidal actions).
 - Gavranović, Lessard, Dudzik, von Glehn, Araújo, Veličković, "Position: Categorical Deep Learning is an Algebraic Theory of All Architectures", arXiv:2402.15332 (the Para construction; monad-algebra equivariance; recursion as lax algebras for parametric monads). See §11.
 - "Coalgebras for Categorical Deep Learning: Representability …", arXiv:2603.03227 (the coalgebraic companion to the above; recursion/unfolding as coalgebras).
