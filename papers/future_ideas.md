@@ -487,6 +487,25 @@ So the dividing line is one criterion: **whether the routing reindexing is data-
 
 The taxonomy earns its keep by unifying constructs usually treated separately: **mixture-density heads = MoE with a non-FFN expert; products-of-experts = MoE with a multiplicative output weave; FedAvg = the ensemble output weave; Universal Transformer = the `Scan`, not the weave, version of "stack a block."**
 
+**Other index categories `D`.** Nothing in §2.4 fixes `D = Br`. The index is a *parameter*, and choosing it fixes what "an axis," "a reindexing," and "broadcasting" mean — so the *same* weave/lift/fusion machinery retargets at different subfields of ML:
+
+| `D` | "axis" is | reindexing is | recovers |
+| --- | --- | --- | --- |
+| `St` | integer axis | affine stride | tensor programs, CNNs (translation-equivariant) |
+| group `BG` / `Rep(G)` | group element / orbit | group translation | equivariant & steerable nets — group convolution is a weave |
+| graph / incidence cat. | node | gather-along-edge | GNNs, meshes, molecules |
+| metric / enriched cat. | point | distance kernel | continuous conv, point clouds, neural fields |
+| partition lattice | cluster | assignment map | pooling, coarsening, slot / capsule routing |
+| Markov cat. (`Stoch`) | sample space | Markov kernel | sampling, VAE, MC / SMC |
+| resource monoid | budget | store-vs-recompute | checkpointing, scheduling (roadmap 4.5) |
+| `Br` | whole model | router / gate | MoE, ensembles (above) |
+
+Two observations make this more than a list. First, **St is the translation instance of the group row** — affine strides on `ℤⁿ` *are* discrete translations, so CNNs are already "group convolution over `D` = the translation group"; `D = Rep(G)` generalizes only by swapping the group (rotations, `SE(n)`, gauge) and is St's natural extension to symmetries it cannot encode. This is a *grading*-based route to geometric deep learning, complementary to the monad-algebra route of [graded_prop.md §11](graded_prop.md#11-relation-to-categorical-deep-learning) — whether the two coincide (the symmetry monad `T` of [graded_prop.md Prop 8.4](graded_prop.md#8-propositions-the-synthesis-organizes) versus the choice `D = BG`) is an open question.
+
+Second, **one law cuts across every row**: a *structural / fixed* reindexing → a weave that inherits all passes; a *data-dependent* one → a `Route` generator; a *recurrent* one → `Scan`. CNN vs deformable conv, fixed-graph vs input-dependent-graph GNN, dense vs sparse MoE, reparameterized vs resampled stochastic layer — all the same split, one level apart, at different `D`.
+
+Honest scope: only St (and the translation/permutation fragment of the group row) is implemented; every other row is a conceptual instance, each needing its own reindexing layer — all gated on the same `D`-genericity refactor. The claim is structural, not yet executable: GDL, GNNs, neural fields, pooling, and stochastic layers are not separate frameworks but the *same graded-PROP machinery at different `D`*. What such a weave inherits, and the one refactor that unlocks every row, is next.
+
 **What it buys, and what's open.** Because §2.4's two conditions (thick wires + a lift with naturality) are the *only* requirements, a `D = Br` PROP inherits every pass built for the St→Br level — but only once that machinery is *written* generically over `D`. Today `Weave`/`Broadcasted`/`bc_signature()` are hard-coded for `D = St`, so "inherits for free" means *no MoE-specific code*, **not** *works today*: the cost is one refactor, after which dense MoE's marginal cost is ~zero (it is a weave, not a new construction rule). What is inherited, with honest grades:
 
 - **Batching (strongest, fully real).** `[MoE, batch]` is the same `Σ_φ` that batches a `Linear`; extra/nested batch axes and the GPU tiling decision come from the existing lift, and batch-equivariance is automatic ([graded_prop.md Prop 8.4](graded_prop.md#8-propositions-the-synthesis-organizes)). No hand-written batching law.
