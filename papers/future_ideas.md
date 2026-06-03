@@ -194,6 +194,16 @@ Given (1) and (2), a weave on color `c` relative to degree `P` is exactly a map 
 
 **Connection to §2.2.** The two halves of the weave-as-Grothendieck-element identification (§2.2) split cleanly along this generalization. The **structure/data half** — a weave is an element of `∫D`, structure paired with axis data — is generic to *any* acset schema; `acset.md`'s Grothendieck construction never assumes Br. The **target/tiling half** is the extra ingredient contributed by the lift: it is exactly the part of `C♯` that records the grading of `C` over `D`. So weaves are where the two halves of the pipeline (§1.1) meet — simultaneously a Grothendieck element (acset) and the cartesian-lift datum of the `C → D` fibration (lift structure). That is why the same object surfaces under three names.
 
+**Expansion — concrete consequences.** Unlike the speculative third level below, these follow immediately for the *current* codebase:
+
+1. **A litmus test for "weave vs. dedicated construction rule."** The two conditions above are a decision procedure for any new operator or axis: (i) does its wire decompose into sub-wires (thick)? (ii) does the lift over the new axis satisfy the naturality law `[f,P] ; [Y,p] = [X,p] ; f` (Eq. 3)? If both hold, it is a weave and inherits autoalignment (§2.1), lifts (§3.3), and fusion (§4.1) for free. If (ii) fails, it needs its own construction rule. This applies *now*, to every operator one might add — not only at the speculative `D = Br` level.
+
+2. **It explains and generalizes the `Scan` exception.** `theory.md` notes that `Scan` violates Eq. 3 for its recurrence axis and must therefore be a separate construction rule rather than a `Broadcasted` with the recurrence as a tiling axis. The litmus test converts that from an ad hoc observation into an instance of condition (ii): `Scan` simply fails the test. The framing then *predicts* which future constructs need `Scan`-like rules rather than weaves — any axis with cross-position dependency: cumulative sums, prefix scans, IIR filters, beam search. Each will fail Eq. 3 for the same reason `Scan` does. This is a concrete checklist, retroactively justified by an existing design decision.
+
+3. **Lean-formalization economy.** If the weave lemmas are proved once at the generic `D`-graded-SMC level, the St→Br instance — and any future instance — share the proof, exactly as §2.1's free associativity and §1.3's `pullback_comp` compound across vocabularies. Formalize the cartesian-lift bookkeeping abstractly, instantiate per `D`.
+
+4. **A typing invariant.** Weaves are never constructed over atomic colors. The St non-example becomes a cheap assertion: a `Weave` built directly over a `StrideMorphism`'s colors is a type error, because St wires have no sub-wires to partition.
+
 **The payoff is a third level** — developed as a speculative frontier in §6.4: because `D` is a parameter, taking `D = Br` (colors are whole arrays-with-operators) yields weaves that *tile over models*, the natural home for mixture-of-experts and ensembles. Formalizing weaves generically over any `D`-graded SMC, rather than hard-coding St→Br, would make that third level inherit lifts, autoalignment, and the Layer III–IV analyses for free.
 
 ---
