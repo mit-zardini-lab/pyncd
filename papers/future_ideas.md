@@ -33,6 +33,7 @@ This document fuses three lines of thinking developed in [theory.md](theory.md) 
    - [Model compression as approximate algebra morphisms](#62-model-compression-as-approximate-algebra-morphisms)
    - [Free algebras and certified initialization](#63-free-algebras-and-certified-initialization)
    - [Stacking levels: weaves over models (MoE, ensembles)](#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles)
+   - [Swapping the index: `D` as a dial across ML](#65-swapping-the-index-d-as-a-dial-across-ml)
 7. [The Deepest Structural Connection](#7-the-deepest-structural-connection)
 8. [Prioritized Implementation Roadmap](#8-prioritized-implementation-roadmap)
    - [Tier 1 — High impact, low cost, foundations exist](#tier-1--high-impact-low-cost-foundations-exist)
@@ -423,7 +424,7 @@ These are the research-grade opportunities. They are less certain but, if they l
 
 ### 6.4 Stacking levels: weaves over models (mixture-of-experts, ensembles)
 
-**The framing.** §2.4 shows that weaves are not specific to Br — they are the cartesian-lift datum of a PROP `C` graded over an index category `D`, and Br is the instance with `D = St` (sub-wires = axes). The index `D` is a *parameter*. Taking `D = Br` — so the colors of the new top-level PROP are themselves whole Br objects (arrays-with-operators) — yields weaves whose sub-wires are **entire sub-morphisms**. Tiling at this level loops the degree over a family of *models* rather than a family of axis coordinates. The worked example below makes this concrete; the general pattern and its payoff follow it.
+**The framing.** §2.4 shows that weaves are not specific to Br — they are the cartesian-lift datum of a PROP `C` graded over an index category `D`, and Br is the instance with `D = St` (sub-wires = axes). The index `D` is a *parameter*, and there are two ways to exploit that: **stack** the construction — grade over Br itself, the *vertical* move of this section — or **swap** the index — grade over a different `D` entirely, the *horizontal* move of §6.5. Taking the vertical route, `D = Br` — so the colors of the new top-level PROP are themselves whole Br objects (arrays-with-operators) — yields weaves whose sub-wires are **entire sub-morphisms**. Tiling at this level loops the degree over a family of *models* rather than a family of axis coordinates. The worked example below makes this concrete; the general pattern and its payoff follow it.
 
 **Worked example — a 2-expert MoE layer.** Take two experts `E₀, E₁ : [ℝ, m] → [ℝ, m]`, each a full Br morphism (say `Linear ; ReLU ; Linear`), a batch of independent items `H : [ℝ, i ⊗ m]`, and a gate `g : [ℝ, i ⊗ e]` (a softmax over the expert axis `e ∈ [0..2)`). The **items** are whatever the layer routes independently — in a transformer they are sequence tokens, but equally image patches, graph nodes, set elements, or plain samples; the construction is indifferent to which. At the model level `D = Br`, the *base operation* is "apply one expert to one item," and the new degree axis is the expert index `e`. The two routing regimes fall on opposite sides of the §2.4 litmus test.
 
@@ -487,7 +488,19 @@ So the dividing line is one criterion: **whether the routing reindexing is data-
 
 The taxonomy earns its keep by unifying constructs usually treated separately: **mixture-density heads = MoE with a non-FFN expert; products-of-experts = MoE with a multiplicative output weave; FedAvg = the ensemble output weave; Universal Transformer = the `Scan`, not the weave, version of "stack a block."**
 
-**Other index categories `D`.** Nothing in §2.4 fixes `D = Br`. The index is a *parameter*, and choosing it fixes what "an axis," "a reindexing," and "broadcasting" mean — so the *same* weave/lift/fusion machinery retargets at different subfields of ML:
+**What it buys, and what's open.** Because §2.4's two conditions (thick wires + a lift with naturality) are the *only* requirements, a `D = Br` PROP inherits every pass built for the St→Br level — but only once that machinery is *written* generically over `D`. Today `Weave`/`Broadcasted`/`bc_signature()` are hard-coded for `D = St`, so "inherits for free" means *no MoE-specific code*, **not** *works today*: the cost is one refactor, after which dense MoE's marginal cost is ~zero (it is a weave, not a new construction rule). What is inherited, with honest grades:
+
+- **Batching (strongest, fully real).** `[MoE, batch]` is the same `Σ_φ` that batches a `Linear`; extra/nested batch axes and the GPU tiling decision come from the existing lift, and batch-equivariance is automatic ([graded_prop.md Prop 8.4](graded_prop.md#8-propositions-the-synthesis-organizes)). No hand-written batching law.
+- **Autoalignment (real).** An MoE layer composes into a `Composed`/TL chain via the same `@`/`Context` pushout as any `Broadcasted` (§2.1); interface discovery at `D = Br` must generalize as part of the refactor.
+- **Fusion (partial; the pass is itself roadmap 2.2).** The experts' `Linear ; ReLU ; Linear` and a trailing residual-add fuse under the §4.1 conditions, but the **gate softmax is a fusion barrier** like any normalization — the whole layer does *not* collapse to one kernel.
+
+Beyond these three, a weave inherits *every* pass — equivariance audit (§5.3), shape inference (`Π_φ`, §3.2), dead-code elimination, serialization, the `BrGraph` analyses — with no per-pass work, whereas a generator pays bespoke cost in each (exactly what `Scan` does today). That is §6.4's practical content as a **design signal**: data-independent routing is free; data-dependent routing is expensive everywhere — prefer the former when an architecture should ride the existing infrastructure rather than extend it.
+
+What remains is therefore one refactor and one design choice. The refactor abstracts the reindexing layer over `D` — `St`'s reindexings are affine `StrideMorphism`s, whereas `D = Br`'s are themselves Br morphisms (the gate). The design choice is the shape of the `Route` generator ([graded_prop.md §3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class)): its degree, its data-dependent coproduct injection `[0..E) → experts`, and its `Para` gate-parameter — the direct analogue of designing `Scan` from the recurrence's failure of Eq. 3. This is roadmap item 4.4 ([§8](#8-prioritized-implementation-roadmap)).
+
+### 6.5 Swapping the index: `D` as a dial across ML
+
+The *horizontal* generalization of §2.4 keeps `C` a category of operations but grades it over an index `D` other than St — not stacking a level (§6.4) but **swapping what "an axis" is**. Choosing `D` fixes what "an axis," "a reindexing," and "broadcasting" mean, so the *same* weave/lift/fusion machinery retargets at different subfields of ML:
 
 | `D` | "axis" is | reindexing is | recovers |
 | --- | --- | --- | --- |
@@ -504,17 +517,7 @@ Two observations make this more than a list. First, **St is the translation inst
 
 Second, **one law cuts across every row**: a *structural / fixed* reindexing → a weave that inherits all passes; a *data-dependent* one → a `Route` generator; a *recurrent* one → `Scan`. CNN vs deformable conv, fixed-graph vs input-dependent-graph GNN, dense vs sparse MoE, reparameterized vs resampled stochastic layer — all the same split, one level apart, at different `D`.
 
-Honest scope: only St (and the translation/permutation fragment of the group row) is implemented; every other row is a conceptual instance, each needing its own reindexing layer — all gated on the same `D`-genericity refactor. The claim is structural, not yet executable: GDL, GNNs, neural fields, pooling, and stochastic layers are not separate frameworks but the *same graded-PROP machinery at different `D`*. What such a weave inherits, and the one refactor that unlocks every row, is next.
-
-**What it buys, and what's open.** Because §2.4's two conditions (thick wires + a lift with naturality) are the *only* requirements, a `D = Br` PROP inherits every pass built for the St→Br level — but only once that machinery is *written* generically over `D`. Today `Weave`/`Broadcasted`/`bc_signature()` are hard-coded for `D = St`, so "inherits for free" means *no MoE-specific code*, **not** *works today*: the cost is one refactor, after which dense MoE's marginal cost is ~zero (it is a weave, not a new construction rule). What is inherited, with honest grades:
-
-- **Batching (strongest, fully real).** `[MoE, batch]` is the same `Σ_φ` that batches a `Linear`; extra/nested batch axes and the GPU tiling decision come from the existing lift, and batch-equivariance is automatic ([graded_prop.md Prop 8.4](graded_prop.md#8-propositions-the-synthesis-organizes)). No hand-written batching law.
-- **Autoalignment (real).** An MoE layer composes into a `Composed`/TL chain via the same `@`/`Context` pushout as any `Broadcasted` (§2.1); interface discovery at `D = Br` must generalize as part of the refactor.
-- **Fusion (partial; the pass is itself roadmap 2.2).** The experts' `Linear ; ReLU ; Linear` and a trailing residual-add fuse under the §4.1 conditions, but the **gate softmax is a fusion barrier** like any normalization — the whole layer does *not* collapse to one kernel.
-
-Beyond these three, a weave inherits *every* pass — equivariance audit (§5.3), shape inference (`Π_φ`, §3.2), dead-code elimination, serialization, the `BrGraph` analyses — with no per-pass work, whereas a generator pays bespoke cost in each (exactly what `Scan` does today). That is §6.4's practical content as a **design signal**: data-independent routing is free; data-dependent routing is expensive everywhere — prefer the former when an architecture should ride the existing infrastructure rather than extend it.
-
-What remains is therefore one refactor and one design choice. The refactor abstracts the reindexing layer over `D` — `St`'s reindexings are affine `StrideMorphism`s, whereas `D = Br`'s are themselves Br morphisms (the gate). The design choice is the shape of the `Route` generator ([graded_prop.md §3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class)): its degree, its data-dependent coproduct injection `[0..E) → experts`, and its `Para` gate-parameter — the direct analogue of designing `Scan` from the recurrence's failure of Eq. 3. This is roadmap item 4.4 ([§8](#8-prioritized-implementation-roadmap)).
+Honest scope: only St (and the translation/permutation fragment of the group row) is implemented; every other row is a conceptual instance, each needing its own reindexing layer — all gated on the same `D`-genericity refactor (roadmap 4.4) that unlocks MoE in §6.4. The claim is structural, not yet executable: GDL, GNNs, neural fields, pooling, and stochastic layers are not separate frameworks but the *same graded-PROP machinery at different `D`*. (What such a weave inherits — batching, fusion, and the per-pass cost a generator pays instead — is exactly as §6.4 develops for `D = Br`.)
 
 ---
 
