@@ -47,17 +47,26 @@ pyncd compiles a tensor-logic (TL) program into an executable PyTorch module. Th
 
 ### 1.1 The three-arrow pipeline
 
-```text
-   TL program
-      │  parse, axis unification (Context)
-      ▼
- ┌─────────────┐   attach        ┌─────────────┐   algebra        ┌─────────────┐
- │     C♯      │   sizes/weights │     ∫D       │   functor F     │   PyTorch   │
- │ structural  │ ──────────────▶ │ data-filled  │ ──────────────▶ │  nn.Module  │
- │  skeleton   │                 │  morphism    │                 │             │
- └─────────────┘                 └─────────────┘                 └─────────────┘
-   "what is        Σ_φ / D-functor   "what with        construct()    "running
-    connected"                        what values"     = Para functor   code"
+```mermaid
+%%{init: {'theme': 'default', 'themeVariables': {'edgeLabelBackground': '#ffffff00'}}}%%
+graph LR
+    TL["TL program"]
+    C["<b>C♯</b><br/>structural skeleton<br/><i>what is connected</i>"]
+    ID["<b>∫D</b><br/>data-filled morphism<br/><i>what, with what values</i>"]
+    PT["<b>PyTorch</b><br/>nn.Module<br/><i>running code</i>"]
+
+    TL -->|"parse · axis unification (Context)"| C
+    C -->|"attach sizes/weights<br/>Σ_φ / D-functor<br/>= specialize to ground colors"| ID
+    ID -->|"construct()<br/>= Para functor<br/>Para(Br) → Para(PyTorch)"| PT
+
+    classDef obj fill:#ffffff,stroke:#555555,stroke-width:1px
+    classDef skel fill:#DBDFEF,stroke:#6688bb,stroke-width:2px
+    classDef data fill:#C1E8F7,stroke:#6688bb,stroke-width:2px
+    classDef exec fill:#C5BEDF,stroke:#6688bb,stroke-width:2px
+    class TL obj
+    class C skel
+    class ID data
+    class PT exec
 ```
 
 - **C♯ — the structural skeleton.** Which arrays exist, which axes connect them, which axes are tiled versus contracted, in what order operators apply. No sizes, no weights, no numerical content. This is what `bc_signature()` produces before any datatype or size information is attached, what an `SBrInstance`'s C-set part records, and what `prop_ideas.md` calls the *initial algebra* of the architecture PROP.
@@ -377,8 +386,22 @@ These are the research-grade opportunities. They are less certain but, if they l
 
 Stepping back, the three documents are three coordinate charts on a single three-stage pipeline. The pipeline is:
 
-```text
-  C♯  ──Σ_φ / D──▶  ∫D  ──construct() = Para functor──▶  PyTorch
+```mermaid
+%%{init: {'theme': 'default', 'themeVariables': {'edgeLabelBackground': '#ffffff00'}}}%%
+graph LR
+    C["<b>C♯</b>"]
+    ID["<b>∫D</b>"]
+    PT["<b>PyTorch</b>"]
+
+    C -->|"Σ_φ / D"| ID
+    ID -->|"construct() = Para functor"| PT
+
+    classDef skel fill:#DBDFEF,stroke:#6688bb,stroke-width:2px
+    classDef data fill:#C1E8F7,stroke:#6688bb,stroke-width:2px
+    classDef exec fill:#C5BEDF,stroke:#6688bb,stroke-width:2px
+    class C skel
+    class ID data
+    class PT exec
 ```
 
 and the correspondence table that organizes everything is:
@@ -502,21 +525,65 @@ Genuine research, uncertain payoff, potentially high.
 
 ### Roadmap summary
 
-```text
-Tier 1  (now, no deps):     1.1 memory estimate ─┐
-                            1.2 weight-tying      ├─ immediate wins
-                            1.3 Markov catalog ───┘
+Edges point from prerequisite to dependent; tier colour encodes impact÷cost (darker = do first).
 
-Tier 2  (gateway = 2.1):    2.1 BrGraph-from-acset ──▶ 2.2 fusion ──▶ 2.3 opt_einsum
-                                     └──────────────▶ 2.4 equivariance audit
+```mermaid
+%%{init: {'theme': 'default', 'themeVariables': {'edgeLabelBackground': '#ffffff00'}}}%%
+graph LR
+    subgraph T1["Tier 1 — now, no deps"]
+        direction TB
+        n11["1.1 memory estimate"]
+        n12["1.2 weight-tying"]
+        n13["1.3 Markov catalog"]
+    end
 
-Tier 3  (strategic):        3.1 abstract Scan (needs 1.1)
-                            3.2 architectural identity (needs 2.1)
-                            3.3 BrRewrite library (needs 2.1, 2.2)
+    subgraph T2["Tier 2 — gateway is 2.1"]
+        direction TB
+        n21["2.1 BrGraph-from-acset"]
+        n22["2.2 fusion"]
+        n23["2.3 opt_einsum"]
+        n24["2.4 equivariance audit"]
+    end
 
-Tier 4  (research):         4.1 IH completeness (needs 2.1, 3.3)
-                            4.2 compression morphisms (needs 2.1, 3.2)
-                            4.3 certified init (needs 3.2)
+    subgraph T3["Tier 3 — strategic"]
+        direction TB
+        n31["3.1 abstract Scan"]
+        n32["3.2 architectural identity"]
+        n33["3.3 BrRewrite library"]
+    end
+
+    subgraph T4["Tier 4 — research"]
+        direction TB
+        n41["4.1 IH completeness"]
+        n42["4.2 compression morphisms"]
+        n43["4.3 certified init"]
+    end
+
+    n11 --> n31
+    n21 --> n22 --> n23
+    n21 --> n24
+    n21 --> n32
+    n21 --> n33
+    n22 --> n33
+    n21 --> n41
+    n33 --> n41
+    n21 --> n42
+    n32 --> n42
+    n32 --> n43
+
+    classDef t1 fill:#9FB8E0,stroke:#3a5a9a,stroke-width:1px
+    classDef t2 fill:#C1E8F7,stroke:#3a8aae,stroke-width:1px
+    classDef t3 fill:#DBDFEF,stroke:#6688bb,stroke-width:1px
+    classDef t4 fill:#EFEAF5,stroke:#9a88bb,stroke-width:1px
+    class n11,n12,n13 t1
+    class n21,n22,n23,n24 t2
+    class n31,n32,n33 t3
+    class n41,n42,n43 t4
+
+    style T1 fill:#f4f8ff,stroke:#3a5a9a,stroke-width:2px
+    style T2 fill:#f5fbfe,stroke:#3a8aae,stroke-width:2px
+    style T3 fill:#f7f8fe,stroke:#6688bb,stroke-width:2px
+    style T4 fill:#fbf9fe,stroke:#9a88bb,stroke-width:2px
 ```
 
 The critical path is **1.1/1.2/1.3 → 2.1 → everything else**. The three Tier-1 items have no prerequisites and deliver immediate value; `BrGraph`-from-acset (2.1) is the single gateway that unblocks the rest. The recurring lesson — that `acset.md`'s tables already hold data `prop_ideas.md` thought it needed new infrastructure for — means the cheapest path to most analyses runs *through the acset*, not around it.
