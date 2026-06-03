@@ -117,11 +117,11 @@ This layer concerns `C♯` — the structural skeleton — and the operations th
 
 **The three framings.**
 
-- `theory.md` (§Autoalignment): the `@` operator composes two morphisms `f ; g` with automatic axis alignment. When `cod(f)` and `dom(g)` differ in axis count, identities are inserted; then axes are paired positionally, added to `EqualityClass`es, and `Context.apply` substitutes canonical UIDs throughout. Shape-based matching handles cross-`TL`-instance composition by matching `(name, size)` signatures.
+- `theory.md` ([§Autoalignment](theory.md#autoalignment)): the `@` operator composes two morphisms `f ; g` with automatic axis alignment. When `cod(f)` and `dom(g)` differ in axis count, identities are inserted; then axes are paired positionally, added to `EqualityClass`es, and `Context.apply` substitutes canonical UIDs throughout. Shape-based matching handles cross-`TL`-instance composition by matching `(name, size)` signatures.
 
-- `acset.md` (§Theoretical Advantages, "Colimit-based composition"): composition of two instances is a **pushout** — the smallest instance into which both factor compatibly, identifying shared boundary axes. This gives composition a universal property, so associativity and identity laws are immediate from the categorical axioms rather than proved by hand.
+- `acset.md` ([§Theoretical Advantages](acset.md#theoretical-advantages), "Colimit-based composition"): composition of two instances is a **pushout** — the smallest instance into which both factor compatibly, identifying shared boundary axes. This gives composition a universal property, so associativity and identity laws are immediate from the categorical axioms rather than proved by hand.
 
-- `prop_ideas.md` (§TL as the Internal Language, row 2): contraction over a shared index is the **cup morphism** of a compact closed category; the data-flow edges in a `ThreadedComposed` are cup/cap pairs.
+- `prop_ideas.md` ([§TL as the Internal Language](prop_ideas.md#tl-as-the-internal-language-of-br), row 2): contraction over a shared index is the **cup morphism** of a compact closed category; the data-flow edges in a `ThreadedComposed` are cup/cap pairs.
 
 **The identification.** The `Context` union-find over UIDs *is* the pushout's coequalizer, computed concretely. When `@` unifies `cod(f)` with `dom(g)`, it is computing the colimit cocone: the canonical representative of each `EqualityClass` is the pushout's universal vertex. The cup morphism of the compact closed structure is exactly the boundary identification that the pushout performs.
 
@@ -137,11 +137,11 @@ This layer concerns `C♯` — the structural skeleton — and the operations th
 
 **The three framings.**
 
-- `theory.md` (§Weaves): a weave is a boolean family `(w_i)` partitioning an array's axes into target (operated on directly) and tiling (looped over by the degree `P`). In pyncd it is the `_shape` field of `Weave`, with each slot either a concrete `Axis` (target) or `WeaveMode.TILED` (tiling).
+- `theory.md` ([§Weaves](theory.md#weaves)): a weave is a boolean family `(w_i)` partitioning an array's axes into target (operated on directly) and tiling (looped over by the degree `P`). In pyncd it is the `_shape` field of `Weave`, with each slot either a concrete `Axis` (target) or `WeaveMode.TILED` (tiling).
 
-- `acset.md` (§The Grothendieck Construction): the full category `C` is recovered from its structural skeleton `C♯` and a data functor `D` via the Grothendieck integral `∫D`. Objects are (structural-object, data-assignment) pairs.
+- `acset.md` ([§The Grothendieck Construction](acset.md#the-grothendieck-construction)): the full category `C` is recovered from its structural skeleton `C♯` and a data functor `D` via the Grothendieck integral `∫D`. Objects are (structural-object, data-assignment) pairs.
 
-- `prop_ideas.md` (§Free Algebras; §A Br Graph API): the `BrGraph` *is* the initial (symbolic) algebra of the architecture PROP — structure without numerical content, through which every concrete algebra factors.
+- `prop_ideas.md` ([§Free Algebras](prop_ideas.md#4-free-algebras-and-architecture-initialization); [§A Br Graph API](prop_ideas.md#a-br-graph-api)): the `BrGraph` *is* the initial (symbolic) algebra of the architecture PROP — structure without numerical content, through which every concrete algebra factors.
 
 **The identification.** All three name the same object. The structural part of a weave (which slots are `TILED` versus a concrete axis — i.e., the *pattern* with axis identities and sizes erased) is an object of `C♯`, equivalently a generator of the initial PROP algebra. The data part (the concrete `Axis` objects, their UIDs, their sizes) is the value `D` assigns. A fully-instantiated `Weave` is therefore precisely an element of the Grothendieck integral `∫D`: a structural slot pattern paired with a compatible axis assignment.
 
@@ -151,7 +151,7 @@ A practical consequence: the structural skeleton can be extracted from any `Weav
 
 ### 2.3 BrGraph and SBrInstance are dual views of one DAG
 
-**The tension `prop_ideas.md` identifies.** The §A Br Graph API section argues that the existing `UIDHypergraph` is the wrong substrate for a `BrGraph` because it cannot see the `ThreadedComposed` routing table — it wraps `ThreadedComposed` and `Scan` as opaque leaves, so the data-flow connectivity carried by the routing table is invisible. Since `BrGraph`'s purpose is data-flow analysis, this is fatal.
+**The tension `prop_ideas.md` identifies.** The [§A Br Graph API](prop_ideas.md#a-br-graph-api) section argues that the existing `UIDHypergraph` is the wrong substrate for a `BrGraph` because it cannot see the `ThreadedComposed` routing table — it wraps `ThreadedComposed` and `Scan` as opaque leaves, so the data-flow connectivity carried by the routing table is invisible. Since `BrGraph`'s purpose is data-flow analysis, this is fatal.
 
 **The resolution from `acset.md`.** The `SBrInstance` schema *already encodes the routing table*. The `Sample` rows (`src`, `tgt`, `coeff`, `reindexing_slot`) and the per-equation array slots carry exactly the data-flow connectivity that `BrGraph` needs. The routing table inside a `ThreadedComposed` — `routing[i][j]` = live-pool index for input `j` of step `i` — is the same information as the `Sample`/`reindexing_slot` graph keyed by `equation_idx`. The live pool's "output of step `i` lives at slot `n_external + i`" convention is the topological ordering recorded by `EquationRow.equation_idx`.
 
@@ -208,9 +208,9 @@ This layer concerns the arrows: how `C♯` is filled with data and then mapped t
 
 - `theory.md`: `construct()` compiles a `Broadcasted`/`Composed` term to an `nn.Module`. Operators map to module classes; weaves and reindexings determine the broadcasting contraction.
 
-- `prop_ideas.md` (§The Para Refinement): the learned layers make the algebra *parameterized*. `construct()` is not merely a functor `F: Br → PyTorch` on weight-free structure — it is a functor `Para(Br) → Para(PyTorch)`, mapping abstract parameterized morphisms (`Multilinear`/`Linear` weight tensors bundled with forward maps) to concrete parameterized modules. A trained model is a section of this parameterized algebra; gradient descent is a path in the section space.
+- `prop_ideas.md` ([§The Para Refinement](prop_ideas.md#the-para-refinement)): the learned layers make the algebra *parameterized*. `construct()` is not merely a functor `F: Br → PyTorch` on weight-free structure — it is a functor `Para(Br) → Para(PyTorch)`, mapping abstract parameterized morphisms (`Multilinear`/`Linear` weight tensors bundled with forward maps) to concrete parameterized modules. A trained model is a section of this parameterized algebra; gradient descent is a path in the section space.
 
-- `acset.md` (§Grothendieck Construction): the data functor `D` assigns to each structural object its set of valid data assignments; `∫D` recovers the full category. When the data includes weights, the fiber over a structural object is the parameter space.
+- `acset.md` ([§Grothendieck Construction](acset.md#the-grothendieck-construction)): the data functor `D` assigns to each structural object its set of valid data assignments; `∫D` recovers the full category. When the data includes weights, the fiber over a structural object is the parameter space.
 
 **The fused statement.** Combining the two: the Para fibration sits over the Grothendieck integral. The structural skeleton `C♯` is the base; the Grothendieck integral `∫D` attaches the *non-learned* data (sizes, coefficients, datatypes); the Para structure attaches the *learned* data (weight tensors) as an additional fiber. A trained model is a section of the Para fibration over `∫D`, and gradient descent is a vector field on that fiber.
 
@@ -230,9 +230,9 @@ The unifying criterion — "a pass is correct iff it is a Para natural transform
 
 - `theory.md`: shape inference happens implicitly during `@` composition via `Context` size propagation; the document does not say why it is canonical.
 
-- `acset.md` (§Schema Morphisms): the right Kan extension `Π_φ` computes the *tightest compatible* extension — the unique consistent size assignment given a set of constraints. This is shape inference, framed as a Kan extension so it composes correctly and is provably canonical.
+- `acset.md` ([§Schema Morphisms](acset.md#schema-morphisms-and-data-migration)): the right Kan extension `Π_φ` computes the *tightest compatible* extension — the unique consistent size assignment given a set of constraints. This is shape inference, framed as a Kan extension so it composes correctly and is provably canonical.
 
-- `prop_ideas.md` (§Br → PyTorch improvements): axis sizes are fixed at `construct()` time, making the functor a *specialization* of the abstract PROP expression to ground colors — partial evaluation.
+- `prop_ideas.md` ([§Br → PyTorch improvements](prop_ideas.md#br--pytorch-compiler-improvements)): axis sizes are fixed at `construct()` time, making the functor a *specialization* of the abstract PROP expression to ground colors — partial evaluation.
 
 **The identification.** `Context`-mediated size propagation computes `Π_φ` on the `axis_sizes` attribute table. The "ground colors" of the PROP partial evaluation are the output of `Π_φ`. All three describe the same step: given the structural skeleton and a partial size assignment (from declarations or concrete axes), find the unique tightest total assignment.
 
@@ -246,11 +246,11 @@ The unifying criterion — "a pass is correct iff it is a Para natural transform
 
 **The framings.**
 
-- `theory.md` (§Lift Operations): four lifts — object-object `[X,P]`, object-morphism `[X,η]`, batch lift `[f,P]`, broadcasted-stride lift — extend a Br object or morphism by an St shape or morphism. They distribute over composition and products: `[f;g, P] = [f,P];[g,P]`.
+- `theory.md` ([§Lift Operations](theory.md#lift-operations)): four lifts — object-object `[X,P]`, object-morphism `[X,η]`, batch lift `[f,P]`, broadcasted-stride lift — extend a Br object or morphism by an St shape or morphism. They distribute over composition and products: `[f;g, P] = [f,P];[g,P]`.
 
-- `acset.md` (§Schema Morphisms): the left Kan extension `Σ_φ` freely extends an instance along a schema morphism — e.g., adding a batch axis to every array.
+- `acset.md` ([§Schema Morphisms](acset.md#schema-morphisms-and-data-migration)): the left Kan extension `Σ_φ` freely extends an instance along a schema morphism — e.g., adding a batch axis to every array.
 
-- `prop_ideas.md` (§StrideCategory representation theory): lifts are natural transformations in the PROP algebra, which is why they distribute over composition.
+- `prop_ideas.md` ([§StrideCategory representation theory](prop_ideas.md#the-stridecategory-as-a-representation-theoretic-object)): lifts are natural transformations in the PROP algebra, which is why they distribute over composition.
 
 **The identification.** The batch lift `[f,P]` is `Σ_φ` along the schema morphism that prepends `P` to every array's shape. The distribution laws (`[f;g,P] = [f,P];[g,P]`, `[f⊗g,P] = [f,P]⊗[g,P]`) are functoriality of the left Kan extension, equivalently naturality in the PROP.
 
@@ -273,7 +273,7 @@ These are the concrete compiler wins. Each is grounded in a categorical law that
 
 **The three justifications, now unified.**
 
-- `theory.md` (§Operator Fusion) gives three conditions: no branching (intermediate consumed once), operator compatibility (`br1.operator` fuses inline — `Identity` or `Elementwise`, never across a `SoftMax`/`Normalize` reduction boundary), shape coherence (`cod(br1) = dom(br2)`, guaranteed post-`@`).
+- `theory.md` ([§Operator Fusion](theory.md#operator-fusion)) gives three conditions: no branching (intermediate consumed once), operator compatibility (`br1.operator` fuses inline — `Identity` or `Elementwise`, never across a `SoftMax`/`Normalize` reduction boundary), shape coherence (`cod(br1) = dom(br2)`, guaranteed post-`@`).
 
 - `prop_ideas.md` names the licensing PROP equation: `Composed(ProductOfMorphisms(f_j, id_C), f_k) = f_{jk}` — a compact-closed equation (the contractions are cup morphisms) whose validity rests on SMC structure.
 
@@ -295,7 +295,7 @@ The soundness is the compact-closed equation; the detection is the acset query; 
 
 **The observation.** Three features now implemented in pyncd are *all consequences of a single Markov-category law* — shift invariance — and no document states that they share a root.
 
-- **Norm-axis-invariant term dropping.** `prop_ideas.md` (§Normalization simplification) gives the law `normalize(f + g) = normalize(f)` when `g` is constant along the normalization axis. This is implemented in `TL._register_entry()`: additive terms whose free-index set is disjoint from the `NormAxis` UID are dropped before `bc_signature()`. (See `tensorLogicNCDIntegration.md` for the implementation.)
+- **Norm-axis-invariant term dropping.** `prop_ideas.md` ([§Normalization simplification](prop_ideas.md#normalization-simplification-via-markov-laws)) gives the law `normalize(f + g) = normalize(f)` when `g` is constant along the normalization axis. This is implemented in `TL._register_entry()`: additive terms whose free-index set is disjoint from the `NormAxis` UID are dropped before `bc_signature()`. (See `tensorLogicNCDIntegration.md` for the implementation.)
 
 - **Masked softmax/normalize via `where=`.** `softmax(expr, where=pred)` and `normalize(expr, where=pred)` produce `MaskedSoftMax`/`MaskedNormalize` operators. In Markov terms, this is a Markov kernel restricted to the sub-object selected by `pred` — the support of the output distribution is the predicate's truth set.
 
@@ -331,7 +331,7 @@ These are correctness audits that run at `construct()` time, before training. Ea
 
 ### 5.1 Architectural identity as schema-morphism restriction
 
-**The question** (`prop_ideas.md`, §Generators-and-Relations): do two independently-written TL programs define the same architecture? The proposed answer is equality in the quotient PROP.
+**The question** (`prop_ideas.md`, [§Generators-and-Relations](prop_ideas.md#1-generators-and-relations-presentations-of-architectures)): do two independently-written TL programs define the same architecture? The proposed answer is equality in the quotient PROP.
 
 **The fused mechanism.** Combine three pieces:
 
@@ -357,7 +357,7 @@ These are correctness audits that run at `construct()` time, before training. Ea
 
 **The framings.**
 
-- `prop_ideas.md` (§StrideCategory as Representation-Theoretic Object; §Equivariance breaking): StrideCategory is a colored PROP whose algebras in FVect are "index representations"; an equivariant architecture is one whose algebra functor commutes with axis-permutation group actions. Equivariance breaks exactly at wires whose color carries a non-symmetric predicate (the causal mask's `i ≤ j`).
+- `prop_ideas.md` ([§StrideCategory as Representation-Theoretic Object](prop_ideas.md#the-stridecategory-as-a-representation-theoretic-object); [§Equivariance breaking](prop_ideas.md#equivariance-breaking-static-detection-from-wire-colors)): StrideCategory is a colored PROP whose algebras in FVect are "index representations"; an equivariant architecture is one whose algebra functor commutes with axis-permutation group actions. Equivariance breaks exactly at wires whose color carries a non-symmetric predicate (the causal mask's `i ≤ j`).
 - `acset.md`: `Π_φ` along a schema morphism encoding a symmetry computes the tightest size assignment compatible with that symmetry.
 - `theory.md`: `[a,·]` is the contravariant functor `St → Br`; reindexings are its morphism action.
 
@@ -379,7 +379,7 @@ These are correctness audits that run at `construct()` time, before training. Ea
 
 **Expansion — the required API change.** `prop_ideas.md`'s `BrGraph.predicate(wire)` is specified for Bool *input* wires only. The fused view requires it to cover *output* wires of masked operators. Since the predicate lives on the output `ArrayRow.iverson_expr` in the acset, building `BrGraph` from the acset (§2.3) gets this for free — the predicate is an `ArrayRow` attribute regardless of `is_input`. This is a further argument for the acset-routed `BrGraph` construction: the display-layer `UIDHypergraph` has no notion of output-wire predicates, but the acset does.
 
-Note also (`acset.md`, §Known limitations) that `mask_alignments` — the compile-time permutation aligning the materialized mask with the score tensor — is *not* stored in the acset; it is recomputable from `_compute_mask_alignment(predicate, lhs_axes)`. So the acset is complete for *detection* (the predicate is present) but requires the term layer (or a recomputation) for *reconstruction* of the compiled operator. This is the dual-view pipeline's boundary made precise for masked operators: detection on the acset, reconstruction needs the recomputation step.
+Note also (`acset.md`, [§Known limitations](acset.md#csv-serialization)) that `mask_alignments` — the compile-time permutation aligning the materialized mask with the score tensor — is *not* stored in the acset; it is recomputable from `_compute_mask_alignment(predicate, lhs_axes)`. So the acset is complete for *detection* (the predicate is present) but requires the term layer (or a recomputation) for *reconstruction* of the compiled operator. This is the dual-view pipeline's boundary made precise for masked operators: detection on the acset, reconstruction needs the recomputation step.
 
 ---
 
@@ -389,7 +389,7 @@ These are the research-grade opportunities. They are less certain but, if they l
 
 ### 6.1 The Bool semiring and Interacting Hopf Algebras
 
-**The conjecture** (`prop_ideas.md`, Opportunity 3): the Bool semiring operations in `BroadcastedCategory` (∃ as addition, ∧ as multiplication) might be an instance of the Interacting Hopf Algebras PROP `IH_Bool`, which has a *completeness theorem* — every true equation in Boolean linear algebra is derivable from two graphically-presented Hopf structures.
+**The conjecture** (`prop_ideas.md`, [Opportunity 3](prop_ideas.md#3-the-bool-semiring-and-interacting-hopf-algebras)): the Bool semiring operations in `BroadcastedCategory` (∃ as addition, ∧ as multiplication) might be an instance of the Interacting Hopf Algebras PROP `IH_Bool`, which has a *completeness theorem* — every true equation in Boolean linear algebra is derivable from two graphically-presented Hopf structures.
 
 **The fused investigation route.** Per §2.3, extract the Bool-colored subgraph via the acset: filter `ArrayRow`s with `datatype_tag = BOOL`. Identify which nodes correspond to IH generators (copy `Δ`, delete `ε`, merge `∇`, unit `η`, and duals). Verify whether the IH axioms hold as `BrRewrite` equations over that subgraph. The acset's `datatype_tag` makes the subgraph extraction a one-line filter; the predicate inspection (§5.4) supplies the relational content.
 
@@ -397,7 +397,7 @@ These are the research-grade opportunities. They are less certain but, if they l
 
 ### 6.2 Model compression as approximate algebra morphisms
 
-**The framing** (`prop_ideas.md`, Opportunity 5): knowledge distillation is finding an algebra morphism `φ: F_large → F_small` that *approximately* commutes with all operations. The PROP structure distinguishes "same architecture, different capacity" (morphism between algebras of the same PROP) from "different architecture" (morphism between algebras of different PROPs).
+**The framing** (`prop_ideas.md`, [Opportunity 5](prop_ideas.md#5-model-compression-as-approximate-algebra-morphisms)): knowledge distillation is finding an algebra morphism `φ: F_large → F_small` that *approximately* commutes with all operations. The PROP structure distinguishes "same architecture, different capacity" (morphism between algebras of the same PROP) from "different architecture" (morphism between algebras of different PROPs).
 
 **The fused mechanism.** A compression morphism is a structure-preserving map between two `BrGraph` instances (equivalently, two `SBrInstance`s) respecting wire colors and operator types, approximately in the numerical sense. Using §5.1's architectural-identity machinery: if `F_large` and `F_small` have isomorphic structural skeletons (same architecture, restricted via the same `φ_arch`), the compression is a *within-architecture* morphism — only the size attributes differ, and `φ` is a per-axis dimension reduction. If the skeletons differ, it is a *cross-architecture* morphism requiring structural change.
 
@@ -405,7 +405,7 @@ These are the research-grade opportunities. They are less certain but, if they l
 
 ### 6.3 Free algebras and certified initialization
 
-**The framing** (`prop_ideas.md`, Opportunity 4): the free algebra on a PROP is the "no-parameter" model — architecture without weights — through which every concrete model factors uniquely. Any initialization scheme is a morphism from the free algebra.
+**The framing** (`prop_ideas.md`, [Opportunity 4](prop_ideas.md#4-free-algebras-and-architecture-initialization)): the free algebra on a PROP is the "no-parameter" model — architecture without weights — through which every concrete model factors uniquely. Any initialization scheme is a morphism from the free algebra.
 
 **The fused identification.** The free/initial algebra *is* the structural skeleton `C♯` *is* the `BrGraph` with no numerical content *is* the `SBrInstance`'s C-set part (§2.2). `construct()` is the graph homomorphism from this skeleton to the PyTorch computation graph. The factorization is inspectable: compare a `BrGraph` against a target architecture-PROP skeleton (§5.1) to certify structural conformance *before any weights are instantiated*.
 
