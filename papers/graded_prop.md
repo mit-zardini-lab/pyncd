@@ -185,9 +185,15 @@ Compilation interprets the abstract structure in a concrete target.
 - **Weight tying** is a morphism of algebras collapsing two parameter objects via the diagonal ([prop_ideas.md §Weight tying](prop_ideas.md#weight-tying-static-verification-at-construct-time)).
 - **Equivariance** under a group `g` acting on `D`-colors is the condition `φ_g ∘ F(θ) = F(θ) ∘ φ_g`; it holds automatically for tiling axes (the batch-equivariance theorem, Proposition 8.4) and fails exactly where a wire carries a non-`g`-invariant predicate ([prop_ideas.md §Equivariance breaking](prop_ideas.md#equivariance-breaking-static-detection-from-wire-colors)).
 
-**Definition 7.3 (Para refinement).** Replacing `V` by `Para(V)` (Gavranovic et al.) — 1-cells `(P, f : P ⊗ A → B)` carrying a parameter object — makes `construct()` a functor of graded PROPs `C → Para(V)`. A trained model is a section of the Para fibration over `∫Dat`; gradient descent is a vector field on the fiber ([future_ideas.md §3.1](future_ideas.md#31-construct-is-a-para-functor-over-the-grothendieck-integral)). A compiler pass is **correct** iff it is a monoidal natural transformation in `Para(V)` (parameter-preserving).
+**Definition 7.3 (Para refinement, 2-categorically).** Following CDL (§11), take `Para(V)` as a **2-category** (Gavranović et al.): 0-cells are objects, 1-cells are parametric maps `(P, f : P ⊗ A → B)`, and 2-cells `(P, f) ⇒ (P', f')` are **reparameterizations** — maps `r : P → P'` with `f = (r ⊗ A) ; f'`. Then `construct()` is a **2-functor** `Para(C) → Para(V)`, and three notions that otherwise live in separate vocabularies collapse into one — each is a 2-cell (reparameterization) in `Para(V)`:
 
-**Lean shape.** `F` is a `MonoidalFunctor` (Mathlib) plus a `D`-equivariance natural-iso field and its coherences. Algebra morphisms are `MonoidalNatTrans`. The Para construction is a bicategory; a lightweight Lean encoding is `Para(V)` as a category with hom `Σ (P : V), (P ⊗ A ⟶ B)` and reparameterization 2-cells — definable without full bicategory machinery if only 1-cells and vertical structure are needed.
+- **Weight tying** ([future_ideas.md §5.2](future_ideas.md#52-weight-tying-comonoid-para-morphism-acset-parameter-group)) — the 2-cell collapsing two parameter objects along the diagonal `Δ : P → P ⊗ P`.
+- **Compiler-pass correctness** — a pass is correct iff it is a 2-cell: it transforms the forward map while fixing the parameter object up to reparameterization. This makes precise future_ideas.md's slogan "a pass is correct iff it is a `Para` natural transformation."
+- **`Scan`-strategy selection** ([future_ideas.md §3.1](future_ideas.md#31-construct-is-a-para-functor-over-the-grothendieck-integral); eager / checkpoint / vmap) — a 2-cell exchanging stored-activation parameter for recomputation cost.
+
+A trained model is a section of the Para fibration over `∫Dat`; gradient descent is a vector field on the fiber.
+
+**Lean shape.** `F` is a `MonoidalFunctor` (Mathlib) plus a `D`-equivariance natural-iso field and its coherences; algebra morphisms are `MonoidalNatTrans`. The 2-categorical `Para` belongs at the *specification* level (Def 7.3); for a *formalization*, the full bicategory is heavy, so keep the lightweight encoding — `Para(V)` as a 1-category with hom `Σ (P : V), (P ⊗ A ⟶ B)` plus an explicit reparameterization relation standing in for the 2-cells — and treat the "2-cell" statements above as that relation. Note the gap explicitly rather than paying for a bicategory only the spec uses.
 
 ---
 
@@ -201,11 +207,23 @@ These are the theorems a Lean development would prove *once*, at the graded-PROP
 
 **Proposition 8.3 (Grothendieck splitting).** `C ≅ ∫Dat` (§5), with the structural skeleton `C♯` the base and the size-data the fiber. *(The acset structure/data split is literally the Grothendieck construction.)*
 
-**Proposition 8.4 (Batch equivariance).** Any `D`-equivariant algebra `F` commutes with permutations of tiling sub-colors: for a symmetry `σ` of `D` permuting the tiling part of a degree `P`, `F` intertwines the induced actions. *(Tiling axes are never seen by base operations, so `F`'s equivariance in the `⊛`-variable forces it. This is prop_ideas.md's batch-equivariance theorem, now a corollary.)*
+**Proposition 8.4 (Equivariance, via a symmetry monad).** Fix a *symmetry monad* `T` on `D` (or on its colors). An algebra `F` is **`T`-equivariant** iff it lifts to the Eilenberg–Moore category of `T` — i.e. `F` is a morphism of `T`-algebras. This is the CDL lens (§11): equivariance = morphism of algebras for the symmetry monad, recovering geometric deep learning. Instances:
+
+- **Axis permutation (the batch-equivariance theorem).** When `T` is the free symmetric-group action, `F` commutes with permutations of tiling sub-colors — tiling axes are never seen by base operations, so equivariance in the `⊛`-variable forces it. This is prop_ideas.md's batch-equivariance theorem, now a corollary.
+- **Node permutation / translation.** The free-group monad on a node axis gives GNN permutation-equivariance; a translation monad gives convolutional equivariance — domains the bare axis-permutation statement could not express.
+- **Causal order.** The **order monad** (order-preserving endomaps of a sequence axis) gives the *causal* symmetry: a masked operator (`MaskedSoftMax`/`MaskedNormalize`) is `T`-equivariant for this `T` even though it breaks the symmetric-group symmetry. This is the positive reading of the masked-wire predicate `i ≤ j` ([future_ideas.md §5.3](future_ideas.md#53-equivariance-from-stridecategory-representation-theory), [§5.4](future_ideas.md#54-masked-operators-and-output-wire-predicates)) — *which* symmetry a layer respects is *which monad it is an algebra for*.
 
 **Proposition 8.5 (Composition associativity).** Composition in `Inst(C♯)` is associative and unital. *(Pasting lemma for pushouts, §6.)*
 
 **Proposition 8.6 (The `Scan` obstruction).** Let `L ∈ Ob D` be an axis along which a candidate morphism `s` has cross-position dependency (output at position `ℓ` depends on positions `< ℓ`). Then `s` is **not** in the image of `act(−, L)`: the evaluation `ev_q` at a single point `q : I → L` fails to be natural for `s` (Eq. 3 fails), so `s` admits no weave over `L`. Equivalently, `s` lies in the image only of a *directed* sub-action indexed by order-preserving injections `ι_m : [0..m] ↪ [0..L]` (theory.md's prefix-restriction law), not by points. *(This formalizes [future_ideas.md §2.4](future_ideas.md#24-weaves-are-not-a-br-thing--they-are-the-cartesian-lift-datum-of-a-graded-prop) consequence 2: `Scan` — and any cumulative/prefix/recurrent operator — must be a primitive generator, not a lifted base op, and the precise reason is failure of point-naturality. It also tells the implementer to add such operators as generators in `G`, never via `⊛`.)*
+
+**Proposition 8.7 (`Scan` as a catamorphism — the positive companion to 8.6).** The morphism `Scan` that 8.6 excludes from the lift has a positive home: it is the **catamorphism (fold)** accumulating the state trace (scanl) for the *parametric step endofunctor* `F` — carrying the per-step inputs as parameters — whose algebra structure map is the step morphism `step : F(H) → H`. Equivalently, `Scan` is a (lax) algebra for the free parametric monad on `F`, truncated at length `N` — the CDL account of recurrence (§11). Three consequences, none available from the bare generator of 8.6:
+
+- **The prefix-restriction law is a corollary, not an axiom.** theory.md's prefix law (`Scan_N` restricted to the first `m` steps equals `Scan_m`) follows from the catamorphism universal property `cata(step) ∘ in = step ∘ F(cata(step))` and its uniqueness; it need not be posited separately.
+- **It supplies the morphism notion.** Two scans are equal / composable / fuseable exactly when related by an algebra homomorphism — a notion the bare generator does not carry.
+- **It explains the affine fast path.** The `ScanAffine` associative-scan optimization (tensorLogicNCDIntegration.md §6.4) is precisely the case where the step algebra factors through a **monoid** (affine maps under composition): the fold is then a monoid homomorphism, computable by parallel prefix in `O(log N)`. The affine condition is the categorical *precondition* for the optimization, not a pattern-match.
+
+*(8.6 says `Scan` is not a weave; 8.7 says what it is instead. The dual — `Scan` as an unfold / coalgebra for streaming generation — is the lens of arXiv:2603.03227.)*
 
 ---
 
