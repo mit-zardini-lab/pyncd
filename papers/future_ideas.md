@@ -560,6 +560,12 @@ These deliver durable architectural capabilities but need real new machinery.
 *Justification:* PROP equations as graph rewrites; ZX-calculus analogy.
 *Prerequisite:* 2.1, 2.2 (fusion is the first rule).
 
+**3.4 — Coupled recurrences: folds over a product of states (item E; [graded_prop.md §3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class), Prop 8.7).**
+*Win:* mutually-recursive scans (`n_states > 1`, Jacobi-style) — currently a `NotImplementedError` in `_finalize_iter`.
+*Cost:* moderate — generalize the step to an endofunctor on `C^k`; the catamorphism ranges over the product of state objects, with cross-coupling between states.
+*Justification:* multi-sorted catamorphism — the product generalization of finite iteration (graded_prop.md Def 3.4).
+*Prerequisite:* 3.1 (abstract `Scan` node). This is a genuine capability gap, not just formalization.
+
 ### Tier 4 — Research-grade, open-ended
 
 Genuine research, uncertain payoff, potentially high.
@@ -588,6 +594,18 @@ Genuine research, uncertain payoff, potentially high.
 *Justification:* the weave is the cartesian-lift datum of the grading fibration `C → D`; St→Br is one instance.
 *Prerequisite:* conceptual only — orthogonal to the `BrGraph` line; benefits from 3.1 (the `Scan` precedent for a non-naturality-respecting axis is the model for data-dependent routing).
 
+**4.5 — Resource-graded `Para` + fold-fusion for `Scan` strategies (item F; [graded_prop.md §7](graded_prop.md#7-algebras-construct-and-the-para-refinement), Prop 8.7).**
+*Win:* eager / checkpoint / `vmap` / associative-scan selection as principled 2-cells; scan-into-scan and map-into-scan fusion.
+*Cost:* high, research — grade `Para` by a resource (memory/compute) semiring so checkpointing is a 2-cell rather than an ad hoc flag; add the fold-fusion rewrite `h ∘ cata(f) = cata(g)` (for `h` an algebra homomorphism) as a `BrRewrite`.
+*Justification:* resource-enriched `Para`; the functional-programming fold-fusion law; the associative-scan path is the case where the step algebra factors through a monoid (Prop 8.7).
+*Prerequisite:* 3.1 (abstract `Scan`), 3.3 (`BrRewrite` for fold-fusion).
+
+**4.6 — Coalgebraic dual: unbounded generation via unfold/anamorphism (item G; [graded_prop.md §3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class); arXiv:2603.03227).**
+*Win:* autoregressive decode / streaming as corecursion when the length is not known up front.
+*Cost:* high, research — final coalgebras / guarded corecursion, a different completeness assumption than the finite iteration of Def 3.4.
+*Justification:* the coalgebraic companion to Categorical Deep Learning (arXiv:2603.03227); dual to graded_prop.md Def 3.4.
+*Prerequisite:* 3.1; conceptually the dual of the §3.4 finite-iteration structure.
+
 ### Roadmap summary
 
 Edges point from prerequisite to dependent; tier colour encodes impact÷cost (darker = do first).
@@ -615,6 +633,7 @@ graph LR
         n31["3.1 abstract Scan"]
         n32["3.2 architectural identity"]
         n33["3.3 BrRewrite library"]
+        n34["3.4 coupled recurrences (E)"]
     end
 
     subgraph T4["Tier 4 — research"]
@@ -622,6 +641,9 @@ graph LR
         n41["4.1 IH completeness"]
         n42["4.2 compression morphisms"]
         n43["4.3 certified init"]
+        n44["4.4 generic weaves / MoE"]
+        n45["4.5 resource-Para + fold-fusion (F)"]
+        n46["4.6 coalgebraic generation (G)"]
     end
 
     n11 --> n31
@@ -635,6 +657,11 @@ graph LR
     n21 --> n42
     n32 --> n42
     n32 --> n43
+    n31 --> n34
+    n31 -.-> n44
+    n31 --> n45
+    n33 --> n45
+    n31 --> n46
 
     classDef t1 fill:#9FB8E0,stroke:#3a5a9a,stroke-width:1px
     classDef t2 fill:#C1E8F7,stroke:#3a8aae,stroke-width:1px
@@ -642,8 +669,8 @@ graph LR
     classDef t4 fill:#EFEAF5,stroke:#9a88bb,stroke-width:1px
     class n11,n12,n13 t1
     class n21,n22,n23,n24 t2
-    class n31,n32,n33 t3
-    class n41,n42,n43 t4
+    class n31,n32,n33,n34 t3
+    class n41,n42,n43,n44,n45,n46 t4
 
     style T1 fill:#f4f8ff,stroke:#3a5a9a,stroke-width:2px
     style T2 fill:#f5fbfe,stroke:#3a8aae,stroke-width:2px

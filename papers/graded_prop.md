@@ -16,6 +16,7 @@ Notation: `⊗` is monoidal product, `;` is diagrammatic-order composition (`f ;
    - [Data](#31-data)
    - [Axioms](#32-axioms)
    - [Weaves as cartesian-lift data](#33-weaves-as-cartesian-lift-data)
+   - [The temporal grading and making `Scan` first-class](#34-the-temporal-grading-and-making-scan-first-class)
 4. [Generators, Relations, and the Structural PROP `C♯`](#4-generators-relations-and-the-structural-prop-c)
 5. [The Structure/Data Split as a Grothendieck Construction](#5-the-structuredata-split-as-a-grothendieck-construction)
 6. [Composition as Pushout](#6-composition-as-pushout)
@@ -112,6 +113,20 @@ Per wire (each color of `X`, `Y`), the shape `sh(color) ∈ Ob D` is a list of s
 The permutation relating the canonical order (targets first, tilings second) to the wire's actual sub-color order is the `Ω_w` of theory.md, recovered from the symmetry `σ`.
 
 **This is precisely the cartesian-lift datum of the grading fibration.** The shape map and lift assemble into a functor exhibiting `C` over `D`; a weave is the choice of how a `C`-morphism's wires sit over their `D`-shapes, with the tiling part the part "pulled back" along the degree. Uniqueness of this datum is Proposition 8.2.
+
+### 3.4 The temporal grading and making `Scan` first-class
+
+`Scan` (theory.md's iterative recurrence) is currently a *bare generator*: Prop 8.6 shows it is **not** a weave, and Prop 8.7 *identifies* it as a catamorphism, but the structure §3.1–3.3 supplies is not enough to make either a definition. Four additions internalize what a fold needs — the index it folds along, the iteration that makes the fold exist, the typing of its output, and the law letting it compose with the lift. (Two further extensions — coupled states and a coalgebraic dual for unbounded generation — are deferred to the roadmap, [future_ideas.md §8](future_ideas.md#8-prioritized-implementation-roadmap), items E–G.)
+
+**Definition 3.3 (Temporal object; directed action).** Distinguish a **temporal object** `L ∈ Ob D` carrying the structure of the augmented simplex `Δ_+` — equivalently a `length` grading by the monoid `(ℕ, +, 0)` — with prefix inclusions `ι_m : [0..m] ↪ [0..N]`. Equip `C` with a **directed action**: restriction natural transformations `act(−, ι_m) : (− ⊛ [0..N]) ⇒ (− ⊛ [0..m])` along the `ι_m`, satisfying the unit and composition laws of an action **but with no point-evaluation** `ev_q` for a single point `q : I → L`. The absence of point-naturality is exactly the obstruction of Prop 8.6; the present restrictions are theory.md's prefix-restriction law, now first-class data rather than a remark.
+
+**Definition 3.4 (Finite iteration).** Require that `C` (and any target actegory `V`, §7) admit **finite iteration of parametric endofunctors**: for a parametric step endofunctor `F` (carrying the per-step inputs as parameters) and a length `N ∈ Ob D`, the `N`-fold iterate and its catamorphism `cata(step)` exist. For fixed `N` this is `N`-fold composition — no fixpoint is needed; a genuine initial algebra / natural-numbers object is required only for *unbounded* length (the corecursion extension, roadmap item G).
+
+**Definition 3.5 (Trace).** The output of a fold is the **state history** (scanl): the object `H ⊗ L_{N+1}` (state tensored with the temporal axis). A coherence relates `cata(step)`-accumulating-the-trace to the restrictions of Definition 3.3 — truncating the trace along `ι_m` agrees with running the `m`-fold. This types `Scan`'s codomain `(*state, N+1)` from the framework rather than declaring it in `ConstructedScan`.
+
+- **(Lift–fold distributivity)** For an ordinary (non-temporal) degree `P` *orthogonal* to `L`, the actegory lift distributes through the fold: `act(Scan, P) ≅ Scan(act(step, P))`. *(theory.md's "`[Scan, P]` for an independent batch axis `P` runs the scan independently per `p`, and Eq. 3 holds over `P`," now an axiom; its consequence is Proposition 8.8.)*
+
+With Definitions 3.3–3.5 and the distributivity law, **`Scan := cata(step)`** is a *definition* over the temporal grading (Prop 8.7): the prefix law is then a corollary of the catamorphism universal property, and `Scan` composes with broadcasting and batching (Prop 8.8) — so it sits in `ThreadedComposed` and admits the `vmap`/batch strategies like any other morphism, despite not being a weave along `L`. What remains open — coupled recurrences, resource-graded strategy selection with fold-fusion, and unbounded corecursion — is roadmap items E–G ([future_ideas.md §8](future_ideas.md#8-prioritized-implementation-roadmap)).
 
 ---
 
@@ -224,6 +239,8 @@ These are the theorems a Lean development would prove *once*, at the graded-PROP
 - **It explains the affine fast path.** The `ScanAffine` associative-scan optimization (tensorLogicNCDIntegration.md §6.4) is precisely the case where the step algebra factors through a **monoid** (affine maps under composition): the fold is then a monoid homomorphism, computable by parallel prefix in `O(log N)`. The affine condition is the categorical *precondition* for the optimization, not a pattern-match.
 
 *(8.6 says `Scan` is not a weave; 8.7 says what it is instead. The dual — `Scan` as an unfold / coalgebra for streaming generation — is the lens of arXiv:2603.03227.)*
+
+**Proposition 8.8 (`Scan` batches).** Under the lift–fold distributivity law (§3.4), `Scan` is closed under the actegory action by any degree `P` *orthogonal* to its temporal axis `L`: `act(Scan, P) ≅ Scan(act(step, P))`. *(So `Scan` participates in `ThreadedComposed` routing and the `vmap`/batch strategies despite not being a weave — 8.6's obstruction is only along `L`, never along orthogonal axes. This is what lets the compiler treat a batched recurrence as one fold run independently per batch coordinate.)*
 
 ---
 
