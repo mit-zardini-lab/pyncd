@@ -146,12 +146,25 @@ Autoalignment (`@`, `Context`) builds a composite from separately-constructed pi
 
 **Definition 6.1 (Open morphisms).** Work in the category `Inst(C♯)` of finite acset presentations (instances) and their morphisms (natural transformations of presentations; [acset.md §Instances as Functors](acset.md#instances-as-functors-phi_a-at-the-instance-category-level)). Composition of two instances sharing a boundary is the **pushout**
 
-```
-        boundary B
-       ↙          ↘
-   inst f          inst g
-       ↘          ↙
-        f ;_B g   (pushout)
+```mermaid
+%%{init: {'theme': 'default', 'themeVariables': {'edgeLabelBackground': '#ffffff00'}}}%%
+graph TD
+    B["boundary <b>B</b>"]
+    F["inst <i>f</i>"]
+    G["inst <i>g</i>"]
+    P["<b>f ;<sub>B</sub> g</b><br/>(pushout)"]
+
+    B -->|"span leg"| F
+    B -->|"span leg"| G
+    F -->|"cocone"| P
+    G -->|"cocone"| P
+
+    classDef bnd fill:#DBDFEF,stroke:#6688bb,stroke-width:1px
+    classDef inst fill:#ffffff,stroke:#555555,stroke-width:1px
+    classDef po fill:#C1E8F7,stroke:#3a8aae,stroke-width:2px
+    class B bnd
+    class F,G inst
+    class P po
 ```
 
 identifying the shared boundary colors `B` (the cup). The `Context` union-find computes the pushout's coequalizer on `UID`s; the canonical class representative is the universal cocone vertex ([future_ideas.md §2.1](future_ideas.md#21-autoalignment-is-the-pushout-is-the-cup-morphism)).
