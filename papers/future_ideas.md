@@ -425,11 +425,30 @@ These are the research-grade opportunities. They are less certain but, if they l
 
 **The framing.** §2.4 shows that weaves are not specific to Br — they are the cartesian-lift datum of a PROP `C` graded over an index category `D`, and Br is the instance with `D = St` (sub-wires = axes). The index `D` is a *parameter*. Taking `D = Br` — so the colors of the new top-level PROP are themselves whole Br objects (arrays-with-operators) — yields weaves whose sub-wires are **entire sub-morphisms**. Tiling at this level means looping the degree over a family of models rather than over a family of axis coordinates.
 
-**The two natural applications.**
+**Applications.** The pattern is far more general than MoE: a degree axis indexing whole sub-models, with an *output weave* saying how their results combine. To place any "run several sub-models and combine" construct, ask three questions — (i) does the looped axis index whole computations (thick wires = sub-morphisms)? (ii) is the routing **data-independent** (→ a genuine weave, Eq. 3 holds), **data-dependent** (→ a `Route` generator), or **recurrent** — the model feeding itself along the axis (→ a `Scan` generator, [graded_prop.md §3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class))? (iii) what is the output weave? The router/selector is a reindexing in `D = Br`, exactly as a stride is a reindexing in `D = St` one level down.
 
-- **Mixture-of-experts.** The tiling axis is the expert index; each expert is a full Br morphism, and the base operation at this level selects (or gates) among them. A MoE layer is then a single top-level broadcasted operation: degree `P` = the item-to-expert routing, reindexings `ηᵢ` select which expert each item reads, and the target sub-wires are the per-expert computations. The router is a reindexing in `D = Br`, exactly as a stride is a reindexing in `D = St` one level down.
+*Data-independent — genuine weaves (inherit batching, composition, fusion).* These differ only in the **output weave** — the one degree of freedom across the family:
 
-- **Ensembles.** Tile a whole model over an ensemble axis. The degree is the ensemble index; each member is the same Br morphism with independent weights (or the same weights under tying, §5.2). The output weave aggregates members — averaging is an `AdditionOp` at the top level followed by a scale.
+| Construct | sub-model tiled over | output weave |
+| --- | --- | --- |
+| **Dense (soft) MoE** — the worked example below | expert axis | gate-contract (softmax mix) |
+| **Deep ensembles** | member axis (independent weights, or tied via §5.2) | average (`AdditionOp` + scale) |
+| **MC-dropout / variational nets** | sample axis (random mask, *not* input-dependent) | average |
+| **Test-time augmentation, multi-scale** | augmentation / scale axis (fixed transforms) | average / max |
+| **Multi-task heads** | task axis (shared trunk → per-task head) | concatenate |
+| **Mixture-density heads** | component axis | gate-contract — *MoE with a non-FFN expert* |
+| **Products of experts** | expert axis | multiply — *MoE with a multiplicative weave* |
+| **Grouped / depthwise conv, grouped-query attention** | group axis (fixed grouping) | concatenate groups |
+| **Federated averaging (forward), bagging** | client / bag axis | average — *FedAvg = the ensemble weave* |
+| **Self-consistency (sample-K-then-vote)** | independent-sample axis | majority vote |
+
+*Data-dependent — `Route` generators (the sparse side).* Routing depends on input values, so Eq. 3 fails — as the worked example shows for sparse MoE: **sparse / top-k / Switch MoE**, **multi-LoRA or adapter-bank serving** with per-request selection, **hard attention**. Each needs a `Route` generator and pays bespoke cost in every pass.
+
+*Recurrent — `Scan` generators (not parallel weaves).* The sub-model feeds itself along the axis, so this is the temporal grading of [graded_prop.md §3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class), not a §6.4 lift: **weight-tied deep stacks** (Universal Transformer, ALBERT) tile one block over depth *with feedback* → `Scan` (contrast deep ensembles, which replicate *independently* → a weave); **beam search, particle filters / SMC, speculative decoding** are *compound* — a weave/`Scan` propagate step plus a data-dependent prune/resample/accept step (`Scan` + `Route`).
+
+*Not lifts — Para.* **Hypernetworks** compute another model's weights: a Para reparameterization (§3.1), not a lift over a degree. **Model / pipeline parallelism** is the same lift at the *execution* layer (degree = devices) — the algebra-specific "GPU reading" of §2.4, not architecture.
+
+The taxonomy does real work: ensembles, MC-dropout, TTA, multi-task heads, mixture-density, products-of-experts, GQA, FedAvg, and self-consistency are all *the same construct with a different output weave* and all ride the existing weave machinery, whereas sparse MoE, multi-LoRA routing, beam search, and SMC are on the generator side and cost per-pass. It also surfaces non-obvious unifications — **mixture-density heads = MoE with a non-FFN expert; products-of-experts = MoE with a multiplicative output weave; FedAvg = the ensemble output weave; Universal Transformer = the `Scan`, not the weave, version of "stack a block."**
 
 **Worked example — a 2-expert MoE layer.** Take two experts `E₀, E₁ : [ℝ, m] → [ℝ, m]`, each a full Br morphism (say `Linear ; ReLU ; Linear`), a batch of independent items `H : [ℝ, i ⊗ m]`, and a gate `g : [ℝ, i ⊗ e]` (a softmax over the expert axis `e ∈ [0..2)`). The **items** are whatever the layer routes independently — in a transformer they are sequence tokens, but equally image patches, graph nodes, set elements, or plain samples; the construction is indifferent to which. At the model level `D = Br`, the *base operation* is "apply one expert to one item," and the new degree axis is the expert index `e`. The two routing regimes fall on opposite sides of the §2.4 litmus test.
 
