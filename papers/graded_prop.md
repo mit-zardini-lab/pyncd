@@ -25,6 +25,7 @@ Notation: `⊗` is monoidal product, `;` is diagrammatic-order composition (`f ;
 9. [Instantiation](#9-instantiation)
    - [`D = St`, `C = Br`](#91-d--st-c--br)
    - [The speculative third level: `D = Br`](#92-the-speculative-third-level-d--br)
+   - [The horizontal axis: swapping `D`](#93-the-horizontal-axis-swapping-d)
 10. [Lean Formalization Notes](#10-lean-formalization-notes)
 11. [Relation to Categorical Deep Learning](#11-relation-to-categorical-deep-learning)
 12. [Summary](#12-summary)
@@ -116,7 +117,7 @@ The permutation relating the canonical order (targets first, tilings second) to 
 
 ### 3.4 The temporal grading and making `Scan` first-class
 
-`Scan` (theory.md's iterative recurrence) is currently a *bare generator*: Prop 8.6 shows it is **not** a weave, and Prop 8.7 *identifies* it as a catamorphism, but the structure §3.1–3.3 supplies is not enough to make either a definition. Four additions internalize what a fold needs — the index it folds along, the iteration that makes the fold exist, the typing of its output, and the law letting it compose with the lift. (Two further extensions — coupled states and a coalgebraic dual for unbounded generation — are deferred to the roadmap, [future_ideas.md §8](future_ideas.md#8-prioritized-implementation-roadmap), items E–G.)
+`Scan` (theory.md's iterative recurrence) is currently a *bare generator*: Prop 8.6 shows it is **not** a weave, and Prop 8.7 *identifies* it as a catamorphism, but the structure §3.1–3.3 supplies is not enough to make either a definition. Four additions internalize what a fold needs — the index it folds along, the iteration that makes the fold exist, the typing of its output, and the law letting it compose with the lift. (Two further extensions — coupled states and a coalgebraic dual for unbounded generation — are deferred to the roadmap, [future_ideas.md §8](future_ideas.md#8-prioritized-implementation-roadmap), items E–G.) `Scan` is species (i) of the Prop 8.6 obstruction (fixed reindexing, coupled lift); the data-dependent sibling — species (ii), the `Route` generator — is *not* made first-class here, as its reindexing is not a `D`-morphism; see Prop 8.6(ii) and [future_ideas.md §6.4](future_ideas.md#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles).
 
 **Definition 3.3 (Temporal object; directed action).** Distinguish a **temporal object** `L ∈ Ob D` carrying the structure of the augmented simplex `Δ_+` — equivalently a `length` grading by the monoid `(ℕ, +, 0)` — with prefix inclusions `ι_m : [0..m] ↪ [0..N]`. Equip `C` with a **directed action**: restriction natural transformations `act(−, ι_m) : (− ⊛ [0..N]) ⇒ (− ⊛ [0..m])` along the `ι_m`, satisfying the unit and composition laws of an action **but with no point-evaluation** `ev_q` for a single point `q : I → L`. The absence of point-naturality is exactly the obstruction of Prop 8.6; the present restrictions are theory.md's prefix-restriction law, now first-class data rather than a remark.
 
@@ -236,11 +237,19 @@ These are the theorems a Lean development would prove *once*, at the graded-PROP
 - **Node permutation / translation.** The free-group monad on a node axis gives GNN permutation-equivariance; a translation monad gives convolutional equivariance — domains the bare axis-permutation statement could not express.
 - **Causal order.** The **order monad** (order-preserving endomaps of a sequence axis) gives the *causal* symmetry: a masked operator (`MaskedSoftMax`/`MaskedNormalize`) is `T`-equivariant for this `T` even though it breaks the symmetric-group symmetry. This is the positive reading of the masked-wire predicate `i ≤ j` ([future_ideas.md §5.3](future_ideas.md#53-equivariance-from-stridecategory-representation-theory), [§5.4](future_ideas.md#54-masked-operators-and-output-wire-predicates)) — *which* symmetry a layer respects is *which monad it is an algebra for*.
 
+**Open question (two routes to equivariance).** This proposition encodes a symmetry as a *monad* `T` on `D`; §9.3 encodes one instead as a *grading* `D = BG` (the delooping of a group `G`). These are two presentations of the same data — a `T`-algebra structure on `F` versus `F` being defined over the group-graded index. The conjecture is that they coincide: the Eilenberg–Moore lift along `T` and the grading over `BG` give equivalent equivariant-algebra categories, so geometric deep learning is recovered identically whether one adds a symmetry monad or swaps the index for a group. Proving (or refuting) this would unify the two equivariance stories in this document; it is open.
+
 **Proposition 8.5 (Composition associativity).** Composition in `Inst(C♯)` is associative and unital. *(Pasting lemma for pushouts, §6.)*
 
-**Proposition 8.6 (The `Scan` obstruction).** Let `L ∈ Ob D` be an axis along which a candidate morphism `s` has cross-position dependency (output at position `ℓ` depends on positions `< ℓ`). Then `s` is **not** in the image of `act(−, L)`: the evaluation `ev_q` at a single point `q : I → L` fails to be natural for `s` (Eq. 3 fails), so `s` admits no weave over `L`. Equivalently, `s` lies in the image only of a *directed* sub-action indexed by order-preserving injections `ι_m : [0..m] ↪ [0..L]` (theory.md's prefix-restriction law), not by points. *(This formalizes [future_ideas.md §2.4](future_ideas.md#24-weaves-are-not-a-br-thing--they-are-the-cartesian-lift-datum-of-a-graded-prop) consequence 2: `Scan` — and any cumulative/prefix/recurrent operator — must be a primitive generator, not a lifted base op, and the precise reason is failure of point-naturality. It also tells the implementer to add such operators as generators in `G`, never via `⊛`.)*
+**Proposition 8.6 (Obstructions to being a weave — two species).** A morphism `s` can fail to lie in the image of `act(−, P)` — to admit no weave over `P` — in two categorically distinct ways, each demanding a dedicated generator in `G` rather than a base op lifted through `⊛`. The litmus test is uniform: *is the reindexing a fixed, point-natural `D`-morphism?* A "no" arises two ways:
 
-**Proposition 8.7 (`Scan` as a catamorphism — the positive companion to 8.6).** The morphism `Scan` that 8.6 excludes from the lift has a positive home: it is the **catamorphism (fold)** accumulating the state trace (scanl) for the *parametric step endofunctor* `F` — carrying the per-step inputs as parameters — whose algebra structure map is the step morphism `step : F(H) → H`. Equivalently, `Scan` is a (lax) algebra for the free parametric monad on `F`, truncated at length `N` — the CDL account of recurrence (§11). Three consequences, none available from the bare generator of 8.6:
+- **(i) Fixed reindexing, coupled lift → `Scan`.** `s` reindexes by a genuine `D`-morphism along an axis `L`, but the lift *couples positions* (output at `ℓ` depends on positions `< ℓ`): the evaluation `ev_q` at a point `q : I → L` fails to be natural for `s` (Eq. 3 fails). `s` lies only in the image of the *directed* sub-action indexed by prefix injections `ι_m : [0..m] ↪ [0..L]` (theory.md's prefix-restriction law), not by points. The generator is **`Scan`** (Prop 8.7); examples are cumulative / prefix / recurrent operators ([future_ideas.md §2.4](future_ideas.md#24-weaves-are-not-a-br-thing--they-are-the-cartesian-lift-datum-of-a-graded-prop) consequence 2).
+
+- **(ii) Data-dependent reindexing → `Route`.** The reindexing *depends on input values*, so it is not a fixed `D`-morphism at all — there is no single `η` to lift. The generator is **`Route`**: a data-dependent coproduct injection whose routing map is carried as a `Para` parameter (the gate). The positive home is the species-(ii) analogue of Prop 8.7 — a `Route` generator, not a catamorphism. The example is sparse / top-`k` mixture-of-experts ([future_ideas.md §6.4](future_ideas.md#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles)), where the expert each item reads is `argmax`-selected at runtime.
+
+The two species are independent: `Scan` is *data-independent but coupled*, `Route` is *uncoupled but data-dependent*, and constructs like beam search or SMC are both at once. In every case the implementer adds the operator to `G` as a generator, never via `⊛`.
+
+**Proposition 8.7 (`Scan` as a catamorphism — the positive home for species (i)).** The `Scan` excluded by Prop 8.6(i) has a positive home: it is the **catamorphism (fold)** accumulating the state trace (scanl) for the *parametric step endofunctor* `F` — carrying the per-step inputs as parameters — whose algebra structure map is the step morphism `step : F(H) → H`. Equivalently, `Scan` is a (lax) algebra for the free parametric monad on `F`, truncated at length `N` — the CDL account of recurrence (§11). Three consequences, none available from the bare generator of 8.6:
 
 - **The prefix-restriction law is a corollary, not an axiom.** theory.md's prefix law (`Scan_N` restricted to the first `m` steps equals `Scan_m`) follows from the catamorphism universal property `cata(step) ∘ in = step ∘ F(cata(step))` and its uniqueness; it need not be posited separately.
 - **It supplies the morphism notion.** Two scans are equal / composable / fuseable exactly when related by an algebra homomorphism — a notion the bare generator does not carry.
@@ -253,6 +262,8 @@ These are the theorems a Lean development would prove *once*, at the graded-PROP
 ---
 
 ## 9. Instantiation
+
+Instantiation has two axes (cf. [future_ideas.md §6.4](future_ideas.md#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles)–[§6.5](future_ideas.md#65-swapping-the-index-d-as-a-dial-across-ml)): **vertical**, stacking the construction by letting `D` itself be a graded PROP (§9.2, `D = Br`), and **horizontal**, swapping `D` for a different index category (§9.3). The base `D = St`, `C = Br` (§9.1) sits at the origin of both.
 
 ### 9.1 `D = St`, `C = Br`
 
@@ -279,11 +290,27 @@ These are the theorems a Lean development would prove *once*, at the graded-PROP
 | Para refinement | `Multilinear`/`Linear` weight tensors; `construct() : Para(Br) → Para(PyTorch)` | [prop_ideas.md §Para Refinement](prop_ideas.md#the-para-refinement) |
 | Proposition 8.6 obstruction | `Scan` is a separate construction rule, not a `Broadcasted` | [theory.md §Scan note](theory.md#batch-lift-f-p-def-11) |
 
-Every row is a definitional unfolding of §3–7 with `D := St`, `C := Br`. The `Scan` extension is exactly the generator demanded by Proposition 8.6.
+Every row is a definitional unfolding of §3–7 with `D := St`, `C := Br`. The `Scan` extension is exactly the generator demanded by Proposition 8.6. Note that `St`'s affine reindexings are translations on `ℤⁿ`, so `D = St` is the **translation instance** of the group-graded family (§9.3): ordinary convolution is already group convolution over the translation group.
 
 ### 9.2 The speculative third level: `D = Br`
 
-Taking `D := Br` (colors = whole arrays-with-operators), a top-level graded PROP `C_mod` has *models* as wires; the lift `⊛` tiles a base computation over a family of models. This is the mixture-of-experts / ensemble level ([future_ideas.md §6.4](future_ideas.md#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles)). The open question is precisely Proposition 8.6 applied here: static (fixed) routing satisfies (Eq. 3) and is a genuine weave; data-dependent (learned top-k) routing may fail point-naturality and then — by Proposition 8.6 — must be a dedicated generator, the way `Scan` is. The synthesis turns "does MoE generalize the weave?" into the decidable check "does the routing lift satisfy Eq. 3?".
+Taking `D := Br` (colors = whole arrays-with-operators), a top-level graded PROP `C_mod` has *models* as wires; the lift `⊛` tiles a base computation over a family of models. This is the mixture-of-experts / ensemble level ([future_ideas.md §6.4](future_ideas.md#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles)). The choice is exactly Proposition 8.6: static (fixed) routing satisfies Eq. 3 and is a genuine weave (dense MoE); data-dependent (learned top-`k`) routing is species (ii) and must be a `Route` generator. The synthesis turns "does MoE generalize the weave?" into the decidable check "does the routing lift satisfy Eq. 3?".
+
+### 9.3 The horizontal axis: swapping `D`
+
+Keeping `C` a category of operations but grading over an index `D` other than `St` retargets the same machinery at a different domain — only the reindexing layer changes. Each row is a `D`-graded colored PROP in the sense of Def 3.1, conceptual pending the genericity refactor ([future_ideas.md §6.5](future_ideas.md#65-swapping-the-index-d-as-a-dial-across-ml)):
+
+| `D` | reindexing | instantiation |
+| --- | --- | --- |
+| `St` | affine stride | tensor programs, CNNs (translation-equivariant) — §9.1 |
+| group `BG` / `Rep(G)` | group translation | equivariant & steerable nets; group convolution is a weave (cf. the open question at Prop 8.4) |
+| graph / incidence cat. | gather-along-edge | GNNs, meshes, molecules (fixed graph = weave; per-sample graph = `Route`, Prop 8.6(ii)) |
+| metric / enriched cat. | distance kernel | continuous conv, point clouds, neural fields |
+| partition lattice | assignment map | pooling, clustering, slot / capsule (fixed = weave; learned = `Route`) |
+| Markov cat. (`Stoch`) | Markov kernel | sampling, VAE, MC / SMC |
+| resource monoid | store-vs-recompute | checkpointing / scheduling (the resource-graded `Para` of [future_ideas.md §8](future_ideas.md#8-prioritized-implementation-roadmap) item 4.5) |
+
+The Prop 8.6 classification is `D`-uniform: at *every* `D`, a fixed structural reindexing yields a weave, a data-dependent one a `Route` (species ii), and a recurrent one a `Scan` (species i). See [future_ideas.md §6.5](future_ideas.md#65-swapping-the-index-d-as-a-dial-across-ml) for the ML reading of each row.
 
 ---
 
