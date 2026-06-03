@@ -431,13 +431,33 @@ These are the research-grade opportunities. They are less certain but, if they l
 
 - **Ensembles.** Tile a whole model over an ensemble axis. The degree is the ensemble index; each member is the same Br morphism with independent weights (or the same weights under tying, §5.2). The output weave aggregates members — averaging is an `AdditionOp` at the top level followed by a scale.
 
+**Worked example — a 2-expert feed-forward MoE.** Take two experts `E₀, E₁ : [ℝ, m] → [ℝ, m]`, each a full Br morphism (say `Linear ; ReLU ; Linear`), a token wire `H : [ℝ, t ⊗ m]`, and a gate `g : [ℝ, t ⊗ e]` (a softmax over the expert axis `e ∈ [0..2)`). At the model level `D = Br`, the *base operation* is "apply one expert to one token-slice," and the new degree axis is the expert index `e`. The two routing regimes fall on opposite sides of the §2.4 litmus test.
+
+*Dense (soft) MoE — a genuine weave.* Run every expert on every token and combine by the gate:
+
+```text
+Y[t, m] = Σ_e  g[t, e] · E_e( H[t, ·] )
+```
+
+In graded-PROP terms: degree `P = (t, e)`; the input reindexing `η_H = ()` *deletes* `e`, so the same token embedding is delivered to every expert — exactly as `η_K = ()` broadcasts the key tensor across the batch one level down. The expert axis `e` is **tiling** (looped by `P`); the gate contracts it in the output weave (a weighted `AdditionOp`). Point-evaluation holds — slicing the output at expert `e` equals running `E_e` then slicing — so **Eq. 3 is satisfied**: dense MoE *is* a weave over models, and inherits batching, autoalignment, and fusion for free.
+
+*Sparse (top-1) MoE — the obstruction.* Now route each token to the single expert chosen by the gate:
+
+```text
+Y[t, m] = E_{r(t)}( H[t, ·] ) ,     r(t) = argmax_e g[t, e]
+```
+
+Here the reindexing `η` — "which expert does token `t` read?" — *depends on the input values* `g`, so it is not a fixed `D`-morphism. **Eq. 3 fails** for the same reason it fails for `Scan`'s recurrence axis: you cannot slice-then-apply, because *which* slice (expert) is read is decided at runtime, not by the degree coordinate. By the litmus test (§2.4; [graded_prop.md Prop 8.6](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class)) sparse routing is therefore **not** a weave and needs its own construction rule — call it `Route` — exactly as recurrence needed `Scan`. Its positive home is the analogue of [graded_prop.md §3.4 / Prop 8.7](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class): a `Route` generator whose semantics is a data-dependent coproduct injection `[0..E) → experts`, with the gate as a `Para` parameter.
+
+This makes the conjecture testable rather than rhetorical: **dense MoE passes the Eq. 3 check and slots into the existing weave machinery; sparse MoE fails it and joins `Scan` as a dedicated generator.** The dividing line is exactly whether the routing reindexing is data-independent — a property decidable from the gate's dependency structure, not a matter of taste.
+
 **Why this is more than an analogy.** Because §2.4's two conditions (thick wires + a lift with naturality) are the *only* requirements, a top-level PROP over `D = Br` automatically inherits every piece of machinery developed for the St→Br level:
 
 - **Lifts** (§3.3) — batch a MoE layer over a sequence/batch axis by the same `Σ_φ` that batches a linear layer.
 - **Autoalignment** (§2.1) — compose two MoE layers by the same pushout that composes two einsums; the boundary "axes" are now whole model wires.
 - **Fusion, Markov, equivariance** (§§4–5) — apply at the model level: fusing adjacent expert selections, dropping a routing-invariant term, auditing whether an ensemble is permutation-equivariant in its member index.
 
-**The cost and the open question.** The machinery is generic only if it is *written* generically — over an arbitrary `D`-graded SMC rather than hard-coded for `St`. The current `Weave`/`Broadcasted`/`bc_signature()` implementation bakes in `D = St` (axes, affine strides). The research question is whether the reindexing layer can be abstracted over `D` cleanly: St's reindexings are affine `StrideMorphism`s, but `D = Br`'s reindexings (routers, gates) are not affine — they are themselves Br morphisms, possibly data-dependent. Whether the naturality law (condition 2 of §2.4) survives data-dependent routing is the crux: static MoE (fixed routing) clearly satisfies it; learned top-k routing may break Eq. 3 the same way `Scan` breaks it for its recurrence axis (theory.md's `Scan` note). If so, MoE-tiling would need its own construction rule alongside `Scan`, not a plain weave — a precise and testable conjecture.
+**The cost and what remains open.** The worked example settles the *theory* question — dense routing is a weave, sparse routing is a `Route` generator — so what remains is engineering and one design choice. The machinery is generic only if it is *written* generically: over an arbitrary `D`-graded SMC rather than hard-coded for `St`. The current `Weave`/`Broadcasted`/`bc_signature()` bakes in `D = St` (axes, affine strides), so the refactor is to abstract the reindexing layer over `D` — `St`'s reindexings are affine `StrideMorphism`s, whereas `D = Br`'s are themselves Br morphisms (the gate). The remaining design choice is the shape of the `Route` generator (§2.4 / graded_prop §3.4): what its degree, its data-dependent coproduct injection, and its `Para` gate-parameter should be — the direct analogue of designing `Scan` from the recurrence's failure of Eq. 3. This is roadmap item 4.4 ([§8](#8-prioritized-implementation-roadmap)).
 
 ---
 
