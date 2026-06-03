@@ -427,42 +427,42 @@ These are the research-grade opportunities. They are less certain but, if they l
 
 **The two natural applications.**
 
-- **Mixture-of-experts.** The tiling axis is the expert index; each expert is a full Br morphism, and the base operation at this level selects (or gates) among them. A MoE layer is then a single top-level broadcasted operation: degree `P` = the token-to-expert routing, reindexings `ηᵢ` select which expert each token reads, and the target sub-wires are the per-expert computations. The router is a reindexing in `D = Br`, exactly as a stride is a reindexing in `D = St` one level down.
+- **Mixture-of-experts.** The tiling axis is the expert index; each expert is a full Br morphism, and the base operation at this level selects (or gates) among them. A MoE layer is then a single top-level broadcasted operation: degree `P` = the item-to-expert routing, reindexings `ηᵢ` select which expert each item reads, and the target sub-wires are the per-expert computations. The router is a reindexing in `D = Br`, exactly as a stride is a reindexing in `D = St` one level down.
 
 - **Ensembles.** Tile a whole model over an ensemble axis. The degree is the ensemble index; each member is the same Br morphism with independent weights (or the same weights under tying, §5.2). The output weave aggregates members — averaging is an `AdditionOp` at the top level followed by a scale.
 
-**Worked example — a 2-expert feed-forward MoE.** Take two experts `E₀, E₁ : [ℝ, m] → [ℝ, m]`, each a full Br morphism (say `Linear ; ReLU ; Linear`), a token wire `H : [ℝ, t ⊗ m]`, and a gate `g : [ℝ, t ⊗ e]` (a softmax over the expert axis `e ∈ [0..2)`). At the model level `D = Br`, the *base operation* is "apply one expert to one token-slice," and the new degree axis is the expert index `e`. The two routing regimes fall on opposite sides of the §2.4 litmus test.
+**Worked example — a 2-expert MoE layer.** Take two experts `E₀, E₁ : [ℝ, m] → [ℝ, m]`, each a full Br morphism (say `Linear ; ReLU ; Linear`), a batch of independent items `H : [ℝ, i ⊗ m]`, and a gate `g : [ℝ, i ⊗ e]` (a softmax over the expert axis `e ∈ [0..2)`). The **items** are whatever the layer routes independently — in a transformer they are sequence tokens, but equally image patches, graph nodes, set elements, or plain samples; the construction is indifferent to which. At the model level `D = Br`, the *base operation* is "apply one expert to one item," and the new degree axis is the expert index `e`. The two routing regimes fall on opposite sides of the §2.4 litmus test.
 
 **Symbols.** `[ℝ, A]` is the Br color of a real-valued array of shape `A` (the `Array[Reals, A]` of theory.md), and `⊗` joins axes into a shape. The axes and arrays here:
 
 | Symbol | Meaning |
 | --- | --- |
-| `t` | token / sequence-position axis; `H[t, ·]` is one token's embedding slice |
-| `m` | model (embedding) dimension — the per-token feature axis |
+| `i` | item axis — the independent inputs the layer routes (transformer tokens, image patches, graph nodes, set elements, samples); `H[i, ·]` is one item |
+| `m` | feature dimension — the per-item representation axis |
 | `e` | expert-index axis, of size `E` (here `E = 2`); `[0..E)` is its index set |
-| `H : [ℝ, t ⊗ m]` | input hidden states — the tokens entering the MoE layer |
-| `E_e : [ℝ, m] → [ℝ, m]` | expert `e`, a full Br morphism applied to a single token slice |
-| `g : [ℝ, t ⊗ e]` | gate weights; `g[t, e]` = token `t`'s affinity for expert `e`, softmax-normalized over `e` |
-| `Y : [ℝ, t ⊗ m]` | the layer output |
+| `H : [ℝ, i ⊗ m]` | input — a batch of `i` items, each an `m`-vector |
+| `E_e : [ℝ, m] → [ℝ, m]` | expert `e`, a full Br morphism applied to a single item |
+| `g : [ℝ, i ⊗ e]` | gate weights; `g[i, e]` = item `i`'s affinity for expert `e`, softmax-normalized over `e` |
+| `Y : [ℝ, i ⊗ m]` | the layer output |
 | `P` | the degree (the loop domain of the broadcasted operation) |
 | `η` | a reindexing (which slice each input contributes per degree coordinate); `η = ()` is the deletion that broadcasts an input across the whole degree |
-| `r(t)` | the hard routing function `r(t) = argmax_e g[t, e]` (sparse case only) |
+| `r(i)` | the hard routing function `r(i) = argmax_e g[i, e]` (sparse case only) |
 
-*Dense (soft) MoE — a genuine weave.* Run every expert on every token and combine by the gate:
-
-```text
-Y[t, m] = Σ_e  g[t, e] · E_e( H[t, ·] )
-```
-
-In graded-PROP terms: degree `P = (t, e)`; the input reindexing `η_H = ()` *deletes* `e`, so the same token embedding is delivered to every expert — exactly as `η_K = ()` broadcasts the key tensor across the batch one level down. The expert axis `e` is **tiling** (looped by `P`); the gate contracts it in the output weave (a weighted `AdditionOp`). Point-evaluation holds — slicing the output at expert `e` equals running `E_e` then slicing — so **Eq. 3 is satisfied**: dense MoE *is* a weave over models, and inherits batching, autoalignment, and fusion for free.
-
-*Sparse (top-1) MoE — the obstruction.* Now route each token to the single expert chosen by the gate:
+*Dense (soft) MoE — a genuine weave.* Run every expert on every item and combine by the gate:
 
 ```text
-Y[t, m] = E_{r(t)}( H[t, ·] ) ,     r(t) = argmax_e g[t, e]
+Y[i, m] = Σ_e  g[i, e] · E_e( H[i, ·] )
 ```
 
-Here the reindexing `η` — "which expert does token `t` read?" — *depends on the input values* `g`, so it is not a fixed `D`-morphism. **Eq. 3 fails** for the same reason it fails for `Scan`'s recurrence axis: you cannot slice-then-apply, because *which* slice (expert) is read is decided at runtime, not by the degree coordinate. By the litmus test (§2.4; [graded_prop.md Prop 8.6](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class)) sparse routing is therefore **not** a weave and needs its own construction rule — call it `Route` — exactly as recurrence needed `Scan`. Its positive home is the analogue of [graded_prop.md §3.4 / Prop 8.7](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class): a `Route` generator whose semantics is a data-dependent coproduct injection `[0..E) → experts`, with the gate as a `Para` parameter.
+In graded-PROP terms: degree `P = (i, e)`; the input reindexing `η_H = ()` *deletes* `e`, so the same item's feature vector is delivered to every expert — exactly as `η = ()` broadcasts a shared input across a batch one level down. The expert axis `e` is **tiling** (looped by `P`); the gate contracts it in the output weave (a weighted `AdditionOp`). Point-evaluation holds — slicing the output at expert `e` equals running `E_e` then slicing — so **Eq. 3 is satisfied**: dense MoE *is* a weave over models, and inherits batching, autoalignment, and fusion for free.
+
+*Sparse (top-1) MoE — the obstruction.* Now route each item to the single expert chosen by the gate:
+
+```text
+Y[i, m] = E_{r(i)}( H[i, ·] ) ,     r(i) = argmax_e g[i, e]
+```
+
+Here the reindexing `η` — "which expert does item `i` read?" — *depends on the input values* `g`, so it is not a fixed `D`-morphism. **Eq. 3 fails** for the same reason it fails for `Scan`'s recurrence axis: you cannot slice-then-apply, because *which* slice (expert) is read is decided at runtime, not by the degree coordinate. By the litmus test (§2.4; [graded_prop.md Prop 8.6](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class)) sparse routing is therefore **not** a weave and needs its own construction rule — call it `Route` — exactly as recurrence needed `Scan`. Its positive home is the analogue of [graded_prop.md §3.4 / Prop 8.7](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class): a `Route` generator whose semantics is a data-dependent coproduct injection `[0..E) → experts`, with the gate as a `Para` parameter.
 
 This makes the conjecture testable rather than rhetorical: **dense MoE passes the Eq. 3 check and slots into the existing weave machinery; sparse MoE fails it and joins `Scan` as a dedicated generator.** The dividing line is exactly whether the routing reindexing is data-independent — a property decidable from the gate's dependency structure, not a matter of taste.
 
