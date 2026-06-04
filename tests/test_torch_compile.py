@@ -519,6 +519,21 @@ def test_inline_relu_compiles_and_runs():
     assert (out <= 0).all()
 
 
+def test_relu_preserves_relu_operator():
+    """relu() must keep its ReLU identity through compilation (so it renders as
+    ReLU, not the generic Elementwise sigma label)."""
+    import data_structure.Operators as ops
+    from data_structure.TensorLogic import _split_nonlinearity
+    q = real_axis('q', 2)
+    d = real_axis('d', 4)
+    dff = real_axis('dff', 8)
+    tl = TL()
+    tl.H[q, dff] = relu(tl.W_in[dff, d] * tl.X[q, d])
+    composed = _split_nonlinearity(tl.to_equation())
+    nonlinearity = composed.content[-1]   # Composed(einsum, nonlinearity)
+    assert isinstance(nonlinearity.operator, ops.ReLU), type(nonlinearity.operator)
+
+
 def test_inline_normalize_compiles_and_runs():
     """normalize() inline in a TL equation compiles and preserves shape."""
     p = real_axis('p', 8)

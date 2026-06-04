@@ -366,7 +366,7 @@ class TL:
             elif isinstance(op, ops.Normalize):
                 result = result @ ops.Normalize.template()
             elif isinstance(op, ops.Elementwise):
-                result = result @ ops.Elementwise.template()
+                result = result @ type(op).template()   # preserve the concrete op (e.g. ReLU)
             else:
                 raise NotImplementedError(
                     f'No base morphism registered for SumExpr nonlinearity {op!r}'

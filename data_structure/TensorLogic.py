@@ -293,7 +293,7 @@ def _split_nonlinearity(
             )
         return br @ ops.Normalize.template()
     elif isinstance(op, ops.Elementwise):   # catches ReLU (subclass)
-        return br @ ops.Elementwise.template()
+        return br @ type(op).template()   # preserve the concrete op (e.g. ReLU)
     else:
         raise NotImplementedError(
             f'No base morphism registered for nonlinearity {op!r}; '

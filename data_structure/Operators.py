@@ -74,7 +74,9 @@ class Elementwise(cat.Operator):
         base = chp.object_product(base, conversion=chp.datatype_converter)[0]
         _reindexing: cat.StrideCategory[A] = chp.morphism_product((reindexing, base.shape())) # type: ignore
         return cat.Broadcasted(
-            operator=cls(name=fd.DynamicName('\\sigma')),
+            # cls() so a subclass keeps its own display name (e.g. ReLU -> 'R')
+            # rather than being relabelled with the generic Elementwise sigma.
+            operator=cls(),
             input_weaves=(cat.Weave(base.datatype, (cat.WeaveMode.TILED,) * len(_reindexing.cod())),),
             output_weaves=(cat.Weave(base.datatype, (cat.WeaveMode.TILED,) * len(_reindexing.dom())),),
             reindexings=(_reindexing,)
