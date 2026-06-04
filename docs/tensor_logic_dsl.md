@@ -365,6 +365,14 @@ A recurrence is written as two assignments: a **base case** (literal `0` in the
 iteration slot) and a **step** (`l + 1` in that slot), where `l = real_axis('l', N)`
 is the iteration axis with a concrete step count `N`.
 
+> **The iteration axis is a plain `real_axis`** — there is no special iteration-axis
+> constructor (the only constructors are `axes`, `real_axis`, `norm_axis`, `nat_axis`;
+> `norm_axis` is for the softmax/normalize reduction dimension, §6, not iteration). The
+> similarly named `tl.H.iteration_axis(l)` is a *method*, not a constructor: it merely
+> *registers* an already-built `real_axis` as `H`'s recurrence axis so forward
+> references resolve (required for coupled recurrences; optional otherwise). The axis
+> needs a concrete integer size because that size is the step count `N`.
+
 ### Uncoupled (single state)
 
 ```python
