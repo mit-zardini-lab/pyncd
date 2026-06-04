@@ -282,6 +282,12 @@ def generate_tensor_equation_signature(target: cat.Broadcasted) -> str:
     )
     # Append segments for sized-Iverson buffer factors excluded from input_weaves.
     # Their ordering here must match the buffer_inputs ordering in forward().
+    #
+    # An axis repeated within one Iverson predicate emits the SAME tag twice
+    # here, so einops collapses the buffer's diagonal during the contraction.
+    # The buffer itself is materialised in the expanded (one-dim-per-leaf) form;
+    # see materialise_iverson()'s "PERFORMANCE TRADEOFF" note for why the collapse
+    # lives here (uniformity with caller tensors) and how to move it earlier.
     if isinstance(target.operator, TensorEquation):
         lhs_uid_to_pos = {ax.uid: i for i, ax in enumerate(target.operator.lhs_indices)}
         for factor in target.operator.rhs:
