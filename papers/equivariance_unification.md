@@ -1,6 +1,6 @@
 # Unifying the Three Routes to Equivariance
 
-*Closing the open problem at [graded_prop.md Prop 8.4](graded_prop.md#8-propositions-the-synthesis-organizes) — Phases 1–2 of the attack plan.*
+*Closing the open problem at [graded_prop.md Prop 8.4](graded_prop.md#8-propositions-the-synthesis-organizes). Carries out Phases 1–4 of the attack plan; non-compact `G` (Phase 4.3) and the Lean formalization (Phase 5) remain.*
 
 [graded_prop.md](graded_prop.md) records three ways the framework expresses an *equivariant model*, and asks whether they coincide:
 
@@ -8,9 +8,26 @@
 - **(b) base grading** — `D = BG`, the delooping of a group `G` (group convolution; [future_ideas.md Appendix A.2](future_ideas.md#a2-d--group-bg-base-repg-fibers));
 - **(c) fiber grading** — `D = Rep(G)` (steerable features; [same appendix](future_ideas.md#a2-d--group-bg-base-repg-fibers)).
 
-This note carries out **Phase 1** (the object-level kernel), **Phase 2** (lifting to algebras of a graded PROP), **Phase 3** (base ⊗ fiber, §4.1), and **Phase 4.1–4.2** (the sharp scope and the symmetry-on-the-broadcasting case, §5): it reduces the question to a single classical equivalence, proves the three routes agree, makes the agreement an "iff" (coincidence ⟺ action monad), and recovers DeepSets as the degree-permutation instance. It also closes **Phase 4.3 for compact `G`** (modulo standard enriched scaffolding — the e3nn/`SO(3)` setting); only **non-compact `G`** (4.3, §5.3) and the Lean formalization (Phase 5) remain open.
+This note carries out **Phase 1** (the object-level kernel), **Phase 2** (lifting to algebras of a graded PROP), **Phase 3** (base ⊗ fiber, [§4.1](#41-base--fiber-the-action-groupoid-phase-3-completed)), and **Phase 4.1–4.2** (the sharp scope and the symmetry-on-the-broadcasting case, [§5](#5-scope-and-failure-boundary-phase-4)): it reduces the question to a single classical equivalence, proves the three routes agree, makes the agreement an "iff" (coincidence ⟺ action monad), and recovers DeepSets as the degree-permutation instance. It also closes **Phase 4.3 for compact `G`** (modulo standard enriched scaffolding — the e3nn/`SO(3)` setting); only **non-compact `G`** (4.3, [§5.3](#53-continuous-g-compact-closable-vs-non-compact-open)) and the Lean formalization (Phase 5) remain open.
 
-**Result.** For a group (or monoid) `G`, all three routes compute one and the same category — `C`-algebras valued in the `G`-objects of the target — so they coincide. The proof is: *(1)* the three presentations of "a `G`-object" are monoidally equivalent (Phase 1, classical), and *(2)* `Alg(C, −)` preserves monoidal equivalences (Phase 2, standard 2-functoriality). The coincidence is therefore a theorem, with scope exactly the *action (Hopf) monads*; for symmetry monads carrying extra relations the routes provably diverge (§5).
+**Result.** For a group (or monoid) `G`, all three routes compute one and the same category — `C`-algebras valued in the `G`-objects of the target — so they coincide. The proof is: *(1)* the three presentations of "a `G`-object" are monoidally equivalent (Phase 1, classical), and *(2)* `Alg(C, −)` preserves monoidal equivalences (Phase 2, standard 2-functoriality). The coincidence is therefore a theorem, with scope exactly the *action (Hopf) monads*; for symmetry monads carrying extra relations the routes provably diverge ([§5](#5-scope-and-failure-boundary-phase-4)).
+
+---
+
+## Contents
+
+- [1. Setup and notation](#1-setup-and-notation)
+- [2. Phase 1 — the object-level kernel](#2-phase-1--the-object-level-kernel)
+- [3. Phase 2 — lifting to algebras of `C`](#3-phase-2--lifting-to-algebras-of-c)
+- [4. Corollaries and base ⊗ fiber (Phase 3)](#4-corollaries-and-base--fiber-phase-3)
+  - [4.1 The action groupoid](#41-base--fiber-the-action-groupoid-phase-3-completed)
+- [5. Scope and failure boundary (Phase 4)](#5-scope-and-failure-boundary-phase-4)
+  - [5.1 Recognition — coincidence ⟺ action monad](#51-the-recognition-theorem--coincidence--action-monad)
+  - [5.2 Symmetry acting on the broadcasting](#52-symmetry-acting-on-the-broadcasting-dropping-h4)
+  - [5.3 Continuous `G`: compact vs non-compact](#53-continuous-g-compact-closable-vs-non-compact-open)
+- [6. Status of the attack plan](#6-status-of-the-attack-plan)
+- [Appendix — Next steps](#appendix--next-steps)
+- [References](#references)
 
 ---
 
@@ -101,7 +118,7 @@ So the symmetry-monad condition (a), the `BG`-graded index (b), and the `Rep(G)`
 
 ---
 
-## 4. Corollaries
+## 4. Corollaries and base ⊗ fiber (Phase 3)
 
 **Corollary 3 (the open problem, resolved).** Under (H1)–(H4) the Prop 8.4 conjecture holds: the symmetry-monad and `BG`-grading routes to equivariance give equivalent categories of equivariant algebras, and `Rep(G)` is the fiber (`V = Vect`) instance. Geometric deep learning is recovered identically by all three.
 
@@ -131,7 +148,7 @@ So `BG`-base and `Rep(G)`-fiber are the `B = G` (or `G/H`) and `B = ⋆` ends of
 
 ## 5. Scope and failure boundary (Phase 4)
 
-Theorem 2 holds **exactly** for symmetries that are group/monoid actions. §5.1 makes this an "iff" (4.1); §5.2 handles symmetries that act *on* the broadcasting (4.2); §5.3 is the still-open analytic case (4.3).
+Theorem 2 holds **exactly** for symmetries that are group/monoid actions. [§5.1](#51-the-recognition-theorem--coincidence--action-monad) makes this an "iff" (4.1); [§5.2](#52-symmetry-acting-on-the-broadcasting-dropping-h4) handles symmetries that act *on* the broadcasting (4.2); [§5.3](#53-continuous-g-compact-closable-vs-non-compact-open) is the still-open analytic case (4.3).
 
 ### 5.1 The recognition theorem — coincidence ⟺ action monad
 
@@ -177,7 +194,7 @@ The discrete proofs use the copower `T_G = G·(−)` and finite direct sums; a t
 - **(enriched Theorem 1)** `V^{T_G} ≃ [BG, V]_{cont} ≃ Rep(G)`, monoidally (the convolution algebra is Hopf; tensor of reps = diagonal action), where `BG` is the enriched delooping and `[BG,V]_{cont}` the continuous functors.
 - **(enriched Theorems 2 & 6)** `Alg(C, V^{T_G})` is the steerable-equivariant algebra category, and the recognition theorem still holds: `Rep(G) → V` is monadic by enriched Barr–Beck (the convolution algebra has a bounded approximate identity; modules = continuous reps), so coincidence ⟺ `T` is the convolution action monad.
 
-The analytic inputs are exactly: Haar measure (standard for compact `G`), the convolution Hopf algebra and its approximate identity, enriched Barr–Beck monadicity, and completeness of `V` for direct sums. This is the setting GDL actually uses — `SO(2)`, `SO(3)`, `O(3)`, finite point groups (e3nn) — so compact `G` is **closed in practice**, the categorical skeleton being identical to §§2–5.2.
+The analytic inputs are exactly: Haar measure (standard for compact `G`), the convolution Hopf algebra and its approximate identity, enriched Barr–Beck monadicity, and completeness of `V` for direct sums. This is the setting GDL actually uses — `SO(2)`, `SO(3)`, `O(3)`, finite point groups (e3nn) — so compact `G` is **closed in practice**, the categorical skeleton being identical to [§§2–5.2](#2-phase-1--the-object-level-kernel).
 
 **Non-compact `G` — open; the clean equivalence is a compact phenomenon.** Drop compactness and three things break, each identifiable:
 
@@ -191,11 +208,11 @@ The abstract `V^{T_G}` (for a *chosen* monad) is always defined, but its identif
 
 ## 6. Status of the attack plan
 
-- **Phase 0** (precise statement, comparison functor) — folded into §1 and the route table.
+- **Phase 0** (precise statement, comparison functor) — folded into [§1](#1-setup-and-notation) and the route table.
 - **Phase 1** (object kernel) — **done**: Theorem 1 + Prop 1′ (classical; full proof above).
 - **Phase 2** (algebra lift) — **done**: Lemma 2 + Theorem 2.
-- **Phase 3** (reconcile `Rep(G)`, and base ⊗ fiber) — **done**: Cor. 3 (the `V = Vect` instance) plus Prop 5 (§4.1), which unifies base and fiber via the action groupoid `B ⋊ G` — `Rep(G)` is `B = ⋆`, convolution is `B = G/H`.
-- **Phase 4** (scope) — **4.1 done** (Theorem 6: coincidence ⟺ action monad, by monadicity + uniqueness, with the free-monoid-monad counterexample, §5.1); **4.2 done** (Prop 7: degree-permutation is the PROP's own symmetry, recovering DeepSets; Prop 8: general entanglement ⟺ a Beck distributive law, §5.2); **4.3 — compact `G` closed** modulo enriched scaffolding (Prop 9: Haar–convolution monad + Peter–Weyl transport the skeleton; the e3nn/`SO(3)` setting), **non-compact `G` open** (semisimplicity, a canonical monad, and monadicity all fail — needs a direct-integral grading over the unitary dual), §5.3.
+- **Phase 3** (reconcile `Rep(G)`, and base ⊗ fiber) — **done**: Cor. 3 (the `V = Vect` instance) plus Prop 5 ([§4.1](#41-base--fiber-the-action-groupoid-phase-3-completed)), which unifies base and fiber via the action groupoid `B ⋊ G` — `Rep(G)` is `B = ⋆`, convolution is `B = G/H`.
+- **Phase 4** (scope) — **4.1 done** (Theorem 6: coincidence ⟺ action monad, by monadicity + uniqueness, with the free-monoid-monad counterexample, [§5.1](#51-the-recognition-theorem--coincidence--action-monad)); **4.2 done** (Prop 7: degree-permutation is the PROP's own symmetry, recovering DeepSets; Prop 8: general entanglement ⟺ a Beck distributive law, [§5.2](#52-symmetry-acting-on-the-broadcasting-dropping-h4)); **4.3 — compact `G` closed** modulo enriched scaffolding (Prop 9: Haar–convolution monad + Peter–Weyl transport the skeleton; the e3nn/`SO(3)` setting), **non-compact `G` open** (semisimplicity, a canonical monad, and monadicity all fail — needs a direct-integral grading over the unitary dual), [§5.3](#53-continuous-g-compact-closable-vs-non-compact-open).
 - **Phase 5** (Lean) — finite `G` is reachable: Mathlib has `CategoryTheory.Monad.Algebra` (Eilenberg–Moore), `Action`/`Rep G`, and monoidal-functor categories; the target is `Action V G ≃ V^{T_G}` and `Alg(C, −)` preserving it. Continuous `G` is out of reach (no enriched/smooth category theory in Mathlib).
 
 **Net:** the open problem is closed in the affirmative for group/monoid symmetries — it is the classical `V^{T_G} ≃ [BG, V] ≃ Rep(G)` equivalence transported through `Alg(C, −)` — with the failure mode (non-action monads) characterizing its exact scope. The base ⊗ fiber composition is unified by the action groupoid (Prop 5); the scope is sharp (Theorem 6); symmetries acting on the broadcasting are handled (Props 7–8, recovering DeepSets); and compact continuous groups are covered modulo standard enriched scaffolding (Prop 9). The sole open residue is **non-compact `G`** — where semisimplicity, a canonical action monad, and monadicity all fail, and a direct-integral grading over the unitary dual would be required.
@@ -217,7 +234,7 @@ Phases 1–4 are done bar the non-compact analytics. The natural continuations, 
 
 **C. Tighten the present results.**
 
-- **C1.** Write the §5.1 counterexamples in full (the free-monoid monad and the action-with-a-relation family) as a proposition, making *necessity* airtight rather than sketched.
+- **C1.** Write the [§5.1](#51-the-recognition-theorem--coincidence--action-monad) counterexamples in full (the free-monoid monad and the action-with-a-relation family) as a proposition, making *necessity* airtight rather than sketched.
 - **C2.** Catalog which symmetries-on-the-broadcasting admit the Prop 8 distributive law `T_G ⊛ ⇒ ⊛ T_G` beyond the permutation case (Prop 7) — e.g. gauge / local symmetries — and which do not.
 
 **D. Propagate the closure into the main documents.**
@@ -228,7 +245,7 @@ Phases 1–4 are done bar the non-compact analytics. The natural continuations, 
 **E. Run the same lens on the other `D`-rows.** The recognition + symmetry analysis here was carried out for `D =` group. Each other [§6.5](future_ideas.md#65-swapping-the-index-d-as-a-dial-across-ml) row deserves the same:
 
 - **graph** — GNN node-permutation-equivariance *is* Prop 7 with `G = S_n` acting on the node degree, so the DeepSets recovery extends to "GNN equivariance = symmetric aggregation over neighbours." Worth stating explicitly.
-- **metric / `Stoch` / partition** — identify the symmetry monad (if any) per row and whether the routes coincide. This turns §5 into a per-`D` program.
+- **metric / `Stoch` / partition** — identify the symmetry monad (if any) per row and whether the routes coincide. This turns [§5](#5-scope-and-failure-boundary-phase-4) into a per-`D` program.
 
 **F. The CDL bridge.** Theorem 6 sharpens [graded_prop.md §11](graded_prop.md#11-relation-to-categorical-deep-learning)'s relation to Categorical Deep Learning: CDL encodes equivariance as monad-algebras; Theorem 6 says *exactly when* that monad route equals the grading route (iff the monad is an action monad). Writing this out makes the two frameworks' equivariance accounts precisely comparable.
 
@@ -238,7 +255,7 @@ Phases 1–4 are done bar the non-compact analytics. The natural continuations, 
 
 ## References
 
-- [graded_prop.md](graded_prop.md) — the graded colored PROP framework; Prop 8.4 (the open problem), §9.3 (`D`-menu).
+- [graded_prop.md](graded_prop.md) — the graded colored PROP framework; Prop 8.4 (the open problem), [§9.3](graded_prop.md#93-the-horizontal-axis-swapping-d) (`D`-menu).
 - [future_ideas.md §6.5](future_ideas.md#65-swapping-the-index-d-as-a-dial-across-ml) and [Appendix A](future_ideas.md#appendix-a--index-categories-d-in-detail) — the three routes and the `Rep(G)` detail.
 - Mac Lane, *Categories for the Working Mathematician* — monads, Eilenberg–Moore, monadicity.
 - Bruguières, Lack, Virelizier, "Hopf monads on monoidal categories", *Advances in Mathematics* 227, 2011 — when `V^T` is monoidal and `U` strong monoidal (H3).
