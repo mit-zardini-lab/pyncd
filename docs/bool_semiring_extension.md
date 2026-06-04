@@ -1,6 +1,6 @@
 # Boolean Semiring Extension
 
-**Status:** Implemented (pyncd layer, torch compilation, composition typing, tsncd rendering, and tsncd equation notation complete; Iverson materialisation and embedding DSL deferred)  
+**Status:** Implemented (pyncd layer, torch compilation, composition typing, tsncd rendering, tsncd equation notation, Iverson materialisation — including logical negation and masked softmax/normalize — complete; embedding DSL deferred)  
 **Context:** Design notes for extending pyncd and tsncd to support the Boolean semiring `(𝔹, ∨, ∧)` alongside the existing arithmetic semiring `(ℝ, +, ×)`, enabling predicate tensors to be realised at the `Datatype` level.
 
 ---
@@ -115,7 +115,7 @@ tl.Y[i, j] = tl.W[i, k] * tl.X[k, j]
 
 **Contraction structure from UID identity.** `TensorEquation` stores `lhs_indices` (the output axes) and `rhs` (a tuple of `RHSFactor`s, each carrying their own axes). An axis whose UID appears in `lhs_indices` is *retained* (it appears in the output); an axis present only in `rhs` is *contracted* (summed over). There is no string parsing — axis identity is object identity, tracked by UID.
 
-**Compilation.** `TL.bc_signature()` compiles a single-equation registry to a `Broadcasted` type — the pyncd type of the resulting morphism. `TL.to_morphism()` produces the morphism itself; for multi-equation programs, it topologically sorts equations by dependency before compiling. `ConstructedModule.construct()` in `torch_compile` then lowers a `Broadcasted[B, A, TensorEquation]` to a PyTorch `nn.Module` via `ConstructedTensorEquation`, which runs the contraction as an einsum and applies the Heaviside step $H(x) = \mathbf{1}[x > 0]$ when the output weave carries `Bool()`. Pre-materialised Iverson tensors are passed as ordinary inputs in RHS factor order; their materialisation is a separate upstream step.
+**Compilation.** `TL.bc_signature()` compiles a single-equation registry to a `Broadcasted` type — the pyncd type of the resulting morphism. `TL.to_morphism()` produces the morphism itself; for multi-equation programs, it topologically sorts equations by dependency before compiling (it returns a `ThreadedComposed`). `ConstructedModule.construct()` in `torch_compile` then lowers a `Broadcasted[B, A, TensorEquation]` to a PyTorch `nn.Module` via `ConstructedTensorEquation`, which runs the contraction as an einsum and applies the Heaviside step $H(x) = \mathbf{1}[x > 0]$ when the output weave carries `Bool()`. Iverson factors are materialised automatically: a predicate whose axes all have concrete integer sizes is evaluated to a constant `{0,1}` buffer at construction time (registered on the module) and never appears in the caller's input list; a predicate with unsized axes falls back to a caller-supplied tensor in RHS factor order. See [§7 Iverson materialisation](#7-iverson-materialisation-and-masked-reductions).
 
 **Declarations.** Tensor names can be annotated before use with `.tensor()`, `.predicate()`, or `.selection()`. These record kind and shape metadata that enforce arity at subscript/assignment time and control axis promotion. `.selection()` promotes slots declared as `NatAxis` so the morphism carries the correct `Natural` datatype; `.predicate()` records the name as `Bool`-typed without promoting axes.
 
@@ -162,7 +162,7 @@ class IversonBinOp(fd.Term):
 
 @dataclass(frozen=True)
 class IversonUnaryOp(fd.Term):
-    op: str                    # 'abs', 'not', '-'
+    op: str                    # 'abs', '-', '~'  ('~' = logical negation)
     operand: IversonExpr
 
 type IversonExpr = sc.RawAxis | IversonConst | IversonBinOp | IversonUnaryOp
@@ -173,17 +173,27 @@ type IversonExpr = sc.RawAxis | IversonConst | IversonBinOp | IversonUnaryOp
 **Operator syntax.** Importing `TensorExpr` monkey-patches `RawAxis` with the comparison and arithmetic operators that build Iverson nodes. `__mul__` is intentionally excluded to avoid collision with tensor-product semantics in the DSL.
 
 ```python
-from data_structure.TensorExpr import iabs, ieq  # importing patches RawAxis
+from data_structure.TensorExpr import iabs, ieq, inot  # importing patches RawAxis
 
 q, x = axes('q x')
 pred = q < x           # IversonBinOp('<', q, x)
 pred = q <= x          # IversonBinOp('<=', q, x)
 pred = ieq(q, x)       # IversonBinOp('==', q, x)   — __eq__ can't be overridden on Term
+pred = (q < x) & (q < x)   # IversonBinOp('&', …, …)   — conjunction
+pred = (q < x) | ieq(q, x) # IversonBinOp('|', …, …)   — disjunction
 pred = iabs(q - x) < IversonConst(nm.Integer(3))
 #      IversonBinOp('<', IversonUnaryOp('abs', IversonBinOp('-', q, x)), IversonConst(3))
 ```
 
 `IversonBinOp` and `IversonUnaryOp` also define their own comparison and arithmetic operators so that compound expressions chain naturally: `(q - x) < IversonConst(nm.Integer(3))` works even when the left operand is itself an `IversonBinOp`.
+
+**Logical negation.** `~` builds an `IversonUnaryOp('~', …)`; `__invert__` is defined on `IversonBinOp`, `IversonUnaryOp`, and (via monkey-patch) `RawAxis`, and `inot()` is the convenience constructor. Negation materialises as the arithmetic complement $1 - x$ on a $\{0,1\}$ value (see [§7](#7-iverson-materialisation-and-masked-reductions)), so $\sim$ composes with `&`/`|` to give the full Boolean operator set:
+
+```python
+neg  = ~(q < x)            # IversonUnaryOp('~', IversonBinOp('<', q, x))
+neg2 = inot(ieq(q, x))     # IversonUnaryOp('~', IversonBinOp('==', q, x))
+# De Morgan, by hand: ~((q < x) | ieq(q, x))  ==  ~(q < x) & ~ieq(q, x)
+```
 
 **Using an Iverson factor in an equation.** An `IndexedTensor` — the object produced by subscripting a `TensorProxy`, e.g. `tl.Score[q, x]` — can be multiplied by an Iverson predicate to include it as a Bool-typed factor:
 
@@ -374,10 +384,36 @@ The `.predicate()` declaration is retained — it controls the Bool/Reals dispat
 
 ---
 
-### 7. What is not yet done
+### 7. Iverson materialisation and masked reductions
 
-- **Iverson materialisation** — inline Iverson factors (`q <= x`) are typed as `Bool` inputs in `bc_signature()` but have no runtime evaluation path in `torch_compile`. They must currently be pre-built as concrete tensors by the caller and passed in RHS factor order. A future materialisation step would evaluate `IversonExpr` trees to generate these tensors automatically.
-- **Embedding DSL** — `ops.Embedding.template()` is unchanged; the Iverson-based embedding derivation is possible but not exposed.
+Inline Iverson factors now have a runtime evaluation path (`torch_compile/materialise.py`), so a caller no longer has to pre-build masks for sized predicates.
+
+**`materialise_iverson(factor)`** evaluates an `IversonExpr` tree to a float `{0,1}` tensor by broadcasting one integer coordinate grid per axis. Operator semantics:
+
+| node | torch semantics |
+|---|---|
+| `<`, `<=`, `>`, `>=`, `==` | comparison → `{0,1}` float |
+| `&`, `\|` | `logical_and` / `logical_or` → `{0,1}` float |
+| `~` | `1 - v` (arithmetic complement of a `{0,1}` value) |
+| `abs` | `\|v\|` |
+| `+`, `-`, `*` | elementwise arithmetic (for index expressions inside a predicate) |
+
+It raises `ValueError` if any axis lacks a concrete integer size.
+
+**Auto-materialisation.** `ConstructedTensorEquation.__init__` walks `rhs`: each Iverson factor whose axes are all sized (`TensorLogic._iverson_is_materializable`) is materialised once and stored as a registered buffer (`_mask_i`); unsized ones warn and remain caller inputs. `bc_signature()` correspondingly **excludes** sized Iversons from `input_weaves`, so the morphism's domain stays pure `Reals` and composes cleanly — they are constants, not inputs. The buffer tensors are appended after the caller inputs when calling `einops.einsum`, matching the segment order in `generate_tensor_equation_signature`.
+
+**Masked softmax / normalize.** A predicate that gates a *reduction* (rather than a plain product) is expressed with a `where=` clause and compiled separately, because the gate is not a multiplicative factor of the einsum:
+
+```python
+tl.Attn[q, x] = softmax(tl.Score[q, x],     where=(x <= q))   # MaskedSoftMax
+tl.Out[p, m]  = normalize(tl.X[p, m],       where=(m <= p))   # MaskedNormalize
+```
+
+`SoftMax`/`Normalize` carry a `where_predicate` tuple; `TensorLogic._split_nonlinearity` routes a non-empty predicate to the `MaskedSoftMax` / `MaskedNormalize` operators (score einsum built from the tensor-only factors, then the masked reduction). At runtime the materialised mask sets excluded positions to $-\infty$ before `softmax` (so they vanish after exponentiation) or to $0$ before the `normalize` sum. Because these paths are *not* einsums, they cannot borrow einops' index-identity machinery, so they align the mask explicitly: `_compute_mask_alignment` permutes/broadcasts the mask onto the score tensor, and `_iverson_diagonal` collapses any axis that appears more than once in a single predicate to its diagonal first (the einsum-buffer path instead emits a repeated einops tag for the same effect — see the *PERFORMANCE TRADEOFF* note in `materialise_iverson`).
+
+### 8. What is not yet done
+
+- **Embedding DSL** — `ops.Embedding.template()` is unchanged; the Iverson-based embedding derivation (the `Natural → Bool` relation promotion of [Challenge 4](#challenge-4-the-embedding-chain)) is possible but not exposed.
 
 ---
 
@@ -403,7 +439,7 @@ A future refactor could split `B` into `B_in: tuple[Datatype, ...]` and `B_out: 
 
 **Fully resolved** for the torch compilation path.
 
-The promotion $\iota : \mathbb{B} \to \{0,1\} \subset \mathbb{R}$ is handled implicitly: pre-materialised Bool tensors are float tensors containing $0.0$ and $1.0$, so no explicit cast is needed. When a caller supplies a Mask or an inline Iverson tensor in RHS factor order, the values are already in $\{0,1\}$ by construction.
+The promotion $\iota : \mathbb{B} \to \{0,1\} \subset \mathbb{R}$ is handled implicitly: Bool tensors are float tensors containing $0.0$ and $1.0$, so no explicit cast is needed. Sized inline Iverson factors are produced this way automatically by `materialise_iverson` (see [§7](#7-iverson-materialisation-and-masked-reductions)); an unsized Mask or Iverson tensor supplied by the caller in RHS factor order is already in $\{0,1\}$ by construction.
 
 The demotion $H : \mathbb{R}_{\geq 0} \to \mathbb{B}$ is implemented in `ConstructedTensorEquation.forward`:
 
@@ -495,17 +531,19 @@ The combination of per-wire Bool styling, `𝔹` datatype anchors, and `∃`/`�
 
 | File | Change |
 |---|---|
-| `data_structure/TensorExpr.py` | **New.** `TensorRef`, `IversonConst`, `IversonBinOp`, `IversonUnaryOp`; `_factor_axes`, `_serialize_iverson`; `ieq`/`imul`/`iabs`; monkey-patches `RawAxis` operators |
+| `data_structure/TensorExpr.py` | **New.** `TensorRef`, `IversonConst`, `IversonBinOp`, `IversonUnaryOp`; `_factor_axes`, `_serialize_iverson`; `ieq`/`imul`/`iabs`/`inot`; `__invert__` (logical `~`) on the Iverson nodes; monkey-patches `RawAxis` operators (incl. `~`) |
 | `data_structure/BroadcastedCategory.py` | Add `Bool(Datatype)` |
-| `data_structure/Category.py` | Re-export `Bool` |
+| `data_structure/Category.py` | Re-export `Bool`; lazily re-export `TensorEquation`/`TensorProgram` via module `__getattr__` to break the `TensorLogic → Operators → Category` import cycle |
 | `data_structure/AxisAnnotations.py` | Delete `PredAxis` |
-| `data_structure/TensorLogic.py` | `rhs` type → `fd.Prod[TensorRef \| IversonBinOp \| IversonUnaryOp]`; `bc_signature` and `to_morphism` accept `array_datatypes`; `topological_sort` and `contracted_axes` use `_factor_axes` |
-| `data_structure/TensorDSL.py` | Remove `_pred_wrap`, PREDICATE axis promotion; `__setitem__` produces `TensorRef`; add `_array_datatypes()`; `RHSExpression` accepts Iverson factors; re-export `ieq`/`imul`/`iabs` |
-| `acset/instances.py` | Add `DataTag.BOOL`; add `ArrayRow.iverson_expr: str \| None` |
-| `acset/convert.py` | `_dt_fields` handles `Bool`; `_add_equation` dispatches `TensorRef` vs Iverson |
+| `data_structure/TensorLogic.py` | `rhs` type → `fd.Prod[TensorRef \| IversonBinOp \| IversonUnaryOp]`; `bc_signature` and `to_morphism` accept `array_datatypes`; `topological_sort` and `contracted_axes` use `_factor_axes`; `_iverson_is_materializable` excludes sized Iversons from the domain; `_split_nonlinearity` routes `where=` to masked ops; `_compute_mask_alignment`/`_iverson_diagonal` align masks |
+| `data_structure/TensorDSL.py` | Remove `_pred_wrap`, PREDICATE axis promotion; `__setitem__` produces `TensorRef`; add `_array_datatypes()`; `RHSExpression` accepts Iverson factors; re-export `ieq`/`imul`/`iabs`/`inot`; `where=` on `softmax`/`normalize`; `norm_axis` accepts an optional size |
+| `acset/instances.py` | Add `DataTag.BOOL`, `OpTag.MASKED_NORMALIZE`; add `ArrayRow.iverson_expr: str \| None` |
+| `acset/convert.py` | `_dt_fields` handles `Bool`; `_add_equation` dispatches `TensorRef` vs Iverson; serialise `MaskedSoftMax`/`MaskedNormalize` predicates |
 | `acset/csv_io.py` | Remove `PredAxis` from UID registry; add `iverson_expr` to arrays CSV read/write |
-| `torch_compile/torch_compile.py` | Add `generate_tensor_equation_signature`; add `ConstructedTensorEquation` (registered for `TensorEquation` operator; applies $H$ when `output_weave.datatype == Bool()`) |
-| `tests/test_torch_compile.py` | **New.** Signature generation, dispatch, Reals forward, Bool/Heaviside forward, pre-materialised Iverson interface |
+| `data_structure/Operators.py` | `SoftMax`/`Normalize` gain `where_predicate`; add `MaskedSoftMax`/`MaskedNormalize` operators carrying `iverson_factors` + `mask_alignments` |
+| `torch_compile/materialise.py` | **New.** `materialise_iverson` evaluates an `IversonExpr` tree to a `{0,1}` float tensor (comparisons, `&`/`\|`, `~`→`1-v`, `abs`, arithmetic) |
+| `torch_compile/torch_compile.py` | Add `generate_tensor_equation_signature`; `ConstructedTensorEquation` (registered for `TensorEquation`; auto-materialises sized Iversons as buffers; applies $H$ when `output_weave.datatype == Bool()`); `ConstructedMaskedSoftMax`/`ConstructedMaskedNormalize` (mask buffers, diagonal-collapsed, applied as $-\infty$/zero masks) |
+| `tests/test_torch_compile.py` | **New.** Signature generation, dispatch, Reals forward, Bool/Heaviside forward, Iverson materialisation (incl. `~`/`inot`), auto-materialised buffers, masked normalize |
 | `construction_helpers/composition.py` | `align_axes` raises `TypeError` on datatype mismatch |
 | `tests/test_composition.py` | **New.** 8 tests for matching and mismatching datatype composition |
 | `data_structure/BroadcastedCategory.py` | `iverson_expr: str \| None` added to `Weave` and `Array`; forwarded in `target()` and `imprint_to_degree()` |
