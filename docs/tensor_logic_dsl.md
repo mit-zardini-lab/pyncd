@@ -421,16 +421,40 @@ order; base and per-step inputs are likewise grouped per state in that order.
 ### Pre-built step morphism
 
 When a step is too complex for one equation (e.g. a whole transformer layer built
-from another `TL` session), register the morphism directly with `recur`:
+from another `TL` session), register the morphism directly with `recur`. The step
+**must be a morphism that takes the current state as its sole input and returns the
+next state** (same shape); it is invoked once per step as `step(H)`, with no per-step
+external inputs. The base case is still given by `tl.H[..., 0] = …`.
+
+Here the step is a self-contained block built in its own `TL` session — its single
+external tensor (`In`) is the state slot:
 
 ```python
-l = real_axis('l', L)
-x, m = axes('x m')
+def relu_step():
+    """A state -> state step morphism: applies ReLU to the current state."""
+    inner = TL()
+    x, m = axes('x m')
+    inner.Out[x, m] = relu(inner.In[x, m])   # 'In' is the (sole) state input
+    return inner.to_morphism()
+
+l = real_axis('l', 3)
+x, m = real_axis('x', 2), real_axis('m', 2)
 tl = TL()
-tl.H[x, m, 0] = tl.X[x, m]            # base
-tl.H.recur(l, transformer_layer())    # step: a pre-built morphism (state in → state out)
-morphism = tl.to_morphism()
+tl.H[x, m, 0] = tl.X[x, m]            # base:  H[...,0] = X
+tl.H.recur(l, relu_step())            # step:  H[...,l+1] = relu(H[...,l])
+
+mod = ConstructedModule.construct(tl.to_morphism())
+X = torch.tensor([[-1., 2.], [3., -4.]])
+out = mod(X)
+H = out[0] if isinstance(out, tuple) else out
+assert H.shape == (2, 2, 4)                       # (*state, N+1)
+assert torch.allclose(H[..., 0], X)               # base
+assert torch.allclose(H[..., 1], X.clamp(min=0))  # one ReLU step
 ```
+
+A real transformer layer follows the same contract: a pre-built morphism whose only
+input is the state and whose weights are already bound inside it (so it exposes no
+extra per-step inputs) — substitute it for `relu_step()` above.
 
 ### Associative-scan fast path
 
