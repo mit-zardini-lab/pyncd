@@ -107,6 +107,26 @@ So the symmetry-monad condition (a), the `BG`-graded index (b), and the `Rep(G)`
 
 **Corollary 4 (St is the translation instance).** Take `G = ℤⁿ` (discrete translations). `[BG, Set]` is `ℤⁿ`-sets and `[BG, Vect]` is `ℤⁿ`-representations; the lift's affine offsets ([future_ideas.md Appendix A.1](future_ideas.md#a1-d--st-axes)) realize the `G`-action, so the translation-equivariant CNN is `Alg(C, V^{T_{ℤⁿ}})` — confirming "St with the translation symmetry = grading over `B(ℤⁿ)`."
 
+### 4.1 Base ⊗ fiber: the action groupoid (Phase 3 completed)
+
+[future_ideas.md Appendix A.2](future_ideas.md#a2-d--group-bg-base-repg-fibers) flagged that a full steerable network grades over *both* a base/spatial role (`BG`, group convolution) and a fiber role (`Rep(G)`), and asked how the two combine. They do **not** combine as two separate gradings to be composed; they are **one `G` acting diagonally on the field category** — translating the base and transforming the fiber at once — and Theorem 2 then applies verbatim. The organizing object is the **action groupoid** `B ⋊ G`.
+
+**Proposition 5 (base–fiber unification).** Let `G` act on a base `B`, and let the field category `V_B := [B, \mathbf{Vect}]` carry the *induced* action monad `T_G^B` with `(T_G^B F)(x) = \bigoplus_{g∈G} F(g^{-1}·x)` (unit = identity component, multiplication = group law). Then:
+
+1. `V_B^{T_G^B} ≃ [B ⋊ G, \mathbf{Vect}]` — the category of `G`-equivariant vector bundles over `B`, i.e. **steerable feature fields**. *(This is Theorem 1 with `V := V_B` and `T := T_G^B`: a `T_G^B`-algebra is a functor out of the action groupoid `B ⋊ G` — objects = points of `B`, morphisms `(g : x → g·x)` — which is exactly an equivariant bundle.)*
+2. `Rep(G)` is the **point-base** instance `B = ⋆`: then `⋆ ⋊ G = BG` and `[BG, \mathbf{Vect}] = Rep(G)`.
+3. Hence steerable equivariant `C`-algebras are `Alg(C, V_B^{T_G^B})` by **Theorem 2** — the *same* theorem, with the field category as target and the *base* action monad. Base equivariance and fiber equivariance are one `G`-action, not two.
+
+**Proof.** (1) Apply Theorem 1 to `V_B` with the induced action monad; its Eilenberg–Moore algebras are functors `B ⋊ G → \mathbf{Vect}`, and presheaves on the action groupoid are precisely `G`-equivariant bundles over `B` (standard). (2) `⋆ ⋊ G = BG`, and Theorem 1 gives `[BG, \mathbf{Vect}] = \mathbf{Vect}^{T_G} = Rep(G)`. (3) Theorem 2 with `V := V_B`, `T := T_G^B`; `V_B` is a `D`-actegory for any *remaining* (non-spatial) broadcasting, and (H4) holds because `G` acts only on `B`, leaving that broadcasting untouched. ∎
+
+**Remark (the two appendix rows are two extremes of one construction).** Varying the base interpolates between the appendix's `BG` and `Rep(G)` cells:
+
+- `B = ⋆` → `[BG, \mathbf{Vect}] = Rep(G)` — the pure **fiber** (no space): maximal fiber constraint.
+- `B = G/H` (a homogeneous space) → `[B ⋊ G, \mathbf{Vect}] ≃ Rep(H)` — feature fields on `G/H` correspond to representations of the stabilizer `H` (Mackey / the standard GDL dictionary).
+- `B = G` (free regular action) → `[G ⋊ G, \mathbf{Vect}] ≃ \mathbf{Vect}` — pure **convolution**: a field over the free `G`-space is determined by its value at one point, so the constraint is carried entirely spatially.
+
+So `BG`-base and `Rep(G)`-fiber are the `B = G` (or `G/H`) and `B = ⋆` ends of the single action-groupoid construction `B ⋊ G`; a general steerable net sits in between.
+
 ---
 
 ## 5. Scope and failure boundary (Phase 4 preview)
@@ -124,7 +144,7 @@ Theorem 2 holds **exactly** for symmetries that are group/monoid actions; the hy
 - **Phase 0** (precise statement, comparison functor) — folded into §1 and the route table.
 - **Phase 1** (object kernel) — **done**: Theorem 1 + Prop 1′ (classical; full proof above).
 - **Phase 2** (algebra lift) — **done**: Lemma 2 + Theorem 2.
-- **Phase 3** (reconcile `Rep(G)`) — **done** as Cor. 3 / the `V = Vect` instance.
+- **Phase 3** (reconcile `Rep(G)`, and base ⊗ fiber) — **done**: Cor. 3 (the `V = Vect` instance) plus Prop 5 (§4.1), which unifies base and fiber via the action groupoid `B ⋊ G` — `Rep(G)` is `B = ⋆`, convolution is `B = G/H`.
 - **Phase 4** (scope) — characterized in §5; the converse (`V^T ⊋ [BG,V]` for non-action monads) is sketched, not fully written.
 - **Phase 5** (Lean) — finite `G` is reachable: Mathlib has `CategoryTheory.Monad.Algebra` (Eilenberg–Moore), `Action`/`Rep G`, and monoidal-functor categories; the target is `Action V G ≃ V^{T_G}` and `Alg(C, −)` preserving it. Continuous `G` is out of reach (no enriched/smooth category theory in Mathlib).
 
