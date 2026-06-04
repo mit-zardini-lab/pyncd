@@ -502,11 +502,13 @@ What remains is therefore one refactor and one design choice. The refactor abstr
 
 The *horizontal* generalization of [§2.4](#24-weaves-are-not-a-br-thing--they-are-the-cartesian-lift-datum-of-a-graded-prop) keeps `C` a category of operations but grades it over an index `D` other than St — not stacking a level ([§6.4](#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles)) but **swapping what "an axis" is**. Choosing `D` fixes what "an axis," "a reindexing," and "broadcasting" mean, so the *same* weave/lift/fusion machinery retargets at different subfields of ML:
 
-Recall the two-level structure each row instantiates: a **`C`-wire** is an array whose *shape* is a `D`-object (thick wires), and a **`C`-operation** is a base op broadcast over `D`, with the reindexings being `D`-morphisms. Spelling out the objects and morphisms of *both* levels:
+In every row both `D` and `C` are colored PROPs ([graded_prop.md §2](graded_prop.md#2-preliminaries-colored-props)): a **color** is an atomic wire type, an **object** is a finite product (`⊗`) of colors, and a **morphism** runs between two such products (with symmetries permuting wires). The two levels are tied together by the **shape map** `sh` ([graded_prop.md §3.1](graded_prop.md#31-data)): every `C`-color's shape is a `D`-*object* — a product of `D`-colors — so a single `C`-wire unzips into `D`-coloured sub-wires (this is what "thick wires" means). A `C`-morphism is then a base operation acting on the sub-wires it consumes (its *target* sub-wires), broadcast over a degree `P ∈ Ob D` whose coordinates are supplied by per-input reindexings `ηᵢ : P → Qᵢ` — and those `ηᵢ` are precisely `D`-morphisms. So **`D`'s colors are what `C`'s wires are built from, and `D`'s morphisms are how `C`'s operations index into them.**
 
-| `D` | objects of `D` | morphisms of `D` (reindexings) | objects of `C` (wires) | morphisms of `C` (operations) | recovers |
+Concretely at `D = St`: the `D`-colors are axes (integer lengths) and the `D`-morphisms are affine strides; a `C`-color is an array `[dtype, shape]`, whose shape unzips into those axes; a `C`-morphism is a `Broadcasted` op acting on its target axes, reindexed over the degree by strides. Reading *down* the table, swapping `D` swaps all four middle columns in lockstep — what a sub-wire is, how it is reindexed, what a whole wire is, and what an operation does:
+
+| `D` | colors of `D` | morphisms of `D` (reindexings) | colors of `C` (wires) | morphisms of `C` (operations) | recovers |
 | --- | --- | --- | --- | --- | --- |
-| `St` | axes / shapes (integer lengths) | affine strides | arrays `[dtype, shape]` | broadcasted tensor ops | tensor programs, CNNs (translation-equivariant) |
+| `St` | axes (integer lengths) | affine strides | arrays `[dtype, shape]` | broadcasted tensor ops | tensor programs, CNNs (translation-equivariant) |
 | group `BG` / `Rep(G)` | the group / `G`-reps | group elements (translations), intertwiners | rep-valued feature fields | equivariant maps, group convolution | equivariant & steerable nets |
 | graph / incidence cat. | nodes | edges, paths (adjacency) | per-node feature signals | message-passing layers | GNNs, meshes, molecules |
 | metric / enriched cat. | points | distances (kernels) | fields over the domain | continuous conv, kernel maps | point clouds, neural fields |
