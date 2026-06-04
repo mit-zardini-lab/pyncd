@@ -8,7 +8,7 @@
 - **(b) base grading** — `D = BG`, the delooping of a group `G` (group convolution; [future_ideas.md Appendix A.2](future_ideas.md#a2-d--group-bg-base-repg-fibers));
 - **(c) fiber grading** — `D = Rep(G)` (steerable features; [same appendix](future_ideas.md#a2-d--group-bg-base-repg-fibers)).
 
-This note carries out **Phase 1** (the object-level kernel) and **Phase 2** (lifting to algebras of a graded PROP), reducing the question to a single, classical equivalence and proving the three routes agree under explicit hypotheses. The boundary analysis (Phase 4) is previewed; a Lean target (Phase 5) is noted.
+This note carries out **Phase 1** (the object-level kernel), **Phase 2** (lifting to algebras of a graded PROP), **Phase 3** (base ⊗ fiber, §4.1), and **Phase 4.1–4.2** (the sharp scope and the symmetry-on-the-broadcasting case, §5): it reduces the question to a single classical equivalence, proves the three routes agree, makes the agreement an "iff" (coincidence ⟺ action monad), and recovers DeepSets as the degree-permutation instance. Only the continuous/non-compact-`G` analytics (4.3) and the Lean formalization (Phase 5) remain.
 
 **Result.** For a group (or monoid) `G`, all three routes compute one and the same category — `C`-algebras valued in the `G`-objects of the target — so they coincide. The proof is: *(1)* the three presentations of "a `G`-object" are monoidally equivalent (Phase 1, classical), and *(2)* `Alg(C, −)` preserves monoidal equivalences (Phase 2, standard 2-functoriality). The coincidence is therefore a theorem, with scope exactly the *action (Hopf) monads*; for symmetry monads carrying extra relations the routes provably diverge (§5).
 
@@ -129,13 +129,47 @@ So `BG`-base and `Rep(G)`-fiber are the `B = G` (or `G/H`) and `B = ⋆` ends of
 
 ---
 
-## 5. Scope and failure boundary (Phase 4 preview)
+## 5. Scope and failure boundary (Phase 4)
 
-Theorem 2 holds **exactly** for symmetries that are group/monoid actions; the hypotheses pinpoint where it breaks.
+Theorem 2 holds **exactly** for symmetries that are group/monoid actions. §5.1 makes this an "iff" (4.1); §5.2 handles symmetries that act *on* the broadcasting (4.2); §5.3 is the still-open analytic case (4.3).
 
-- **(H1)/(H3) are sharp.** The argument uses, essentially only, that `T` is an **action (Hopf) monad** — that its Eilenberg–Moore category is `[BG, V]`. A monad `T` carrying *relations beyond a bare action* (a non-free `G`-action; a monad whose Lawvere theory is not `BG`; a monad for a richer algebraic structure) has `V^T ⊋ [BG, V]`, and routes (a) and (b) **genuinely diverge**. Thus: *the three routes coincide iff the symmetry monad is the action monad of a group/monoid (iff its presentation is `BG`).* This is the precise closure — a theorem with scope, not a yes/no.
-- **(H4) is load-bearing.** If the symmetry acts on the *broadcasting itself* (the `G`-action does not commute with `⊛`), one needs a distributive law `T_G ⊛ ⇒ ⊛ T_G` and `V^{T_G}` is a `D`-actegory only when it exists; absent it, the equivalence need not descend to algebras.
-- **Continuous `G`.** For a Lie group, `BG` must be enriched (topological/smooth) and `Vect^{T_G} ≃ Rep(G)` needs compactness/semisimplicity (Peter–Weyl); finite `G` is unconditional, compact `G` needs the representation theory, non-compact `G` may fail (no semisimplicity). The categorical skeleton (Theorems 1–2) is identical; only the analytic hypotheses on the copower/completeness change.
+### 5.1 The recognition theorem — coincidence ⟺ action monad
+
+**Theorem 6 (recognition).** Fix a group (or monoid) `G` and let `V` be cocomplete symmetric monoidal. For a monad `T` on `V`, the following are equivalent:
+
+1. route (a) with `T` coincides with the `BG`-grading route (b) — i.e. `V^T ≃ [BG, V]` as categories **over `V`** (the equivalence commutes with the forgetful functors to `V`);
+2. `T ≅ T_G = G ⊗ (−)` as monads on `V`;
+3. `T`'s Lawvere/PROP presentation is `BG`.
+
+Hence the three routes of Theorem 2 coincide **iff** the symmetry monad is an action monad.
+
+**Proof.** (2)⟹(1) is Theorem 1. (1)⟹(2): the forgetful `U : [BG,V] → V` is monadic, with monad `T_G` (left adjoint `T_G = G⊗(−)`, and `[BG,V] = V^{T_G}` by Theorem 1). The forgetful `U_T : V^T → V` is monadic with monad `T` by definition of the Eilenberg–Moore category. An equivalence `Φ : V^T ≃ [BG,V]` **over `V`** (`U ∘ Φ ≅ U_T`) is an equivalence of monadic functors; the monad of a monadic functor is recovered as forgetful-∘-its-left-adjoint and is unique up to isomorphism, so `T ≅ T_G`. (2)⟺(3): `G⊗(−)` is the monad presented by the theory `BG` — one unary operation per element of `G`, relations = the group/monoid law, nothing more. ∎
+
+The phrase **"over `V`"** carries the weight and is exactly what the framework means by "the routes coincide": both `V^T` and `[BG,V]` come with their forgetful functors to `V` (forget the equivariance), and coincidence is an equivalence respecting them. An abstract equivalence of categories is *not* enough — `G`-Set and `H`-Set can be abstractly equivalent for non-isomorphic `G, H`, but never over `Set`.
+
+**Remark (necessity has teeth — counterexamples).** Drop the action-monad hypothesis and the routes provably diverge. The decisive invariant is that **an action monad preserves coproducts** — `T_G(∐_i X_i) ≅ ∐_i T_G(X_i)` and `T_G(∅) = ∅` — being "linear" in its argument.
+
+- *Free-monoid (list) monad* `T_{list}(X) = X^*` on `Set`: `Set^{T_{list}} = Mon` (monoids). It is **not** an action monad — `T_{list}(∅) = \{ε\} = 1 ≠ ∅`, so it fails to preserve the initial object — hence `Mon ≇ [BG,Set] = G\text{-Set}` over `Set` (coproduct of monoids is the free product, not disjoint union). A "`T_{list}`-equivariant" `C`-algebra (valued in monoids) is not any `BG`-graded one.
+- *Action-with-a-relation*: the monad for "`G`-action together with a fixed invariant element" (or a commuting idempotent) has `V^T` strictly larger than `[BG,V]` — its algebras carry the `G`-action *plus* the extra structure. This is the framework's intended failure mode: **relations beyond a bare action push `V^T` off the `[BG,V]` locus**, and routes (a)/(b) separate.
+
+### 5.2 Symmetry acting on the broadcasting (dropping H4)
+
+H4 assumed `G` commutes with `⊛`. The interesting failure is when `G` acts *on the degree itself* — set/permutation symmetry. It splits cleanly.
+
+**Proposition 7 (degree-permutation is internal to `D`; DeepSets recovered).** Suppose `G` acts on the degree object `P` by `D`-**automorphisms**, `ρ : G → Aut_D(P)`. Then no symmetry monad is needed: the action is realized by reindexings `act(−, ρ(g)) = [−, ρ(g)]` *already in the framework*, and a broadcasted morphism `g = [f, P]` is `G`-equivariant iff it is fixed by them. For the canonical case `G = S_n` permuting the `n` identical coordinates of a degree `P = A^{⊗ n}` (a set of `n` inputs), `S_n ⊆ Aut_D(P)` is the **symmetric-monoidal symmetry `σ` of the colored PROP itself**, and `act(−, σ)` is automatically natural (functoriality of `act` in `Dᵒᵖ`). Consequently:
+
+- the **tiling** part (the base op broadcast over `P`) is `S_n`-equivariant *unconditionally* — the base op runs identically at each coordinate;
+- the **output weave** (the aggregation over the permuted coordinates) is `S_n`-equivariant **iff** it is a symmetric aggregation (sum / mean / max / any `S_n`-invariant reduction).
+
+This **recovers the DeepSets theorem**: a set-function layer is permutation-invariant iff its aggregation is symmetric (`ρ(∐_x φ(x))` form). Equivariance over the degree is not added structure — it is the PROP's own symmetry — and the only real condition lands on the output weave.
+
+*Proof.* `Aut_D(P)` acts on the image of `act(−,P)` through `act(−, σ)` by functoriality of the lift; uniformity of the lift makes the input/tiling side invariant automatically; the output side contracts the `n` coordinates and is `S_n`-invariant iff that contraction is symmetric. ∎
+
+**Proposition 8 (general entanglement ⟺ a distributive law).** If `G` acts on the degree but **not** by `D`-automorphisms, then `V^{T_G}` is a `D`-actegory — and Theorem 2 still lifts — **iff** there is a distributive law `λ : T_G ∘ ⊛ ⇒ ⊛ ∘ T_G` satisfying the Beck axioms. By Beck's theorem (`distributive laws T∘S ⇒ S∘T` ⟺ liftings of `S` to `V^T`), such a `λ` lifts the `⊛`-action to `V^{T_G}`; the Phase-1 monoidal equivalence then upgrades to a `D`-actegory equivalence and Lemma 2 / Theorem 2 go through, giving `Alg_T(C,V) ≃ Alg(C, V^{T_G})`. When no coherent `λ` exists the routes need not agree. So **H4 can be dropped exactly when a distributive law `T_G ⊛ ⇒ ⊛ T_G` exists**; Prop 7 is the special case where `λ` is the canonical symmetry and always exists. ∎
+
+### 5.3 Continuous `G` (still open analytically)
+
+For a Lie group, `BG` must be enriched (topological/smooth) and `Vect^{T_G} ≃ Rep(G)` needs compactness/semisimplicity (Peter–Weyl). Finite `G` is unconditional (§5.1–5.2); compact `G` needs the representation theory; **non-compact `G` may genuinely fail** (no semisimplicity). The categorical skeleton (Theorems 1–2, 6–8) is identical — only the copower/completeness and the analytic hypotheses on the enriched `Alg(C,−)` change. This is the one part of Phase 4 not closed.
 
 ---
 
@@ -145,7 +179,7 @@ Theorem 2 holds **exactly** for symmetries that are group/monoid actions; the hy
 - **Phase 1** (object kernel) — **done**: Theorem 1 + Prop 1′ (classical; full proof above).
 - **Phase 2** (algebra lift) — **done**: Lemma 2 + Theorem 2.
 - **Phase 3** (reconcile `Rep(G)`, and base ⊗ fiber) — **done**: Cor. 3 (the `V = Vect` instance) plus Prop 5 (§4.1), which unifies base and fiber via the action groupoid `B ⋊ G` — `Rep(G)` is `B = ⋆`, convolution is `B = G/H`.
-- **Phase 4** (scope) — characterized in §5; the converse (`V^T ⊋ [BG,V]` for non-action monads) is sketched, not fully written.
+- **Phase 4** (scope) — **4.1 done** (Theorem 6: coincidence ⟺ action monad, by monadicity + uniqueness, with the free-monoid-monad counterexample, §5.1); **4.2 done** (Prop 7: degree-permutation is the PROP's own symmetry, recovering DeepSets; Prop 8: general entanglement ⟺ a Beck distributive law, §5.2); **4.3 open** (continuous/non-compact `G`, §5.3).
 - **Phase 5** (Lean) — finite `G` is reachable: Mathlib has `CategoryTheory.Monad.Algebra` (Eilenberg–Moore), `Action`/`Rep G`, and monoidal-functor categories; the target is `Action V G ≃ V^{T_G}` and `Alg(C, −)` preserving it. Continuous `G` is out of reach (no enriched/smooth category theory in Mathlib).
 
 **Net:** the open problem is closed in the affirmative for group/monoid symmetries — it is the classical `V^{T_G} ≃ [BG, V] ≃ Rep(G)` equivalence transported through `Alg(C, −)` — with the failure mode (non-action monads) characterizing its exact scope.
@@ -158,4 +192,6 @@ Theorem 2 holds **exactly** for symmetries that are group/monoid actions; the hy
 - [future_ideas.md §6.5](future_ideas.md#65-swapping-the-index-d-as-a-dial-across-ml) and [Appendix A](future_ideas.md#appendix-a--index-categories-d-in-detail) — the three routes and the `Rep(G)` detail.
 - Mac Lane, *Categories for the Working Mathematician* — monads, Eilenberg–Moore, monadicity.
 - Bruguières, Lack, Virelizier, "Hopf monads on monoidal categories", *Advances in Mathematics* 227, 2011 — when `V^T` is monoidal and `U` strong monoidal (H3).
-- Standard: `Rep(G) = [BG, Vect] = k[G]\text{-Mod}` (the action monad's modules).
+- Beck, "Distributive laws", 1969 — distributive laws `T∘S ⇒ S∘T` ⟺ liftings of `S` to `V^T` (Prop 8).
+- Zaheer et al., "Deep Sets", NeurIPS 2017 — permutation-invariant set functions as `ρ(∐ φ)` (recovered by Prop 7).
+- Standard: `Rep(G) = [BG, Vect] = k[G]\text{-Mod}` (the action monad's modules); monadicity and uniqueness of the monad of a monadic functor (Theorem 6).
