@@ -16,6 +16,7 @@ This note carries out **Phase 1** (the object-level kernel), **Phase 2** (liftin
 
 ## Contents
 
+- [The attack plan](#the-attack-plan)
 - [1. Setup and notation](#1-setup-and-notation)
 - [2. Phase 1 — the object-level kernel](#2-phase-1--the-object-level-kernel)
 - [3. Phase 2 — lifting to algebras of `C`](#3-phase-2--lifting-to-algebras-of-c)
@@ -28,6 +29,19 @@ This note carries out **Phase 1** (the object-level kernel), **Phase 2** (liftin
 - [6. Status of the attack plan](#6-status-of-the-attack-plan)
 - [Appendix — Next steps](#appendix--next-steps)
 - [References](#references)
+
+---
+
+## The attack plan
+
+The closure proceeds in six phases; their status is tracked in [§6](#6-status-of-the-attack-plan).
+
+- **Phase 0** — pin the precise statement and the comparison functor (folded into [§1](#1-setup-and-notation) and the route table).
+- **Phase 1** — the object-level kernel: identify the action monad's algebras with the delooping presheaves ([§2](#2-phase-1--the-object-level-kernel)).
+- **Phase 2** — lift that equivalence to algebras of the graded PROP ([§3](#3-phase-2--lifting-to-algebras-of-c)).
+- **Phase 3** — reconcile the fiber leg `Rep(G)` and unify base ⊗ fiber ([§4.1](#41-base--fiber-the-action-groupoid-phase-3-completed)).
+- **Phase 4** — the scope and failure boundary: the recognition "iff" (4.1), symmetries acting on the broadcasting (4.2), and continuous `G` (4.3) ([§5](#5-scope-and-failure-boundary-phase-4)).
+- **Phase 5** — Lean formalization ([Appendix A](#appendix--next-steps)).
 
 ---
 
