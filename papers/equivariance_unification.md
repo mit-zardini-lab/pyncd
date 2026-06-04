@@ -47,7 +47,7 @@ The closure proceeds in six phases; their status is tracked in [§6](#6-status-o
 
 ## 1. Setup and notation
 
-We use the definitions of [graded_prop.md](graded_prop.md): a `D`-graded colored PROP `C` (Def 3.1) with shape map `sh : O_C → Ob D` and lift action `act : C × Dᵒᵖ ⥤ C`; a **target** `D`-actegory `V` (Def 7.1, symmetric monoidal with a compatible `D`-action `⊛_V`); and an **algebra** `F : C → V` (Def 7.2): a strong symmetric monoidal, `D`-equivariant functor. Write `Alg(C, V)` for the category of algebras and monoidal natural transformations.
+We use the definitions of [graded_prop.md](graded_prop.md): a `D`-graded colored PROP `C` ([Def 3.1](graded_prop.md#31-data)) with shape map `sh : O_C → Ob D` and lift action `act : C × Dᵒᵖ ⥤ C`; a **target** `D`-actegory `V` ([Def 7.1](graded_prop.md#7-algebras-construct-and-the-para-refinement), symmetric monoidal with a compatible `D`-action `⊛_V`); and an **algebra** `F : C → V` ([Def 7.2](graded_prop.md#7-algebras-construct-and-the-para-refinement)): a strong symmetric monoidal, `D`-equivariant functor. Write `Alg(C, V)` for the category of algebras and monoidal natural transformations.
 
 **The group and its action monad.** Let `G` be a group (the monoid case is identical wherever invertibility is not invoked). On `V`, the **action monad** is the `G`-fold copower
 
@@ -116,7 +116,7 @@ Alg(C, W)  ≃  Alg(C, W') .
 
 **The three routes, precisely.**
 
-- **Route (a).** By Prop 8.4 a `T_G`-equivariant algebra is a lift of `F` through `U : V^{T_G} → V`; the category of such lifts *is* `Alg(C, V^{T_G})`.
+- **Route (a).** By [Prop 8.4](graded_prop.md#8-propositions-the-synthesis-organizes) a `T_G`-equivariant algebra is a lift of `F` through `U : V^{T_G} → V`; the category of such lifts *is* `Alg(C, V^{T_G})`.
 - **Route (b).** Grading the index by `BG` makes the lift `act(−, g)` act on each wire by `g ∈ G`; an algebra must transport this to a `G`-action on each value, i.e. land in `[BG, V]`. So `Alg(C_{BG}, V) = Alg(C, [BG, V])`. *(This is the faithful unfolding of "graded over `BG`": for a group, building `G` into the source index and valuing in `G`-objects of the target are the same data — a coincidence special to one-object groupoids, and the reason the question has a clean answer.)*
 - **Route (c).** The `V = Vect` instance of (a): `Alg(C, Vect^{T_G}) = Alg(C, Rep(G))`.
 
@@ -134,7 +134,7 @@ So the symmetry-monad condition (a), the `BG`-graded index (b), and the `Rep(G)`
 
 ## 4. Corollaries and base ⊗ fiber (Phase 3)
 
-**Corollary 3 (the open problem, resolved).** Under (H1)–(H4) the Prop 8.4 conjecture holds: the symmetry-monad and `BG`-grading routes to equivariance give equivalent categories of equivariant algebras, and `Rep(G)` is the fiber (`V = Vect`) instance. Geometric deep learning is recovered identically by all three.
+**Corollary 3 (the open problem, resolved).** Under (H1)–(H4) the [Prop 8.4](graded_prop.md#8-propositions-the-synthesis-organizes) conjecture holds: the symmetry-monad and `BG`-grading routes to equivariance give equivalent categories of equivariant algebras, and `Rep(G)` is the fiber (`V = Vect`) instance. Geometric deep learning is recovered identically by all three.
 
 **Corollary 4 (St is the translation instance).** Take `G = ℤⁿ` (discrete translations). `[BG, Set]` is `ℤⁿ`-sets and `[BG, Vect]` is `ℤⁿ`-representations; the lift's affine offsets ([future_ideas.md Appendix A.1](future_ideas.md#a1-d--st-axes)) realize the `G`-action, so the translation-equivariant CNN is `Alg(C, V^{T_{ℤⁿ}})` — confirming "St with the translation symmetry = grading over `B(ℤⁿ)`."
 
