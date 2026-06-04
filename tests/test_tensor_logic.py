@@ -6,7 +6,7 @@ import data_structure.ProductCategory as pc
 from data_structure.TensorLogic import TensorEquation, TensorProgram, topological_sort
 from data_structure.TensorExpr import TensorRef
 from data_structure.TensorDSL import NormAxis
-from data_structure.ProductCategory import Composed
+from data_structure.ProductCategory import ThreadedComposed
 from data_structure.StrideCategory import RawAxis, Axis
 from data_structure.Operators import Identity, SoftMax
 
@@ -212,7 +212,7 @@ def test_tensor_program_single_equation():
     )
     prog = TensorProgram(equations=(eq,))
     morphism = prog.to_morphism()
-    assert isinstance(morphism, Composed)
+    assert isinstance(morphism, ThreadedComposed)
     assert len(morphism.content) == 1
 
 
@@ -245,7 +245,7 @@ def test_tensor_program_two_equation_chain():
     )
     prog = TensorProgram(equations=(eq1, eq2))
     morphism = prog.to_morphism()
-    assert isinstance(morphism, Composed)
+    assert isinstance(morphism, ThreadedComposed)
     assert len(morphism.content) == 2
 
 
@@ -432,7 +432,7 @@ def _gram_program():
 def test_self_join_composed_length():
     prog, *_ = _gram_program()
     morphism = prog.to_morphism()
-    assert isinstance(morphism, Composed)
+    assert isinstance(morphism, ThreadedComposed)
     assert len(morphism.content) == 2
 
 
@@ -519,7 +519,7 @@ def test_to_morphism_declarations_accepted():
     morphism = TensorProgram(equations=(eq,)).to_morphism(
         declarations={fd.DynamicName('Y'): (d_i, d_j)}
     )
-    assert isinstance(morphism, Composed)
+    assert isinstance(morphism, ThreadedComposed)
     assert len(morphism.content) == 1
 
 
@@ -529,7 +529,7 @@ def test_to_morphism_unknown_declaration_is_ignored():
     morphism = TensorProgram(equations=(eq,)).to_morphism(
         declarations={fd.DynamicName('UNKNOWN'): (RawAxis.named('z'),)}
     )
-    assert isinstance(morphism, Composed)
+    assert isinstance(morphism, ThreadedComposed)
 
 
 # ── bug-exposing tests (expected to fail until bugs are fixed) ───────────────
