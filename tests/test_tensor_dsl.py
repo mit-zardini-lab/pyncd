@@ -759,3 +759,12 @@ def test_invert_on_rawaxis():
     negated = ~q
     assert isinstance(negated, IversonUnaryOp)
     assert negated.op == '~'
+
+
+def test_inot_exported_from_tensordsl():
+    """inot is importable from TensorDSL alongside ieq, imul, iabs."""
+    from data_structure.TensorDSL import inot
+    q = real_axis('q', 4)
+    expr = inot(q)
+    assert isinstance(expr, IversonUnaryOp)
+    assert expr.op == '~'

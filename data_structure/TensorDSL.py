@@ -13,7 +13,7 @@ from data_structure.TensorLogic import TensorEquation, TensorProgram
 from data_structure.TensorExpr import (
     TensorRef, IversonBinOp, IversonUnaryOp,
     IversonExpr,
-    ieq, imul, iabs,
+    ieq, imul, iabs, inot,
 )
 from data_structure.AxisAnnotations import NormAxis, NatAxis
 
