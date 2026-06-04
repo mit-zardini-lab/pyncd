@@ -34,6 +34,7 @@ This document fuses three lines of thinking developed in [theory.md](theory.md) 
    - [Free algebras and certified initialization](#63-free-algebras-and-certified-initialization)
    - [Stacking levels: weaves over models (MoE, ensembles)](#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles)
    - [Swapping the index: `D` as a dial across ML](#65-swapping-the-index-d-as-a-dial-across-ml)
+   - [Beyond ML: tensor networks for quantum systems](#66-beyond-ml-tensor-networks-for-quantum-systems)
 7. [The Deepest Structural Connection](#7-the-deepest-structural-connection)
 8. [Prioritized Implementation Roadmap](#8-prioritized-implementation-roadmap)
    - [Tier 1 — High impact, low cost, foundations exist](#tier-1--high-impact-low-cost-foundations-exist)
@@ -526,6 +527,16 @@ Second, **one law cuts across every row**: a *structural / fixed* reindexing →
 Honest scope: only St (and the translation/permutation fragment of the group row) is implemented; every other row is a conceptual instance, each needing its own reindexing layer — all gated on the same `D`-genericity refactor (roadmap 4.4) that unlocks MoE in §6.4. The claim is structural, not yet executable: GDL, GNNs, neural fields, pooling, and stochastic layers are not separate frameworks but the *same graded-PROP machinery at different `D`*. (What such a weave inherits — batching, fusion, and the per-pass cost a generator pays instead — is exactly as [§6.4](#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles) develops for `D = Br`.)
 
 Each row of the table is unpacked in full — the colors, objects, and morphisms of both `D` and `C`, with the data-independent-vs-data-dependent subtleties — in [Appendix A](#appendix-a--index-categories-d-in-detail).
+
+### 6.6 Beyond ML: tensor networks for quantum systems
+
+Everything above reads the framework through *machine learning*, but a **tensor network** — the workhorse for approximating quantum many-body states (MPS, PEPS, MERA) — is a *purer* fit for Br than any neural net: it is multilinear contraction with **no** nonlinearities, exactly what `Einops`/Br expresses. A full treatment is in **[tensor_networks.md](tensor_networks.md)**; the three findings:
+
+- **A tensor network is a Br morphism.** Bonds are contracted (target) axes, physical legs are degree axes, bond dimension `χ` is the St axis size, the network topology is the acset structure and bond dimensions are its data, and contraction-order optimization *is* the framework's fusion + `opt_einsum`. States/effects are theory.md's elements/co-elements; bonds are compact-closed cups.
+- **Symmetric (charge-conserving) tensor networks *are* the `Rep(G)` grading** (§6.5 / Appendix A.2): charge sectors = irreps, charge conservation = intertwiners, fusion = Clebsch–Gordan. The symmetry groups (`U(1)`, `SU(2)`, `SU(N)`) are compact, so [equivariance_unification.md Proposition 9](equivariance_unification.md#53-continuous-g-compact-closable-vs-non-compact-open) applies verbatim — the equivariance theory *is* the theory of symmetric tensor networks, sharing even the `e3nn`-style Clebsch–Gordan machinery.
+- **"Quantum" is a target swap.** The structural layers are datatype-agnostic; making them quantum means evaluating in a complex Hilbert target with a **dagger** (adjoints/unitarity) — a dagger-compact closed category, i.e. categorical quantum mechanics and the **ZX-calculus**, which is the [Interacting Hopf Algebras frontier](#61-the-bool-semiring-and-interacting-hopf-algebras) (§6.1) seen from physics.
+
+The honest boundary mirrors the ML reading: contraction is in scope, but the **decomposition/truncation algorithms** (SVD, canonical forms, DMRG, TEBD) that make tensor networks an *approximation* method are non-multilinear and sit outside the contraction core, exactly as nonlinearities do. See [tensor_networks.md](tensor_networks.md) for the details, the `U(1)` example, and what a quantum target would require.
 
 ---
 
