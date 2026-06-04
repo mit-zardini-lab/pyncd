@@ -502,16 +502,18 @@ What remains is therefore one refactor and one design choice. The refactor abstr
 
 The *horizontal* generalization of [§2.4](#24-weaves-are-not-a-br-thing--they-are-the-cartesian-lift-datum-of-a-graded-prop) keeps `C` a category of operations but grades it over an index `D` other than St — not stacking a level ([§6.4](#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles)) but **swapping what "an axis" is**. Choosing `D` fixes what "an axis," "a reindexing," and "broadcasting" mean, so the *same* weave/lift/fusion machinery retargets at different subfields of ML:
 
-| `D` | "axis" is | reindexing is | recovers |
-| --- | --- | --- | --- |
-| `St` | integer axis | affine stride | tensor programs, CNNs (translation-equivariant) |
-| group `BG` / `Rep(G)` | group element / orbit | group translation | equivariant & steerable nets — group convolution is a weave |
-| graph / incidence cat. | node | gather-along-edge | GNNs, meshes, molecules |
-| metric / enriched cat. | point | distance kernel | continuous conv, point clouds, neural fields |
-| partition lattice | cluster | assignment map | pooling, coarsening, slot / capsule routing |
-| Markov cat. (`Stoch`) | sample space | Markov kernel | sampling, VAE, MC / SMC |
-| resource monoid | budget | store-vs-recompute | checkpointing, scheduling (roadmap 4.5) |
-| `Br` | whole model | router / gate | MoE, ensembles (above) |
+Recall the two-level structure each row instantiates: a **`C`-wire** is an array whose *shape* is a `D`-object (thick wires), and a **`C`-operation** is a base op broadcast over `D`, with the reindexings being `D`-morphisms. Spelling out the objects and morphisms of *both* levels:
+
+| `D` | objects of `D` | morphisms of `D` (reindexings) | objects of `C` (wires) | morphisms of `C` (operations) | recovers |
+| --- | --- | --- | --- | --- | --- |
+| `St` | axes / shapes (integer lengths) | affine strides | arrays `[dtype, shape]` | broadcasted tensor ops | tensor programs, CNNs (translation-equivariant) |
+| group `BG` / `Rep(G)` | the group / `G`-reps | group elements (translations), intertwiners | rep-valued feature fields | equivariant maps, group convolution | equivariant & steerable nets |
+| graph / incidence cat. | nodes | edges, paths (adjacency) | per-node feature signals | message-passing layers | GNNs, meshes, molecules |
+| metric / enriched cat. | points | distances (kernels) | fields over the domain | continuous conv, kernel maps | point clouds, neural fields |
+| partition lattice | partitions (blocks) | refinements | per-block signals | pooling / assignment layers | pooling, coarsening, slot / capsule |
+| Markov cat. (`Stoch`) | sample spaces | Markov kernels | distributions / random fields | stochastic (sampling) layers | sampling, VAE, MC / SMC |
+| resource monoid | budgets (mem, compute) | store↔recompute trades | cost-annotated computations | scheduled / checkpointed ops | checkpointing, scheduling (roadmap 4.5) |
+| `Br` (vertical case, [§6.4](#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles)) | whole models (arrays-with-ops) | routers, gates | model-valued wires | MoE / ensemble layers | MoE, ensembles |
 
 Two observations make this more than a list. First, **St is the translation instance of the group row** — affine strides on `ℤⁿ` *are* discrete translations, so CNNs are already "group convolution over `D` = the translation group"; `D = Rep(G)` generalizes only by swapping the group (rotations, `SE(n)`, gauge) and is St's natural extension to symmetries it cannot encode. This is a *grading*-based route to geometric deep learning, complementary to the monad-algebra route of [graded_prop.md [§11](graded_prop.md#11-relation-to-categorical-deep-learning)](graded_prop.md#11-relation-to-categorical-deep-learning) — whether the two coincide (the symmetry monad `T` of [graded_prop.md Prop 8.4](graded_prop.md#8-propositions-the-synthesis-organizes) versus the choice `D = BG`) is an open question.
 
