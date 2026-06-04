@@ -202,6 +202,40 @@ The abstract `V^{T_G}` (for a *chosen* monad) is always defined, but its identif
 
 ---
 
+## Appendix — Next steps
+
+Phases 1–4 are done bar the non-compact analytics. The natural continuations, by theme and reachability:
+
+**A. Formalization (Phase 5), layered.**
+
+- **A1 (reachable now).** Formalize Theorem 1 + Prop 1′ for finite `G` in Lean/Mathlib: `Action V G ≃ V^{T_G}` monoidally, via `CategoryTheory.Action`, `Rep`, `Monad.Algebra`, and the monoidal structure on `Action`. Self-contained; Mathlib likely already has most pieces.
+- **A2 (reachable now).** Theorem 6 (recognition) for finite `G` — Mathlib has Barr–Beck monadicity; the uniqueness-of-monad argument is short.
+- **A3 (gated).** Lemma 2 + Theorem 2 need the graded colored PROP, the actegory, and `Alg(C, −)` formalized first — i.e. [graded_prop.md §10](graded_prop.md#10-lean-formalization-notes)'s own program. A3 waits on that.
+- **Out of reach.** Anything continuous (no enriched/smooth category theory in Mathlib).
+
+**B. Close the non-compact residue (4.3).** Develop the direct-integral generalization: an index that is a *measurable field of colors* (the unitary dual `Ĝ` with Plancherel measure) rather than a discrete set, with "objects = direct integrals" replacing "objects = direct sums." This extends the graded-colored-PROP definition ([graded_prop.md §3.1](graded_prop.md#31-data)) to a measure-enriched setting and connects to von Neumann algebras / direct-integral decomposition. Research-grade; the payoff is covering Lorentz / affine / scale symmetries.
+
+**C. Tighten the present results.**
+
+- **C1.** Write the §5.1 counterexamples in full (the free-monoid monad and the action-with-a-relation family) as a proposition, making *necessity* airtight rather than sketched.
+- **C2.** Catalog which symmetries-on-the-broadcasting admit the Prop 8 distributive law `T_G ⊛ ⇒ ⊛ T_G` beyond the permutation case (Prop 7) — e.g. gauge / local symmetries — and which do not.
+
+**D. Propagate the closure into the main documents.**
+
+- Promote Theorem 6 (recognition) into [graded_prop.md](graded_prop.md) as a numbered proposition beside Prop 8.4 (which currently only *points* here).
+- The group / `Rep(G)` / graph rows of [future_ideas.md §6.5](future_ideas.md#65-swapping-the-index-d-as-a-dial-across-ml) and [Appendix A](future_ideas.md#appendix-a--index-categories-d-in-detail) now have a precise equivariance theorem behind them — annotate them.
+
+**E. Run the same lens on the other `D`-rows.** The recognition + symmetry analysis here was carried out for `D =` group. Each other [§6.5](future_ideas.md#65-swapping-the-index-d-as-a-dial-across-ml) row deserves the same:
+
+- **graph** — GNN node-permutation-equivariance *is* Prop 7 with `G = S_n` acting on the node degree, so the DeepSets recovery extends to "GNN equivariance = symmetric aggregation over neighbours." Worth stating explicitly.
+- **metric / `Stoch` / partition** — identify the symmetry monad (if any) per row and whether the routes coincide. This turns §5 into a per-`D` program.
+
+**F. The CDL bridge.** Theorem 6 sharpens [graded_prop.md §11](graded_prop.md#11-relation-to-categorical-deep-learning)'s relation to Categorical Deep Learning: CDL encodes equivariance as monad-algebras; Theorem 6 says *exactly when* that monad route equals the grading route (iff the monad is an action monad). Writing this out makes the two frameworks' equivariance accounts precisely comparable.
+
+**Suggested ordering.** A1/A2 (finite-`G` Lean) and C1 (full counterexample) are immediate and self-contained; D and E are low-effort write-ups propagating what is already proved; B and F are research-grade.
+
+---
+
 ## References
 
 - [graded_prop.md](graded_prop.md) — the graded colored PROP framework; Prop 8.4 (the open problem), §9.3 (`D`-menu).
