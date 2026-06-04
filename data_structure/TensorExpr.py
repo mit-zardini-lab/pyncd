@@ -54,6 +54,9 @@ class IversonBinOp(fd.Term):
     def __or__(self, other: IversonBinOp | IversonUnaryOp) -> IversonBinOp:
         return IversonBinOp('|', self, other)
 
+    def __invert__(self) -> IversonUnaryOp:
+        return IversonUnaryOp('~', self)
+
     # Arithmetic with another axis/expr — produces a new IversonBinOp for use
     # inside compound predicates such as iabs(x - y) < z.
     def __add__(self, other: Any) -> IversonBinOp:
@@ -98,6 +101,9 @@ class IversonUnaryOp(fd.Term):
 
     def __sub__(self, other: Any) -> IversonBinOp:
         return IversonBinOp('-', self, other)
+
+    def __invert__(self) -> IversonUnaryOp:
+        return IversonUnaryOp('~', self)
 
 
 # Unified type for one factor on the RHS of a TensorEquation
@@ -170,6 +176,11 @@ def iabs(operand: IversonExpr) -> IversonUnaryOp:
     return IversonUnaryOp('abs', operand)
 
 
+def inot(operand: IversonExpr) -> IversonUnaryOp:
+    """Create a logical-negation node: ~[operand] = 1 - [operand]."""
+    return IversonUnaryOp('~', operand)
+
+
 # ---------------------------------------------------------------------------
 # Monkey-patch RawAxis with Iverson-producing operators
 # __mul__ excluded: collides with tensor-product semantics in TensorDSL
@@ -199,6 +210,9 @@ def _rawaxis_radd(self: sc.RawAxis, other: Any) -> IversonBinOp:
 def _rawaxis_rsub(self: sc.RawAxis, other: Any) -> IversonBinOp:
     return IversonBinOp('-', other, self)
 
+def _rawaxis_invert(self: sc.RawAxis) -> IversonUnaryOp:
+    return IversonUnaryOp('~', self)
+
 sc.RawAxis.__lt__ = _rawaxis_lt  # type: ignore[method-assign]
 sc.RawAxis.__le__ = _rawaxis_le  # type: ignore[method-assign]
 sc.RawAxis.__gt__ = _rawaxis_gt  # type: ignore[method-assign]
@@ -207,3 +221,4 @@ sc.RawAxis.__add__ = _rawaxis_add  # type: ignore[method-assign]
 sc.RawAxis.__sub__ = _rawaxis_sub  # type: ignore[method-assign]
 sc.RawAxis.__radd__ = _rawaxis_radd  # type: ignore[method-assign]
 sc.RawAxis.__rsub__ = _rawaxis_rsub  # type: ignore[method-assign]
+sc.RawAxis.__invert__ = _rawaxis_invert  # type: ignore[method-assign]

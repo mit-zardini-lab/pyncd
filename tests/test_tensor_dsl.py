@@ -723,3 +723,39 @@ def test_split_nonlinearity_with_where_produces_masked_softmax():
     assert isinstance(last, bc.Broadcasted)
     assert isinstance(last.operator, ops.MaskedSoftMax)
     assert len(last.operator.iverson_factors) == 1
+
+
+def test_inot_helper():
+    """inot(x) produces an IversonUnaryOp with op='~'."""
+    from data_structure.TensorExpr import inot
+    q = real_axis('q', 4)
+    expr = inot(q)
+    assert isinstance(expr, IversonUnaryOp)
+    assert expr.op == '~'
+
+def test_invert_on_binop():
+    """~(q < x) produces IversonUnaryOp('~', IversonBinOp('<', q, x))."""
+    q = real_axis('q', 4)
+    x = real_axis('x', 4)
+    pred = q < x
+    negated = ~pred
+    assert isinstance(negated, IversonUnaryOp)
+    assert negated.op == '~'
+    assert isinstance(negated.operand, IversonBinOp)
+
+def test_invert_on_unaryop():
+    """~~(q < x) double-negates correctly (IversonUnaryOp wrapping IversonUnaryOp)."""
+    q = real_axis('q', 4)
+    x = real_axis('x', 4)
+    inner = ~(q < x)
+    double = ~inner
+    assert isinstance(double, IversonUnaryOp)
+    assert double.op == '~'
+    assert isinstance(double.operand, IversonUnaryOp)
+
+def test_invert_on_rawaxis():
+    """~q on a RawAxis produces IversonUnaryOp('~', q)."""
+    q = real_axis('q', 4)
+    negated = ~q
+    assert isinstance(negated, IversonUnaryOp)
+    assert negated.op == '~'
