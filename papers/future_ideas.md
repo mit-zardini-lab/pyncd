@@ -42,6 +42,8 @@ This document fuses three lines of thinking developed in [theory.md](theory.md) 
    - [Tier 4 — Research-grade, open-ended](#tier-4--research-grade-open-ended)
 9. [References](#9-references)
 
+- [Appendix A — Index categories `D` in detail](#appendix-a--index-categories-d-in-detail)
+
 ---
 
 ## 1. Bird's-Eye View: One Pipeline, Three Vocabularies
@@ -386,7 +388,7 @@ These are correctness audits that run at `construct()` time, before training. Ea
 
 2. **Composition safety.** Two masked operations composed sequentially may produce incompatible supports (the second masks positions the first already zeroed, or vice versa). The acset records both predicates; a composition-safety check compares the output predicate of `br1` with the mask predicate of `br2`.
 
-3. **Equivariance.** A masked operator's output is not symmetric under the masked-out positions, so it breaks equivariance exactly as [§5.3](#53-equivariance-from-stridecategory-representation-theory) describes — and now the breaking wire is an *output*, which the audit must cover. The positive reading (via the Categorical Deep Learning lens — see [graded_prop.md [§11](graded_prop.md#11-relation-to-categorical-deep-learning)](graded_prop.md#11-relation-to-categorical-deep-learning) and Prop 8.4): a causal mask does not break *all* symmetry, it selects a *different* one. The predicate `i ≤ j` makes the operator equivariant for the **order monad** (order-preserving endomaps of the sequence axis), not the symmetric-group monad — so "which symmetry does this layer respect?" is precisely "which monad is it an algebra for?" The audit should report the respected symmetry, not only the broken one.
+3. **Equivariance.** A masked operator's output is not symmetric under the masked-out positions, so it breaks equivariance exactly as [§5.3](#53-equivariance-from-stridecategory-representation-theory) describes — and now the breaking wire is an *output*, which the audit must cover. The positive reading (via the Categorical Deep Learning lens — see [graded_prop.md §11](graded_prop.md#11-relation-to-categorical-deep-learning) and Prop 8.4): a causal mask does not break *all* symmetry, it selects a *different* one. The predicate `i ≤ j` makes the operator equivariant for the **order monad** (order-preserving endomaps of the sequence axis), not the symmetric-group monad — so "which symmetry does this layer respect?" is precisely "which monad is it an algebra for?" The audit should report the respected symmetry, not only the broken one.
 
 **Expansion — the required API change.** `prop_ideas.md`'s `BrGraph.predicate(wire)` is specified for Bool *input* wires only. The fused view requires it to cover *output* wires of masked operators. Since the predicate lives on the output `ArrayRow.iverson_expr` in the acset, building `BrGraph` from the acset ([§2.3](#23-brgraph-and-sbrinstance-are-dual-views-of-one-dag)) gets this for free — the predicate is an `ArrayRow` attribute regardless of `is_input`. This is a further argument for the acset-routed `BrGraph` construction: the display-layer `UIDHypergraph` has no notion of output-wire predicates, but the acset does.
 
@@ -461,7 +463,7 @@ Here the reindexing `η` — which expert item `i` reads, written `r(i)` in the 
 
 So the dividing line is one criterion: **whether the routing reindexing is data-independent** — decidable from the gate's dependency structure, not a matter of taste. Dense MoE passes (it is a weave); sparse MoE fails (it is a `Route` generator, like `Scan`). That single criterion organizes the whole space of "run-several-sub-models" constructs, below.
 
-**The general pattern.** To place any "run several sub-models and combine" construct, ask three questions: (i) does the looped axis index whole computations (thick wires = sub-morphisms)? (ii) is the routing **data-independent** (→ a genuine weave, like dense MoE), **data-dependent** (→ a `Route` generator, like sparse MoE), or **recurrent** — the model feeding itself along the axis (→ a `Scan` generator, [graded_prop.md [§3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class)](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class))? (iii) what is the **output weave** — the rule combining the per-model results? (The router/selector is a reindexing in `D = Br`, exactly as a stride is a reindexing in `D = St` one level down.)
+**The general pattern.** To place any "run several sub-models and combine" construct, ask three questions: (i) does the looped axis index whole computations (thick wires = sub-morphisms)? (ii) is the routing **data-independent** (→ a genuine weave, like dense MoE), **data-dependent** (→ a `Route` generator, like sparse MoE), or **recurrent** — the model feeding itself along the axis (→ a `Scan` generator, [graded_prop.md §3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class))? (iii) what is the **output weave** — the rule combining the per-model results? (The router/selector is a reindexing in `D = Br`, exactly as a stride is a reindexing in `D = St` one level down.)
 
 *Data-independent — genuine weaves.* These all ride the existing weave machinery and differ only in the **output weave** — the one degree of freedom across the family:
 
@@ -480,7 +482,7 @@ So the dividing line is one criterion: **whether the routing reindexing is data-
 
 *Data-dependent — `Route` generators.* Routing depends on input values, so Eq. 3 fails (as for sparse MoE): **sparse / top-k / Switch MoE**, **multi-LoRA or adapter-bank serving** with per-request selection, **hard attention**. Each needs a `Route` generator and pays bespoke cost in every pass.
 
-*Recurrent — `Scan` generators (not parallel weaves).* The sub-model feeds itself along the axis — the temporal grading of [graded_prop.md [§3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class)](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class), not a [§6.4](#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles) lift: **weight-tied deep stacks** (Universal Transformer, ALBERT) tile one block over depth *with feedback* → `Scan` (contrast deep ensembles, which replicate *independently* → a weave); **beam search, particle filters / SMC, speculative decoding** are *compound* — a weave/`Scan` propagate step plus a data-dependent prune/resample/accept step (`Scan` + `Route`).
+*Recurrent — `Scan` generators (not parallel weaves).* The sub-model feeds itself along the axis — the temporal grading of [graded_prop.md §3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class), not a [§6.4](#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles) lift: **weight-tied deep stacks** (Universal Transformer, ALBERT) tile one block over depth *with feedback* → `Scan` (contrast deep ensembles, which replicate *independently* → a weave); **beam search, particle filters / SMC, speculative decoding** are *compound* — a weave/`Scan` propagate step plus a data-dependent prune/resample/accept step (`Scan` + `Route`).
 
 *Not lifts — Para.* **Hypernetworks** compute another model's weights: a Para reparameterization ([§3.1](#31-construct-is-a-para-functor-over-the-grothendieck-integral)), not a lift over a degree. **Model / pipeline parallelism** is the same lift at the *execution* layer (degree = devices) — the algebra-specific "GPU reading" of [§2.4](#24-weaves-are-not-a-br-thing--they-are-the-cartesian-lift-datum-of-a-graded-prop), not architecture.
 
@@ -496,7 +498,7 @@ The taxonomy earns its keep by unifying constructs usually treated separately: *
 
 Beyond these three, a weave inherits *every* pass — equivariance audit ([§5.3](#53-equivariance-from-stridecategory-representation-theory)), shape inference (`Π_φ`, [§3.2](#32-shape-inference-is-the-right-kan-extension-is-partial-evaluation)), dead-code elimination, serialization, the `BrGraph` analyses — with no per-pass work, whereas a generator pays bespoke cost in each (exactly what `Scan` does today). That is [§6.4](#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles)'s practical content as a **design signal**: data-independent routing is free; data-dependent routing is expensive everywhere — prefer the former when an architecture should ride the existing infrastructure rather than extend it.
 
-What remains is therefore one refactor and one design choice. The refactor abstracts the reindexing layer over `D` — `St`'s reindexings are affine `StrideMorphism`s, whereas `D = Br`'s are themselves Br morphisms (the gate). The design choice is the shape of the `Route` generator ([graded_prop.md [§3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class)](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class)): its degree, its data-dependent coproduct injection `[0..E) → experts`, and its `Para` gate-parameter — the direct analogue of designing `Scan` from the recurrence's failure of Eq. 3. This is roadmap item 4.4 ([§8](#8-prioritized-implementation-roadmap)).
+What remains is therefore one refactor and one design choice. The refactor abstracts the reindexing layer over `D` — `St`'s reindexings are affine `StrideMorphism`s, whereas `D = Br`'s are themselves Br morphisms (the gate). The design choice is the shape of the `Route` generator ([graded_prop.md §3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class)): its degree, its data-dependent coproduct injection `[0..E) → experts`, and its `Para` gate-parameter — the direct analogue of designing `Scan` from the recurrence's failure of Eq. 3. This is roadmap item 4.4 ([§8](#8-prioritized-implementation-roadmap)).
 
 ### 6.5 Swapping the index: `D` as a dial across ML
 
@@ -517,11 +519,13 @@ Concretely at `D = St`: the `D`-colors are axes (integer lengths) and the `D`-mo
 | resource monoid | budgets (mem, compute) | store↔recompute trades | cost-annotated computations | scheduled / checkpointed ops | checkpointing, scheduling (roadmap 4.5) |
 | `Br` (vertical case, [§6.4](#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles)) | whole models (arrays-with-ops) | routers, gates | model-valued wires | MoE / ensemble layers | MoE, ensembles |
 
-Two observations make this more than a list. First, **St is the translation instance of the group row** — affine strides on `ℤⁿ` *are* discrete translations, so CNNs are already "group convolution over `D` = the translation group"; `D = Rep(G)` generalizes only by swapping the group (rotations, `SE(n)`, gauge) and is St's natural extension to symmetries it cannot encode. This is a *grading*-based route to geometric deep learning, complementary to the monad-algebra route of [graded_prop.md [§11](graded_prop.md#11-relation-to-categorical-deep-learning)](graded_prop.md#11-relation-to-categorical-deep-learning) — whether the two coincide (the symmetry monad `T` of [graded_prop.md Prop 8.4](graded_prop.md#8-propositions-the-synthesis-organizes) versus the choice `D = BG`) is an open question.
+Two observations make this more than a list. First, **St is the translation instance of the group row** — affine strides on `ℤⁿ` *are* discrete translations, so CNNs are already "group convolution over `D` = the translation group"; `D = Rep(G)` generalizes only by swapping the group (rotations, `SE(n)`, gauge) and is St's natural extension to symmetries it cannot encode. This is a *grading*-based route to geometric deep learning, complementary to the monad-algebra route of [graded_prop.md §11](graded_prop.md#11-relation-to-categorical-deep-learning) — whether the two coincide (the symmetry monad `T` of [graded_prop.md Prop 8.4](graded_prop.md#8-propositions-the-synthesis-organizes) versus the choice `D = BG`) is an open question.
 
 Second, **one law cuts across every row**: a *structural / fixed* reindexing → a weave that inherits all passes; a *data-dependent* one → a `Route` generator; a *recurrent* one → `Scan`. CNN vs deformable conv, fixed-graph vs input-dependent-graph GNN, dense vs sparse MoE, reparameterized vs resampled stochastic layer — all the same split, one level apart, at different `D`.
 
 Honest scope: only St (and the translation/permutation fragment of the group row) is implemented; every other row is a conceptual instance, each needing its own reindexing layer — all gated on the same `D`-genericity refactor (roadmap 4.4) that unlocks MoE in §6.4. The claim is structural, not yet executable: GDL, GNNs, neural fields, pooling, and stochastic layers are not separate frameworks but the *same graded-PROP machinery at different `D`*. (What such a weave inherits — batching, fusion, and the per-pass cost a generator pays instead — is exactly as [§6.4](#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles) develops for `D = Br`.)
+
+Each row of the table is unpacked in full — the colors, objects, and morphisms of both `D` and `C`, with the data-independent-vs-data-dependent subtleties — in [Appendix A](#appendix-a--index-categories-d-in-detail).
 
 ---
 
@@ -644,7 +648,7 @@ These deliver durable architectural capabilities but need real new machinery.
 *Justification:* PROP equations as graph rewrites; ZX-calculus analogy.
 *Prerequisite:* 2.1, 2.2 (fusion is the first rule).
 
-**3.4 — Coupled recurrences: folds over a product of states (item E; [graded_prop.md [§3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class)](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class), Prop 8.7).**
+**3.4 — Coupled recurrences: folds over a product of states (item E; [graded_prop.md §3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class), Prop 8.7).**
 *Win:* mutually-recursive scans (`n_states > 1`, Jacobi-style) — currently a `NotImplementedError` in `_finalize_iter`.
 *Cost:* moderate — generalize the step to an endofunctor on `C^k`; the catamorphism ranges over the product of state objects, with cross-coupling between states.
 *Justification:* multi-sorted catamorphism — the product generalization of finite iteration (graded_prop.md Def 3.4).
@@ -684,7 +688,7 @@ Genuine research, uncertain payoff, potentially high.
 *Justification:* resource-enriched `Para`; the functional-programming fold-fusion law; the associative-scan path is the case where the step algebra factors through a monoid (Prop 8.7).
 *Prerequisite:* 3.1 (abstract `Scan`), 3.3 (`BrRewrite` for fold-fusion).
 
-**4.6 — Coalgebraic dual: unbounded generation via unfold/anamorphism (item G; [graded_prop.md [§3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class)](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class); arXiv:2603.03227).**
+**4.6 — Coalgebraic dual: unbounded generation via unfold/anamorphism (item G; [graded_prop.md §3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class); arXiv:2603.03227).**
 *Win:* autoregressive decode / streaming as corecursion when the length is not known up front.
 *Cost:* high, research — final coalgebras / guarded corecursion, a different completeness assumption than the finite iteration of Def 3.4.
 *Justification:* the coalgebraic companion to Categorical Deep Learning (arXiv:2603.03227); dual to graded_prop.md Def 3.4.
@@ -781,3 +785,57 @@ External references are catalogued in the respective source documents. The most 
 - Gavranovic et al. — "Categorical Deep Learning", arXiv:2402.15332 (the Para construction).
 - Bonchi, Sobocinski, Zanasi — "Interacting Hopf Algebras", arXiv:1404.1729 (the Bool-semiring frontier).
 - Smith, Gray — "opt_einsum", *JOSS* 3(26), 2018 (contraction ordering).
+
+---
+
+## Appendix A — Index categories `D` in detail
+
+This unpacks each row of the [§6.5](#65-swapping-the-index-d-as-a-dial-across-ml) table: the colors, objects, and morphisms of the index `D` and of the operation PROP `C` graded over it, with the subtleties — chiefly which routings are *data-independent* (a weave, inheriting every pass) versus *data-dependent* (a `Route` generator) or *recurrent* (a `Scan`); see [§6.4](#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles) and [graded_prop.md Prop 8.6](graded_prop.md#8-propositions-the-synthesis-organizes). Throughout, the shape map `sh` sends each `C`-color to a `D`-object, so a `C`-wire unzips into `D`-coloured sub-wires.
+
+### A.1 `D = St` (axes)
+
+- **`D`:** colors = axes (each an index set with an integer/`Numeric` size); objects = shapes (products of axes, indexing a coordinate grid); morphisms = affine coordinate maps `η(p) = Λp + b` (`StrideMorphism`) — strides, offsets, permutations, broadcasts, diagonals.
+- **`C` = Br:** colors = arrays `[dtype, shape]`, with `sh` = the shape; morphisms = broadcasted tensor operations (contraction / `Einops`, `Linear`, `SoftMax`, …), each a base op over the degree axes with per-input reindexings.
+- **Notes.** The implemented base case. Affine *offsets* are translations, so St already gives translation-equivariant convolution; permutations are `Rearrangement`s. Every other row generalizes some aspect of St.
+
+### A.2 `D =` group (`BG` base, `Rep(G)` fibers)
+
+The group enters two distinct ways; the §6.5 cell bundles them.
+
+- **Base — `D = BG`** (delooping of `G`, or the action groupoid on a homogeneous space `G/H`): colors = a single object (or the points of `G/H`); morphisms = group elements `g` (symmetry transports). `C`-colors = feature fields over the base; `C`-morphisms = **group convolution** — a base op broadcast over the orbit, reindexed by translation `x ↦ g·x`. The reindexing `g` is fixed structure → **weave**.
+- **Fibers — `D = Rep(G)`**: colors = irreps of `G` (`SO(3)`: `ℓ = 0, 1, 2, …`, dim `2ℓ+1`; `SO(2)`: angular frequencies; finite `G`: its irreducibles); objects = direct sums of irreps with multiplicities (steerable feature types, e3nn `Irreps`), monoidal product `⊕`; morphisms = intertwiners (`G`-equivariant linear maps, block-structured by irrep type via Schur — the learnable weights of a steerable linear layer). `C`-colors = steerable fields (fiber = a rep, `sh` = the fiber type, unzipping into irrep sub-wires); `C`-morphisms = steerable layers (equivariant convolution, Clebsch–Gordan tensor-product coupling, gated nonlinearity).
+- **Notes.** Juxtaposing wires is `⊕` (channel stacking), **not** `⊗`; the tensor product `⊗` is a *coupling operation* (a `C`-morphism), not the wire-bundling product. A full steerable CNN grades over both factors — `St_base ⋉ G` for space, `Rep(G)` for fibers. The fiber grading reads more as the *equivariance constraint* (Schur forces intertwiners) than a literal broadcast. This sharpens the [graded_prop.md Prop 8.4](graded_prop.md#8-propositions-the-synthesis-organizes) open question into three encodings — symmetry monad `T`, `BG`-grading, `Rep(G)`-grading — whose equivalence is open.
+
+### A.3 `D =` graph / incidence category
+
+- **`D`:** colors = nodes; objects = node sets; morphisms = edges and paths (adjacency / walks); the reindexing "gather from neighbours" reads, at node `v`, from `N(v)`.
+- **`C`:** colors = node-feature signals (a feature vector per node, `sh` = the node set); morphisms = message-passing layers (message/update broadcast over nodes, reindexed by gather-along-edges).
+- **Notes.** **Fixed graph** (one mesh/molecule shared across inputs) → data-independent adjacency → **weave** (a fixed sparse conv). **Per-sample graph** (a different molecule each input, or a learned adjacency) → data-dependent reindexing → **`Route`** generator. A regular grid is the graph with fixed affine adjacency — i.e. St; graph-`D` generalizes to irregular domains. Node-relabelling equivariance is the symmetric-group symmetry-monad reading (Prop 8.4); edge features, hypergraphs, and simplicial complexes need richer incidence categories.
+
+### A.4 `D =` metric / enriched category
+
+- **`D`:** a metric space as a Lawvere-enriched category — colors = points; hom `(x, y)` = distance `d(x, y) ∈ [0, ∞]`; morphisms (reindexings) = distance kernels: at a query `x`, gather neighbours weighted by `k(x, y)` — a *soft, weighted* gather, unlike St's exact integer pick.
+- **`C`:** colors = fields over the domain (functions point → value; point-cloud features; `sh` = the point set); morphisms = continuous convolution, kernel layers, neural-field readouts.
+- **Notes.** St is the special case of a regular grid with a fixed finite stencil; metric-`D` generalizes to continuous / irregular points (point clouds, NeRF coordinates). **Fixed kernel** (Gaussian RBF, fixed continuous filter) → **weave**; **data-dependent kernel** (attention weights `k(x, y) = softmax(q(x)·k(y))` computed from the data) → data-dependent reindexing → `Route`-like. So continuous convolution is a weave; attention sits on the data-dependent side.
+
+### A.5 `D =` partition lattice
+
+- **`D`:** objects = partitions of the base set; morphisms = refinements / coarsenings (`P ≤ Q` when `P` refines `Q`); a coarsening morphism = the assignment of fine cells to coarse blocks.
+- **`C`:** colors = per-block (or per-element) signals (`sh` = the block set); morphisms = pooling / coarsening / clustering layers (aggregate — mean / max / sum — over coarse blocks, reindexed by the assignment).
+- **Notes.** **Fixed partition** (e.g. 2×2 grid pooling — also St-expressible as a fixed stride) → **weave**; **learned / data-dependent grouping** (slot attention, capsule routing, differentiable pooling, where assignment depends on features) → **`Route`**. The refinement order makes `D` a poset; a fixed *chain* of refinements (hierarchical pooling) is a weave, a sequential one is `Scan`-like.
+
+### A.6 `D =` Markov category (`Stoch`)
+
+- **`D`:** objects = sample spaces; morphisms = Markov kernels (stochastic maps); the reindexing *samples* a slice rather than deterministically selecting one.
+- **`C`:** colors = random fields / distributions over arrays (`sh` = the sample space); morphisms = stochastic layers (sampling, reparameterized draws, VAE encode / decode, dropout-as-sampling, MC integration).
+- **Notes.** **Reparameterized / fixed-noise** sampling (draw `ε` independent of the data, then a deterministic transform) → data-independent → **weave**; **data-dependent resampling** (SMC: resample by data-dependent weights) → `Route` / `Scan`. theory.md already notes Br is a deletion category spanning Set and Stoch, so this makes the stochastic reading explicit; the Markov copy/discard comonoid relates to weight tying ([§5.2](#52-weight-tying-comonoid-para-morphism-acset-parameter-group)), and the softmax/normalize-as-Markov-kernel story to [graded_prop.md §11](graded_prop.md#11-relation-to-categorical-deep-learning).
+
+### A.7 `D =` resource monoid
+
+- **`D`:** objects = resource budgets (e.g. `(memory, compute)` in a monoidal poset / semiring); morphisms = resource transforms (store↔recompute trades, allocation).
+- **`C`:** colors = computations annotated with a resource footprint; morphisms = the same computation scheduled under different budgets (eager / checkpoint / offload).
+- **Notes.** This is the *execution* layer (like model parallelism), not architecture — the "GPU reading" [§2.4](#24-weaves-are-not-a-br-thing--they-are-the-cartesian-lift-datum-of-a-graded-prop) calls algebra-specific. It is the resource-graded `Para` of roadmap 4.5 (checkpointing as a 2-cell trading memory for recompute). **Honesty:** this row stretches "graded" — it is *resource grading* (the effect-system / graded-monad sense), adjacent to but not identical with the cartesian-lift grading of the other rows; there is no literal broadcast.
+
+### A.8 `D = Br` (the vertical case)
+
+Covered concretely in [§6.4](#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles): colors = whole Br objects (arrays-with-operators, i.e. models); morphisms = routers / gates; `C`-colors = model-valued wires; `C`-morphisms = MoE / ensemble layers. Dense (fixed) routing → weave; sparse (data-dependent) routing → `Route`. See the worked example there.
