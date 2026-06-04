@@ -67,6 +67,6 @@ def _eval(expr: IversonExpr, grid_iter: Iterator[torch.Tensor]) -> torch.Tensor:
         match expr.op:
             case 'abs': return v.abs()
             case '-':   return -v
-            case 'not': return (~v.bool()).float()
+            case '~':   return 1.0 - v
             case _:     raise ValueError(f"Unknown IversonUnaryOp operator: {expr.op!r}")
     raise ValueError(f"Unknown Iverson node type: {type(expr)!r}")

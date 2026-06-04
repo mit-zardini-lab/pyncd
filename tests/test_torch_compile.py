@@ -1175,3 +1175,39 @@ def test_attn_res_with_where_is_exactly_causally_invariant():
     assert not torch.allclose(out0[2:], out1[2:], atol=1e-5), (
         "Expected output at pos 2,3 to differ when H[2:] changed"
     )
+
+
+# ---------------------------------------------------------------------------
+# Iverson logical negation (~) materialisation tests
+# ---------------------------------------------------------------------------
+
+def test_materialise_invert_predicate():
+    """~(q < x) over 4x4 equals 1 minus the strict-upper-triangular mask."""
+    q = real_axis('q', 4)
+    x = real_axis('x', 4)
+    result = materialise_iverson(~(q < x))
+    # [q < x] is 1 where row < col (strict upper triangular, no diagonal)
+    # ~[q < x] = 1 - [q < x] = lower triangular including diagonal
+    expected = torch.tril(torch.ones(4, 4))
+    assert torch.allclose(result, expected)
+
+def test_materialise_inot_helper():
+    """inot(ieq(q, x)) over 4x4 equals 1 minus the identity."""
+    from data_structure.TensorExpr import inot
+    q = real_axis('q', 4)
+    x = real_axis('x', 4)
+    result = materialise_iverson(inot(ieq(q, x)))
+    expected = torch.ones(4, 4) - torch.eye(4)
+    assert torch.allclose(result, expected)
+
+def test_materialise_double_invert():
+    """~~(q < x) over 4x4 equals [q < x] (identity through double negation)."""
+    q = real_axis('q', 4)
+    x = real_axis('x', 4)
+    result = materialise_iverson(~~(q < x))
+    # [q < x] is strict upper triangular
+    expected = torch.zeros(4, 4)
+    for i in range(4):
+        for j in range(4):
+            expected[i, j] = 1.0 if i < j else 0.0
+    assert torch.allclose(result, expected)
