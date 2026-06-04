@@ -567,6 +567,38 @@ def test_masked_normalize_compiles():
     assert mod is not None
 
 
+def test_masked_normalize_repeated_uid_axis():
+    """A where-predicate with one axis appearing twice compiles and runs correctly.
+
+    (m > 2) | (m == 2) is the predicate [m >= 2]; m appears twice, so the
+    materialised mask buffer is (SEQ, SEQ).  Before the fix this crashed in
+    forward because a length-1 alignment perm could not permute the 2-D buffer.
+    The diagonal collapse reduces it to the 1-D [m>=2] mask, zeroing m<2 before
+    normalisation.
+    """
+    from torch_compile.torch_compile import ConstructedModule
+    from data_structure.TensorDSL import TL, real_axis, norm_axis, normalize
+    from data_structure.TensorExpr import IversonConst, ieq
+    from data_structure.Numeric import Integer
+
+    SEQ = 5
+    p = real_axis('p', SEQ)
+    m = norm_axis('m', SEQ)
+    two = IversonConst(Integer(2))
+    tl = TL()
+    tl.Out[p, m] = normalize(tl.X[p, m], where=((m > two) | ieq(m, two)))
+    mod = ConstructedModule.construct(tl.to_morphism())
+
+    X = torch.ones(SEQ, SEQ)
+    result = mod(X)
+    out = result[0] if isinstance(result, tuple) else result
+
+    # m<2 masked to 0; the 3 surviving positions (m=2,3,4) each get 1/3.
+    expected = torch.zeros(SEQ, SEQ)
+    expected[:, 2:] = 1.0 / 3.0
+    assert torch.allclose(out, expected, atol=1e-6)
+
+
 def test_inline_softmax_in_program():
     """softmax() inline in a TensorProgram (multi-equation) compiles correctly."""
     q = real_axis('q', 4)

@@ -501,6 +501,7 @@ class ConstructedMaskedSoftMax(
         op = target.operator
         displacement = bcast.get_displacement(target)
         self._dim = displacement if displacement is not None else -1
+        from data_structure.TensorLogic import _iverson_diagonal
         self._n_masks = len(op.iverson_factors)
         self._alignments: list[tuple[list[int], int]] = [
             (list(perm), n_broadcast)
@@ -509,6 +510,12 @@ class ConstructedMaskedSoftMax(
         for i, factor in enumerate(op.iverson_factors):
             try:
                 buf = materialise_iverson(factor)
+                # Collapse axes repeated within one predicate to a diagonal so
+                # the buffer carries one dim per distinct UID (matching the
+                # alignment perm computed by _compute_mask_alignment).
+                diag_eqn, _ = _iverson_diagonal(factor)
+                if diag_eqn:
+                    buf = torch.einsum(diag_eqn, buf)
                 self.register_buffer(f'_mask_{i}', buf)
             except ValueError as e:
                 warnings.warn(
@@ -548,6 +555,7 @@ class ConstructedMaskedNormalize(
         op = target.operator
         displacement = bcast.get_displacement(target)
         self._dim = displacement if displacement is not None else -1
+        from data_structure.TensorLogic import _iverson_diagonal
         self._n_masks = len(op.iverson_factors)
         self._alignments: list[tuple[list[int], int]] = [
             (list(perm), n_broadcast)
@@ -556,6 +564,12 @@ class ConstructedMaskedNormalize(
         for i, factor in enumerate(op.iverson_factors):
             try:
                 buf = materialise_iverson(factor)
+                # Collapse axes repeated within one predicate to a diagonal so
+                # the buffer carries one dim per distinct UID (matching the
+                # alignment perm computed by _compute_mask_alignment).
+                diag_eqn, _ = _iverson_diagonal(factor)
+                if diag_eqn:
+                    buf = torch.einsum(diag_eqn, buf)
                 self.register_buffer(f'_mask_{i}', buf)
             except ValueError as e:
                 warnings.warn(

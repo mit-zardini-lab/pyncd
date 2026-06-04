@@ -152,6 +152,38 @@ class TensorEquation(bc.Operator):
         )
 
 
+def _iverson_diagonal(
+    iverson_factor,   # IversonBinOp | IversonUnaryOp
+) -> tuple:
+    """Deduplicate axes that appear more than once in one Iverson predicate.
+
+    materialise_iverson() gives every RawAxis *leaf* its own positional
+    dimension, so an axis repeated in a single predicate (e.g. x in
+    (x > 2) | (x == 2)) yields multiple dimensions sharing one UID.  The einsum
+    buffer path collapses these to a diagonal via repeated einops tags; the
+    masked softmax/normalize path has no einsum, so it must collapse explicitly.
+
+    Returns (diag_eqn, distinct_axes) where distinct_axes lists each axis once in
+    first-occurrence DFS order, and diag_eqn is an einsum string that extracts
+    the generalised diagonal over repeated UIDs (mapping the expanded
+    materialise_iverson output to one dimension per distinct UID), or None when
+    there are no repeats (the common case — keep the buffer untouched).
+    """
+    from data_structure.TensorExpr import _iverson_axes
+    iverson_axes = _iverson_axes(iverson_factor)
+    uid_to_letter: dict = {}
+    distinct_axes = []
+    for ax in iverson_axes:
+        if ax.uid not in uid_to_letter:
+            uid_to_letter[ax.uid] = chr(ord('a') + len(distinct_axes))
+            distinct_axes.append(ax)
+    if len(distinct_axes) == len(iverson_axes):
+        return None, distinct_axes
+    in_sub = ''.join(uid_to_letter[ax.uid] for ax in iverson_axes)
+    out_sub = ''.join(uid_to_letter[ax.uid] for ax in distinct_axes)
+    return f'{in_sub}->{out_sub}', distinct_axes
+
+
 def _compute_mask_alignment(
     iverson_factor,   # IversonBinOp | IversonUnaryOp
     lhs_indices: tuple,   # tuple of sc.RawAxis
@@ -160,21 +192,25 @@ def _compute_mask_alignment(
     Iverson mask with the score tensor produced by an einsum.
 
     materialise_iverson(factor) returns a tensor whose shape matches
-    _iverson_axes(factor) in DFS order.  The score tensor's shape matches
-    lhs_indices in that order.  Returns (perm, n_broadcast) such that:
+    _iverson_axes(factor) in DFS order.  An axis repeated within one predicate
+    is first diagonal-collapsed (see _iverson_diagonal) so the mask carries one
+    dimension per *distinct* UID, in first-occurrence DFS order.  The score
+    tensor's shape matches lhs_indices in that order.  Returns (perm,
+    n_broadcast) such that:
 
         mask = materialise_iverson(factor)
+        mask = torch.einsum(diag_eqn, mask)   # only when repeats exist
         mask = mask.permute(list(perm))
         for _ in range(n_broadcast):
             mask = mask.unsqueeze(0)
         # mask now broadcasts correctly with the score tensor
 
+    perm therefore indexes the collapsed (distinct-UID) axes, not raw leaves.
     Axes that appear in lhs_indices but not in the Iverson contribute one
     leading broadcast dimension each.
     """
-    from data_structure.TensorExpr import _iverson_axes
-    iverson_axes = _iverson_axes(iverson_factor)
-    uid_to_iverson_pos = {ax.uid: i for i, ax in enumerate(iverson_axes)}
+    _diag_eqn, distinct_axes = _iverson_diagonal(iverson_factor)
+    uid_to_iverson_pos = {ax.uid: i for i, ax in enumerate(distinct_axes)}
 
     in_iverson = []   # (iverson_pos, lhs_pos)
     n_broadcast = 0

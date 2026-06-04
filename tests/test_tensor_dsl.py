@@ -687,6 +687,51 @@ def test_compute_mask_alignment_no_broadcast():
     assert n_broadcast == 0
 
 
+def test_iverson_diagonal_no_repeat():
+    """A predicate with all-distinct axes has no diagonal collapse (eqn is None)."""
+    from data_structure.TensorLogic import _iverson_diagonal
+    a = real_axis('a', 3)
+    b = real_axis('b', 3)
+    eqn, distinct = _iverson_diagonal(ieq(a, b))  # DFS axes [a, b]
+    assert eqn is None
+    assert len(distinct) == 2
+
+
+def test_iverson_diagonal_repeated_uid():
+    """A predicate where one axis appears twice yields a diagonal-extract einsum."""
+    from data_structure.TensorLogic import _iverson_diagonal
+    from data_structure.TensorExpr import IversonConst
+    from data_structure.Numeric import Integer
+    x = real_axis('x', 8)
+    two = IversonConst(Integer(2))
+    pred = (x > two) | ieq(x, two)   # DFS axes [x, x]
+    eqn, distinct = _iverson_diagonal(pred)
+    assert eqn == 'aa->a'
+    assert len(distinct) == 1
+    assert distinct[0].uid == x.uid
+
+
+def test_compute_mask_alignment_repeated_uid():
+    """A predicate where one axis appears twice collapses to a single mask dim.
+
+    (x > 2) | (x == 2) has DFS axes [x, x] but only one distinct axis.  The
+    alignment perm must have length 1 (one entry per distinct UID), pointing at
+    the diagonal-collapsed buffer dim — not length 1 pointing at the stale last
+    occurrence.  For LHS [q, x]: x is the only predicate axis (collapsed pos 0,
+    lhs pos 1); q broadcasts.
+    """
+    from data_structure.TensorLogic import _compute_mask_alignment
+    from data_structure.TensorExpr import IversonConst
+    from data_structure.Numeric import Integer
+    q = real_axis('q', 4)
+    x = real_axis('x', 8)
+    two = IversonConst(Integer(2))
+    pred = (x > two) | ieq(x, two)   # DFS axes [x, x]
+    perm, n_broadcast = _compute_mask_alignment(pred, (q, x))
+    assert perm == (0,), f"Expected (0,), got {perm}"
+    assert n_broadcast == 1, f"Expected 1, got {n_broadcast}"
+
+
 # ---------------------------------------------------------------------------
 # MaskedSoftMax operator
 # ---------------------------------------------------------------------------
