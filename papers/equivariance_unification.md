@@ -8,7 +8,7 @@
 - **(b) base grading** — `D = BG`, the delooping of a group `G` (group convolution; [future_ideas.md Appendix A.2](future_ideas.md#a2-d--group-bg-base-repg-fibers));
 - **(c) fiber grading** — `D = Rep(G)` (steerable features; [same appendix](future_ideas.md#a2-d--group-bg-base-repg-fibers)).
 
-This note carries out **Phase 1** (the object-level kernel), **Phase 2** (lifting to algebras of a graded PROP), **Phase 3** (base ⊗ fiber, §4.1), and **Phase 4.1–4.2** (the sharp scope and the symmetry-on-the-broadcasting case, §5): it reduces the question to a single classical equivalence, proves the three routes agree, makes the agreement an "iff" (coincidence ⟺ action monad), and recovers DeepSets as the degree-permutation instance. Only the continuous/non-compact-`G` analytics (4.3) and the Lean formalization (Phase 5) remain.
+This note carries out **Phase 1** (the object-level kernel), **Phase 2** (lifting to algebras of a graded PROP), **Phase 3** (base ⊗ fiber, §4.1), and **Phase 4.1–4.2** (the sharp scope and the symmetry-on-the-broadcasting case, §5): it reduces the question to a single classical equivalence, proves the three routes agree, makes the agreement an "iff" (coincidence ⟺ action monad), and recovers DeepSets as the degree-permutation instance. It also closes **Phase 4.3 for compact `G`** (modulo standard enriched scaffolding — the e3nn/`SO(3)` setting); only **non-compact `G`** (4.3, §5.3) and the Lean formalization (Phase 5) remain open.
 
 **Result.** For a group (or monoid) `G`, all three routes compute one and the same category — `C`-algebras valued in the `G`-objects of the target — so they coincide. The proof is: *(1)* the three presentations of "a `G`-object" are monoidally equivalent (Phase 1, classical), and *(2)* `Alg(C, −)` preserves monoidal equivalences (Phase 2, standard 2-functoriality). The coincidence is therefore a theorem, with scope exactly the *action (Hopf) monads*; for symmetry monads carrying extra relations the routes provably diverge (§5).
 
@@ -167,9 +167,25 @@ This **recovers the DeepSets theorem**: a set-function layer is permutation-inva
 
 **Proposition 8 (general entanglement ⟺ a distributive law).** If `G` acts on the degree but **not** by `D`-automorphisms, then `V^{T_G}` is a `D`-actegory — and Theorem 2 still lifts — **iff** there is a distributive law `λ : T_G ∘ ⊛ ⇒ ⊛ ∘ T_G` satisfying the Beck axioms. By Beck's theorem (`distributive laws T∘S ⇒ S∘T` ⟺ liftings of `S` to `V^T`), such a `λ` lifts the `⊛`-action to `V^{T_G}`; the Phase-1 monoidal equivalence then upgrades to a `D`-actegory equivalence and Lemma 2 / Theorem 2 go through, giving `Alg_T(C,V) ≃ Alg(C, V^{T_G})`. When no coherent `λ` exists the routes need not agree. So **H4 can be dropped exactly when a distributive law `T_G ⊛ ⇒ ⊛ T_G` exists**; Prop 7 is the special case where `λ` is the canonical symmetry and always exists. ∎
 
-### 5.3 Continuous `G` (still open analytically)
+### 5.3 Continuous `G`: compact (closable) vs non-compact (open)
 
-For a Lie group, `BG` must be enriched (topological/smooth) and `Vect^{T_G} ≃ Rep(G)` needs compactness/semisimplicity (Peter–Weyl). Finite `G` is unconditional (§5.1–5.2); compact `G` needs the representation theory; **non-compact `G` may genuinely fail** (no semisimplicity). The categorical skeleton (Theorems 1–2, 6–8) is identical — only the copower/completeness and the analytic hypotheses on the enriched `Alg(C,−)` change. This is the one part of Phase 4 not closed.
+The discrete proofs use the copower `T_G = G·(−)` and finite direct sums; a topological group needs analytic replacements. The dividing line is **compactness**.
+
+**Compact `G` — closable modulo enriched scaffolding (Proposition 9).** Let `G` be a compact Hausdorff group and work enriched over a base of (topological / Hilbert) vector spaces with the relevant completeness. Replace the discrete copower by the **Haar–convolution monad** `T_G` (the measure/convolution Hopf algebra of `G`, integrating against normalized Haar measure), whose algebras are the continuous representations. Then the discrete development transports verbatim:
+
+- **(Peter–Weyl)** `Rep(G)` is semisimple symmetric monoidal; its irreducibles form a small set of generating **colors** and every object is a (Hilbert) direct sum of them — the [Appendix A.2 fiber](future_ideas.md#a2-d--group-bg-base-repg-fibers) picture survives, with the Peter–Weyl decomposition in place of the finite `⊕`.
+- **(enriched Theorem 1)** `V^{T_G} ≃ [BG, V]_{cont} ≃ Rep(G)`, monoidally (the convolution algebra is Hopf; tensor of reps = diagonal action), where `BG` is the enriched delooping and `[BG,V]_{cont}` the continuous functors.
+- **(enriched Theorems 2 & 6)** `Alg(C, V^{T_G})` is the steerable-equivariant algebra category, and the recognition theorem still holds: `Rep(G) → V` is monadic by enriched Barr–Beck (the convolution algebra has a bounded approximate identity; modules = continuous reps), so coincidence ⟺ `T` is the convolution action monad.
+
+The analytic inputs are exactly: Haar measure (standard for compact `G`), the convolution Hopf algebra and its approximate identity, enriched Barr–Beck monadicity, and completeness of `V` for direct sums. This is the setting GDL actually uses — `SO(2)`, `SO(3)`, `O(3)`, finite point groups (e3nn) — so compact `G` is **closed in practice**, the categorical skeleton being identical to §§2–5.2.
+
+**Non-compact `G` — open; the clean equivalence is a compact phenomenon.** Drop compactness and three things break, each identifiable:
+
+1. **Semisimplicity fails (no Peter–Weyl).** Finite-dimensional reps of e.g. `SL(2,ℝ)` are not completely reducible; unitary reps decompose by a **direct integral** over the unitary dual against Plancherel measure, not a discrete direct sum. "Colors = irreps, objects = `⊕` irreps" is then replaced by *measurable fields of Hilbert spaces / direct integrals* — outside the discrete colored-PROP framework.
+2. **No canonical action monad.** Algebraic, smooth (Casselman–Wallach), unitary, and tempered representations give genuinely different categories; there is no single `T_G` whose Eilenberg–Moore category is "the" `Rep(G)`. The answer bifurcates by representation-theoretic context.
+3. **Recognition/monadicity may fail.** Without a well-behaved approximate identity, the forgetful from a continuous-rep category need not be monadic over the chosen base, so Theorem 6's argument does not apply.
+
+The abstract `V^{T_G}` (for a *chosen* monad) is always defined, but its identification with a workable, color-generated `Rep(G)` — hence the practical steerable-feature picture — is a **compact-group phenomenon**. Non-compact symmetries need compactification, a restricted finite-dimensional (non-unitary) rep choice, or a **direct-integral generalization of the grading** (index = the unitary dual with Plancherel measure; colors = a measurable field, not a discrete set). Formalizing that generalization is the open residue of Phase 4.
 
 ---
 
@@ -179,10 +195,10 @@ For a Lie group, `BG` must be enriched (topological/smooth) and `Vect^{T_G} ≃ 
 - **Phase 1** (object kernel) — **done**: Theorem 1 + Prop 1′ (classical; full proof above).
 - **Phase 2** (algebra lift) — **done**: Lemma 2 + Theorem 2.
 - **Phase 3** (reconcile `Rep(G)`, and base ⊗ fiber) — **done**: Cor. 3 (the `V = Vect` instance) plus Prop 5 (§4.1), which unifies base and fiber via the action groupoid `B ⋊ G` — `Rep(G)` is `B = ⋆`, convolution is `B = G/H`.
-- **Phase 4** (scope) — **4.1 done** (Theorem 6: coincidence ⟺ action monad, by monadicity + uniqueness, with the free-monoid-monad counterexample, §5.1); **4.2 done** (Prop 7: degree-permutation is the PROP's own symmetry, recovering DeepSets; Prop 8: general entanglement ⟺ a Beck distributive law, §5.2); **4.3 open** (continuous/non-compact `G`, §5.3).
+- **Phase 4** (scope) — **4.1 done** (Theorem 6: coincidence ⟺ action monad, by monadicity + uniqueness, with the free-monoid-monad counterexample, §5.1); **4.2 done** (Prop 7: degree-permutation is the PROP's own symmetry, recovering DeepSets; Prop 8: general entanglement ⟺ a Beck distributive law, §5.2); **4.3 — compact `G` closed** modulo enriched scaffolding (Prop 9: Haar–convolution monad + Peter–Weyl transport the skeleton; the e3nn/`SO(3)` setting), **non-compact `G` open** (semisimplicity, a canonical monad, and monadicity all fail — needs a direct-integral grading over the unitary dual), §5.3.
 - **Phase 5** (Lean) — finite `G` is reachable: Mathlib has `CategoryTheory.Monad.Algebra` (Eilenberg–Moore), `Action`/`Rep G`, and monoidal-functor categories; the target is `Action V G ≃ V^{T_G}` and `Alg(C, −)` preserving it. Continuous `G` is out of reach (no enriched/smooth category theory in Mathlib).
 
-**Net:** the open problem is closed in the affirmative for group/monoid symmetries — it is the classical `V^{T_G} ≃ [BG, V] ≃ Rep(G)` equivalence transported through `Alg(C, −)` — with the failure mode (non-action monads) characterizing its exact scope.
+**Net:** the open problem is closed in the affirmative for group/monoid symmetries — it is the classical `V^{T_G} ≃ [BG, V] ≃ Rep(G)` equivalence transported through `Alg(C, −)` — with the failure mode (non-action monads) characterizing its exact scope. The base ⊗ fiber composition is unified by the action groupoid (Prop 5); the scope is sharp (Theorem 6); symmetries acting on the broadcasting are handled (Props 7–8, recovering DeepSets); and compact continuous groups are covered modulo standard enriched scaffolding (Prop 9). The sole open residue is **non-compact `G`** — where semisimplicity, a canonical action monad, and monadicity all fail, and a direct-integral grading over the unitary dual would be required.
 
 ---
 
