@@ -11,7 +11,20 @@
       "Bash(git commit *)",
       "Bash(PYTHONPATH=. python /tmp/doccheck.py)",
       "Bash(python -m pytest tests/test_torch_compile.py tests/test_tensor_dsl.py tests/test_tensor_logic.py tests/test_import_hygiene.py -q)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Skill(run)",
+      "Skill(run:*)",
+      "Bash(pkill -f \"python3 -m http.server 3001\")",
+      "Bash(pkill -f \"http.server 3001\")",
+      "Bash(python3 -m http.server 3001)",
+      "Bash(sips -g pixelWidth -g pixelHeight /Users/williammacready/code/python/pyncd/docs/factor_graph_render.png)",
+      "Bash(sips --resampleHeightWidth 480 324 /Users/williammacready/code/python/pyncd/docs/factor_graph_render.png)",
+      "Bash(sips --resampleHeightWidth 408 275 /Users/williammacready/code/python/pyncd/docs/factor_graph_render.png)",
+      "Bash(cp /Users/williammacready/code/python/tsncd/src/json_files/mlp.json /tmp/mlp_backup.json)",
+      "Bash(cp /tmp/factor_graph.json /Users/williammacready/code/python/tsncd/src/json_files/mlp.json)",
+      "Bash(sips -g pixelWidth -g pixelHeight /tmp/factor_graph_5x.png)",
+      "Bash(sips --resampleHeightWidth 433 275 /tmp/factor_graph_5x.png --out /Users/williammacready/code/python/pyncd/docs/factor_graph_render.png)",
+      "Bash(sips -g pixelHeight -g pixelWidth /tmp/factor_graph_5x.png)"
     ]
   },
   "hooks": {

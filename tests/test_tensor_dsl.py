@@ -125,6 +125,9 @@ def test_relu_on_single_tensor():
     assert isinstance(expr.operator, ops.ReLU)
     assert len(expr.factors) == 1
 
+def test_relu_operator_string():
+    assert ops.ReLU().operator == 'relu'
+
 def test_softmax_on_expression():
     tl = TL()
     q, h, k = axes('q h k')

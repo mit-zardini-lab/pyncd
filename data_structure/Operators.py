@@ -336,6 +336,7 @@ class WeightedTriangularLower(cat.Operator):
 @dataclass(frozen=True)
 class ReLU(Elementwise):
     name: fd.DynamicName | None = fd.DynamicName('\\mathrm{relu}')
+    operator: str | None = 'relu'
 
 @dataclass(frozen=True)
 class Dropout(Elementwise):
