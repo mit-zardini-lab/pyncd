@@ -1258,3 +1258,22 @@ def test_materialise_double_invert():
         for j in range(4):
             expected[i, j] = 1.0 if i < j else 0.0
     assert torch.allclose(result, expected)
+
+
+def test_linear_declaration_two_layer_mlp():
+    """A two-layer MLP with .linear()-declared weights: each weight becomes an
+    internal ops.Linear parameter (dropped from caller inputs); only X is passed."""
+    q = real_axis('q', 2)
+    d = real_axis('d', 4)
+    dff = real_axis('dff', 8)
+    tl = TL()
+    tl.W_in.linear(dff, d, bias=False)
+    tl.W_out.linear(d, dff, bias=False)
+    tl.H[q, dff]  = relu(tl.W_in[dff, d] * tl.X[q, d])
+    tl.Out[q, d]  = tl.W_out[d, dff] * tl.H[q, dff]
+    mod = ConstructedModule.construct(tl.to_morphism())
+    out = mod(torch.randn(2, 4))               # only X — weights are parameters
+    out = out[0] if isinstance(out, tuple) else out
+    assert out.shape == (2, 4)
+    shapes = sorted(tuple(p.shape) for _, p in mod.named_parameters())
+    assert shapes == [(4, 8), (8, 4)], shapes   # W_in (d->dff) and W_out (dff->d)

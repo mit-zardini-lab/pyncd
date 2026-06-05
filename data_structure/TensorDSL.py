@@ -26,6 +26,7 @@ class TensorKind(Enum):
     TENSOR    = 'tensor'
     PREDICATE = 'predicate'  # Bool-typed; axes no longer promoted to PredAxis
     SELECTION = 'selection'
+    LINEAR    = 'linear'     # weight of a Linear/affine layer (ops.Linear box)
 
 
 @dataclass
@@ -33,6 +34,7 @@ class TensorDeclaration:
     """Positional shape declaration for a named tensor."""
     kind:  TensorKind
     shape: tuple[sc.RawAxis, ...]
+    bias:  bool = False      # only meaningful for LINEAR: affine (Wx + b) vs linear
 
 
 def _nat_wrap(ax: sc.RawAxis) -> NatAxis:
@@ -310,6 +312,9 @@ class TL:
                     for prior_ax, eq_ax in zip(prior_axes, factor.axes):
                         self._ctx.append_iter((prior_ax, eq_ax))
         applied_eq = self._ctx.apply(eq)
+        linear = self._linear_factor(applied_eq)
+        if linear is not None:
+            return self._build_linear_morphism(applied_eq, linear, value.operator)
         br = applied_eq.bc_signature(array_datatypes=self._array_datatypes())
         domain_factors = [
             f for f in applied_eq.rhs
@@ -321,6 +326,62 @@ class TL:
             for f in domain_factors
         )
         return br, applied_eq.lhs_indices, input_names
+
+    def _linear_factor(self, eq) -> tuple[int, TensorDeclaration] | None:
+        """Return (rhs index, declaration) of a LINEAR-declared weight factor, if any."""
+        for i, f in enumerate(eq.rhs):
+            if not isinstance(f, TensorRef):
+                continue
+            key = f.name.body if isinstance(f.name.body, str) else None
+            decl = self._declarations.get(key) if key else None
+            if decl is not None and decl.kind is TensorKind.LINEAR:
+                return (i, decl)
+        return None
+
+    def _build_linear_morphism(self, eq, linear, operator):
+        """Compile `W[out,in] * X[...,in]` (W LINEAR-declared) to an ops.Linear box.
+
+        The weight becomes the layer's internal parameter (dropped from the caller
+        inputs); the activation X is the sole input.  Builds an identity passthrough
+        over X composed with a sized Linear operator, then the nonlinearity.
+        """
+        i, decl = linear
+        W = eq.rhs[i]
+        acts = [f for j, f in enumerate(eq.rhs) if j != i and isinstance(f, TensorRef)]
+        if len(acts) != 1:
+            raise ValueError(
+                f"a LINEAR-declared weight must multiply exactly one activation; "
+                f"got {len(acts)} other tensor factors"
+            )
+        X = acts[0]
+        out_axis, in_axis = W.axes[0], W.axes[1]   # declared shape order (out, in)
+        eq_x = TensorEquation(
+            lhs_name=None, lhs_indices=X.axes,
+            rhs=(X,), operator=ops.Identity(),
+        )
+        br_x = eq_x.bc_signature(array_datatypes=self._array_datatypes())
+        wname = W.name.body if isinstance(W.name.body, str) else None
+        linear_op = ops.Linear(
+            name=fd.DynamicName(
+                body='L',
+                subscript=fd.DynamicName.from_str(wname),
+                settings=fd.DynamicNameSettings(bold=True),
+            ),
+            bias=decl.bias,
+        )
+        morph = br_x @ ops.sized(linear_op, (in_axis,), (out_axis,))
+        if operator is not None and not isinstance(operator, ops.Identity):
+            if isinstance(operator, ops.SoftMax):
+                morph = morph @ ops.SoftMax.template()
+            elif isinstance(operator, ops.Normalize):
+                morph = morph @ ops.Normalize.template()
+            elif isinstance(operator, ops.Elementwise):
+                morph = morph @ type(operator).template()
+            else:
+                raise NotImplementedError(
+                    f"nonlinearity {operator!r} not supported after a Linear layer"
+                )
+        return morph, eq.lhs_indices, (X.name,)
 
     def _build_sum_morphism(
         self,
@@ -1131,6 +1192,22 @@ class TensorProxy:
         self._registry._register_declaration(
             self._name,
             TensorDeclaration(kind=TensorKind.SELECTION, shape=shape),
+        )
+        return self
+
+    def linear(self, *shape: sc.RawAxis, bias: bool = False) -> TensorProxy:
+        """Declare this tensor as a Linear/affine layer weight.
+
+        shape is (output_axis, input_axis): the weight maps the input axis to the
+        output axis.  When this weight multiplies an activation in an equation
+        (e.g. W_in[dff, d] * X[q, d]), the contraction compiles to an ops.Linear
+        operator (drawn as an 'L' box) instead of an einsum — the weight becomes
+        the layer's internal parameter rather than a caller-supplied input, and
+        bias=True makes it affine (Wx + b).
+        """
+        self._registry._register_declaration(
+            self._name,
+            TensorDeclaration(kind=TensorKind.LINEAR, shape=shape, bias=bias),
         )
         return self
 
