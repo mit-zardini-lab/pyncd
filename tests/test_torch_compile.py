@@ -1313,3 +1313,26 @@ def test_linear_multi_axis_input_projection():
     assert out.shape == (2, 6)                   # (q, d)
     shapes = [tuple(p.shape) for _, p in mod.named_parameters()]
     assert shapes == [(2, 3, 6)], shapes
+
+
+def test_linear_rejects_weight_axes_mismatch():
+    """The weight's axes must be exactly out_axes ∪ in_axes (same arity, wrong axis)."""
+    q = real_axis('q', 2)
+    d = real_axis('d', 4)
+    dff = real_axis('dff', 8)
+    z = real_axis('z', 4)
+    tl = TL()
+    tl.W.linear(out_axes=(dff,), in_axes=(d,), bias=False)   # declared {dff, d}
+    with pytest.raises(ValueError, match="do not match its declared"):
+        tl.H[q, dff] = tl.W[dff, z] * tl.X[q, d]             # used {dff, z}: z != d
+
+
+def test_linear_rejects_multiple_activations():
+    """A linear weight must multiply exactly one activation tensor."""
+    q = real_axis('q', 2)
+    d = real_axis('d', 4)
+    dff = real_axis('dff', 8)
+    tl = TL()
+    tl.W_in.linear(out_axes=(dff,), in_axes=(d,), bias=False)
+    with pytest.raises(ValueError, match="exactly one activation"):
+        tl.H[q, dff] = tl.W_in[dff, d] * tl.X[q, d] * tl.Y[q, d]
