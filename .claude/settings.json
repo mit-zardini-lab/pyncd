@@ -5,7 +5,13 @@
       "Bash(cp \"/Users/williammacready/Desktop/Screenshot 2026-05-11 at 2.09.25 PM.png\" /Users/williammacready/code/python/pyncd/papers/images/reindexing-diagram.png)",
       "Bash(cp \"/Users/williammacready/Desktop/Screenshot 2026-05-11 at 2.09.41 PM.png\" /Users/williammacready/code/python/pyncd/papers/images/slice-diagram.png)",
       "Bash(npx markdownlint-cli *)",
-      "Bash(pdftotext *)"
+      "Bash(pdftotext *)",
+      "Bash(python -m pytest tests/test_torch_compile.py tests/test_tensor_dsl.py -q)",
+      "Bash(PYTHONPATH=. python /tmp/cap.py)",
+      "Bash(git commit *)",
+      "Bash(PYTHONPATH=. python /tmp/doccheck.py)",
+      "Bash(python -m pytest tests/test_torch_compile.py tests/test_tensor_dsl.py tests/test_tensor_logic.py tests/test_import_hygiene.py -q)",
+      "Bash(git push *)"
     ]
   },
   "hooks": {
