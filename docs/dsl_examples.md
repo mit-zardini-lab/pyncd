@@ -25,16 +25,20 @@ dimension, apply ReLU, project back down.
 
 ### 1. Mathematical description
 
-With batch/position index `q`, model dimension `d`, and hidden dimension `f`:
+With batch/position index `q`, model dimension `d`, and hidden dimension `f`,
+in **tensor-logic (Einstein) notation** — a repeated index on the right that
+does not appear on the left is implicitly summed:
 
 $$
-H[q, f] = \mathrm{relu}\!\left( \sum_{d} W_{\text{in}}[f, d]\; X[q, d] \right)
+H[q, f] = \mathrm{relu}\!\big( W_{\text{in}}[f, d]\; X[q, d] \big)
 \qquad
-\mathrm{Out}[q, d] = \sum_{f} W_{\text{out}}[d, f]\; H[q, f]
+\mathrm{Out}[q, d] = W_{\text{out}}[d, f]\; H[q, f]
 $$
 
-`d` is contracted in the first equation (summed away); `f` is contracted in the
-second. Everything else is retained on the left.
+So `d` (repeated on the right, absent on the left of the first equation) is
+contracted, and likewise `f` in the second; the left-hand indices are retained.
+This implicit-summation convention is exactly the DSL's rule — contraction is
+read from axis (UID) identity, never written as an explicit `Σ`.
 
 ### 2. TL DSL
 
