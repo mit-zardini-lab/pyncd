@@ -414,6 +414,7 @@ class ConstructedTensorEquation[B: cat.Datatype, A: cat.Axis](
 ConstructedModule.add_function(ops.SoftMax, torch.softmax, dim=True)
 ConstructedModule.add_function(ops.AdditionOp, lambda x, y: x + y, semantic=True)
 ConstructedModule.add_function(ops.Elementwise, torch.relu)
+ConstructedModule.add_function(ops.ReLU, torch.relu)
 
 def weighted_triangular_lower(x: torch.Tensor) -> torch.Tensor:
     trilled = torch.tril(x)

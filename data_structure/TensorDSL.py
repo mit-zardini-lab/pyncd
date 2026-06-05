@@ -355,11 +355,6 @@ class TL:
             )
         X = acts[0]
         out_axis, in_axis = W.axes[0], W.axes[1]   # declared shape order (out, in)
-        eq_x = TensorEquation(
-            lhs_name=None, lhs_indices=X.axes,
-            rhs=(X,), operator=ops.Identity(),
-        )
-        br_x = eq_x.bc_signature(array_datatypes=self._array_datatypes())
         wname = W.name.body if isinstance(W.name.body, str) else None
         linear_op = ops.Linear(
             name=fd.DynamicName(
@@ -369,7 +364,23 @@ class TL:
             ),
             bias=decl.bias,
         )
-        morph = br_x @ ops.sized(linear_op, (in_axis,), (out_axis,))
+        # Build the Linear Broadcasted directly: batch axes (X axes retained in
+        # the lhs) are TILED, the in/out feature axes are concrete. No identity
+        # passthrough is composed in front, so no spurious einsum (Σ) box.
+        retained = {ax.uid for ax in eq.lhs_indices}
+        degree = tuple(ax for ax in X.axes if ax.uid in retained)
+        pos = {ax.uid: k for k, ax in enumerate(degree)}
+        in_shape = tuple(bc.WeaveMode.TILED if ax.uid in pos else ax for ax in X.axes)
+        out_shape = tuple(bc.WeaveMode.TILED if ax.uid in pos else ax for ax in eq.lhs_indices)
+        morph = bc.Broadcasted(
+            operator=linear_op,
+            input_weaves=(bc.Weave(bc.Reals(), in_shape),),
+            output_weaves=(bc.Weave(bc.Reals(), out_shape),),
+            reindexings=(pc.Rearrangement(
+                mapping=tuple(pos[ax.uid] for ax in X.axes if ax.uid in pos),
+                _dom=degree,
+            ),),
+        )
         if operator is not None and not isinstance(operator, ops.Identity):
             if isinstance(operator, ops.SoftMax):
                 morph = morph @ ops.SoftMax.template()
