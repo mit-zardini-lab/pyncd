@@ -34,7 +34,9 @@ class TensorDeclaration:
     """Positional shape declaration for a named tensor."""
     kind:  TensorKind
     shape: tuple[sc.RawAxis, ...]
-    bias:  bool = False      # only meaningful for LINEAR: affine (Wx + b) vs linear
+    bias:  bool = False                          # LINEAR only: affine (Wx + b) vs linear
+    out_axes: tuple[sc.RawAxis, ...] = ()        # LINEAR only: output feature axes
+    in_axes:  tuple[sc.RawAxis, ...] = ()        # LINEAR only: input feature axes
 
 
 def _nat_wrap(ax: sc.RawAxis) -> NatAxis:
@@ -1206,19 +1208,37 @@ class TensorProxy:
         )
         return self
 
-    def linear(self, *shape: sc.RawAxis, bias: bool = False) -> TensorProxy:
+    def linear(
+        self,
+        *,
+        out_axes: tuple[sc.RawAxis, ...],
+        in_axes: tuple[sc.RawAxis, ...],
+        bias: bool = False,
+    ) -> TensorProxy:
         """Declare this tensor as a Linear/affine layer weight.
 
-        shape is (output_axis, input_axis): the weight maps the input axis to the
-        output axis.  When this weight multiplies an activation in an equation
-        (e.g. W_in[dff, d] * X[q, d]), the contraction compiles to an ops.Linear
-        operator (drawn as an 'L' box) instead of an einsum — the weight becomes
-        the layer's internal parameter rather than a caller-supplied input, and
-        bias=True makes it affine (Wx + b).
+        out_axes and in_axes name the weight's output- and input-feature axes
+        (each may be multi-axis).  When this weight multiplies an activation in an
+        equation, e.g.
+
+            tl.W_Q.linear(out_axes=(h, k), in_axes=(d,))
+            tl.Q[q, h, k] = tl.W_Q[h, k, d] * tl.X[q, d]      # maps d -> (h, k)
+
+        the contraction compiles to an ops.Linear operator (drawn as an 'L' box)
+        instead of an einsum: the weight becomes the layer's internal parameter
+        (dropped from caller inputs) and bias=True makes it affine (Wx + b).
         """
+        out_axes = tuple(out_axes)
+        in_axes = tuple(in_axes)
         self._registry._register_declaration(
             self._name,
-            TensorDeclaration(kind=TensorKind.LINEAR, shape=shape, bias=bias),
+            TensorDeclaration(
+                kind=TensorKind.LINEAR,
+                shape=out_axes + in_axes,
+                bias=bias,
+                out_axes=out_axes,
+                in_axes=in_axes,
+            ),
         )
         return self
 

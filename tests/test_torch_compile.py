@@ -1267,8 +1267,8 @@ def test_linear_declaration_two_layer_mlp():
     d = real_axis('d', 4)
     dff = real_axis('dff', 8)
     tl = TL()
-    tl.W_in.linear(dff, d, bias=False)
-    tl.W_out.linear(d, dff, bias=False)
+    tl.W_in.linear(out_axes=(dff,), in_axes=(d,), bias=False)
+    tl.W_out.linear(out_axes=(d,), in_axes=(dff,), bias=False)
     tl.H[q, dff]  = relu(tl.W_in[dff, d] * tl.X[q, d])
     tl.Out[q, d]  = tl.W_out[d, dff] * tl.H[q, dff]
     mod = ConstructedModule.construct(tl.to_morphism())
