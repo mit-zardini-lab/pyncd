@@ -341,11 +341,13 @@ class TL:
         return None
 
     def _build_linear_morphism(self, eq, linear, operator):
-        """Compile `W[out,in] * X[...,in]` (W LINEAR-declared) to an ops.Linear box.
+        """Compile `W * X` (W LINEAR-declared) to an ops.Linear box.
 
-        The weight becomes the layer's internal parameter (dropped from the caller
-        inputs); the activation X is the sole input.  Builds an identity passthrough
-        over X composed with a sized Linear operator, then the nonlinearity.
+        The weight's declared in_axes/out_axes (each possibly multi-axis) give the
+        input/output feature blocks; the weight becomes the layer's internal
+        parameter (dropped from the caller inputs) and the activation X is the sole
+        input.  Builds the Linear Broadcasted directly — feature axes concrete,
+        batch axes TILED — then composes the nonlinearity.
         """
         i, decl = linear
         W = eq.rhs[i]
