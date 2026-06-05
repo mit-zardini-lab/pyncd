@@ -1336,3 +1336,42 @@ def test_linear_rejects_multiple_activations():
     tl.W_in.linear(out_axes=(dff,), in_axes=(d,), bias=False)
     with pytest.raises(ValueError, match="exactly one activation"):
         tl.H[q, dff] = tl.W_in[dff, d] * tl.X[q, d] * tl.Y[q, d]
+
+
+def test_linear_bias_true_adds_bias_parameter():
+    """bias=True makes the layer affine: a bias parameter is created alongside the weight."""
+    q = real_axis('q', 2)
+    d = real_axis('d', 4)
+    dff = real_axis('dff', 8)
+    tl = TL()
+    tl.W_in.linear(out_axes=(dff,), in_axes=(d,), bias=True)
+    tl.H[q, dff] = tl.W_in[dff, d] * tl.X[q, d]
+    mod = ConstructedModule.construct(tl.to_morphism())
+    out = mod(torch.randn(2, 4))
+    out = out[0] if isinstance(out, tuple) else out
+    assert out.shape == (2, 8)
+    pshapes = sorted(tuple(p.shape) for _, p in mod.named_parameters())
+    assert (4, 8) in pshapes and (8,) in pshapes, pshapes   # weight (d,dff) + bias (dff,)
+
+
+def test_linear_rejects_in_axis_not_in_activation():
+    """Every in_axis must appear in the activation tensor."""
+    q = real_axis('q', 2)
+    d = real_axis('d', 4)
+    dff = real_axis('dff', 8)
+    e = real_axis('e', 4)
+    tl = TL()
+    tl.W.linear(out_axes=(dff,), in_axes=(d,), bias=False)
+    with pytest.raises(ValueError, match="in_axes must all appear in the activation"):
+        tl.H[q, dff] = tl.W[dff, d] * tl.X[q, e]    # activation has e, not d
+
+
+def test_linear_rejects_out_axis_not_in_lhs():
+    """Every out_axis must appear in the lhs."""
+    q = real_axis('q', 2)
+    d = real_axis('d', 4)
+    dff = real_axis('dff', 8)
+    tl = TL()
+    tl.W.linear(out_axes=(dff,), in_axes=(d,), bias=False)
+    with pytest.raises(ValueError, match="out_axes must all appear in the lhs"):
+        tl.H[q, d] = tl.W[dff, d] * tl.X[q, d]      # lhs lacks dff
