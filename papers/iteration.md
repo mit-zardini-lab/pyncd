@@ -3,7 +3,50 @@
 This document records the design decisions for expressing iterative recurrences
 in pyncd's tensor logic DSL. It covers motivation, syntax, and the compiler
 consistency checks that make the design statically safe. §6 sketches how these
-decisions map onto the `TL` and `ConstructedModule` machinery.
+decisions map onto the `TL` and `ConstructedModule` machinery, and §7 gives the
+diagrammatic (string-diagram) notation.
+
+---
+
+## Contents
+
+- [1. Motivation](#1-motivation)
+- [2. Design Decisions](#2-design-decisions)
+  - [2.1 Declaration on the tensor, not the axis](#21-declaration-on-the-tensor-not-the-axis)
+  - [2.2 Base case as a tensor equation](#22-base-case-as-a-tensor-equation)
+  - [2.3 Explicit `l+1` on the LHS](#23-explicit-l1-on-the-lhs)
+  - [2.4 Semantics of `l` on the RHS](#24-semantics-of-l-on-the-rhs)
+  - [2.5 Iteration bounds from the axis declaration](#25-iteration-bounds-from-the-axis-declaration)
+  - [2.6 Coupled recurrences use Jacobi-style updates](#26-coupled-recurrences-use-jacobi-style-updates)
+- [3. Full Syntax Summary](#3-full-syntax-summary)
+- [4. Compiler Consistency Checks](#4-compiler-consistency-checks)
+  - [4.1 Axis must carry a concrete size](#41-axis-must-carry-a-concrete-size)
+  - [4.2 Base case literal must match the axis lower bound](#42-base-case-literal-must-match-the-axis-lower-bound)
+  - [4.3 Exactly one base case and one recurrence per iterative tensor](#43-exactly-one-base-case-and-one-recurrence-per-iterative-tensor)
+  - [4.4 `l+1` on the RHS is a causality violation](#44-l1-on-the-rhs-is-a-causality-violation)
+  - [4.5 `l` is not a contraction axis within a recurrence equation](#45-l-is-not-a-contraction-axis-within-a-recurrence-equation)
+  - [4.6 Coupled recurrences must share the same axis](#46-coupled-recurrences-must-share-the-same-axis)
+  - [4.7 Non-recurrent tensors must supply the full `l` dimension](#47-non-recurrent-tensors-must-supply-the-full-l-dimension)
+- [5. Out of Scope (Static Case)](#5-out-of-scope-static-case)
+- [6. DSL Changes and Br Morphism Representation](#6-dsl-changes-and-br-morphism-representation)
+  - [6.1 Required DSL changes](#61-required-dsl-changes)
+  - [6.2 Block vs Scan: two categorical cases](#62-block-vs-scan-two-categorical-cases)
+  - [6.3 Step body extraction](#63-step-body-extraction)
+  - [6.4 Compilation to PyTorch](#64-compilation-to-pytorch)
+  - [6.5 Complexities](#65-complexities)
+  - [6.6 Visual rendering](#66-visual-rendering)
+- [7. Diagrammatic Notation: a String-Diagram Realization of the ScanBox](#7-diagrammatic-notation-a-string-diagram-realization-of-the-scanbox)
+  - [7.1 Why a scan diagram is not a broadcast](#71-why-a-scan-diagram-is-not-a-broadcast)
+  - [7.2 The rolled ScanBox](#72-the-rolled-scanbox)
+  - [7.3 Unrolled semantics (fixed N)](#73-unrolled-semantics-fixed-n)
+  - [7.4 Correspondence to the compiled module](#74-correspondence-to-the-compiled-module)
+  - [7.5 Conventions](#75-conventions)
+- [Appendix: Categorical Status of `Scan` in Br](#appendix-categorical-status-of-scan-in-br)
+  - [A.1 The core axioms `Scan` satisfies](#a1-the-core-axioms-scan-satisfies)
+  - [A.2 The structural property `Scan` fails — the batch lift independence axiom](#a2-the-structural-property-scan-fails--the-batch-lift-independence-axiom)
+  - [A.3 Why `Block` does not already cover `Scan`](#a3-why-block-does-not-already-cover-scan)
+  - [A.4 Interaction with weaves and reindexings](#a4-interaction-with-weaves-and-reindexings)
+  - [A.5 Summary](#a5-summary)
 
 ---
 
@@ -128,27 +171,30 @@ slice).
 slot of the LHS of a tensor declared with `.iteration_axis(l)`.
 
 The symmetric operation `RawAxis.__sub__(int)` returns an `IterPrevRef` for use
-on the RHS, supporting two-term recurrences that read two previous steps:
+on the RHS, intended to support two-term recurrences that read two previous
+steps. **This case is design-only — the type exists, but compiler and morphism
+support are not yet implemented (§5).** The remainder of this subsection
+describes the *planned* rule:
 
 ```python
-tl.H[i, l+1] = tl.H[i, l] + tl.H[i, l-1]   # Fibonacci-style
+tl.H[i, l+1] = tl.H[i, l] + tl.H[i, l-1]   # Fibonacci-style — design only (§5)
 ```
 
-A two-term recurrence requires two base case equations (one for `l=0` and one
-for `l=1`). The compiler infers that the inductive step must start at `l=1`
-— not `l=0` — because reading `H[i, l-1]` at `l=0` would reference the
-non-existent slice `H[:, -1]`. The rule is: the recurrence starts at
-`l = max_lookback`, where `max_lookback` is the largest offset among all
-`IterPrevRef` references on the RHS (here, 1). The compiler checks that
-exactly `max_lookback` base case equations are present.
+A two-term recurrence would require two base case equations (one for `l=0` and
+one for `l=1`). The planned compiler rule infers that the inductive step must
+start at `l=1` — not `l=0` — because reading `H[i, l-1]` at `l=0` would
+reference the non-existent slice `H[:, -1]`. The rule is: the recurrence starts
+at `l = max_lookback`, where `max_lookback` is the largest offset among all
+`IterPrevRef` references on the RHS (here, 1), and exactly `max_lookback` base
+case equations must be present.
 
 ```python
 l = real_axis('l', 10)
-tl.H[i, l+1] = tl.H[i, l] + tl.H[i, l-1]   # no bound predicate needed
+tl.H[i, l+1] = tl.H[i, l] + tl.H[i, l-1]   # design only (§5); no bound predicate needed
 ```
 
-Multi-step look-back is noted as out of scope for the current static design
-(§5) but the `IterPrevRef` type anticipates it.
+Multi-step look-back is out of scope for the current static design (§5); the
+`IterPrevRef` type anticipates it.
 
 ### 2.4 Semantics of `l` on the RHS
 
@@ -805,6 +851,187 @@ notation as `BlockBox` (reusing `block_padding`, `draw_left_bracket`,
 `draw_right_bracket`), augment the bracket annotation with the step count N
 and the recurrence axis label L, and add a feedback arrow on the state wire
 within the bracket to visually distinguish it from `Block`.
+
+---
+
+## 7. Diagrammatic Notation: a String-Diagram Realization of the ScanBox
+
+§6.6 specifies the `ScanBox` rendering rules in prose. This section gives the figures
+for those rules (drawn in Mermaid in the string-diagram grammar of
+[weavesWiresMorphisms.pdf](weavesWiresMorphisms.pdf)) and applies them to the
+depth-recursive MLP of
+[dsl_examples.md § Example 4](../docs/dsl_examples.md#example-4--deep-mlp). Consistent
+with [Appendix A.4](#a4-interaction-with-weaves-and-reindexings), the recurrence axis
+is drawn as **feedback**, never as a tiling weave.
+
+### 7.1 Why a scan diagram is not a broadcast
+
+Every string diagram in [weavesWiresMorphisms.pdf](weavesWiresMorphisms.pdf) is an
+acyclic, left-to-right DAG of boxes and wires. A scan is the first construct with a
+genuine sequential dependency, and §6.6 together with A.4 pin down exactly what the
+diagram must show that a broadcast does not:
+
+- **The recurrence axis `l` is not a tiling weave** (A.4, input side). The per-step
+  input slice is read by a *dynamic* element access `⟨l|` that advances each
+  iteration, not by a fixed affine reindexing. So `l` cannot be drawn as the paper's
+  broadcast tile; the per-step weights `W` are a *sequence indexed by `l`*, sliced
+  dynamically — not parallel independent tiles.
+- **The output history is sequential** (A.4, output side). The history axis `L'` is
+  created by the iteration; it has no counterpart in the step body's signature and so
+  cannot be a weave at all.
+- **Feedback is the defining content** (§6.6). Because `dom ≠ cod` and the state is
+  carried output→input, the state wire loops back — a curved feedback arrow absent
+  from `Block`.
+
+The cycle is therefore **quarantined inside the labelled `ScanBox`**, so the outer
+diagram stays the acyclic DAG the construction-rule algebra (§2) requires. The
+recurrence axis `l` and step count `N` annotate the box bracket, not the inner wires
+(§6.6, pt 1). Following the Appendix, `l`'s axis/object form is written `L` (with
+`|L| = N`) and the length-`N+1` state-history axis is `L'`.
+
+The feedback is categorically a **trace** — independent structure beyond the tiling
+and reindexing that St/Br provide. A reindexing acts on already-materialised data,
+but the state history is produced one slice at a time and never exists as a weave to
+reindex; and the carry violates the batch-lift independence that *defines* a
+broadcast (A.2). `Scan` is therefore a new construction rule (A.3, A.5), and the
+carry is drawn as a feedback loop — distinct from the reindexing hexagons that mark
+slices (§7.2).
+
+### 7.2 The rolled ScanBox
+
+The figure uses the paper's string-diagram grammar throughout; only the carry is new.
+
+```mermaid
+flowchart LR
+    %% weaves grammar: wires carry axis types; named morphisms are solid boxes;
+    %% slices/reindexings are hexagons; inputs are left-pointing element flags;
+    %% the Scan is a Block (teal backdrop + title). Carry = the one non-standard trace.
+    x>"⟨x∣"] -- "q, d₀" --> Win["L_Wᵢₙ"]
+
+    subgraph SCAN["Scan · l · N = 3"]
+        direction LR
+        Wsrc(["W"]) -- "d_h, d_h ⊗ l" --> SLW{{"⟨l∣"}}
+        SLW -. "d_h, d_h" .-> MUL["W[l] ·"]
+        MUL == "q, d_h" ==> RELU["relu"]
+        RELU == "q, d_h" ==> CARRY(("⟲"))
+        CARRY == "carry" ==> MUL
+    end
+
+    Win == "q, d_h" ==> MUL
+    RELU == "q, d_h ⊗ L′" ==> SEL{{"⟨·,3∣"}}
+    SEL -- "q, d_h" --> Wout["L_Wₒᵤₜ"]
+    Wout -- "q, c" --> SM[/"softmax ▷"\]
+    SM -- "q, c." --> y(["y"])
+
+    classDef block fill:#d6f5ee,stroke:#2a9d8f,stroke-width:1px;
+    class SCAN block;
+    classDef carry fill:#ffe0e0,stroke:#cc0000,stroke-width:2px;
+    class CARRY carry;
+    classDef morph fill:#cfd0ff,stroke:#333,stroke-width:1px;
+    class Win,MUL,RELU,Wout morph;
+    classDef pict fill:#cfe8ff,stroke:#333;
+    class SM pict;
+    classDef io fill:#eef,stroke:#333;
+    class x,y,Wsrc io;
+```
+
+Every mark is a primitive from [weavesWiresMorphisms.pdf](weavesWiresMorphisms.pdf)
+except the carry:
+
+| Mark | Meaning | Weaves PDF |
+| --- | --- | --- |
+| labelled wire (`q, d_h`) | object — an axis / shape (a weave) | §3.1; Fig 1 |
+| solid box (`L_Wᵢₙ`, `W[l] ·`, `relu`) | named morphism (operation) | §3.1, *Morphisms* |
+| left flag `⟨x∣` | element (a `1 → X` value) | §3.2.1, *Elements* |
+| hexagon `⟨l∣`, `⟨·,3∣` | reindexing, incl. a slice | Def 10; Figs 2–3 |
+| triangle `softmax ▷` | operation pictogram | §4.2; Fig 10 |
+| teal backdrop + title | **Block** — repeated structure | §3.1, *Blocks* |
+| ⟲ feedback (red) | the carry — a **trace** | *new* — §7.1 |
+
+Reading it: `⟨x∣` is the input element; `L_Wᵢₙ` projects `(q, d₀) → (q, d_h)` and
+injects the carry at `l = 0`. Inside the **Block**, the weight sequence `W : (d_h,
+d_h) ⊗ l` is sliced by the reindexing `⟨l∣` (dynamic, A.4 — dotted) and fed to the
+linear morphism `W[l] ·`, then `relu`; the **⟲ carry** returns the state for the
+next step. The block emits the full history over `L′` (`scanl`, §6.4); the hexagon
+`⟨·,3∣` selects the final slice (a reindexing on the materialised history), which
+feeds `L_Wₒᵤₜ` and the `softmax ▷` pictogram to give `(q, c.)`.
+
+### 7.3 Unrolled semantics (fixed N)
+
+For a statically known `N`, the scan unrolls into a `Composed` of `N` steps — the one
+expressibility the appendix grants without a new primitive ("Expressible via
+`Composed` for fixed N", A.5). The rolled box (the definition) and this chain (its
+fixed-`N` meaning) denote the same module.
+
+```mermaid
+flowchart LR
+    x>"⟨x∣"] -- "q, d₀" --> Win["L_Wᵢₙ"]
+    Win == "q, d_h" ==> M0["W[0] ·"]
+    M0 == "q, d_h" ==> R0["relu"]
+    R0 == "q, d_h" ==> M1["W[1] ·"]
+    M1 == "q, d_h" ==> R1["relu"]
+    R1 == "q, d_h" ==> M2["W[2] ·"]
+    M2 == "q, d_h" ==> R2["relu"]
+    R2 == "q, d_h" ==> Wout["L_Wₒᵤₜ"]
+    Wout -- "q, c" --> SM[/"softmax ▷"\]
+    SM -- "q, c." --> y(["y"])
+    W0(["W[0]"]) -. "d_h, d_h" .-> M0
+    W1(["W[1]"]) -. "d_h, d_h" .-> M1
+    W2(["W[2]"]) -. "d_h, d_h" .-> M2
+
+    classDef morph fill:#cfd0ff,stroke:#333,stroke-width:1px;
+    class Win,M0,R0,M1,R1,M2,R2,Wout morph;
+    classDef pict fill:#cfe8ff,stroke:#333;
+    class SM pict;
+    classDef io fill:#eef,stroke:#333;
+    class x,y,W0,W1,W2 io;
+```
+
+With no carry to close, the scan is an ordinary horizontal **composition** of step
+morphisms (thick wires still mark the state spine `(q, d_h)`); each step's weight
+slice enters from below. Weight-tying versus independent weights is read straight off
+the figure: a single shared `W` feeding every step is tied; distinct `W[0..2]` (as here)
+are independent.
+
+### 7.4 Correspondence to the compiled module
+
+The rolled box maps 1:1 onto the structure §6.4 compiles for Example 4:
+
+```mermaid
+flowchart LR
+    subgraph TC["ConstructedThreadedComposed"]
+        direction LR
+        A["L_Wᵢₙ<br/>Linear 100→64"]
+        subgraph CS["ConstructedScan"]
+            direction TB
+            BM["base_module<br/>(l=0 injection)"]
+            SM["step_module<br/>· W[l] · ▸ relu ▸"]
+        end
+        B["L_Wₒᵤₜ ▸ softmax<br/>Linear 64→10"]
+        A --> CS --> B
+    end
+```
+
+- **`ScanBox` ↔ `ConstructedScan`**,
+- **base injection ↔ `base_module`**,
+- **box interior (step + feedback) ↔ `step_module`**.
+
+The diagram, the recurrence equations (§3), and the IR all share the same three
+top-level pieces.
+
+### 7.5 Conventions
+
+- **Carry-wire styling.** The carry is drawn as a **thick (bold) wire**; colour is
+  reserved for dense diagrams. It is the one wire that must never be mistaken for
+  ordinary data flow, and the bold form reads without colour.
+- **Output.** The box **emits the full history** `h[q, d_h, 0:N]` over `L'` (`Scan`
+  returns `scanl`, §6.4); a downstream **reindexing** extracts the final slice when
+  only that is needed. The history axis `L'` annotates the bracket, never an inner
+  wire (A.4: `L'` is not a weave). Final-slice selection is a reindexing (a hexagon
+  on the materialised history), separate from the scan itself.
+
+When later layers consume every state (e.g. attention over recurrence depth), the
+reindexing is dropped and the full `L'` history wire feeds downstream directly.
 
 ---
 

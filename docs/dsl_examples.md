@@ -147,7 +147,109 @@ The module has no learned parameters — all five factors are caller inputs.
 
 ---
 
-## Example 2 — Multi-Layer Perceptron
+## Example 2 — Predicates for Masked Aggregation
+
+A rank-2 feature table F (table × node) on a 5-node graph. F is used twice in the
+equation — once for source nodes and once for target nodes. An `edge(i, j)` predicate
+selects which pairs contribute. All indices are contracted, yielding a scalar.
+
+### 1. Mathematical description
+
+`F[t, n]` stores a scalar feature for each (table, node) pair. All three indices —
+table `t`, source node `i`, and target node `j` — are contracted:
+
+$$
+\text{Result} = F[t, i]\; F[t, j]\; [\text{edge}(i, j)]
+$$
+
+`t`, `i`, and `j` are all absent from the left-hand side and are therefore contracted.
+The Iverson bracket $[\text{edge}(i,j)]$ restricts the sum to pairs where an edge exists.
+
+### 2. PyRel
+
+`F` is joined against itself on shared table index `t`. Including `edge(i, j)` in the
+`where(...)` clause acts as the Iverson bracket. No output indices → scalar aggregate.
+
+```python
+from relationalai.semantics import Model, Float, Integer, where
+from relationalai.semantics.std.aggregates import sum
+
+model = Model("graph_aggregation")
+
+F      = model.Relationship(f"{Integer:t} {Integer:n} {Float:val}")
+edge   = model.Relationship(f"{Integer:i} {Integer:j}")   # presence = True
+Result = model.Concept("result")
+
+t, i, j = Integer.ref(), Integer.ref(), Integer.ref()
+vfi, vfj = Float.ref(), Float.ref()
+
+where(edge(i, j), F(t, i, vfi), F(t, j, vfj)).define(
+    Result.new(val=sum(vfi*vfj).per())
+)
+```
+
+### 3. TL DSL
+
+All three indices are contracted. The empty subscript `[()]` on the LHS declares
+`Result` as a scalar (zero free axes).
+
+```python
+import torch
+from data_structure.TensorDSL import TL, real_axis
+from torch_compile.torch_compile import ConstructedModule
+
+t = real_axis('t', 5)   # table id (contracted)
+n = real_axis('n', 5)   # node domain — used for F declaration
+i = real_axis('i', 5)   # source node (contracted)
+j = real_axis('j', 5)   # target node (contracted)
+
+tl = TL()
+tl.F.tensor(t, n)
+tl.edge.predicate(n, n)   # Bool-typed 5×5 adjacency matrix
+
+tl.Result[()] = tl.F[t, i] * tl.F[t, j] * tl.edge[i, j]
+
+morph = tl.to_morphism()
+module = ConstructedModule.construct(morph)
+
+F_t = torch.randn(5, 5)
+adj = (torch.rand(5, 5) > 0.6).float()
+out = module(F_t, F_t, adj)   # F passed twice: once as F[t,i], once as F[t,j]
+out = out[0] if isinstance(out, tuple) else out
+assert out.shape == torch.Size([])
+```
+
+### 4. Visualization
+
+Read the diagram left-to-right. The three input groups are the two F instances
+(axes `t(5)` and `i(5)` / `j(5)`) and the edge predicate (orange **𝔹** wire,
+axes `i(5) × j(5)`). The **`Σ`** box contracts over all three indices `t`, `i`, and `j`,
+producing a scalar output (no output wire). The orange colour distinguishes Bool-typed
+wires from real-valued ones.
+
+![Graph aggregation string diagram](graph_agg_render.png)
+
+### 5. Generated PyTorch
+
+```text
+ConstructedThreadedComposed(
+  (chain): ModuleList(
+    (0): ConstructedTensorEquation()
+  )
+)
+```
+
+```python
+module.chain[0].signature
+# '... x0 x1, ... x0 x2, ... x1 x2 -> ...'
+# i.e.  t   i ,   t   j ,   i   j  -> (scalar)
+```
+
+The module has no learned parameters — F and the adjacency matrix are caller inputs.
+
+---
+
+## Example 3 — Multi-Layer Perceptron
 
 A two-layer MLP (one hidden layer with a ReLU): project the input up to a hidden
 dimension, apply ReLU, project back down.
@@ -182,9 +284,8 @@ from relationalai.semantics.std.math import relu
 
 model = Model("mlp")
 
-# W_in and W_out are caller-supplied relations here; PyRel has no notation
-# for learned relations — new syntax would be needed to express the
-# .linear() form where weights are parameters rather than inputs.
+# W_in / W_out are supplied relations as PyRel has no learned
+# relations. 
 W_in  = model.Relationship(f"{Integer:f} {Integer:d} {Float:val}")
 W_out = model.Relationship(f"{Integer:d} {Integer:f} {Float:val}")
 X     = model.Relationship(f"{Integer:q} {Integer:d} {Float:val}")
@@ -284,3 +385,188 @@ caller inputs — one per layer:
 
 (`bias=True` on a `.linear()` declaration adds a matching bias parameter; multi-axis
 feature blocks like `out_axes=(h, k)` give a weight whose shape is `in_size + out_size`.)
+
+---
+
+## Example 4 — Deep MLP
+
+A 5-layer MLP expressed as a scan over layer depth: input projection followed by a
+3-step recurrence with an independent weight matrix at each step, then a softmax
+output projection.
+
+| Axis  | Size | Meaning                                                             |
+|-------|------|---------------------------------------------------------------------|
+| `q`   | 8    | batch / sequence position                                           |
+| `d_0` | 100  | input feature dimension                                             |
+| `d_h` | 64   | hidden dimension (uniform across all layers)                        |
+| `c`   | 10   | output class labels                                                 |
+| `l`   | 3    | recurrence depth; `l=0` is base state, `l=3` is final hidden state  |
+
+### 1. Mathematical description
+
+**Base case** — input projection (no activation):
+
+$$h[q,\, d_h,\, 0] = W_{\mathrm{in}}[d_0,\, d_h]\; x[q,\, d_0]$$
+
+**Recurrence** ($l = 0, 1, 2$) — independent weight matrix at each step:
+
+$$h[q,\, d_h,\, l{+}1] = \mathrm{relu}\!\left(W[l,\, \tilde{d},\, d_h]\; h[q,\, \tilde{d},\, l]\right)$$
+
+**Output** — linear projection followed by softmax:
+
+$$y[q,\, c.] = \mathrm{softmax}\!\left(W_{\mathrm{out}}[d_h,\, c]\; h[q,\, d_h,\, 3]\right)$$
+
+The dot suffix on an axis label (here `c.`) marks that axis as the normalisation
+axis of `softmax`; the result is a probability distribution over `c` for every `q`.
+This convention replaces the traditional subscript `softmax_c`.
+
+$W[l,\,\cdot,\,\cdot]$ is a **stack of independent weight matrices** — one per
+step, not shared across depth. Total learned parameters:
+$W_{\mathrm{in}}$ ($d_0 \times d_h$), $W$ ($3 \times d_h \times d_h$),
+$W_{\mathrm{out}}$ ($d_h \times c$); 5 linear applications.
+
+### 2. PyRel
+
+Each recurrence step is a separate `where(...).define(...)` rule that joins the
+hidden state at depth `l` with the weight relation for that step. PyRel evaluates
+all facts simultaneously, so each step rule fires independently on the depth-indexed
+`H` concept.
+
+```python
+from relationalai.semantics import Model, Float, Integer, where
+from relationalai.semantics.std.aggregates import sum
+
+model = Model("deep_mlp")
+
+x     = model.Relationship(f"{Integer:q} {Integer:d0} {Float:val}")
+W_in  = model.Relationship(f"{Integer:d0} {Integer:dh} {Float:val}")
+W1    = model.Relationship(f"{Integer:dh_in} {Integer:dh_out} {Float:val}")
+W2    = model.Relationship(f"{Integer:dh_in} {Integer:dh_out} {Float:val}")
+W3    = model.Relationship(f"{Integer:dh_in} {Integer:dh_out} {Float:val}")
+W_out = model.Relationship(f"{Integer:dh} {Integer:c} {Float:val}")
+H     = model.Concept("hidden")
+Y     = model.Concept("output")
+
+q, d0, dh, dh_in, dh_out, c = (Integer.ref() for _ in range(6))
+vx, win, w1, w2, w3, wout, vh = (Float.ref() for _ in range(7))
+
+# Input projection → h_0
+where(x(q, d0, vx), W_in(d0, dh, win)).define(
+    H.new(q=q, dh=dh, l=0, val=sum(vx*win).per(q, dh))
+)
+
+# Hidden layer 1: h_0 → h_1
+where(H(q, dh_in, 0, vh), W1(dh_in, dh_out, w1)).define(
+    H.new(q=q, dh=dh_out, l=1, val=relu(sum(vh*w1).per(q, dh_out)))
+)
+
+# Hidden layer 2: h_1 → h_2
+where(H(q, dh_in, 1, vh), W2(dh_in, dh_out, w2)).define(
+    H.new(q=q, dh=dh_out, l=2, val=relu(sum(vh*w2).per(q, dh_out)))
+)
+
+# Hidden layer 3: h_2 → h_3
+where(H(q, dh_in, 2, vh), W3(dh_in, dh_out, w3)).define(
+    H.new(q=q, dh=dh_out, l=3, val=relu(sum(vh*w3).per(q, dh_out)))
+)
+
+# Output: h_3 → y (softmax over c)
+where(H(q, dh, 3, vh), W_out(dh, c, wout)).define(
+    Y.new(q=q, c=c, val=softmax(sum(vh*wout).per(q)))
+)
+```
+
+### 3. TL DSL
+
+`iteration_axis(l)` declares `l` as the scan counter; the base case and step
+equation together define how `h[q, dh, l]` evolves. `W` is a 3D weight stack
+of shape `(3, d_h, d_h)`; `dh_in` (same size as `dh`) names the contracted
+hidden dimension inside the step equation to distinguish it from the free output
+axis `dh`.
+
+```python
+import torch
+from data_structure.TensorDSL import TL, real_axis, relu, softmax
+from torch_compile.torch_compile import ConstructedModule
+
+q     = real_axis('q',     8)
+d0    = real_axis('d0',  100)
+dh    = real_axis('dh',   64)
+dh_in = real_axis('dh_in', 64)   # contracted dim in step equation
+c     = real_axis('c',    10)
+l     = real_axis('l',     3)    # 3 recurrent steps
+
+tl = TL()
+tl.W_in.linear(out_axes=(dh,), in_axes=(d0,))
+tl.W_out.linear(out_axes=(c,), in_axes=(dh,))
+
+tl.h[q, dh, 0]   = tl.W_in[dh, d0] * tl.x[q, d0]
+tl.h[q, dh, l+1] = relu(tl.W[l, dh_in, dh] * tl.h[q, dh_in, l])
+tl.iteration_axis(l)
+tl.y[q, c]        = softmax(tl.W_out[c, dh] * tl.h[q, dh, 3])
+
+morph  = tl.to_morphism()
+module = ConstructedModule.construct(morph)
+
+x_in = torch.randn(8, 100)
+W    = torch.randn(3, 64, 64)    # one 64×64 matrix per step
+
+y    = module(x_in, W)
+y    = y[0] if isinstance(y, tuple) else y   # (8, 10)
+assert y.shape == (8, 10)
+assert torch.allclose(y.sum(-1), torch.ones(8), atol=1e-5)
+```
+
+`W` is passed as an external input, not a module parameter. In practice wrap it in
+an `nn.Parameter` and pass it at each forward call.
+
+### 4. Visualization
+
+The recurrence is drawn with the **rolled `ScanBox`** notation of
+[iteration.md § 7](../papers/iteration.md#7-diagrammatic-notation-a-string-diagram-realization-of-the-scanbox),
+in the string-diagram grammar of
+[weavesWiresMorphisms.pdf](../papers/weavesWiresMorphisms.pdf): wires carry axis
+types, named morphisms (`L_Wᵢₙ`, `W[l] ·`, `relu`, `L_Wₒᵤₜ`) are solid boxes, slices
+are reindexing hexagons (`⟨l∣`, `⟨·,3∣`), the input is an element flag (`⟨x∣`), and
+the `Scan` is a **Block** (the paper's container for repeated structure). The one
+non-standard mark is the **carry** — the `⟲` feedback (a *trace*, §7.1) that hands the
+state `(q, d_h)` from step `l` to `l+1`. `L_Wᵢₙ` injects the carry at `l=0`; the block
+emits the full history over `L′` (`scanl`, §6.4), and the hexagon `⟨·,3∣` selects the
+final slice `h³` for `L_Wₒᵤₜ ▸ softmax`.
+
+![Rolled ScanBox for the deep MLP](mlp5_render.png)
+
+See [iteration.md § 7](../papers/iteration.md#7-diagrammatic-notation-a-string-diagram-realization-of-the-scanbox)
+for the unrolled semantics and the mapping onto `ConstructedScan`.
+
+### 5. Generated PyTorch
+
+```text
+ConstructedThreadedComposed(
+  (chain): ModuleList(
+    (0): ConstructedLinear(module: Multilinear((100,) -> (64,)))   # W_in
+    (1): ConstructedScan(
+      (step_module): ConstructedComposed(
+        (chain): Sequential(
+          (0): ConstructedBroadcasted(operator=Multilinear((64,) -> (64,)))
+          (1): Lambda(ReLU(...))
+        )
+      )
+      (base_module): ConstructedTensorEquation()
+    )
+    (2): ConstructedComposed(
+      (chain): Sequential(
+        (0): ConstructedLinear(module: Multilinear((64,) -> (10,)))  # W_out
+        (1): Lambda(SoftMax(...))
+      )
+    )
+  )
+)
+```
+
+```python
+[(n, tuple(p.shape)) for n, p in module.named_parameters()]
+# [('chain.0.module.weights.weight',           (100, 64)),  # W_in
+#  ('chain.2.chain.0.module.weights.weight',   ( 64, 10))]  # W_out
+# W (shape 3×64×64) is an external input — not tracked as a module parameter
+```

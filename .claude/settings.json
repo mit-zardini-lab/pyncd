@@ -24,7 +24,14 @@
       "Bash(cp /tmp/factor_graph.json /Users/williammacready/code/python/tsncd/src/json_files/mlp.json)",
       "Bash(sips -g pixelWidth -g pixelHeight /tmp/factor_graph_5x.png)",
       "Bash(sips --resampleHeightWidth 433 275 /tmp/factor_graph_5x.png --out /Users/williammacready/code/python/pyncd/docs/factor_graph_render.png)",
-      "Bash(sips -g pixelHeight -g pixelWidth /tmp/factor_graph_5x.png)"
+      "Bash(sips -g pixelHeight -g pixelWidth /tmp/factor_graph_5x.png)",
+      "Bash(which mmdc *)",
+      "Bash(rtk npx *)",
+      "Bash(rm -f /tmp/mmd_*.mmd /tmp/mmd_*.svg /tmp/mmd_*.png)",
+      "Bash(awk 'NR>=337 && /^#{1,3} /' /Users/williammacready/code/python/pyncd/papers/iteration.md)"
+    ],
+    "additionalDirectories": [
+      "/tmp"
     ]
   },
   "hooks": {
