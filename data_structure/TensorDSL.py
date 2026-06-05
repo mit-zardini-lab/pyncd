@@ -356,7 +356,6 @@ class TL:
                 f"got {len(acts)} other tensor factors"
             )
         X = acts[0]
-        out_axis, in_axis = W.axes[0], W.axes[1]   # declared shape order (out, in)
         wname = W.name.body if isinstance(W.name.body, str) else None
         linear_op = ops.Linear(
             name=fd.DynamicName(
@@ -366,14 +365,33 @@ class TL:
             ),
             bias=decl.bias,
         )
-        # Build the Linear Broadcasted directly: batch axes (X axes retained in
-        # the lhs) are TILED, the in/out feature axes are concrete. No identity
+        # Use the declared feature blocks: in_axes are contracted from the
+        # activation, out_axes are produced into the lhs.  Both may be multi-axis.
+        in_uids  = {ax.uid for ax in decl.in_axes}
+        out_uids = {ax.uid for ax in decl.out_axes}
+        w_uids   = {ax.uid for ax in W.axes}
+        if w_uids != (in_uids | out_uids):
+            raise ValueError(
+                f"LINEAR weight {wname!r} axes do not match its declared "
+                f"out_axes ∪ in_axes"
+            )
+        if not in_uids <= {ax.uid for ax in X.axes}:
+            raise ValueError(
+                f"LINEAR weight {wname!r} in_axes must all appear in the activation"
+            )
+        if not out_uids <= {ax.uid for ax in eq.lhs_indices}:
+            raise ValueError(
+                f"LINEAR weight {wname!r} out_axes must all appear in the lhs"
+            )
+        # Build the Linear Broadcasted directly: feature axes concrete, batch
+        # (activation axes that are not input features) TILED.  No identity
         # passthrough is composed in front, so no spurious einsum (Σ) box.
-        retained = {ax.uid for ax in eq.lhs_indices}
-        degree = tuple(ax for ax in X.axes if ax.uid in retained)
-        pos = {ax.uid: k for k, ax in enumerate(degree)}
-        in_shape = tuple(bc.WeaveMode.TILED if ax.uid in pos else ax for ax in X.axes)
-        out_shape = tuple(bc.WeaveMode.TILED if ax.uid in pos else ax for ax in eq.lhs_indices)
+        degree = tuple(ax for ax in X.axes if ax.uid not in in_uids)
+        pos = {ax.uid: i for i, ax in enumerate(degree)}
+        in_shape  = tuple(bc.WeaveMode.TILED if ax.uid not in in_uids else ax
+                          for ax in X.axes)
+        out_shape = tuple(bc.WeaveMode.TILED if ax.uid not in out_uids else ax
+                          for ax in eq.lhs_indices)
         morph = bc.Broadcasted(
             operator=linear_op,
             input_weaves=(bc.Weave(bc.Reals(), in_shape),),

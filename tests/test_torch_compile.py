@@ -1277,3 +1277,39 @@ def test_linear_declaration_two_layer_mlp():
     assert out.shape == (2, 4)
     shapes = sorted(tuple(p.shape) for _, p in mod.named_parameters())
     assert shapes == [(4, 8), (8, 4)], shapes   # W_in (d->dff) and W_out (dff->d)
+
+
+def test_linear_multi_axis_output_projection():
+    """W_Q[h,k,d] · X[q,d] -> Q[q,h,k]: one input feature (d), two output
+    features (h, k). The weight is an internal (d -> h,k) parameter."""
+    q = real_axis('q', 2)
+    d = real_axis('d', 6)
+    h = real_axis('h', 2)
+    k = real_axis('k', 3)
+    tl = TL()
+    tl.W_Q.linear(out_axes=(h, k), in_axes=(d,), bias=False)
+    tl.Q[q, h, k] = tl.W_Q[h, k, d] * tl.X[q, d]
+    mod = ConstructedModule.construct(tl.to_morphism())
+    out = mod(torch.randn(2, 6))                 # only X
+    out = out[0] if isinstance(out, tuple) else out
+    assert out.shape == (2, 2, 3)                # (q, h, k)
+    shapes = [tuple(p.shape) for _, p in mod.named_parameters()]
+    assert shapes == [(6, 2, 3)], shapes
+
+
+def test_linear_multi_axis_input_projection():
+    """W_O[d,h,k] · Attn[q,h,k] -> Out[q,d]: two input features (h, k), one
+    output feature (d). The weight is an internal (h,k -> d) parameter."""
+    q = real_axis('q', 2)
+    d = real_axis('d', 6)
+    h = real_axis('h', 2)
+    k = real_axis('k', 3)
+    tl = TL()
+    tl.W_O.linear(out_axes=(d,), in_axes=(h, k), bias=False)
+    tl.Out[q, d] = tl.W_O[d, h, k] * tl.Attn[q, h, k]
+    mod = ConstructedModule.construct(tl.to_morphism())
+    out = mod(torch.randn(2, 2, 3))              # only Attn
+    out = out[0] if isinstance(out, tuple) else out
+    assert out.shape == (2, 6)                   # (q, d)
+    shapes = [tuple(p.shape) for _, p in mod.named_parameters()]
+    assert shapes == [(2, 3, 6)], shapes
