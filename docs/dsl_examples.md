@@ -42,6 +42,10 @@ read from axis (UID) identity, never written as an explicit `Σ`.
 
 ### 2. TL DSL
 
+We build it from `.linear()` layers (§4 of [tensor_logic_dsl.md](tensor_logic_dsl.md)):
+each weight is declared a Linear layer, so the weight-multiplies become `Linear`
+operators whose weights are the layers' **internal parameters** — you pass only `X`.
+
 ```python
 import torch
 from data_structure.TensorDSL import TL, real_axis, relu
@@ -52,102 +56,83 @@ d   = real_axis('d', 4)      # model dimension
 dff = real_axis('dff', 8)    # hidden dimension
 
 tl = TL()
-tl.H[q, dff] = relu(tl.W_in[dff, d] * tl.X[q, d])   # d contracted, then ReLU
-tl.Out[q, d] = tl.W_out[d, dff] * tl.H[q, dff]      # dff contracted
+tl.W_in.linear(out_axes=(dff,), in_axes=(d,))     # Linear layer  d -> dff
+tl.W_out.linear(out_axes=(d,), in_axes=(dff,))    # Linear layer  dff -> d
+tl.H[q, dff] = relu(tl.W_in[dff, d] * tl.X[q, d])
+tl.Out[q, d] = tl.W_out[d, dff] * tl.H[q, dff]
 
-morph = tl.to_morphism()                  # ThreadedComposed (two steps, H threaded)
+morph = tl.to_morphism()                  # ThreadedComposed (two layers, H threaded)
 module = ConstructedModule.construct(morph)
-```
 
-Running it (external inputs are passed in first-appearance order — `W_in`, `X`,
-`W_out`; the intermediate `H` is threaded internally):
-
-```python
-X     = torch.randn(2, 4)
-W_in  = torch.randn(8, 4)
-W_out = torch.randn(4, 8)
-
-out = module(W_in, X, W_out)
+out = module(torch.randn(2, 4))           # only X; weights live inside as parameters
 out = out[0] if isinstance(out, tuple) else out
 assert out.shape == (2, 4)
-# equivalent to the reference computation:
-ref = (X @ W_in.T).clamp(min=0) @ W_out.T
-assert torch.allclose(out, ref, atol=1e-5)
 ```
+
+> **Alternative — explicit contraction (weights as data).** Drop the two `.linear()`
+> declarations and the *same* equations express plain tensor contractions, where
+> `W_in`/`W_out` are ordinary input tensors you supply: `module(W_in, X, W_out)`. That
+> form draws `Σ` (einsum) boxes with the weights as input wires instead of `L` boxes —
+> the tensor-logic philosophy of weights-as-explicit-data. `.linear()` is the opt-in
+> that reframes a weight as a trainable layer.
 
 ### 3. Visualization
 
 `display.print_category(morph)` renders the string diagram as text. Read it
-left-to-right: the first `TensorEquation` (einsum) contracts `d`, the `Elementwise`
-box applies the nonlinearity, and the second `TensorEquation` contracts `dff`. Left-edge
-wires are inputs labelled `axis-size` with their datatype anchor (`Re` = ℝ); `~~~`
-marks a contracted (summed) axis, `─<n` a tiled/retained wire, and `( … )` groups the
-output degree.
+left-to-right: `X[q,d]` enters the first **`Linear`** box (`d → dff`), then `ReLU`,
+then the second `Linear` box (`dff → d`). Left-edge wires are labelled `axis-size`
+with their datatype anchor (`Re` = ℝ); `~~~` marks the feature axis the layer
+transforms, `─<n` a tiled/batch wire, and `( … )` groups the output degree.
 
 ```text
-8 ─<1                                                    4 ─<1
-4 ~~~                                                    8 ~~~
-Re           (2          ── 2 2 ─<0       (2        ── 2 Re           (2          ── 2
------         8)         ── 8 8 ─<1        8)       ── 8 -----         4)         ── 4
-2 ─<0 > TensorEquation >   Re Re    > Elementwise >   Re 2 ─<0 > TensorEquation >   Re
-4 ~~~                                                    8 ~~~
-Re                                                       Re
+2 ─<0    (2)     ── 2 2 ─<0   (2     ── 2 2 ─<0    (2)     ── 2
+4 ~~~ > Linear > ~~ 8 8 ─<1    8)    ── 8 8 ~~~ > Linear > ~~ 4
+Re                 Re Re    > ReLU >   Re Re                 Re
 ```
 
 > The tsncd frontend draws this same node graph as an interactive Canvas/SVG (pan,
-> zoom, KaTeX labels). To view it live: run `uv run run_server.py` (websocket on
-> `ws://localhost:8765`), start the tsncd frontend (`cd ../tsncd && npm run dev`), and
-> send the morphism with `await websocket_transfer…send_term(morph)`. The ASCII above
-> is the text form of that diagram.
+> zoom, KaTeX labels — wires labelled by axis name and size, `L` boxes subscripted by
+> the weight name). To view it live: point `tsncd/src/data_transfer/json.ts` at a JSON
+> exported with `data_transfer.json.TermJSONConverter.export_to_json(morph)`, then
+> `cd ../tsncd && npm run dev`. The ASCII above is the text form of that diagram.
 
 ### 4. Generated PyTorch
 
-The compiled module is a `ThreadedComposed` of the two equation steps, with the ReLU
-folded into the first step as a `Lambda`:
+The compiled module is a `ThreadedComposed` of the two layers; the ReLU is folded into
+the first as a `Lambda`. Each layer is a `ConstructedLinear` wrapping a `Multilinear`
+(the learned weight):
 
 ```text
 ConstructedThreadedComposed(
   (chain): ModuleList(
     (0): ConstructedComposed(
       (chain): Sequential(
-        (0): ConstructedTensorEquation()
-        (1): Lambda(Elementwise(name=DynamicName(body='\\sigma', subscript=None, settings=None), operator='sigmoid'))
+        (0): ConstructedLinear(
+          (module): Multilinear((4,) -> (8,) (weights): Weights(size=(4, 8)))
+        )
+        (1): Lambda(ReLU(name=DynamicName(body='\\mathrm{relu}', ...), operator='sigmoid'))
       )
     )
-    (1): ConstructedTensorEquation()
+    (1): ConstructedLinear(
+      (module): Multilinear((8,) -> (4,) (weights): Weights(size=(8, 4)))
+    )
   )
 )
 ```
 
-> The nonlinearity node reprs as `Elementwise(operator='sigmoid')` — that string is
-> the operator template's default label. The *executed* function is whatever is
-> registered for `ops.Elementwise`, which is `torch.relu`
-> (`ConstructedModule.add_function(ops.Elementwise, torch.relu)`); the assertion above
-> confirms ReLU semantics.
+> The nonlinearity reprs as `ReLU(..., operator='sigmoid')` — the `'sigmoid'` operator
+> string is a vestigial default; the *executed* function is `torch.relu`, registered for
+> `ops.ReLU` (`ConstructedModule.add_function(ops.ReLU, torch.relu)`), and the box
+> renders its name `\mathrm{relu}`.
 
-Each `ConstructedTensorEquation.forward` runs one `einops.einsum`. The signature
-strings (the actual generated tensor program) are identical for both layers — a
-matmul contracting one axis:
+Unlike the explicit-contraction form, the weights here **are learned parameters**, not
+caller inputs — one per layer:
 
 ```python
-# chain.0.chain.0  (H = W_in · X, contracting d)
-einops.einsum(W_in, X, '... y1 x0, ... y0 x0 -> ... y0 y1')
-# chain.1          (Out = W_out · H, contracting dff)
-einops.einsum(W_out, H, '... y1 x0, ... y0 x0 -> ... y0 y1')
+[(n, tuple(p.shape)) for n, p in module.named_parameters()]
+# [('chain.0.chain.0.module.weights.weight', (4, 8)),   # W_in : d -> dff
+#  ('chain.1.module.weights.weight',         (8, 4))]   # W_out: dff -> d
 ```
 
-Here `x0` is the contracted axis (`d`, then `dff`) and `y0 y1` are the retained
-output axes; the leading `...` carries any batch dimensions.
-
-No buffers and no parameters are registered:
-
-```python
-list(module.named_buffers())     # []
-list(module.named_parameters())  # []
-```
-
-This reflects a core design choice: **weights are inputs, not learned parameters.**
-`W_in` and `W_out` are passed to `forward` like any other tensor rather than stored as
-`nn.Parameter`s. (Pre-materialised Iverson predicate masks would appear as buffers, and
-`ops.Linear`/`ops.Embedding` layers would introduce parameters — neither occurs in this
-pure-contraction MLP.)
+(`bias=True` on a `.linear()` declaration adds a matching bias parameter; multi-axis
+feature blocks like `out_axes=(h, k)` give a weight whose shape is `in_size + out_size`.)
