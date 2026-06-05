@@ -292,14 +292,6 @@ def test_predicate_declaration_stored():
     decl = tl._declarations['Mask']
     assert decl.kind is TensorKind.PREDICATE
 
-def test_selection_declaration_stored():
-    tl = TL()
-    t = nat_axis('t', 50000)
-    d = real_axis('d', 512)
-    tl.Emb.selection(t, d)
-    decl = tl._declarations['Emb']
-    assert decl.kind is TensorKind.SELECTION
-
 def test_declaration_returns_proxy():
     tl = TL()
     (i,) = axes('i')
@@ -337,24 +329,6 @@ def test_tensor_no_promotion():
     i, j = axes('i j')
     it = tl.W[i, j]
     assert not isinstance(it.indices[0], NatAxis)
-    assert not isinstance(it.indices[1], NatAxis)
-
-def test_selection_promotes_nat_slots_only():
-    tl = TL()
-    t = nat_axis('t', 50000)
-    d = real_axis('d', 512)
-    tl.Emb.selection(t, d)
-    i, j = axes('i j')
-    it = tl.Emb[i, j]
-    assert isinstance(it.indices[0], NatAxis)      # slot declared NatAxis → promoted
-    assert not isinstance(it.indices[1], NatAxis)  # slot declared RawAxis → unchanged
-
-def test_selection_type_only_no_size():
-    tl = TL()
-    tl.Emb.selection(nat_axis('t'), real_axis('d'))  # type only, no size
-    i, j = axes('i j')
-    it = tl.Emb[i, j]
-    assert isinstance(it.indices[0], NatAxis)
     assert not isinstance(it.indices[1], NatAxis)
 
 def test_no_declaration_unchanged():

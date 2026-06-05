@@ -25,7 +25,6 @@ from data_structure.AxisAnnotations import NormAxis, NatAxis
 class TensorKind(Enum):
     TENSOR    = 'tensor'
     PREDICATE = 'predicate'  # Bool-typed; axes no longer promoted to PredAxis
-    SELECTION = 'selection'
     LINEAR    = 'linear'     # weight of a Linear/affine layer (ops.Linear box)
 
 
@@ -37,10 +36,6 @@ class TensorDeclaration:
     bias:  bool = False                          # LINEAR only: affine (Wx + b) vs linear
     out_axes: tuple[sc.RawAxis, ...] = ()        # LINEAR only: output feature axes
     in_axes:  tuple[sc.RawAxis, ...] = ()        # LINEAR only: input feature axes
-
-
-def _nat_wrap(ax: sc.RawAxis) -> NatAxis:
-    return NatAxis(uid=ax.uid, _size=ax._size)
 
 
 # ---------------------------------------------------------------------------
@@ -1086,7 +1081,7 @@ class TensorProxy:
 
     __getitem__ returns an IndexedTensor for use on the RHS of an equation.
     __setitem__ captures a completed equation into the parent registry.
-    tensor/predicate/selection register a shape declaration.
+    tensor/predicate register a shape declaration.
     """
 
     def __init__(self, name: str, registry: TL) -> None:
@@ -1104,11 +1099,6 @@ class TensorProxy:
             )
         if decl.kind is TensorKind.PREDICATE:
             return indices  # Bool datatype; axes no longer promoted to PredAxis
-        if decl.kind is TensorKind.SELECTION:
-            return tuple(
-                _nat_wrap(ax) if isinstance(decl_ax, NatAxis) else ax
-                for ax, decl_ax in zip(indices, decl.shape)
-            )
         return indices  # TENSOR — no promotion
 
     def __getitem__(self, indices: sc.RawAxis | tuple[sc.RawAxis, ...]) -> IndexedTensor:
@@ -1217,14 +1207,6 @@ class TensorProxy:
         self._registry._register_declaration(
             self._name,
             TensorDeclaration(kind=TensorKind.PREDICATE, shape=shape),
-        )
-        return self
-
-    def selection(self, *shape: sc.RawAxis) -> TensorProxy:
-        """Declare this tensor as a selection tensor; NatAxis slots promote to NatAxis."""
-        self._registry._register_declaration(
-            self._name,
-            TensorDeclaration(kind=TensorKind.SELECTION, shape=shape),
         )
         return self
 
