@@ -19,7 +19,7 @@ from data_structure.TensorExpr import TensorRef, IversonBinOp, IversonUnaryOp, _
 from torch_compile.materialise import materialise_iverson
 
 import data_structure.BrTyping as Br
-from data_structure.TensorDSL import Scan, Slice, Reindex
+from data_structure.TensorDSL import Scan, Slice, Reindex, Scatter
 
 import torch
 import torch.nn as nn
@@ -71,6 +71,8 @@ class ConstructedModule[M: cat.Morphism](nn.Module, ABC):
                 return ConstructedSlice(target)
             case Reindex():
                 return ConstructedReindex(target)
+            case Scatter():
+                return ConstructedScatter(target)
         print(target)
         raise NotImplementedError()
     
@@ -248,6 +250,35 @@ class ConstructedReindex(ConstructedModule):
                 idx = idx + int(coeff) * grids[k]
             index.append(idx)
         return x[tuple(index)]
+
+
+class ConstructedScatter(ConstructedModule):
+    """Affine scatter: write the value into a zero tensor at affine output positions
+    (`out[const+Σcₖaₖ] = value`).  Realises a `Scatter` (upsampling/padding/strided
+    placement).  Injective + zero-fill (P2)."""
+    def __init__(self, target: Scatter):
+        super().__init__(target)
+        self.in_sizes = tuple(
+            ax._size._value for ax in target.in_axes  # type: ignore[attr-defined]
+        )
+        self.out_shape = tuple(int(s) for s in target.out_shape)
+        self.rows = target.rows
+
+    def forward(self, *xs: torch.Tensor) -> torch.Tensor:
+        value = xs[0]
+        grids = torch.meshgrid(
+            *[torch.arange(s, device=value.device) for s in self.in_sizes],
+            indexing='ij',
+        )
+        index = []
+        for const, terms in self.rows:
+            idx = torch.full(self.in_sizes, int(const), dtype=torch.long, device=value.device)
+            for k, coeff in terms:
+                idx = idx + int(coeff) * grids[k]
+            index.append(idx)
+        out = torch.zeros(self.out_shape, dtype=value.dtype, device=value.device)
+        out[tuple(index)] = value
+        return out
 
 ##################
 ## BROADCASTING ##

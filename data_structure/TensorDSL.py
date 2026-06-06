@@ -122,6 +122,21 @@ class Reindex(fd.Term):
     rows: fd.Prod  # tuple[tuple[int, tuple[tuple[int, int], ...]], ...]
 
 
+@dataclass(frozen=True)
+class Scatter(fd.Term):
+    """Affine scatter (P2): ``out[ rows ] = value``, zero-filled elsewhere.
+
+    The value is indexed by ``in_axes``; for output slot ``s``,
+    ``rows[s] = (const_s, ((k, coeff), ...))`` places it at output coordinate
+    ``const_s + Σ coeff·in_axes[k]``.  ``out_shape`` is the (inferred) output size
+    per slot.  P2 assumes an injective map and zero fill; overlap/partial coverage
+    and custom fill are P3.
+    """
+    in_axes: fd.Prod[sc.RawAxis]
+    out_shape: fd.Prod[int]
+    rows: fd.Prod
+
+
 def _topo_sort_entries(entries):
     """Stably order entries so every producer precedes its consumers.
 
@@ -653,6 +668,13 @@ class TL:
         value: RHSExpression | SumExpr,
     ) -> None:
         """Build and store one morphism entry."""
+        # P2 affine scatter: an LHS slot that is an affine expression (e.g. Y[2*i])
+        # writes the body to affine output positions.  (Pure axis+int LHS is the
+        # recurrence syntax, routed earlier in __setitem__.)
+        if any(isinstance(ix, (IversonBinOp, IversonUnaryOp)) for ix in lhs_indices):
+            self._register_scatter(lhs_name, lhs_indices, value)
+            return
+
         # Propagate concrete sizes from declaration to LHS axes.
         name_str = lhs_name.body if lhs_name and isinstance(lhs_name.body, str) else None
         decl = self._declarations.get(name_str) if name_str else None
@@ -683,6 +705,67 @@ class TL:
         self._entries.append((lhs_name, morph, out_axes, input_names))
         if lhs_name is not None:
             self._name_to_axes[lhs_name] = out_axes
+
+    def _register_scatter(self, lhs_name, lhs_indices, value) -> None:
+        """P2 affine scatter: build the body over the free (value) axes, then write
+        it to affine output positions (`out[const+Σcₖaₖ] = value`, zero-filled).
+        Injective + non-negative-coefficient only (P2); see index_arithmetic_p2_plan.md.
+        """
+        from data_structure.TensorExpr import affine_normal_form
+        # Free axes = axes appearing across the LHS slots (value's axes), in order.
+        free: list[sc.RawAxis] = []
+        def fidx(ax):
+            for k, a in enumerate(free):
+                if a.uid == ax.uid:
+                    return k
+            free.append(ax)
+            return len(free) - 1
+        for ix in lhs_indices:
+            if isinstance(ix, sc.RawAxis):
+                fidx(ix)
+            else:
+                _, coeffs = affine_normal_form(ix)
+                for ax in coeffs:
+                    fidx(ax)
+        free_axes = tuple(free)
+
+        # Build the body value over the free axes as a normal intermediate entry
+        # (this runs the RHS const/affine gather pre-pass too).
+        n = getattr(self, '_slice_counter', 0)
+        self._slice_counter = n + 1
+        base = lhs_name.body if lhs_name and isinstance(lhs_name.body, str) else 'Y'
+        val_name = fd.DynamicName(f'{base}__v{n}')
+        self._register_entry(val_name, free_axes, value)
+        value_axes = self._name_to_axes[val_name]
+
+        def vidx(ax):
+            for k, a in enumerate(value_axes):
+                if a.uid == ax.uid:
+                    return k
+            raise ValueError("scatter LHS axis is not produced by the body")
+
+        out_shape: list[int] = []
+        rows: list = []
+        for ix in lhs_indices:
+            const, coeffs = (0, {ix: 1}) if isinstance(ix, sc.RawAxis) else affine_normal_form(ix)
+            if const < 0:
+                raise ValueError("affine scatter requires a non-negative constant (P2)")
+            terms = []
+            maxpos = const
+            for ax, c in coeffs.items():
+                if c < 0:
+                    raise ValueError("affine scatter requires non-negative coefficients (P2)")
+                if not isinstance(ax._size, nm.Integer):
+                    raise ValueError(f"affine scatter needs a concrete size for axis {ax}")
+                terms.append((vidx(ax), c))
+                maxpos += c * (ax._size._value - 1)
+            out_shape.append(maxpos + 1)
+            rows.append((const, tuple(terms)))
+
+        scat = Scatter(in_axes=value_axes, out_shape=tuple(out_shape), rows=tuple(rows))
+        self._entries.append((lhs_name, scat, value_axes, (val_name,)))
+        if lhs_name is not None:
+            self._name_to_axes[lhs_name] = value_axes
 
     # ------------------------------------------------------------------
     # Iteration support

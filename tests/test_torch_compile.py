@@ -1554,3 +1554,25 @@ def test_non_affine_index_rejected():
     import pytest
     with pytest.raises(ValueError, match="non-affine"):
         affine_normal_form(imul(i, j))
+
+
+def test_affine_scatter_upsampling():
+    """P2 affine scatter: Y[2*i] = X[i] (upsampling with zero fill)."""
+    i = real_axis('i', 4)
+    tl = TL(); tl.Y[2 * i] = tl.X[i]
+    mod = ConstructedModule.construct(tl.to_morphism())
+    X = torch.tensor([1.0, 2.0, 3.0, 4.0])
+    y = mod(X); y = y[0] if isinstance(y, tuple) else y
+    exp = torch.zeros(7); exp[0::2] = X
+    assert torch.allclose(y, exp)
+
+
+def test_affine_scatter_strided_2d():
+    """P2 scatter with a plain axis alongside the affine one: Y[2*i, j] = X[i, j]."""
+    i = real_axis('i', 4); j = real_axis('j', 3)
+    tl = TL(); tl.Y[2 * i, j] = tl.X[i, j]
+    mod = ConstructedModule.construct(tl.to_morphism())
+    X = torch.randn(4, 3)
+    y = mod(X); y = y[0] if isinstance(y, tuple) else y
+    exp = torch.zeros(7, 3); exp[0::2, :] = X
+    assert tuple(y.shape) == (7, 3) and torch.allclose(y, exp)
