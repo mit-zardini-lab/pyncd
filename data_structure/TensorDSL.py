@@ -92,6 +92,19 @@ class Scan(fd.Term):
     step_state_deps: tuple[tuple[int, ...], ...] = ()
 
 
+@dataclass(frozen=True)
+class Slice(fd.Term):
+    """Select fixed integer coordinates from an input tensor — a constant index
+    read such as ``X[..., 3]`` (design note papers/index_arithmetic.md, P1).
+
+    positions[k] is the axis position in the input's own index order and
+    indices[k] the coordinate to select there.  Realised at runtime as repeated
+    ``tensor.select(pos, idx)`` (a slice = an St element reindexing).
+    """
+    positions: tuple[int, ...]
+    indices: tuple[int, ...]
+
+
 def _live_entries(entries):
     """Return only entries reachable from the last output, preserving order.
 
@@ -462,6 +475,47 @@ class TL:
                 )
         return result, degree, tuple(all_input_names)
 
+    def _extract_const_slices(self, value):
+        """Rewrite RHS factors carrying literal-int index slots into slice entries.
+
+        A constant index read ``T[..., c, ...]`` becomes a fresh intermediate
+        ``T__sN`` produced by a `Slice` morphism (selecting coordinate ``c``),
+        and the factor is rewritten to read ``T__sN`` over its free (non-constant)
+        axes.  The slice entry is appended to ``self._entries`` and threads through
+        the normal ThreadedComposed machinery (papers/index_arithmetic_plan.md, P1).
+        Returns the value with const-indexed factors replaced.
+        """
+        def rewrite_factor(f):
+            if not isinstance(f, IndexedTensor):
+                return f
+            const_slots = [(p, idx) for p, idx in enumerate(f.indices)
+                           if isinstance(idx, int)]
+            if not const_slots:
+                return f
+            free = tuple(idx for idx in f.indices if not isinstance(idx, int))
+            n = getattr(self, '_slice_counter', 0)
+            self._slice_counter = n + 1
+            base = f.name.body if isinstance(f.name.body, str) else 'T'
+            fresh = fd.DynamicName(f'{base}__s{n}')
+            slice_morph = Slice(
+                positions=tuple(p for p, _ in const_slots),
+                indices=tuple(v for _, v in const_slots),
+            )
+            self._entries.append((fresh, slice_morph, free, (f.name,)))
+            self._name_to_axes[fresh] = free
+            return IndexedTensor(fresh, free)
+
+        if isinstance(value, RHSExpression):
+            return RHSExpression(
+                [rewrite_factor(f) for f in value.factors], value.operator)
+        if isinstance(value, SumExpr):
+            return SumExpr(
+                [RHSExpression([rewrite_factor(f) for f in t.factors], t.operator)
+                 for t in value.terms],
+                value.operator,
+            )
+        return value
+
     def _register_entry(
         self,
         lhs_name: fd.DynamicName | None,
@@ -486,6 +540,10 @@ class TL:
                 break
         if norm_uid is not None:
             value = _drop_norm_invariant_terms(value, norm_uid)
+
+        # Pre-pass: rewrite RHS factors with literal-int (constant) index slots
+        # into slice entries, so the builders below see only plain-axis reads.
+        value = self._extract_const_slices(value)
 
         if isinstance(value, RHSExpression):
             morph, out_axes, input_names = self._build_rhs_morphism(lhs_name, lhs_indices, value)

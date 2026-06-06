@@ -1375,3 +1375,35 @@ def test_linear_rejects_out_axis_not_in_lhs():
     tl.W.linear(out_axes=(dff,), in_axes=(d,), bias=False)
     with pytest.raises(ValueError, match="out_axes must all appear in the lhs"):
         tl.H[q, d] = tl.W[dff, d] * tl.X[q, d]      # lhs lacks dff
+
+
+def test_constant_index_slice_read():
+    """RHS constant index X[i, 3] compiles to a slice and selects correctly.
+
+    P1 of papers/index_arithmetic_plan.md: a literal-int index slot is a slice
+    (an St element reindexing), synthesised as a Slice entry, not an axis to unify.
+    """
+    from data_structure.TensorDSL import Slice
+    i = real_axis('i', 4)
+    tl = TL()
+    tl.Y[i] = tl.X[i, 3]
+    m = tl.to_morphism()
+    # one synthesised Slice entry threaded ahead of the copy
+    assert any(isinstance(c, Slice) for c in m.content), "expected a Slice entry"
+    mod = ConstructedModule.construct(m)
+    X = torch.arange(20.0).reshape(4, 5)
+    Y = mod(X)
+    Y = Y[0] if isinstance(Y, tuple) else Y
+    assert torch.allclose(Y, X[:, 3]), f"{Y} != {X[:, 3]}"
+
+
+def test_constant_index_slice_two_axes():
+    """Two constant slots select both coordinates (X[3, j, 2])."""
+    j = real_axis('j', 6)
+    tl = TL()
+    tl.Y[j] = tl.X[3, j, 2]
+    mod = ConstructedModule.construct(tl.to_morphism())
+    X = torch.randn(4, 6, 5)
+    Y = mod(X)
+    Y = Y[0] if isinstance(Y, tuple) else Y
+    assert torch.allclose(Y, X[3, :, 2]), "two-axis constant slice mismatch"

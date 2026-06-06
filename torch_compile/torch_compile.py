@@ -19,7 +19,7 @@ from data_structure.TensorExpr import TensorRef, IversonBinOp, IversonUnaryOp, _
 from torch_compile.materialise import materialise_iverson
 
 import data_structure.BrTyping as Br
-from data_structure.TensorDSL import Scan
+from data_structure.TensorDSL import Scan, Slice
 
 import torch
 import torch.nn as nn
@@ -67,6 +67,8 @@ class ConstructedModule[M: cat.Morphism](nn.Module, ABC):
                 return ConstructedModule.construct_broadcasted(target)
             case Scan():
                 return ConstructedScan(target)
+            case Slice():
+                return ConstructedSlice(target)
         print(target)
         raise NotImplementedError()
     
@@ -195,6 +197,25 @@ class ConstructedRearrangement(ConstructedModule):
 
     def forward(self, *xs: torch.Tensor):
         return self.target.apply(xs)
+
+
+class ConstructedSlice(ConstructedModule):
+    """Select fixed integer coordinates from the (single) input tensor.
+
+    Realises a `Slice` morphism (a constant index read, e.g. X[..., 3]) as
+    repeated torch.select.  Positions are selected high-to-low so earlier axis
+    positions stay valid as later axes are dropped.
+    """
+    def __init__(self, target: Slice):
+        super().__init__(target)
+
+    def forward(self, *xs: torch.Tensor) -> torch.Tensor:
+        x = xs[0]
+        for pos, idx in sorted(
+            zip(self.target.positions, self.target.indices), reverse=True
+        ):
+            x = x.select(pos, idx)
+        return x
 
 ##################
 ## BROADCASTING ##
