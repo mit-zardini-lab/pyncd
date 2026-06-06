@@ -1,6 +1,14 @@
 <!-- markdownlint-disable MD013 MD036 MD032 -->
 # Implementation Plan: P2 — Affine Index Arithmetic (gather / scatter)
 
+> **Status: 2a (gather) and 2b (injective scatter) implemented** on branch
+> `p2-affine-gather` — `Reindex`/`ConstructedReindex` and `Scatter`/`ConstructedScatter`,
+> verified incl. conv1d vs `F.conv1d` and upsampling. Deferred to **P3**: scatter
+> coverage/fill/conflict, range inference, and **offset-scatter** `Y[i+1]` (collides
+> with the `axis+int` recurrence syntax — needs the recur-vs-scatter routing decision
+> moved to finalize time). Affine *inside a scan step* is also not yet wired (the
+> pre-pass runs in `_register_entry`, not `_build_step_morph`).
+
 Builds on the merged P1 (integer constants) and its machinery. Design model:
 [index_arithmetic.md](index_arithmetic.md); phase overview:
 [index_arithmetic_plan.md](index_arithmetic_plan.md). Per-tensor iteration model.

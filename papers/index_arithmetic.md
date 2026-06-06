@@ -2,10 +2,11 @@
 # Integer Constants and Affine Index Arithmetic on Axes
 
 **Status:** design note. Defines the model; the detailed, file-level plan is in
-[index_arithmetic_plan.md](index_arithmetic_plan.md). **Phase 1 (integer constants)
-is implemented and merged**, including the scan follow-ups it exposed — `h[…, 3]` and
-the full Example 4 build, compile, and run end-to-end (§ 9). Phases 2–3 (affine
-gather/scatter) remain.
+[index_arithmetic_plan.md](index_arithmetic_plan.md). **Phases 1–2 are implemented**:
+P1 (integer constants, incl. the scan follow-ups — `h[…, 3]`, Example 4 end-to-end)
+and P2 (affine **gather** — shift/stride/dilation/**convolution** — and injective
+**scatter** — upsampling/strided writes; § 9). P3 (scatter coverage/fill/conflict +
+range inference + offset-scatter) remains.
 
 This note proposes giving the tensor-logic DSL first-class **integer constants** and
 **affine arithmetic** on axes at index positions — e.g. `h[q, d_h, 3]`,
@@ -290,8 +291,8 @@ not by side:
 | Phase | Status | Scope | Unlocks |
 | --- | --- | --- | --- |
 | **P1** | ✅ **done** | integer **constants** at read slots → element/slice reindexing (`Slice` term + `ConstructedSlice` + the `_extract_const_slices` synthesis pass); the iteration base case (`H[…,0]`) and recurrence (`H[…,l+1]`) remain the existing LHS special cases | `h[…, 3]` (the scan output head); Example 4 end-to-end |
-| **P2** | todo | general **affine gather (RHS)** and **affine scatter (LHS)** over non-iteration axes → `StrideMorphism`; subsumes `IterNextRef`/`IterPrevRef` | convolution, decimation/pooling (RHS); upsampling, constant-position / strided writes (LHS); scans uniformly |
-| **P3** | todo | scatter **coverage / fill / conflict** semantics (§ 4.4) + range inference from the affine maps | robust general scatter; static bounds |
+| **P2** | ✅ **done** | affine **gather** (`Reindex` + `ConstructedReindex`: index-grid advanced-indexing) and injective **scatter** (`Scatter` + `ConstructedScatter`: zero-filled `index_put`) over non-iteration axes | shift/stride/dilation, **convolution** (=affine gather + contraction, verified vs `F.conv1d`); upsampling / strided writes |
+| **P3** | todo | scatter **coverage / fill / conflict** semantics (§ 4.4) + range inference; **offset-scatter** `Y[i+1]` (collides with the recurrence syntax, needs deferred routing) | robust general scatter |
 | *out of scope* | — | non-affine binning `Y[i//k]`, `Y[i mod k]` | (separate extension beyond St's affine maps) |
 
 P1 is the smallest increment and unblocked the slice we hit; it is implemented and
