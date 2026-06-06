@@ -47,16 +47,21 @@ numerically verified. Two **pre-existing scan** limitations were fixed to get th
 (commit "fix(scan): …"): (a) topological entry ordering so a Scan precedes its
 downstream consumers; (b) splitting the scan-step nonlinearity (relu) so it compiles.
 
-Follow-ups discovered (separate from index arithmetic, not yet done):
+Follow-ups discovered (separate from index arithmetic) — **all done** (branch
+`scan-niceties`, commit "fix(scan): linear-in-scan, l-last weights, const bounds"):
 
-- **`.linear()` inside a scan** is not honored — `_build_rhs_morphism_with_ctx` goes
-  straight to `bc_signature`, so a `.linear()` weight in a scan base/step is an einsum
-  input, not an internal parameter.
-- **Per-step weight `l`-last convention** — `ConstructedScan` slices the trailing dim,
-  so a `W[l, …]` per-step input must be supplied `l`-last; the DSL does not yet
-  reorder it. Example 4's documented `W=(3,d_h,d_h)` should be `(d_h,d_h,3)`.
-- **Static bounds** (`0 ≤ c < |axis|`, `0 ≤ c ≤ N` for history) are not yet checked;
-  an out-of-range constant currently fails at runtime in `torch.select`.
+- ✅ **`.linear()` inside a scan** — `_build_rhs_morphism_with_ctx` now honors a
+  `.linear()` weight (builds an `ops.Linear`, weight becomes an internal parameter),
+  and `_finalize_iter` excludes such weights from the scan's caller inputs.
+- ✅ **Per-step weight `l`-position** — the `Scan` term records each per-step input's
+  declared `l` position (`step_x_l_positions`); `ConstructedScan.forward` `movedim`s it
+  to last before slicing. So `W[l, …]` is supplied exactly as declared (l-first),
+  e.g. Example 4's `W=(3,d_h,d_h)`.
+- ✅ **Static bounds** — `_check_const_bound` rejects an out-of-range constant index
+  (`0 ≤ c < |axis|`; `0 ≤ c ≤ N` for an iterative tensor's history) at assignment time.
+
+With these, **Example 4 builds, compiles, and runs exactly as documented**
+(`.linear()` weights internal, l-first `W`, `module(x, W)`), numerically verified.
 
 Original goal (for reference): `Y[…] = … T[…, 3] …` and the full Example 4 build,
 compile, and run end-to-end, replacing the term-level assembly used for the figure.

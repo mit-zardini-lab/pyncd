@@ -685,6 +685,10 @@ class ConstructedScan(ConstructedModule):
             self.b_positions: tuple[int, ...] = affine.b_positions
             self._state_matrix = len(affine.state_in_axes) > 0
 
+        # Position of l within each per-step input as declared (e.g. W[l,..]->0);
+        # forward() moves it to last before slicing.  Empty => already l-last.
+        self.step_x_l_positions: tuple[int, ...] = target.step_x_l_positions
+
         self._loop = torch._dynamo.disable(self._run_loop)
 
     def _init_coupled(self, target: Scan) -> None:
@@ -830,6 +834,12 @@ class ConstructedScan(ConstructedModule):
         if self.n_states == 1:
             base_xs = xs[: self.n_base]
             step_xs = xs[self.n_base :]
+            # Move l to the last axis of each per-step input (l-last contract).
+            if self.step_x_l_positions:
+                step_xs = tuple(
+                    x.movedim(p, -1) if p not in (-1, x.ndim - 1) else x
+                    for x, p in zip(step_xs, self.step_x_l_positions)
+                )
             H0 = to_tuple(self.base_module(*base_xs))[0]
             if self._has_affine:
                 return self._assoc_scan_forward(H0, step_xs)

@@ -90,6 +90,10 @@ class Scan(fd.Term):
     # each step morphism expects, in the order they appear in its domain.
     # Length == n_states; empty tuple means "all states in order 0..n-1".
     step_state_deps: tuple[tuple[int, ...], ...] = ()
+    # Uncoupled only: the axis position of the recurrence axis l within each
+    # per-step input, as the user declared it (e.g. W[l, ...] -> 0).  The runtime
+    # moves that axis to last before slicing.  Empty = assume l-last for all.
+    step_x_l_positions: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -516,6 +520,36 @@ class TL:
                 )
         return result, degree, tuple(all_input_names)
 
+    def _check_const_bound(self, name: fd.DynamicName, pos: int, value: int) -> None:
+        """Static bounds check for a constant index ``T[..., value, ...]``.
+
+        The valid range is ``0 ≤ value < |axis|``; for the iteration axis of an
+        iterative tensor the readable extent is the materialised history ``N+1``.
+        Skipped silently when the axis size is unknown (e.g. an undeclared input);
+        the runtime ``torch.select`` will catch any residual out-of-range access.
+        """
+        shape = self._name_to_axes.get(name)
+        if shape is None:
+            key = name.body if isinstance(name.body, str) else None
+            decl = self._declarations.get(key) if key else None
+            shape = decl.shape if decl is not None else None
+        if shape is None or pos >= len(shape):
+            return
+        ax = shape[pos]
+        key = name.body if isinstance(name.body, str) else None
+        it = self._iteration_axes.get(key) if key else None
+        if it is not None and ax.uid == it.uid and isinstance(it._size, nm.Integer):
+            size = it._size._value + 1            # history L' = N+1
+        elif isinstance(ax._size, nm.Integer):
+            size = ax._size._value
+        else:
+            return
+        if not (0 <= value < size):
+            raise ValueError(
+                f"constant index {value} out of range for axis {pos} of "
+                f"'{key}' (size {size}) in a slice read"
+            )
+
     def _extract_const_slices(self, value):
         """Rewrite RHS factors carrying literal-int index slots into slice entries.
 
@@ -533,6 +567,8 @@ class TL:
                            if isinstance(idx, int)]
             if not const_slots:
                 return f
+            for p, v in const_slots:
+                self._check_const_bound(f.name, p, v)
             free = tuple(idx for idx in f.indices if not isinstance(idx, int))
             n = getattr(self, '_slice_counter', 0)
             self._slice_counter = n + 1
@@ -617,6 +653,13 @@ class TL:
             operator=value.operator,
         )
         applied_eq = ctx.apply(eq)
+        # Honor .linear() weights inside a scan step/base: build an ops.Linear box
+        # (the weight becomes an internal parameter, dropped from caller inputs),
+        # mirroring the non-ctx _build_rhs_morphism path.
+        linear = self._linear_factor(applied_eq)
+        if linear is not None:
+            morph, out_axes, _ = self._build_linear_morphism(applied_eq, linear, value.operator)
+            return morph, out_axes
         br = applied_eq.bc_signature(array_datatypes=self._array_datatypes())
         return br, applied_eq.lhs_indices
 
@@ -1054,6 +1097,7 @@ class TL:
                 step_out = base_out
                 affine = None
                 _input_names: tuple = ()
+                _step_x_l_positions: tuple[int, ...] = ()
             else:
                 step_out, recur_value = entry['recur']
                 # Check 4.4: no l+1 on RHS.
@@ -1069,10 +1113,33 @@ class TL:
                 # Collect external input names for the live-pool routing table.
                 # Exclude both the original state name and its proxy (both are
                 # internal to the Scan loop).
-                _exclude = {state_proxy_dn, state_name_dn}
+                # Exclude the state name/proxy, and any .linear()-declared weight
+                # (now an internal Linear parameter, not a caller input).
+                _linear_names = {
+                    fd.DynamicName(k) for k, d in self._declarations.items()
+                    if d.kind is TensorKind.LINEAR
+                }
+                _exclude = {state_proxy_dn, state_name_dn} | _linear_names
                 _base_external = _external_names_from_value(base_value, _exclude)
                 _step_external = _external_names_from_value(step_value, _exclude)
                 _input_names = _base_external + _step_external
+
+                # Record l's position within each per-step input as the user wrote
+                # it (from the un-stripped recurrence), so the runtime can move it
+                # to last before slicing (l-last is the ConstructedScan contract).
+                def _l_pos_in_recur(target_name):
+                    factors = (
+                        recur_value.factors if isinstance(recur_value, RHSExpression)
+                        else [f for t in recur_value.terms for f in t.factors]
+                    )
+                    for f in factors:
+                        if isinstance(f, IndexedTensor) and f.name == target_name:
+                            for p, ax in enumerate(f.indices):
+                                if not isinstance(ax, int) and getattr(ax, 'uid', None) == l.uid:
+                                    return p
+                    return -1
+                _step_x_l_positions = tuple(
+                    _l_pos_in_recur(nm_) for nm_ in _step_external)
 
             base_morph = self._build_step_morph(None, base_out, base_value, self._ctx)
 
@@ -1085,6 +1152,7 @@ class TL:
                 N=l._size,
                 axis=l,
                 affine=affine,
+                step_x_l_positions=_step_x_l_positions,
             )
             self._entries.append((lhs_name, scan, step_out + (l,), _input_names))
 

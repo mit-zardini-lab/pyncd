@@ -1446,10 +1446,73 @@ def test_example4_scan_relu_history_slice():
     tl.y[q, e] = tl.W_out[e, dh] * tl.h[q, dh, 3]
     mod = ConstructedModule.construct(tl.to_morphism())
     W_in = torch.randn(12, 16); x = torch.randn(8, 16)
-    W = torch.randn(12, 12, 3)            # per-step weight, l-last
+    W = torch.randn(3, 12, 12)            # per-step weight, l-first as declared W[l,dh2,dh]
     W_out = torch.randn(5, 12)
     y = mod(W_in, x, W, W_out); y = y[0] if isinstance(y, tuple) else y
     h = x @ W_in.T
     for s in range(3):
-        h = torch.relu(h @ W[:, :, s])
+        h = torch.relu(h @ W[s])          # W[s] is [dh2, dh]
     assert torch.allclose(y, h @ W_out.T, atol=1e-4)
+
+
+def test_const_index_out_of_range_raises():
+    """Static bounds: a constant index beyond the (history) extent is rejected."""
+    i = real_axis('i', 3); l = real_axis('l', 4)
+    tl = TL()
+    tl.H[i, 0] = tl.X[i]
+    tl.H[i, l + 1] = tl.H[i, l] + tl.Delta[i, l]
+    tl.H.iteration_axis(l)
+    import pytest
+    with pytest.raises(ValueError, match="out of range"):
+        tl.Y[i] = tl.H[i, 5]       # history is N+1 = 5 -> valid 0..4; 5 rejected
+
+
+def test_linear_weight_inside_scan_is_internal():
+    """A .linear() weight in a scan base becomes an internal parameter, not a
+    caller input (excluded from the scan's external inputs)."""
+    q = real_axis('q', 4); d0 = real_axis('d0', 6); dh = real_axis('dh', 5); l = real_axis('l', 3)
+    tl = TL()
+    tl.W_in.linear(out_axes=(dh,), in_axes=(d0,))
+    tl.h[q, dh, 0] = tl.W_in[dh, d0] * tl.x[q, d0]
+    tl.h[q, dh, l + 1] = tl.h[q, dh, l] + tl.Delta[q, dh, l]
+    tl.h.iteration_axis(l)
+    tl.y[q, dh] = tl.h[q, dh, 3]
+    m = tl.to_morphism()
+    assert m.n_external == 2, f"W_in should be internal; got n_external={m.n_external}"
+    mod = ConstructedModule.construct(m)
+    assert sum(1 for _ in mod.parameters()) == 1, "expected one internal Linear param"
+    x = torch.randn(4, 6); Delta = torch.randn(4, 5, 3)
+    y = mod(x, Delta); y = y[0] if isinstance(y, tuple) else y
+    W = [p for n, p in mod.named_parameters() if 'weight' in n][0]   # (d0, dh)
+    h = x @ W
+    for s in range(3):
+        h = h + Delta[:, :, s]
+    assert torch.allclose(y, h, atol=1e-4)
+
+
+def test_example4_as_documented():
+    """Example 4 exactly as documented: .linear() weights internal, per-step
+    weight declared l-first W[l,dh,dh] and passed l-first, softmax output."""
+    import torch.nn.functional as F
+    q = real_axis('q', 8); d0 = real_axis('d0', 16); dh = real_axis('dh', 12)
+    dh_in = real_axis('dh_in', 12); c = real_axis('c', 5); l = real_axis('l', 3)
+    tl = TL()
+    tl.W_in.linear(out_axes=(dh,), in_axes=(d0,))
+    tl.W_out.linear(out_axes=(c,), in_axes=(dh,))
+    tl.h[q, dh, 0] = tl.W_in[dh, d0] * tl.x[q, d0]
+    tl.h[q, dh, l + 1] = relu(tl.W[l, dh_in, dh] * tl.h[q, dh_in, l])
+    tl.h.iteration_axis(l)
+    tl.y[q, c] = softmax(tl.W_out[c, dh] * tl.h[q, dh, 3])
+    m = tl.to_morphism()
+    assert m.n_external == 2, "only x and W are caller inputs"
+    mod = ConstructedModule.construct(m)
+    p = dict(mod.named_parameters())
+    Win = p['chain.0.base_module.module.weights.weight']    # (d0, dh)
+    Wout = p['chain.2.chain.0.module.weights.weight']       # (dh, c)
+    x = torch.randn(8, 16); W = torch.randn(3, 12, 12)      # l-first as declared
+    y = mod(x, W); y = y[0] if isinstance(y, tuple) else y
+    h = x @ Win
+    for s in range(3):
+        h = torch.relu(h @ W[s])
+    assert torch.allclose(y, F.softmax(h @ Wout, dim=-1), atol=1e-5)
+    assert torch.allclose(y.sum(-1), torch.ones(8), atol=1e-5)
