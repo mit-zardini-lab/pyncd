@@ -1407,3 +1407,49 @@ def test_constant_index_slice_two_axes():
     Y = mod(X)
     Y = Y[0] if isinstance(Y, tuple) else Y
     assert torch.allclose(Y, X[3, :, 2]), "two-axis constant slice mismatch"
+
+
+def test_constant_slice_of_scan_history():
+    """A downstream constant slice of a scan's history threads and selects right.
+
+    Exercises: topological ordering of entries (Scan before its consumer) and
+    the Slice runtime on the (q,..,N+1) history axis.
+    """
+    i = real_axis('i', 3)
+    l = real_axis('l', 4)
+    tl = TL()
+    tl.H[i, 0] = tl.X[i]
+    tl.H[i, l + 1] = tl.H[i, l] + tl.Delta[i, l]
+    tl.H.iteration_axis(l)
+    tl.Y[i] = tl.H[i, 3]
+    mod = ConstructedModule.construct(tl.to_morphism())
+    X = torch.tensor([1.0, 2.0, 3.0])
+    Delta = torch.zeros(3, 4); Delta[0, :] = 1.0
+    out = mod(X, Delta); out = out[0] if isinstance(out, tuple) else out
+    H = X.clone(); hist = [H.clone()]
+    for s in range(4):
+        H = H + Delta[:, s]; hist.append(H.clone())
+    assert torch.allclose(out, torch.stack(hist, dim=-1)[:, 3])
+
+
+def test_example4_scan_relu_history_slice():
+    """Example 4 chain: input proj + relu recurrence + softmax-free output head
+    reading the final history slice h[...,3].  Verifies the scan-step relu split
+    and the constant history slice together, against a reference loop."""
+    q = real_axis('q', 8); d0 = real_axis('d0', 16)
+    dh = real_axis('dh', 12); dh2 = real_axis('dh2', 12)
+    e = real_axis('e', 5); l = real_axis('l', 3)
+    tl = TL()
+    tl.h[q, dh, 0] = tl.W_in[dh, d0] * tl.x[q, d0]
+    tl.h[q, dh, l + 1] = relu(tl.W[l, dh2, dh] * tl.h[q, dh2, l])
+    tl.h.iteration_axis(l)
+    tl.y[q, e] = tl.W_out[e, dh] * tl.h[q, dh, 3]
+    mod = ConstructedModule.construct(tl.to_morphism())
+    W_in = torch.randn(12, 16); x = torch.randn(8, 16)
+    W = torch.randn(12, 12, 3)            # per-step weight, l-last
+    W_out = torch.randn(5, 12)
+    y = mod(W_in, x, W, W_out); y = y[0] if isinstance(y, tuple) else y
+    h = x @ W_in.T
+    for s in range(3):
+        h = torch.relu(h @ W[:, :, s])
+    assert torch.allclose(y, h @ W_out.T, atol=1e-4)

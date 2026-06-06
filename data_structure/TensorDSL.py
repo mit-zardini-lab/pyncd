@@ -105,6 +105,47 @@ class Slice(fd.Term):
     indices: tuple[int, ...]
 
 
+def _topo_sort_entries(entries):
+    """Stably order entries so every producer precedes its consumers.
+
+    An entry consumes a name iff that name appears in its input_names and is
+    produced by some entry's lhs_name.  Ties are broken by original index, so a
+    list that is already in producer-before-consumer order is returned unchanged
+    (this keeps non-scan programs byte-identical).  Needed because _finalize_iter
+    appends Scan entries last, after any downstream consumer of the scan output.
+    """
+    import heapq
+    n = len(entries)
+    produced: dict = {}
+    for idx, (lhs, _, _, _) in enumerate(entries):
+        if lhs is not None:
+            produced[lhs] = idx  # last writer wins
+    deps = []
+    for (_, _, _, input_names) in entries:
+        d = {produced[name] for name in input_names
+             if name is not None and name in produced}
+        deps.append(d)
+    indeg = [len(d) for d in deps]
+    consumers: list[list[int]] = [[] for _ in range(n)]
+    for i, d in enumerate(deps):
+        for j in d:
+            if j != i:
+                consumers[j].append(i)
+    ready = [i for i in range(n) if indeg[i] == 0]
+    heapq.heapify(ready)
+    order: list[int] = []
+    while ready:
+        i = heapq.heappop(ready)
+        order.append(i)
+        for c in consumers[i]:
+            indeg[c] -= 1
+            if indeg[c] == 0:
+                heapq.heappush(ready, c)
+    if len(order) != n:
+        return entries  # cycle (unexpected) — leave as-is
+    return [entries[i] for i in order]
+
+
 def _live_entries(entries):
     """Return only entries reachable from the last output, preserving order.
 
@@ -613,10 +654,16 @@ class TL:
         value: RHSExpression | SumExpr,
         ctx: fd.Context,
     ) -> object:
+        from data_structure.TensorLogic import TensorEquation, _split_nonlinearity
         if isinstance(value, RHSExpression):
             morph, _ = self._build_rhs_morphism_with_ctx(lhs_name, lhs_indices, value, ctx)
         else:
             morph, _ = self._build_sum_morphism_with_ctx(lhs_name, lhs_indices, value, ctx)
+        # Split any nonlinearity (e.g. relu) out of the einsum so the scan
+        # step/base compiles: ConstructedTensorEquation only handles Identity
+        # operators, with the activation composed as a separate Broadcasted.
+        if isinstance(morph, bc.Broadcasted) and isinstance(morph.operator, TensorEquation):
+            return _split_nonlinearity(morph.operator, array_datatypes=self._array_datatypes())
         return morph
 
     def _strip_iter_axis_from_value(
@@ -1082,7 +1129,7 @@ class TL:
             if len(morphisms) == 1:
                 return morphisms[0]
             return pc.Composed(content=morphisms)
-        entries = _live_entries(self._entries)
+        entries = _live_entries(_topo_sort_entries(self._entries))
         internal_names = {lhs for lhs, _, _, _ in entries if lhs is not None}
         # Collect external tensor names in order of first appearance.
         external_order: list[fd.DynamicName] = []
