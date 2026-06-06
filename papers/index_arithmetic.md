@@ -1,15 +1,19 @@
 <!-- markdownlint-disable MD013 -->
 # Integer Constants and Affine Index Arithmetic on Axes
 
-**Status:** design note. Defines the model; the implementation plan is derived
-separately from this note.
+**Status:** design note. Defines the model; the detailed, file-level plan is in
+[index_arithmetic_plan.md](index_arithmetic_plan.md). **Phase 1 (integer constants)
+is implemented and merged**, including the scan follow-ups it exposed — `h[…, 3]` and
+the full Example 4 build, compile, and run end-to-end (§ 9). Phases 2–3 (affine
+gather/scatter) remain.
 
 This note proposes giving the tensor-logic DSL first-class **integer constants** and
 **affine arithmetic** on axes at index positions — e.g. `h[q, d_h, 3]`,
 `x[i+j]`, `x[2i+1]` — and specifies how such index expressions are interpreted and
 compiled. It resolves a deficit surfaced while building the scan visualisation
 ([iteration.md § 7.6](iteration.md#76-implementation-status-in-tsncd--and-what-remains)):
-reading a fixed slice `h[…, 3]` of an iterative tensor is rejected by the front-end.
+reading a fixed slice `h[…, 3]` of an iterative tensor was rejected by the front-end
+(now supported — P1).
 
 ---
 
@@ -283,18 +287,21 @@ LHS (output) indexing is **in scope**, not deferred — because the scan base ca
 recurrence are *already* LHS index arithmetic (§ 4.4). The phases split by difficulty,
 not by side:
 
-| Phase | Scope | Unlocks |
-| --- | --- | --- |
-| **P1** | integer **constants** at read *and* output slots → element/slice reindexing; recognise the iteration base case (`H[…,0]`) and recurrence (`H[…,l+1]`) as the LHS special cases the mechanism subsumes | `h[…, 3]` (the scan output head); base/step unified |
-| **P2** | general **affine gather (RHS)** and **affine scatter (LHS)** over non-iteration axes → `StrideMorphism`; subsumes `IterNextRef`/`IterPrevRef` | convolution, decimation/pooling (RHS); upsampling, constant-position / strided writes (LHS); scans uniformly |
-| **P3** | scatter **coverage / fill / conflict** semantics (§ 4.4) + range inference from the affine maps | robust general scatter; static bounds |
-| *out of scope* | non-affine binning `Y[i//k]`, `Y[i mod k]` | (separate extension beyond St's affine maps) |
+| Phase | Status | Scope | Unlocks |
+| --- | --- | --- | --- |
+| **P1** | ✅ **done** | integer **constants** at read slots → element/slice reindexing (`Slice` term + `ConstructedSlice` + the `_extract_const_slices` synthesis pass); the iteration base case (`H[…,0]`) and recurrence (`H[…,l+1]`) remain the existing LHS special cases | `h[…, 3]` (the scan output head); Example 4 end-to-end |
+| **P2** | todo | general **affine gather (RHS)** and **affine scatter (LHS)** over non-iteration axes → `StrideMorphism`; subsumes `IterNextRef`/`IterPrevRef` | convolution, decimation/pooling (RHS); upsampling, constant-position / strided writes (LHS); scans uniformly |
+| **P3** | todo | scatter **coverage / fill / conflict** semantics (§ 4.4) + range inference from the affine maps | robust general scatter; static bounds |
+| *out of scope* | — | non-affine binning `Y[i//k]`, `Y[i mod k]` | (separate extension beyond St's affine maps) |
 
-P1 is the smallest increment and unblocks the slice we hit. P2 makes gather and
-scatter symmetric and folds the iteration special-cases into the one mechanism. P3 is
-the genuinely harder remainder — partial/overlapping output maps — which is why
-general non-iteration scatter trails even though LHS iteration arithmetic already
-works.
+P1 is the smallest increment and unblocked the slice we hit; it is implemented and
+merged, together with the **scan follow-ups** it exposed — `.linear()` weights inside
+a scan, l-positioned per-step weights, and static bounds on constant indices — so
+Example 4 builds, compiles, and runs exactly as documented. (General **LHS scatter**
+for non-iteration axes is part of P2/P3; only the iteration LHS special cases —
+base/recurrence — exist today.) P2 makes gather and scatter symmetric and folds the
+iteration special-cases into the one mechanism. P3 is the genuinely harder remainder
+— partial/overlapping output maps.
 
 The detailed, file-level steps for each phase are in
 [index_arithmetic_plan.md](index_arithmetic_plan.md).
