@@ -213,6 +213,11 @@ def _rawaxis_rsub(self: sc.RawAxis, other: Any) -> IversonBinOp:
 def _rawaxis_invert(self: sc.RawAxis) -> IversonUnaryOp:
     return IversonUnaryOp('~', self)
 
+def _rawaxis_rmul(self: sc.RawAxis, other: Any) -> IversonBinOp:
+    # Integer coefficient on an axis: `c * axis` (coefficient first), for affine
+    # index expressions like `2*i + 1`.  __mul__ stays excluded (tensor product).
+    return IversonBinOp('*', other, self)
+
 sc.RawAxis.__lt__ = _rawaxis_lt  # type: ignore[method-assign]
 sc.RawAxis.__le__ = _rawaxis_le  # type: ignore[method-assign]
 sc.RawAxis.__gt__ = _rawaxis_gt  # type: ignore[method-assign]
@@ -221,4 +226,64 @@ sc.RawAxis.__add__ = _rawaxis_add  # type: ignore[method-assign]
 sc.RawAxis.__sub__ = _rawaxis_sub  # type: ignore[method-assign]
 sc.RawAxis.__radd__ = _rawaxis_radd  # type: ignore[method-assign]
 sc.RawAxis.__rsub__ = _rawaxis_rsub  # type: ignore[method-assign]
+sc.RawAxis.__rmul__ = _rawaxis_rmul  # type: ignore[method-assign]
 sc.RawAxis.__invert__ = _rawaxis_invert  # type: ignore[method-assign]
+
+
+# ---------------------------------------------------------------------------
+# Affine index expressions (P2): normalise an index-slot value to b + Σ cₖ·aₖ
+# ---------------------------------------------------------------------------
+
+def affine_normal_form(
+    expr: Any,
+) -> tuple[int, dict[sc.RawAxis, int]]:
+    """Flatten an index-slot value to affine normal form ``(const, {axis: coeff})``.
+
+    Accepts a bare ``RawAxis`` (-> ``(0, {axis: 1})``), an ``int`` constant
+    (-> ``(c, {})``), and ``IversonBinOp`` trees built from ``+ - *`` where ``*``
+    has an integer coefficient on one side.  Raises ``ValueError`` on a non-affine
+    index (axis·axis products, ``//``, ``mod``, comparisons, etc.).
+    """
+    if isinstance(expr, sc.RawAxis):
+        return 0, {expr: 1}
+    if isinstance(expr, bool):
+        raise ValueError(f"non-affine index expression: {expr!r}")
+    if isinstance(expr, int):
+        return expr, {}
+    if isinstance(expr, IversonBinOp):
+        if expr.op == '+':
+            cl, dl = affine_normal_form(expr.lhs)
+            cr, dr = affine_normal_form(expr.rhs)
+            return cl + cr, _merge_coeffs(dl, dr, 1)
+        if expr.op == '-':
+            cl, dl = affine_normal_form(expr.lhs)
+            cr, dr = affine_normal_form(expr.rhs)
+            return cl - cr, _merge_coeffs(dl, dr, -1)
+        if expr.op == '*':
+            lc, ld = affine_normal_form(expr.lhs)
+            rc, rd = affine_normal_form(expr.rhs)
+            # exactly one operand must be a pure integer (no axes)
+            if not ld and rd:
+                return lc * rc, {a: lc * c for a, c in rd.items()}
+            if not rd and ld:
+                return rc * lc, {a: rc * c for a, c in ld.items()}
+            raise ValueError(
+                "non-affine index expression: product of two axis terms"
+            )
+    raise ValueError(f"non-affine index expression: {expr!r}")
+
+
+def _merge_coeffs(
+    a: dict[sc.RawAxis, int], b: dict[sc.RawAxis, int], sign: int,
+) -> dict[sc.RawAxis, int]:
+    out = dict(a)
+    for axis, coeff in b.items():
+        out[axis] = out.get(axis, 0) + sign * coeff
+        if out[axis] == 0:
+            del out[axis]
+    return out
+
+
+def is_plain_axis(expr: Any) -> bool:
+    """True iff the slot is a bare axis (coeff 1, no constant) — no reindex needed."""
+    return isinstance(expr, sc.RawAxis)

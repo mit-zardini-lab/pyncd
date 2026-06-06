@@ -1516,3 +1516,41 @@ def test_example4_as_documented():
         h = torch.relu(h @ W[s])
     assert torch.allclose(y, F.softmax(h @ Wout, dim=-1), atol=1e-5)
     assert torch.allclose(y.sum(-1), torch.ones(8), atol=1e-5)
+
+
+def test_affine_gather_shift_stride_dilation():
+    """P2 single-axis affine gather: shift, decimation, dilation."""
+    i = real_axis('i', 5)
+    def build(expr_fn):
+        tl = TL(); tl.Y[i] = expr_fn(tl); return ConstructedModule.construct(tl.to_morphism())
+    X = torch.arange(7.0); Xd = torch.arange(10.0)
+    def run(mod, *a):
+        y = mod(*a); return y[0] if isinstance(y, tuple) else y
+    assert torch.allclose(run(build(lambda tl: tl.X[i + 1]), X), X[1:6])
+    assert torch.allclose(run(build(lambda tl: tl.X[2 * i]), Xd), Xd[0:10:2])
+    assert torch.allclose(run(build(lambda tl: tl.X[2 * i + 1]), Xd), Xd[1:10:2])
+
+
+def test_affine_gather_conv1d():
+    """P2 multi-axis affine gather: conv1d (im2col + contraction) == F.conv1d."""
+    import torch.nn.functional as F
+    Cout, Cin, K, Lout = 2, 3, 3, 6
+    L = Lout + K - 1
+    co = real_axis('co', Cout); ci = real_axis('ci', Cin)
+    i = real_axis('i', Lout); k = real_axis('k', K)
+    tl = TL()
+    tl.Y[co, i] = tl.W[co, ci, k] * tl.X[ci, i + k]
+    mod = ConstructedModule.construct(tl.to_morphism())
+    W = torch.randn(Cout, Cin, K); X = torch.randn(Cin, L)
+    y = mod(X, W); y = y[0] if isinstance(y, tuple) else y     # external order [X, W]
+    ref = F.conv1d(X.unsqueeze(0), W).squeeze(0)
+    assert torch.allclose(y, ref, atol=1e-4)
+
+
+def test_non_affine_index_rejected():
+    """A product of two axis terms in an index slot is rejected as non-affine."""
+    from data_structure.TensorExpr import affine_normal_form, imul
+    i = real_axis('i', 4); j = real_axis('j', 4)
+    import pytest
+    with pytest.raises(ValueError, match="non-affine"):
+        affine_normal_form(imul(i, j))

@@ -109,6 +109,19 @@ class Slice(fd.Term):
     indices: tuple[int, ...]
 
 
+@dataclass(frozen=True)
+class Reindex(fd.Term):
+    """Affine gather (P2): ``X_g[out_axes] = X[ rows ]``.
+
+    For input-axis ``p`` of ``X``, ``rows[p] = (const_p, ((k, coeff), ...))`` gives
+    the read coordinate ``const_p + Σ coeff·out_axes[k]``.  Realises a non-iteration
+    affine index read — shift/stride/dilation/convolution/diagonal — as an St affine
+    reindexing.  ``out_axes`` are the fan-out axes; their sizes give the output shape.
+    """
+    out_axes: fd.Prod[sc.RawAxis]
+    rows: fd.Prod  # tuple[tuple[int, tuple[tuple[int, int], ...]], ...]
+
+
 def _topo_sort_entries(entries):
     """Stably order entries so every producer precedes its consumers.
 
@@ -550,6 +563,40 @@ class TL:
                 f"'{key}' (size {size}) in a slice read"
             )
 
+    def _build_reindex_factor(self, f):
+        """Synthesise a `Reindex` (affine gather) entry for a factor with affine
+        index slots, returning a plain read of the fresh fan-out intermediate.
+        All slots become affine rows: a bare axis -> coeff 1; an int -> a constant;
+        an affine expr -> its normal form (papers/index_arithmetic_p2_plan.md, 2a)."""
+        from data_structure.TensorExpr import affine_normal_form
+        fan_out: list[sc.RawAxis] = []
+
+        def fan_idx(ax: sc.RawAxis) -> int:
+            for k, a in enumerate(fan_out):
+                if a.uid == ax.uid:
+                    return k
+            fan_out.append(ax)
+            return len(fan_out) - 1
+
+        rows: list = []
+        for idx in f.indices:
+            if isinstance(idx, sc.RawAxis):
+                rows.append((0, ((fan_idx(idx), 1),)))
+            elif isinstance(idx, int):
+                rows.append((idx, ()))
+            else:
+                const, coeffs = affine_normal_form(idx)
+                rows.append((const, tuple((fan_idx(ax), c) for ax, c in coeffs.items())))
+        fan_axes = tuple(fan_out)
+        n = getattr(self, '_slice_counter', 0)
+        self._slice_counter = n + 1
+        base = f.name.body if isinstance(f.name.body, str) else 'T'
+        fresh = fd.DynamicName(f'{base}__g{n}')
+        reindex = Reindex(out_axes=fan_axes, rows=tuple(rows))
+        self._entries.append((fresh, reindex, fan_axes, (f.name,)))
+        self._name_to_axes[fresh] = fan_axes
+        return IndexedTensor(fresh, fan_axes)
+
     def _extract_const_slices(self, value):
         """Rewrite RHS factors carrying literal-int index slots into slice entries.
 
@@ -563,10 +610,16 @@ class TL:
         def rewrite_factor(f):
             if not isinstance(f, IndexedTensor):
                 return f
+            has_affine = any(isinstance(idx, (IversonBinOp, IversonUnaryOp))
+                             for idx in f.indices)
+            has_const = any(isinstance(idx, int) for idx in f.indices)
+            if has_affine:
+                return self._build_reindex_factor(f)       # P2 affine gather
+            if not has_const:
+                return f                                   # all plain axes
+            # P1: pure constant index -> Slice (drop the constant axes)
             const_slots = [(p, idx) for p, idx in enumerate(f.indices)
                            if isinstance(idx, int)]
-            if not const_slots:
-                return f
             for p, v in const_slots:
                 self._check_const_bound(f.name, p, v)
             free = tuple(idx for idx in f.indices if not isinstance(idx, int))

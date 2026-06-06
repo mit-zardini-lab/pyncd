@@ -19,7 +19,7 @@ from data_structure.TensorExpr import TensorRef, IversonBinOp, IversonUnaryOp, _
 from torch_compile.materialise import materialise_iverson
 
 import data_structure.BrTyping as Br
-from data_structure.TensorDSL import Scan, Slice
+from data_structure.TensorDSL import Scan, Slice, Reindex
 
 import torch
 import torch.nn as nn
@@ -69,6 +69,8 @@ class ConstructedModule[M: cat.Morphism](nn.Module, ABC):
                 return ConstructedScan(target)
             case Slice():
                 return ConstructedSlice(target)
+            case Reindex():
+                return ConstructedReindex(target)
         print(target)
         raise NotImplementedError()
     
@@ -216,6 +218,36 @@ class ConstructedSlice(ConstructedModule):
         ):
             x = x.select(pos, idx)
         return x
+
+
+class ConstructedReindex(ConstructedModule):
+    """Affine gather: build per-input-axis index grids from the out-axis ranges and
+    advanced-index the input.  Realises a `Reindex` (shift/stride/dilation/conv/
+    diagonal).  Out-of-range affine coordinates raise (P2 requires in-range)."""
+    def __init__(self, target: Reindex):
+        super().__init__(target)
+        sizes = []
+        for ax in target.out_axes:
+            if not isinstance(ax._size, nm.Integer):
+                raise ValueError(
+                    f"affine gather needs a concrete size for fan-out axis {ax}")
+            sizes.append(ax._size._value)
+        self.out_sizes = tuple(sizes)
+        self.rows = target.rows
+
+    def forward(self, *xs: torch.Tensor) -> torch.Tensor:
+        x = xs[0]
+        grids = torch.meshgrid(
+            *[torch.arange(s, device=x.device) for s in self.out_sizes],
+            indexing='ij',
+        )
+        index = []
+        for const, terms in self.rows:
+            idx = torch.full(self.out_sizes, int(const), dtype=torch.long, device=x.device)
+            for k, coeff in terms:
+                idx = idx + int(coeff) * grids[k]
+            index.append(idx)
+        return x[tuple(index)]
 
 ##################
 ## BROADCASTING ##
