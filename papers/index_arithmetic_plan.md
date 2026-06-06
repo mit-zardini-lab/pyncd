@@ -102,6 +102,10 @@ compile, and run end-to-end, replacing the term-level assembly used for the figu
 
 ## Phase 2 — affine gather (RHS) and scatter (LHS)
 
+> **Detailed, actionable P2 plan:** [index_arithmetic_p2_plan.md](index_arithmetic_p2_plan.md)
+> (architecture, sub-phases 2a/2b, runtimes, tests, risks, suggested order). The sketch
+> below is the original outline.
+
 Goal: offsets, dilation, strides, multi-axis reads, and non-iteration scatter.
 
 1. **Extend `IndexExpr`** to affine: `Affine(coeffs: dict[axis,int], const: int)`.
