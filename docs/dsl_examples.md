@@ -539,9 +539,10 @@ final slice `h³` for `L_Wₒᵤₜ ▸ softmax`.
 The same diagram as produced by the **tsncd renderer** (the `ScanBox` reuses the
 existing `BlockBox`; only the carry arc is new). Here the network is assembled at the
 morphism level — `L_Wᵢₙ → Scan(L_W ▸ relu) → L_Wₒᵤₜ ▸ softmax` — and the scan emits its
-final state directly, because the DSL cannot yet read a fixed history slice
-`h[…, 3]`; see [index_arithmetic.md](../papers/index_arithmetic.md) for the planned
-resolution (integer constants and affine index arithmetic on axes):
+final state directly. (The DSL now also reads a fixed history slice `h[…, 3]`
+directly — P1 of [index_arithmetic.md](../papers/index_arithmetic.md), integer
+constants on axes — so the full network builds from the DSL; this figure keeps the
+final-state assembly originally used to render the diagram.)
 
 ![tsncd render of the deep-MLP ScanBox](mlp5_tsncd_render.png)
 

@@ -38,10 +38,28 @@ Key files:
 
 ---
 
-## Phase 1 — integer constants (unblocks `h[…, 3]`)
+## Phase 1 — integer constants (unblocks `h[…, 3]`)  ✅ DONE
 
-Goal: `Y[…] = … T[…, 3] …` and the full Example 4 build, compile, and run
-end-to-end, replacing the term-level assembly used for the figure.
+Implemented on branch `index-arithmetic-p1`: `Slice` term + `ConstructedSlice`
+runtime + `_extract_const_slices` synthesis (commit "feat(dsl): P1 …"). Const slices
+of plain and scan tensors work end-to-end; Example 4's scan + relu + `h[…,3]` chain is
+numerically verified. Two **pre-existing scan** limitations were fixed to get there
+(commit "fix(scan): …"): (a) topological entry ordering so a Scan precedes its
+downstream consumers; (b) splitting the scan-step nonlinearity (relu) so it compiles.
+
+Follow-ups discovered (separate from index arithmetic, not yet done):
+
+- **`.linear()` inside a scan** is not honored — `_build_rhs_morphism_with_ctx` goes
+  straight to `bc_signature`, so a `.linear()` weight in a scan base/step is an einsum
+  input, not an internal parameter.
+- **Per-step weight `l`-last convention** — `ConstructedScan` slices the trailing dim,
+  so a `W[l, …]` per-step input must be supplied `l`-last; the DSL does not yet
+  reorder it. Example 4's documented `W=(3,d_h,d_h)` should be `(d_h,d_h,3)`.
+- **Static bounds** (`0 ≤ c < |axis|`, `0 ≤ c ≤ N` for history) are not yet checked;
+  an out-of-range constant currently fails at runtime in `torch.select`.
+
+Original goal (for reference): `Y[…] = … T[…, 3] …` and the full Example 4 build,
+compile, and run end-to-end, replacing the term-level assembly used for the figure.
 
 1. **`IndexExpr` type** (`TensorExpr.py`). Minimal union for P1: `AxisRef(axis)` and
    `Const(value: int)`. `IndexedTensor.indices` becomes `Prod[IndexExpr]` (bare
