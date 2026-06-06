@@ -536,6 +536,13 @@ final slice `h³` for `L_Wₒᵤₜ ▸ softmax`.
 
 ![Rolled ScanBox for the deep MLP](mlp5_render.png)
 
+The same diagram as produced by the **tsncd renderer** (the `ScanBox` reuses the
+existing `BlockBox`; only the carry arc is new). Here the network is assembled at the
+morphism level — `L_Wᵢₙ → Scan(L_W ▸ relu) → L_Wₒᵤₜ ▸ softmax` — and the scan emits its
+final state directly:
+
+![tsncd render of the deep-MLP ScanBox](mlp5_tsncd_render.png)
+
 See [iteration.md § 7](../papers/iteration.md#7-diagrammatic-notation-a-string-diagram-realization-of-the-scanbox)
 for the unrolled semantics and the mapping onto `ConstructedScan`.
 

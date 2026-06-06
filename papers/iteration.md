@@ -41,6 +41,7 @@ diagrammatic (string-diagram) notation.
   - [7.3 Unrolled semantics (fixed N)](#73-unrolled-semantics-fixed-n)
   - [7.4 Correspondence to the compiled module](#74-correspondence-to-the-compiled-module)
   - [7.5 Conventions](#75-conventions)
+  - [7.6 Implementation status in tsncd — and what remains](#76-implementation-status-in-tsncd--and-what-remains)
 - [Appendix: Categorical Status of `Scan` in Br](#appendix-categorical-status-of-scan-in-br)
   - [A.1 The core axioms `Scan` satisfies](#a1-the-core-axioms-scan-satisfies)
   - [A.2 The structural property `Scan` fails — the batch lift independence axiom](#a2-the-structural-property-scan-fails--the-batch-lift-independence-axiom)
@@ -1032,6 +1033,44 @@ top-level pieces.
 
 When later layers consume every state (e.g. attention over recurrence depth), the
 reindexing is dropped and the full `L'` history wire feeds downstream directly.
+
+### 7.6 Implementation status in tsncd — and what remains
+
+A first `ScanBox` renderer is implemented in tsncd. It reuses `BlockBox` wholesale
+(teal backdrop + title + bracket) and adds exactly one new mark — the **carry arc**
+(`CategoryRenderer.ts`, dispatched on `instanceof cat.Scan`; the `Scan` term lives in
+`ProductCategory.ts`). The live render of Example 4 is in
+[dsl_examples.md § 4](../docs/dsl_examples.md#example-4--deep-mlp). All changes are
+additive and gated on `instanceof Scan`, so non-scan diagrams render byte-identically
+(verified).
+
+> [!IMPORTANT]
+> **What is done, and what remains for a *general, robust* scan renderer.**
+>
+> **Working today** — single-state (`n_states = 1`), non-affine scans with an
+> *arbitrary step body*. The body is delegated to the existing `display_category`, so
+> any step morphism renders (verified across three different bodies: `Linear▸ReLU`, a
+> contraction `Σ`, and an additive `Σ + Σ` step). The Block scaffold and carry are
+> body-agnostic.
+>
+> **Not yet general — three concrete gaps:**
+>
+> 1. **Affine scans don't serialise.** `ScanAffine` (the associative-scan
+>    decomposition) is a plain dataclass, not a `Term`, so `export_to_json` throws on
+>    any recurrence the compiler recognises as affine (linear RNN, EMA, gradient
+>    descent…). *Fix (small):* make `ScanAffine` a `Term`, or null `affine` in a
+>    visualisation-only export.
+> 2. **Coupled scans (`n_states > 1`) render only the first state.** The `ScanBox`
+>    `body` getter returns `steps[0]`, so the other states' step morphisms — and their
+>    carries — are dropped. *Fix (moderate):* stack all step morphisms in the box and
+>    draw one carry per state, driven by `n_states` / `step_state_deps`.
+> 3. **The carry is a generic over-the-box arc**, routed off the box rectangle rather
+>    than wired to the state's codomain→domain anchors. Fine for one state; imprecise
+>    when the step has extra per-step inputs and structurally wrong for multiple
+>    states. *Fix (localised):* attach the carry to the actual state anchors (needs a
+>    reliable "which wire is the state" rule).
+>
+> Until #1–#3 land, treat the renderer as a **single-state, non-affine** ScanBox.
 
 ---
 
