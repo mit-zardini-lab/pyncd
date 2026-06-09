@@ -269,8 +269,9 @@ where:
 - `[f, P]` is the lift of `f` over `P`;
 - `ω` is assembled from reindexing maps and symmetry maps.
 
-The key test for being a weave is **point naturality**. A lifted operation must
-satisfy, for every point `p : I_D -> P`,
+A morphism satisfies **point naturality** over `P` when evaluating at a point of
+`P` commutes with applying the same base operation at every point. For a lifted
+operation `[f, P]`, this means that, for every point `p : I_D -> P`,
 
 ```text
 [f, P] ; ev_{p,Y} = ev_{p,X} ; f.
@@ -279,6 +280,8 @@ satisfy, for every point `p : I_D -> P`,
 This equation says that evaluating a lifted operation at point `p` is the same
 as evaluating the inputs at `p` and then running the base operation. In
 [graded_prop.md](graded_prop.md), this is Eq. 3.
+
+The key test for being a weave is this point-naturality condition.
 
 The intuition is simple: a weave is pointwise independent over its degree
 coordinates. If a morphism mixes different points of the degree axis, it cannot
