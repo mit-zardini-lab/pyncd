@@ -608,6 +608,8 @@ I ⊗ E.
 Every item is sent to every expert, and a gate later combines the expert
 outputs. This is a weave when the expert axis `E` is fixed structure.
 
+### 7.1 Value-level route data
+
 A sparse top-1 mixture-of-experts layer instead computes a routing function:
 
 ```text
@@ -629,39 +631,344 @@ This is the `Route` obstruction:
 - `Scan` has fixed reindexing but coupled temporal dependence.
 - `Route` has uncoupled per-item execution but data-dependent reindexing.
 
-A minimal `Route` generator would have a type of the form:
+The map `r` is therefore not an object of `D` and not a morphism of `D`.
+Instead, it is a **value-level parameter**. A value-level parameter is data
+available to the concrete algebra, such as a tensor of gate decisions, rather
+than symbolic structure available to the graded PROP.
 
-```text
-Route(r, experts) : Items -> Outputs
-```
-
-where:
-
-- `Items` is the `C`-object carrying item features;
-- `Outputs` is the `C`-object carrying routed outputs;
-- `experts` is a family of `C`-morphisms indexed by `E`;
-- `r` is a value-level routing parameter or gate, not a `D`-morphism.
-
-The correct categorical home for `Route` is therefore not the ordinary
-`D`-action. It belongs in the parameterized setting, where the route map is
-carried as data in a `Para` morphism. Here **Para** means the category whose
-morphisms from `A` to `B` are pairs:
+To model this, use **Para**. The category `Para(C)` has the same objects as
+`C`. A morphism from an object `A` to an object `B` is a pair:
 
 ```text
 (P, f : P ⊗ A -> B)
 ```
 
-where `P` is a parameter object and `f` is a morphism using that parameter.
+where `P` is a parameter object and `f` is a `C`-morphism using that parameter.
+Composition in `Para(C)` threads parameters by tensoring the parameter objects
+together.
 
-For `Route`, the parameter object contains the gate values or routing decisions.
-This is why `Route` is not made first-class by the Scan axioms. It requires a
-separate account of value-dependent indexing.
+For top-1 routing, let:
+
+```text
+R_{I,E}
+```
+
+be a parameter object whose concrete elements are functions from items to
+experts. In a target algebra, an element
+
+```text
+ρ : I -> E
+```
+
+of `R_{I,E}` assigns each item `i` an expert `ρ(i)`.
+
+### 7.2 Expert families
+
+Let:
+
+```text
+A
+```
+
+be a `C`-object representing one item feature vector.
+
+Let:
+
+```text
+B
+```
+
+be a `C`-object representing one item output vector.
+
+An **expert family** indexed by `E` is a family of `C`-morphisms:
+
+```text
+expert_e : A -> B
+```
+
+one for each point `e : I_D -> E`. Equivalently, it can be represented as a
+single lifted morphism over the expert axis:
+
+```text
+expert : A ⊛ E -> B ⊛ E
+```
+
+such that evaluating at expert `e` gives `expert_e`:
+
+```text
+expert ; ev_e,B = ev_e,A ; expert_e.
+```
+
+Here `ev_e,A : A ⊛ E -> A` and `ev_e,B : B ⊛ E -> B` are the evaluation maps
+derived from the `D`-action.
+
+### 7.3 Route signature
+
+For index object `I`, expert object `E`, item object `A`, output object `B`,
+and expert family `{expert_e : A -> B}_{e in E}`, add a parameterized
+generator:
+
+```text
+Route_{I,E}({expert_e}) : A ⊛ I -> B ⊛ I
+```
+
+in `Para(C)`, with parameter object:
+
+```text
+R_{I,E}.
+```
+
+Equivalently, as an ordinary `C`-morphism under the Para encoding, it has type:
+
+```text
+route_{I,E}({expert_e}) : R_{I,E} ⊗ (A ⊛ I) -> B ⊛ I.
+```
+
+The object `A ⊛ I` is the collection of item inputs. The object `B ⊛ I` is the
+collection of item outputs. The parameter object `R_{I,E}` stores the runtime
+route decision.
+
+### 7.4 Axiom 1: itemwise dispatch
+
+The **itemwise dispatch axiom** says that evaluating the routed output at item
+`i` is the same as evaluating the input at item `i`, then applying the expert
+chosen by the route parameter at `i`.
+
+Let:
+
+```text
+i : I_D -> I
+```
+
+be a point selecting one item.
+
+Let:
+
+```text
+ρ : I -> E
+```
+
+be a concrete value of the parameter object `R_{I,E}` in a target algebra. Let:
+
+```text
+ρ(i) : I_D -> E
+```
+
+be the point of `E` selected by `ρ` at item `i`.
+
+Then the routed morphism specialized at `ρ`, written
+
+```text
+Route_ρ({expert_e}) : A ⊛ I -> B ⊛ I,
+```
+
+satisfies:
+
+```text
+Route_ρ({expert_e}) ; ev_i,B
+  =
+ev_i,A ; expert_{ρ(i)}.
+```
+
+Here:
+
+- `ev_i,A : A ⊛ I -> A` selects the input item at `i`;
+- `ev_i,B : B ⊛ I -> B` selects the output item at `i`;
+- `expert_{ρ(i)} : A -> B` is the expert selected by the runtime route.
+
+This is the Route analogue of the Scan step axiom. For Scan, the point law
+relates neighboring time points. For Route, the point law is item-local but
+depends on a value-level parameter.
+
+### 7.5 Axiom 2: fixed-route specialization
+
+The **fixed-route specialization axiom** says that when the route is known
+statically, `Route` collapses to ordinary `D`-graded structure.
+
+Let:
+
+```text
+η : I -> E
+```
+
+be a fixed `D`-morphism, available at graph-construction time. Let `ρ_η` be the
+corresponding constant parameter value in `R_{I,E}`.
+
+Then:
+
+```text
+Route_{ρ_η}({expert_e}) ; ev_i,B
+  =
+ev_i,A ; expert_{η(i)}
+```
+
+for every point `i : I_D -> I`.
+
+Because the points of `I` jointly separate morphisms, this pointwise equality
+determines the whole morphism. Thus a fixed route is not genuinely dynamic; it
+is recoverable from the ordinary action, reindexing, and expert family.
+
+### 7.6 Axiom 3: orthogonal lift distribution
+
+Let:
+
+```text
+P
+```
+
+be a `D`-object representing an independent batch, head, sample, or spatial
+degree.
+
+Say that `P` is **orthogonal** to `I` and `E` when its axes or index components
+are disjoint from the item and expert components. In `St`, this means `P`, `I`,
+and `E` share no axis UID.
+
+The route parameter can be lifted pointwise over `P`. Write:
+
+```text
+ρ ⊛ P
+```
+
+for the value-level route that chooses, for each pair `(i, p)`, the same expert
+that `ρ` chooses for `i`. More general implementations may allow the route to
+vary over `P`; then the parameter object is `R_{I⊗P,E}` instead of
+`R_{I,E} ⊛ P`.
+
+The **orthogonal lift-distribution axiom** says:
+
+```text
+[Route_ρ({expert_e}), P]
+  ≅
+Route_{ρ ⊛ P}({[expert_e, P]}).
+```
+
+The symbol `≅` denotes a canonical isomorphism in `Para(C)`; it may be
+definitional equality in a strict implementation.
+
+This axiom says that batching an independent route is the same as routing
+batched experts. It is the categorical basis for vectorizing sparse routing
+across batch coordinates.
+
+### 7.7 Axiom 4: expert relabeling equivariance
+
+Let:
+
+```text
+σ : E -> E
+```
+
+be an isomorphism in `D`, such as a permutation of the expert axis.
+
+Relabeling experts should not change the computation, provided the route labels
+and expert family are relabeled together. Define the relabeled route:
+
+```text
+σ ∘ ρ : I -> E
+```
+
+by first applying `ρ : I -> E`, then applying `σ : E -> E`.
+
+Define the relabeled expert family `{expert^σ_e}` by:
+
+```text
+expert^σ_{σ(e)} = expert_e.
+```
+
+Equivalently:
+
+```text
+expert^σ_e = expert_{σ^{-1}(e)}.
+```
+
+The **expert relabeling axiom** says:
+
+```text
+Route_ρ({expert_e})
+  =
+Route_{σ ∘ ρ}({expert^σ_e}).
+```
+
+This axiom prevents `Route` from depending on arbitrary names or storage order
+of experts. Only the pairing between route decisions and expert implementations
+matters.
+
+### 7.8 Algebra preservation
+
+Let `F : C -> V` be an algebra into a target actegory `V`. Extending `F` to the
+parameterized setting interprets Para parameters as ordinary target values.
+
+The **Route preservation law** says:
+
+```text
+F(Route_ρ({expert_e}))(x)_i
+  =
+F(expert_{ρ(i)})(x_i).
+```
+
+Here:
+
+- `x` is a concrete value of `F(A ⊛ I)`;
+- `x_i` is the slice of `x` at item `i`;
+- `F(Route_ρ({expert_e}))(x)_i` is the slice of the routed output at item `i`;
+- `F(expert_{ρ(i)})` is the concrete operation assigned to the selected expert.
+
+This is the runtime dispatch semantics. It is not expressible as a fixed
+`D`-morphism unless `ρ` is known before graph construction.
+
+### 7.9 Weighted top-k routing
+
+Top-1 routing is the minimal categorical core. Weighted top-k routing adds two
+pieces of structure.
+
+First, replace `R_{I,E}` by a parameter object:
+
+```text
+R_{I,E,K,W}
+```
+
+whose concrete values assign to each item `i` a finite list:
+
+```text
+((e_{i,1}, w_{i,1}), ..., (e_{i,K}, w_{i,K}))
+```
+
+where each `e_{i,j}` is an expert in `E` and each `w_{i,j}` is a scalar weight
+in a scalar object `W`.
+
+Second, require `B` to carry a finite weighted-sum operation:
+
+```text
+combine_K : (W ⊗ B)^{⊗ K} -> B.
+```
+
+Then the itemwise dispatch axiom becomes:
+
+```text
+Route_ρ({expert_e}) ; ev_i,B
+  =
+⟨
+  w_{i,1} ⊗ (ev_i,A ; expert_{e_{i,1}}),
+  ...,
+  w_{i,K} ⊗ (ev_i,A ; expert_{e_{i,K}})
+⟩
+; combine_K.
+```
+
+The top-k variant inherits fixed-route specialization, orthogonal
+lift-distribution, expert relabeling equivariance, and algebra preservation,
+with the selected expert replaced by the weighted combination of selected
+experts.
+
+This is why `Route` is not made first-class by the Scan axioms. Scan needs
+finite-fold laws for coupled temporal dependence. Route needs Para laws for
+value-dependent indexing.
 
 ---
 
 ## 8. What is deliberately not included
 
-The minimal Scan extension intentionally excludes several larger features.
+The minimal Scan and Route extensions intentionally exclude several larger
+features.
 
 **Unbounded generation.** The present `Scan_N` is finite. An unbounded generator
 would need a coalgebraic account, such as an anamorphism or guarded corecursion.
@@ -687,8 +994,17 @@ the semantics depend on equation order. The minimal account instead supports
 Jacobi-style coupled updates, where all right-hand sides read the old state and
 all left-hand sides write the new state.
 
-**Route laws.** This document identifies why `Route` is not a weave, but it does
-not give a complete algebraic theory of value-dependent routing.
+**Route capacity management.** Practical sparse mixture-of-experts systems often
+add per-expert capacity limits, overflow handling, padding, and load-balancing
+losses. These are not part of the minimal `Route` generator. They can be modeled
+by refining the parameter object from `R_{I,E}` to a richer object that records
+expert slots, dropped items, or auxiliary loss terms, but the core itemwise
+dispatch axiom remains the semantic anchor.
+
+**Gate-to-route compilation.** A neural gate may produce scores, after which a
+top-k or sampling rule produces route decisions. This score-to-decision step is
+not the `Route` generator itself. In the minimal account, `Route` starts once
+the value-level parameter `ρ` has been produced.
 
 ---
 
@@ -749,6 +1065,62 @@ scan_preserve :
     foldN (F.map step) (F.map init) N
 ```
 
+Route is represented as a parameterized generator. The parameter object
+`RouteParam I E` stores value-level assignments of items to experts.
+
+```lean
+route :
+  (experts : ExpertFamily A B E) ->
+  BrParaHom (actObj A I) (actObj B I)
+```
+
+The itemwise dispatch law states that specializing the route parameter to `rho`
+and evaluating item `i` applies the expert selected by `rho i`.
+
+```lean
+route_item :
+  evalItem (route experts).specialize rho i =
+    evalItemInput i |>.comp (experts.at (rho i))
+```
+
+The fixed-route law states that a route induced by a static `D`-morphism reduces
+to the corresponding ordinary reindexing construction.
+
+```lean
+route_fixed :
+  (eta : DHom I E) ->
+  (route experts).specialize (rhoOf eta) =
+    fixedRoute eta experts
+```
+
+The lift-distribution law states that independent batching commutes with route.
+
+```lean
+route_lift :
+  Orthogonal P I ->
+  Orthogonal P E ->
+  actParaHom (route experts).specialize rho P =
+    (route (experts.act P)).specialize (rho.act P)
+```
+
+The relabeling law states that permuting expert names changes nothing when the
+route labels and expert family are permuted together.
+
+```lean
+route_relabel :
+  (sigma : DIso E E) ->
+  (route experts).specialize rho =
+    (route (experts.relabel sigma)).specialize (sigma.comp rho)
+```
+
+The algebra preservation field says that Route compiles to runtime dispatch.
+
+```lean
+route_preserve :
+  F.map ((route experts).specialize rho) x i =
+    F.map (experts.at (rho i)) (x i)
+```
+
 The prefix theorem is then proved by induction on the prefix length using
 `scan_base` and `scan_step`.
 
@@ -773,6 +1145,22 @@ The existing `D`-action already supplies point evaluation, prefix restriction,
 and ordinary batching. `Scan` only needs the finite fold laws that explain how
 its temporal points depend on earlier temporal points.
 
-`Route` remains separate. It is not a coupled temporal fold; it is a
-value-dependent reindexing whose routing map is not a fixed `D`-morphism. Its
-home is the parameterized `Para` layer, not the ordinary `D`-graded lift.
+The minimal foundation for top-1 `Route` is:
+
+1. Put `Route` in `Para(C)`, with parameter object `R_{I,E}` storing runtime
+   assignments `ρ : I -> E`.
+2. Add the itemwise dispatch axiom:
+   `Route_ρ({expert_e}) ; ev_i = ev_i ; expert_{ρ(i)}`.
+3. Add the fixed-route specialization axiom: when `ρ` comes from a static
+   `D`-morphism, `Route` agrees with the ordinary reindexing construction.
+4. Add the orthogonal lift-distribution axiom:
+   `[Route_ρ({expert_e}), P] ≅ Route_{ρ ⊛ P}({[expert_e, P]})`.
+5. Add expert relabeling equivariance:
+   `Route_ρ({expert_e}) = Route_{σ ∘ ρ}({expert^σ_e})`.
+6. Extend algebras with the preservation law:
+   `F(Route_ρ({expert_e}))(x)_i = F(expert_{ρ(i)})(x_i)`.
+
+Thus `Scan` and `Route` require different minimal extensions. `Scan` is a
+finite catamorphism over a fixed temporal object. `Route` is value-dependent
+indexing over a fixed family of experts, and its categorical home is the
+parameterized `Para` layer rather than the ordinary `D`-graded lift.
