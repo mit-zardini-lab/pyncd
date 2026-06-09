@@ -260,12 +260,28 @@ g : X -> Y
 is a weave over a `D`-object `P` when `X` and `Y` are structurally assembled
 from indexed versions of per-point objects `X0` and `Y0`, and `g` factors as
 
+Here **per-point** means "after fixing one point of the indexing object `P`."
+If `p : I_D -> P` is a point, then evaluating an indexed input `X0 ⊛ P` at
+`p` gives a slice of type `X0`:
+
+```text
+ev_{p,X0} : X0 ⊛ P -> X0.
+```
+
+Thus `X0` is the tensor-wire type seen at one chosen point of `P`, and `Y0`
+is the tensor-wire type produced at that same point. In pyncd's implemented
+case, if `P` is a batch axis `b` and the full input object has axes `(b, i)`,
+then fixing `b` to one value leaves the local object with axis `(i)`.
+
 ```text
 g = α ; [f, P] ; ω
 ```
 
 where:
 
+- `X0` and `Y0` are the local tensor-wire types at one point of `P`; they are
+  objects of the operation PROP `C`, not axes in `D`. In pyncd's implemented
+  case `C = Br`, examples are array wires such as `bc.Array(bc.Reals(), (i,))`;
 - `α : X -> X0 ⊛ P` is structural input bookkeeping;
 - `f : X0 -> Y0` is a base operation in `C`;
 - `[f, P] : X0 ⊛ P -> Y0 ⊛ P` is the lift of `f` over `P`;
