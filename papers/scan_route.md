@@ -276,6 +276,20 @@ associativity/unit isomorphisms, and symmetry maps. They prepare the input for
 the lifted operation and put its output into the exact domain and codomain shape
 of `g`; they are not new non-weave generators.
 
+In the pyncd code, these structural maps are represented by the
+`Broadcasted.input_weaves`, `Broadcasted.output_weaves`, and `reindexings`
+metadata rather than by literal morphisms named `α` and `ω`. A `Weave` records
+which axes are tiled degree axes and which axes belong to the local target shape.
+The input weaves, together with their reindexings, specify how the actual input
+tensors are presented to the lifted operator; this is the implementation-side
+witness for `α`. The output weaves specify how the lifted result is imprinted
+back into the broadcast degree; this is the implementation-side witness for
+`ω`. For example, `Broadcasted.dom()` computes each input object by
+`input_weave.imprint_to_degree(reindexing.cod())`, while `Broadcasted.cod()`
+computes each output object by `output_weave.imprint_to_degree(self.degree())`.
+The PyTorch compiler then uses the same metadata in `broadcast_vmap(...)` to
+choose the input and output `vmap` dimensions.
+
 A morphism satisfies **point naturality** over `P` when evaluating at a point of
 `P` commutes with applying the same base operation at every point. For a lifted
 operation `[f, P] : X0 ⊛ P -> Y0 ⊛ P`, this means that, for every point
