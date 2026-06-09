@@ -57,6 +57,7 @@ because `P` and `Q` are reserved for index shapes in `D` such as `St` shapes.
    4. [Formalizing the unified non-weave schema](#84-formalizing-the-unified-non-weave-schema)
    5. [Proof targets](#85-proof-targets)
 9. [Summary](#9-summary)
+10. [Appendix A: pyncd code correspondence for `Scan`](#appendix-a-pyncd-code-correspondence-for-scan)
 
 ---
 
@@ -340,6 +341,12 @@ and each point depends on earlier points along that axis.
 The minimal extension is to add `Scan` as a distinguished generator with three
 axioms. No new structure is needed on `D`, and no new action functor is needed
 beyond the existing `act : C × D^op -> C`.
+
+In the current pyncd implementation, this abstract generator is represented by
+the `Scan` dataclass in `data_structure/TensorDSL.py`; see
+[Appendix A](#appendix-a-pyncd-code-correspondence-for-scan) for the
+correspondence between the concrete fields/checks and
+[the Scan axioms](#43-axiom-1-base-case).
 
 #### 4.2.1 Temporal objects
 
@@ -1431,7 +1438,9 @@ the generator agrees with the ordinary D-graded construction.
 
 Let `P` be a `D`-object orthogonal to the output index object `S` and to any
 index objects used by the generator's parameters. Orthogonal means the axes or
-index components are disjoint, as in the earlier Scan and Route sections.
+index components are disjoint, as in
+[`Scan` Axiom 3](#45-axiom-3-orthogonal-lift-distribution) and
+[`Route` Axiom 3](#55-axiom-3-orthogonal-lift-distribution).
 
 The generator must commute with lifting over `P`:
 
@@ -1474,7 +1483,8 @@ permutations do not preserve predecessor structure, so this axiom is usually
 trivial: only the identity, or very special schedule automorphisms, apply.
 
 For `Route`, the item axis `I` is usually kept fixed while the destination axis
-`E` is relabeled. This gives the earlier destination relabeling law:
+`E` is relabeled. This gives the
+[destination relabeling law](#56-axiom-4-destination-relabeling-equivariance):
 
 ```text
 Route_ρ({handler_e})
@@ -1990,3 +2000,84 @@ algebras. Then add `HasScan` and `HasRoute` typeclasses with their pointwise
 laws. Finally factor their shared structure into a `NonWeaveGenerator` interface
 with proof targets for point extensionality, Scan prefix restriction, Route
 static specialization, relabeling, orthogonal batching, and backend soundness.
+
+[Appendix A](#appendix-a-pyncd-code-correspondence-for-scan) summarizes how the
+abstract `Scan_N(step, init)` laws correspond to the current pyncd `Scan`
+dataclass and `ConstructedScan` runtime.
+
+---
+
+## Appendix A: pyncd code correspondence for `Scan`
+
+The categorical generator
+
+```text
+Scan_N(step, init) : X ⊗ (U ⊛ L_N) -> H ⊛ L_{N+1}
+```
+
+is represented in pyncd by the frozen dataclass `Scan` in
+`data_structure/TensorDSL.py`.
+
+```python
+@dataclass(frozen=True)
+class Scan(fd.Term):
+    step: object
+    base: object
+    N: nm.Numeric
+    axis: sc.RawAxis
+    affine: ScanAffine | None = None
+    n_states: int = 1
+    step_state_deps: tuple[tuple[int, ...], ...] = ()
+    step_x_l_positions: tuple[int, ...] = ()
+```
+
+The names differ slightly: `base` is the implementation name for the
+categorical initializer `init`, and `axis` together with `N` represents the
+finite temporal object `L_N`.
+
+| Categorical item | pyncd code item | Meaning |
+| --- | --- | --- |
+| `Scan_N(step, init)` | `Scan(step=..., base=..., N=..., axis=...)` | The term-level scan generator. |
+| `step : H ⊗ U -> H` | `Scan.step` | The one-step update morphism. |
+| `init : X -> H` | `Scan.base` | The base-case morphism computing `H_0`. |
+| `L_N` | `Scan.axis` and `Scan.N` | The recurrence axis and its finite step count. |
+| `H ⊛ L_{N+1}` | output entry shape `step_out + (axis,)` | The emitted full history, with base plus `N` updates. |
+| orthogonal axes `P` | ordinary tensor axes not equal to `axis` | Batch/state axes carried through each loop slice. |
+| algebra `F` | `ConstructedScan` | The PyTorch interpretation of the `Scan` term. |
+
+The Scan axioms correspond to concrete construction checks and runtime
+obligations.
+
+| Axiom in this note | Concrete pyncd condition |
+| --- | --- |
+| [Axiom 1: Base case](#43-axiom-1-base-case) | `TensorDSL._finalize_iter()` requires a base equation and rejects `base_literal != 0`; `base` therefore computes `H_0`. |
+| [Axiom 2: Inductive step](#44-axiom-2-inductive-step) | `_finalize_iter()` strips the recurrence axis from the RHS, rejects `l + 1` on the RHS, and builds `step` as the update from old state plus the current input slice. `ConstructedScan._run_loop()` implements `H = step_module(H, *x[..., l_idx])`. |
+| [Axiom 3: Orthogonal lift distribution](#45-axiom-3-orthogonal-lift-distribution) | `ConstructedScan` slices only along the recurrence axis. `step_x_l_positions` records where the user wrote that axis and moves it to the last dimension before slicing; all other axes are preserved as independent batch/state axes. |
+| [Axiom 4: Algebra preservation](#46-algebra-semantics) | `ConstructedScan.forward()` must return exactly the history `[H_0, ..., H_N]` denoted by the abstract scan. The sequential loop is the reference semantics. |
+| finite `Scan_N` setup | `ConstructedScan.__init__()` requires `N` to be an `nm.Integer`; dynamic iteration counts are outside this note's minimal account. |
+
+The dataclass also contains implementation refinements that are not new
+primitive axioms.
+
+| pyncd field/refinement | Relation to the theory |
+| --- | --- |
+| `n_states > 1` | Coupled Jacobi-style Scan. It generalizes the single-state step law by updating several states from the old state tuple simultaneously. |
+| `step_state_deps` | Records which old states each coupled step reads, preserving a well-defined Jacobi dependency structure. |
+| `affine : ScanAffine \| None` | Optional optimization evidence for an affine recurrence `H[l+1] = A_l H[l] + b_l`. Associative-scan lowering is valid only when it is observationally equal to the sequential recurrence, so it is justified by [algebra preservation](#46-algebra-semantics) plus extra affine/associative structure. |
+| `step_x_l_positions` | Runtime metadata ensuring the recurrence axis is sliced correctly regardless of the axis position in the user's tensor expression. |
+
+Thus the code-level validity criterion is:
+
+```text
+A Scan dataclass is valid when:
+1. N is concrete.
+2. base defines H_0 at axis coordinate 0.
+3. step defines H_{l+1} using only H_l and inputs at l, never l+1.
+4. axis is the unique recurrence axis; other axes are orthogonal batch/state axes.
+5. forward() returns the full history H_0 ... H_N stacked along axis.
+6. any optimized lowering is observationally equal to the sequential recurrence.
+```
+
+The first three points are largely enforced while building the `Scan` term. The
+last three are semantic obligations of `ConstructedScan` and any future backend
+algebra interpreting the same generator.
