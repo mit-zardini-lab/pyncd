@@ -2,9 +2,8 @@
 
 This note refines the `Scan` discussion in [graded_prop.md](graded_prop.md) and
 [iteration.md](iteration.md). Its goal is narrow: identify the smallest extension
-to the `D`-graded colored PROP formalism that gives `Scan` a categorical
-foundation, and contrast it with the different obstruction that leads to
-`Route`.
+to the `D`-graded colored PROP formalism that gives `Scan` and `Route`
+categorical foundations.
 
 Every symbol used below is introduced before it is used. The notation follows
 [graded_prop.md](graded_prop.md): composition is written in diagrammatic order,
@@ -14,20 +13,66 @@ so `f ; g` means "first `f`, then `g`".
 
 ## Contents
 
-1. [Base setting](#1-base-setting)
-2. [The weave criterion](#2-the-weave-criterion)
-3. [Why `Scan` is not a weave](#3-why-scan-is-not-a-weave)
-4. [Minimal extension for `Scan`](#4-minimal-extension-for-scan)
-5. [Algebra semantics](#5-algebra-semantics)
-6. [Consequences](#6-consequences)
-7. [`Route`: the other obstruction](#7-route-the-other-obstruction)
-8. [What is deliberately not included](#8-what-is-deliberately-not-included)
-9. [Lean shape](#9-lean-shape)
-10. [Summary](#10-summary)
+1. [Why formulate Scan and Route axiomatically?](#1-why-formulate-scan-and-route-axiomatically)
+2. [Base setting](#2-base-setting)
+3. [The weave criterion](#3-the-weave-criterion)
+4. [`Scan`: fixed temporal coupling](#4-scan-fixed-temporal-coupling)
+5. [`Route`: value-dependent indexing](#5-route-value-dependent-indexing)
+6. [What is deliberately not included](#6-what-is-deliberately-not-included)
+7. [Lean shape](#7-lean-shape)
+8. [Summary](#8-summary)
 
 ---
 
-## 1. Base setting
+## 1. Why formulate Scan and Route axiomatically?
+
+The ordinary `D`-graded PROP already explains a large class of pyncd programs:
+base operations can be lifted over index shapes, reindexed by structural
+`D`-morphisms, and compiled by algebras such as `construct()`. `Scan` and
+`Route` are important precisely because they sit just outside that ordinary
+weave fragment.
+
+A machine learning task that requires `Scan` is autoregressive sequence modeling
+with a recurrent state, such as evaluating a recurrent neural network or a
+state-space model over a token sequence. The hidden state at token `l + 1`
+depends on the hidden state at token `l`, so the computation cannot be expressed
+as an independent pointwise lift over the sequence axis.
+
+A machine learning task that requires `Route` is sparse mixture-of-experts
+inference. A gate computes, from each token's activation values, which expert or
+experts should process that token. The chosen expert index is therefore a
+runtime value, not a fixed structural reindexing known when the graph is built.
+
+An axiomatic formulation is useful for four reasons.
+
+First, it separates **what an operator means** from **how an implementation runs
+it**. A sequential loop, a checkpointed loop, and an associative parallel prefix
+can all implement the same `Scan` when they satisfy the same axioms. Likewise,
+a dense dispatch kernel, a sparse dispatch kernel, and a fused mixture-of-experts
+kernel can all implement the same `Route` when they satisfy the same route laws.
+
+Second, it identifies the exact obstruction to being a weave. `Scan` is not a
+weave because it couples neighboring temporal points. `Route` is not a weave
+because the reindexing map is a runtime value rather than a fixed `D`-morphism.
+The two failures are different, so they need different minimal extensions.
+
+Third, axioms give reusable compiler laws. Prefix restriction, vectorization over
+orthogonal axes, fixed-route specialization, expert relabeling, and algebra
+preservation become theorems or fields to check rather than ad hoc conventions
+inside each backend.
+
+Fourth, an axiomatic boundary keeps the core small. The goal is not to add a
+general theory of loops, effects, routing, and dynamic shapes. The goal is to add
+only the equations that make finite scan and value-dependent route compositional
+inside the existing categorical framework.
+
+The rest of the note therefore presents `Scan` and `Route` in parallel. Each is
+introduced by its obstruction to the weave criterion, then given a signature,
+axioms, algebra semantics, and derived consequences.
+
+---
+
+## 2. Base setting
 
 A **colored PROP** is a strict symmetric monoidal category whose objects are
 finite lists of colors. A **color** is a wire type. The monoidal product `⊗`
@@ -127,9 +172,28 @@ Composing this with the action unit isomorphism
 gives `ev_p,X`. Equivalently, `ev_p,X` is `[X, p]` followed by
 `υ_X`. When `X` is clear, we write this as `ev_p`.
 
+A **target actegory** is a symmetric monoidal category `V` equipped with a right
+action of `D`, written:
+
+```text
+⊛_V : V x D^op -> V.
+```
+
+For pyncd, `V` is the category of PyTorch tensor spaces and tensor functions;
+`A ⊛_V P` appends the dimensions described by `P` to the tensor space `A`.
+
+An **algebra** of `C` in `V` is a strong symmetric monoidal functor:
+
+```text
+F : C -> V
+```
+
+that preserves the `D`-action up to coherent isomorphism. In pyncd,
+`F` is `construct()`: it maps abstract Br morphisms to concrete PyTorch modules.
+
 ---
 
-## 2. The weave criterion
+## 3. The weave criterion
 
 A **weave** is the data witnessing that a `C`-morphism is a lifted base operation
 over an index shape. More explicitly, a morphism
@@ -167,7 +231,9 @@ be a weave over that axis.
 
 ---
 
-## 3. Why `Scan` is not a weave
+## 4. `Scan`: fixed temporal coupling
+
+### 4.1 Obstruction to being a weave
 
 A **recurrence** is a computation where the value at the next step depends on
 the value at the current step. In tensor notation:
@@ -210,13 +276,13 @@ that the reindexing itself depends on runtime data.
 
 ---
 
-## 4. Minimal extension for `Scan`
+### 4.2 Minimal extension
 
 The minimal extension is to add `Scan` as a distinguished generator with three
 axioms. No new structure is needed on `D`, and no new action functor is needed
 beyond the existing `act : C x D^op -> C`.
 
-### 4.1 Temporal objects
+#### 4.2.1 Temporal objects
 
 For each natural number `N`, let
 
@@ -250,7 +316,7 @@ be the prefix inclusion. It sends the ordered set `{0, ..., M - 1}` into the
 first `M` points of `{0, ..., N - 1}`. In `St`, this is the affine inclusion of a
 prefix axis into a longer axis.
 
-### 4.2 Step and initial morphisms
+#### 4.2.2 Step and initial morphisms
 
 Let:
 
@@ -301,7 +367,7 @@ U ⊛ L_N.
 
 This is `U` lifted over the `N` time points.
 
-### 4.3 Scan signature
+#### 4.2.3 Scan signature
 
 For each natural number `N`, add a generator:
 
@@ -322,7 +388,7 @@ H ⊛ L_{N+1},
 
 the history of `N + 1` states: the initial state plus one state after each step.
 
-### 4.4 Axiom 1: base case
+### 4.3 Axiom 1: base case
 
 The pointwise Scan laws are stated in an **ambient routing envelope** around the
 linear PROP. The routing envelope supplies projections and pairings for the
@@ -376,7 +442,7 @@ The projection is the only reason this equation is not a bare PROP equation.
 The categorical content is the base-case equality; the projection just adapts
 the equality to pyncd's multi-input calling convention.
 
-### 4.5 Axiom 2: inductive step
+### 4.4 Axiom 2: inductive step
 
 The **step axiom** says that output slice `k + 1` is obtained by applying
 `step` to output slice `k` and input slice `k`.
@@ -421,7 +487,7 @@ Here:
 This equation is a finite catamorphism law. It does not require an infinite
 initial algebra or a fixpoint object because `N` is finite.
 
-### 4.6 Axiom 3: orthogonal lift distribution
+### 4.5 Axiom 3: orthogonal lift distribution
 
 Let:
 
@@ -453,28 +519,10 @@ recurrence across batch coordinates.
 
 ---
 
-## 5. Algebra semantics
+### 4.6 Algebra semantics
 
-A **target actegory** is a symmetric monoidal category `V` equipped with a right
-action of `D`, written:
-
-```text
-⊛_V : V x D^op -> V.
-```
-
-For pyncd, `V` is the category of PyTorch tensor spaces and tensor functions;
-`A ⊛_V P` appends the dimensions described by `P` to the tensor space `A`.
-
-An **algebra** of `C` in `V` is a strong symmetric monoidal functor:
-
-```text
-F : C -> V
-```
-
-that preserves the `D`-action up to coherent isomorphism. In pyncd,
-`F` is `construct()`: it maps abstract Br morphisms to concrete PyTorch modules.
-
-To support `Scan`, the algebra must satisfy one additional preservation law:
+Let `F : C -> V` be an algebra into a target actegory. To support `Scan`, the
+algebra must satisfy one additional preservation law:
 
 ```text
 F(Scan_N(step, init))
@@ -506,12 +554,12 @@ prefix algorithm.
 
 ---
 
-## 6. Consequences
+### 4.7 Consequences
 
 The three Scan axioms are enough to recover the useful laws without treating
 `Scan` as an opaque generator.
 
-### 6.1 Prefix restriction
+#### 4.7.1 Prefix restriction
 
 For `0 <= M <= N`, the prefix restriction of an `N`-step scan to its first
 `M + 1` output states equals the `M`-step scan.
@@ -543,7 +591,7 @@ history of the `N`-step scan gives the `M`-step scan.
 
 This follows by induction on `M` from the base-case and step axioms.
 
-### 6.2 Why Scan still fails the weave criterion
+#### 4.7.2 Why Scan still fails the weave criterion
 
 The Scan axioms do not add point naturality for `Scan` along the temporal axis.
 They instead specify how temporal points depend on previous temporal points.
@@ -553,7 +601,7 @@ Therefore `Scan` remains outside the image of the ordinary lift operation
 This is the intended result: `Scan` is a generator with fold laws, not a disguised
 weave.
 
-### 6.3 Equality and fusion of scans
+#### 4.7.3 Equality and fusion of scans
 
 Two scans with the same `init` and extensionally equal `step` morphisms are equal
 by the base-case and step axioms. More generally, a morphism between state
@@ -578,7 +626,7 @@ init)` agrees with running `Scan_N(step', init ; h)`.
 
 ---
 
-## 7. `Route`: the other obstruction
+## 5. `Route`: value-dependent indexing
 
 `Route` is not a recurrence. It solves a different problem: selecting where data
 goes based on runtime values.
@@ -608,7 +656,7 @@ I ⊗ E.
 Every item is sent to every expert, and a gate later combines the expert
 outputs. This is a weave when the expert axis `E` is fixed structure.
 
-### 7.1 Value-level route data
+### 5.1 Obstruction and value-level route data
 
 A sparse top-1 mixture-of-experts layer instead computes a routing function:
 
@@ -662,7 +710,7 @@ experts. In a target algebra, an element
 
 of `R_{I,E}` assigns each item `i` an expert `ρ(i)`.
 
-### 7.2 Expert families
+### 5.2 Expert families
 
 Let:
 
@@ -702,7 +750,7 @@ expert ; ev_e,B = ev_e,A ; expert_e.
 Here `ev_e,A : A ⊛ E -> A` and `ev_e,B : B ⊛ E -> B` are the evaluation maps
 derived from the `D`-action.
 
-### 7.3 Route signature
+### 5.3 Route signature
 
 For index object `I`, expert object `E`, item object `A`, output object `B`,
 and expert family `{expert_e : A -> B}_{e in E}`, add a parameterized
@@ -728,7 +776,7 @@ The object `A ⊛ I` is the collection of item inputs. The object `B ⊛ I` is t
 collection of item outputs. The parameter object `R_{I,E}` stores the runtime
 route decision.
 
-### 7.4 Axiom 1: itemwise dispatch
+### 5.4 Axiom 1: itemwise dispatch
 
 The **itemwise dispatch axiom** says that evaluating the routed output at item
 `i` is the same as evaluating the input at item `i`, then applying the expert
@@ -780,7 +828,7 @@ This is the Route analogue of the Scan step axiom. For Scan, the point law
 relates neighboring time points. For Route, the point law is item-local but
 depends on a value-level parameter.
 
-### 7.5 Axiom 2: fixed-route specialization
+### 5.5 Axiom 2: fixed-route specialization
 
 The **fixed-route specialization axiom** says that when the route is known
 statically, `Route` collapses to ordinary `D`-graded structure.
@@ -808,7 +856,7 @@ Because the points of `I` jointly separate morphisms, this pointwise equality
 determines the whole morphism. Thus a fixed route is not genuinely dynamic; it
 is recoverable from the ordinary action, reindexing, and expert family.
 
-### 7.6 Axiom 3: orthogonal lift distribution
+### 5.6 Axiom 3: orthogonal lift distribution
 
 Let:
 
@@ -849,7 +897,7 @@ This axiom says that batching an independent route is the same as routing
 batched experts. It is the categorical basis for vectorizing sparse routing
 across batch coordinates.
 
-### 7.7 Axiom 4: expert relabeling equivariance
+### 5.7 Axiom 4: expert relabeling equivariance
 
 Let:
 
@@ -892,7 +940,7 @@ This axiom prevents `Route` from depending on arbitrary names or storage order
 of experts. Only the pairing between route decisions and expert implementations
 matters.
 
-### 7.8 Algebra preservation
+### 5.8 Algebra preservation
 
 Let `F : C -> V` be an algebra into a target actegory `V`. Extending `F` to the
 parameterized setting interprets Para parameters as ordinary target values.
@@ -915,7 +963,7 @@ Here:
 This is the runtime dispatch semantics. It is not expressible as a fixed
 `D`-morphism unless `ρ` is known before graph construction.
 
-### 7.9 Weighted top-k routing
+### 5.9 Weighted top-k routing
 
 Top-1 routing is the minimal categorical core. Weighted top-k routing adds two
 pieces of structure.
@@ -959,13 +1007,58 @@ lift-distribution, expert relabeling equivariance, and algebra preservation,
 with the selected expert replaced by the weighted combination of selected
 experts.
 
-This is why `Route` is not made first-class by the Scan axioms. Scan needs
-finite-fold laws for coupled temporal dependence. Route needs Para laws for
-value-dependent indexing.
+### 5.10 Consequences
+
+The Route axioms are enough to recover useful laws without pretending that a
+runtime route is a static `D`-morphism.
+
+#### 5.10.1 Static routes are ordinary structure
+
+If the route parameter `ρ` is induced by a fixed `D`-morphism `η : I -> E`, then
+the fixed-route specialization axiom identifies `Route_ρ` with the ordinary
+graded construction. Thus dense or statically routed mixture-of-experts layers
+remain in the weave fragment.
+
+#### 5.10.2 Dynamic routes are item-local but not structural
+
+The itemwise dispatch axiom says that each output item depends only on the
+corresponding input item and the expert chosen for that item:
+
+```text
+Route_ρ({expert_e}) ; ev_i,B
+  =
+ev_i,A ; expert_{ρ(i)}.
+```
+
+This is not point naturality in the ordinary `D`-action, because `ρ(i)` is read
+from a value-level parameter. The computation is point-local in `I`, but the
+choice of structural expert coordinate is not fixed before runtime.
+
+#### 5.10.3 Expert names are irrelevant
+
+Expert relabeling equivariance implies that optimization passes may reorder,
+pack, shard, or rename experts as long as they transform route labels and expert
+implementations together. The observable morphism is unchanged.
+
+#### 5.10.4 Independent batching is safe
+
+Orthogonal lift distribution implies that vectorizing `Route` across an
+independent axis `P` does not change semantics:
+
+```text
+[Route_ρ({expert_e}), P]
+  ≅
+Route_{ρ ⊛ P}({[expert_e, P]}).
+```
+
+This is the Route counterpart of Scan's batched-loop law.
+
+Scan and Route therefore need different laws. Scan needs finite-fold laws for
+coupled temporal dependence. Route needs Para laws for value-dependent indexing.
 
 ---
 
-## 8. What is deliberately not included
+## 6. What is deliberately not included
 
 The minimal Scan and Route extensions intentionally exclude several larger
 features.
@@ -1008,7 +1101,7 @@ the value-level parameter `ρ` has been produced.
 
 ---
 
-## 9. Lean shape
+## 7. Lean shape
 
 In Lean, the minimal extension can be represented by adding a `scan` constructor
 to the inductive type of Br morphisms, plus three theorem fields or axioms.
@@ -1126,7 +1219,7 @@ The prefix theorem is then proved by induction on the prefix length using
 
 ---
 
-## 10. Summary
+## 8. Summary
 
 The minimal foundation for `Scan` is:
 
