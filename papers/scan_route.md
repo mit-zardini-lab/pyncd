@@ -2045,6 +2045,97 @@ finite temporal object `L_N`.
 | orthogonal axes `P` | ordinary tensor axes not equal to `axis` | Batch/state axes carried through each loop slice. |
 | algebra `F` | `ConstructedScan` | The PyTorch interpretation of the `Scan` term. |
 
+### A.1 The `step` morphism in code
+
+The categorical `step` morphism is the one-step update:
+
+```text
+step : H ⊗ U -> H.
+```
+
+In pyncd this is stored as `Scan.step`. For a usual single-state TL recurrence,
+the user writes an equation of the form:
+
+```text
+H[..., l + 1] = expr(H[..., l], U[..., l])
+```
+
+During `TensorDSL._finalize_iter()`, pyncd turns this equation into the
+one-step morphism in three stages.
+
+1. It rejects future-state reads on the right-hand side:
+
+   ```python
+   self._check_no_lnext_on_rhs(recur_value, l, name_str)
+   ```
+
+2. It strips the recurrence axis `l` from the RHS factors and renames the
+   recurrent tensor to an internal state proxy:
+
+   ```python
+   step_value = self._strip_iter_axis_from_value(
+       recur_value, l, {state_name_dn: state_proxy_dn}
+   )
+   ```
+
+   This turns the schematic expression
+
+   ```text
+   expr(H[..., l], U[..., l])
+   ```
+
+   into a point-level update expression:
+
+   ```text
+   expr(H_state, U_step).
+   ```
+
+3. It compiles that stripped expression to a pyncd morphism:
+
+   ```python
+   step_morph = self._build_step_morph(None, step_out, step_value, step_ctx)
+   ```
+
+   The result is usually a `Broadcasted`, `Composed`, or other
+   `ProductCategory` morphism. That object is stored as:
+
+   ```python
+   Scan(step=step_morph, ...)
+   ```
+
+At runtime, `ConstructedScan` interprets this morphism as a PyTorch module:
+
+```python
+self.step_module = ConstructedModule.construct(target.step)
+```
+
+and applies it in the sequential reference loop:
+
+```python
+sliced = tuple(x[..., l_idx] for x in step_xs)
+H = to_tuple(self.step_module(H, *sliced))[0]
+```
+
+Thus `Scan.step` is not the whole scan. It is the point-level update morphism
+used repeatedly by the scan algebra to compute:
+
+```text
+H_{l+1} = step(H_l, U_l).
+```
+
+There are two important variants.
+
+| Case | Representation of `Scan.step` |
+| --- | --- |
+| ordinary single-state recurrence | one pyncd morphism built from the stripped RHS expression |
+| `TensorProxy.recur(axis, morphism)` | the prebuilt user-supplied morphism `morphism`; this bypasses TL RHS parsing and assumes no per-step external inputs |
+| coupled Jacobi scan, `n_states > 1` | a tuple of step morphisms, one per state; `step_state_deps` records which old states each step reads |
+
+The optional `ScanAffine` field does not replace `Scan.step`. It stores
+additional decomposition evidence for optimized lowering. The sequential meaning
+of the scan remains the recurrence defined by `Scan.step`; any affine or
+associative path must preserve that meaning.
+
 The Scan axioms correspond to concrete construction checks and runtime
 obligations.
 
@@ -2053,7 +2144,7 @@ obligations.
 | [Axiom 1: Base case](#43-axiom-1-base-case) | `TensorDSL._finalize_iter()` requires a base equation and rejects `base_literal != 0`; `base` therefore computes `H_0`. |
 | [Axiom 2: Inductive step](#44-axiom-2-inductive-step) | `_finalize_iter()` strips the recurrence axis from the RHS, rejects `l + 1` on the RHS, and builds `step` as the update from old state plus the current input slice. `ConstructedScan._run_loop()` implements `H = step_module(H, *x[..., l_idx])`. |
 | [Axiom 3: Orthogonal lift distribution](#45-axiom-3-orthogonal-lift-distribution) | `ConstructedScan` slices only along the recurrence axis. `step_x_l_positions` records where the user wrote that axis and moves it to the last dimension before slicing; all other axes are preserved as independent batch/state axes. |
-| [Axiom 4: Algebra preservation](#46-algebra-semantics) | `ConstructedScan.forward()` must return exactly the history `[H_0, ..., H_N]` denoted by the abstract scan. The sequential loop is the reference semantics. |
+| [Algebra semantics](#46-algebra-semantics) | `ConstructedScan.forward()` must return exactly the history `[H_0, ..., H_N]` denoted by the abstract scan. The sequential loop is the reference semantics. |
 | finite `Scan_N` setup | `ConstructedScan.__init__()` requires `N` to be an `nm.Integer`; dynamic iteration counts are outside this note's minimal account. |
 
 The dataclass also contains implementation refinements that are not new
@@ -2081,3 +2172,30 @@ A Scan dataclass is valid when:
 The first three points are largely enforced while building the `Scan` term. The
 last three are semantic obligations of `ConstructedScan` and any future backend
 algebra interpreting the same generator.
+
+### A.2 Test-case correspondence
+
+The executable regression tests for these obligations live in
+[`tests/test_torch_compile.py`](../tests/test_torch_compile.py). They are written
+as small TL recurrences that construct a `Scan`, compile it through
+`ConstructedModule`, and compare the resulting history with either a required
+slice property, a construction-time rejection, or an explicit Python reference
+loop.
+
+| Theoretical/code obligation | Test pointer | Test structure |
+| --- | --- | --- |
+| [Axiom 1: base case](#43-axiom-1-base-case) | `test_scan_base_case_is_output_slice_zero` | Builds `H[i, 0] = X[i]` and `H[i, l + 1] = H[i, l] + Delta[i, l]`; asserts output slice `0` is exactly `X`. |
+| Base point must be `0` | `test_scan_rejects_nonzero_base_index` | Attempts `H[i, 1] = X[i]`; expects `tl.to_morphism()` to reject the scan before compilation. |
+| [Axiom 2: inductive step](#44-axiom-2-inductive-step) cannot read the future state | `test_scan_rejects_future_state_read_on_rhs` | Attempts a RHS read of `H[i, l + 1]`; expects construction to fail rather than create a non-causal step. |
+| Finite `Scan_N` requires concrete `N` | `test_scan_rejects_unsized_iteration_axis` | Uses an unsized recurrence axis `l`; expects construction to reject the absence of a concrete finite length. |
+| [Axiom 3: orthogonal lift distribution](#45-axiom-3-orthogonal-lift-distribution) | `test_scan_orthogonal_batch_axis_runs_independent_loops` | Adds an independent batch axis `b`; compares the compiled batched scan with independent per-batch Python loops. |
+| Orthogonal axes are preserved while only `l` is sliced | `test_scan_step_axis_position_is_moved_to_last_before_slicing` | Writes the step input as `Delta[l, i]`; checks that `step_x_l_positions`-style axis movement yields the same history as slicing over `l`. |
+| [Algebra semantics](#46-algebra-semantics) for optimized lowering | `test_scan_affine_fast_path_preserves_reference_recurrence` | Uses an affine recurrence `H[i,l+1] = A[i,l] * H[i,l] + B[i,l]`; verifies the affine fast path is selected and equals an explicit sequential loop. |
+
+Several older scan tests in the same file provide surrounding integration
+coverage. In particular, `test_uncoupled_scan_returns_threaded_composed` checks
+that scan terms compose correctly with ordinary equations, and
+`test_uncoupled_scan_in_threaded_matches_composed_numerics` checks the compiled
+numerics of such a composed scan against a hand-written recurrence. The axiom
+tests above are deliberately narrower: each one isolates one categorical
+side-condition or backend preservation obligation from this appendix.

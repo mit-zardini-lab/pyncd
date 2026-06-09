@@ -767,6 +767,150 @@ def test_uncoupled_scan_in_threaded_matches_composed_numerics():
     )
 
 
+def test_scan_base_case_is_output_slice_zero():
+    """Axiom 1: the first scan-history slice is exactly the base case."""
+    i = real_axis('i', 3)
+    l = real_axis('l', 4)
+    tl = TL()
+    tl.H[i, 0] = tl.X[i]
+    tl.H[i, l + 1] = tl.H[i, l] + tl.Delta[i, l]
+    mod = ConstructedModule.construct(tl.to_morphism())
+
+    X = torch.tensor([2.0, -1.0, 4.0])
+    Delta = torch.randn(3, 4)
+    result = mod(X, Delta)
+    H_out = result[0] if isinstance(result, tuple) else result
+
+    assert torch.allclose(H_out[:, 0], X)
+
+
+def test_scan_rejects_nonzero_base_index():
+    """Axiom 1 side condition: base case must be at the first point l=0."""
+    i = real_axis('i', 3)
+    l = real_axis('l', 4)
+    tl = TL()
+    tl.H[i, 1] = tl.X[i]
+    tl.H[i, l + 1] = tl.H[i, l] + tl.Delta[i, l]
+
+    with pytest.raises(ValueError, match="base case must be l=0"):
+        tl.to_morphism()
+
+
+def test_scan_rejects_future_state_read_on_rhs():
+    """Axiom 2 side condition: the step cannot read H[l+1] on its RHS."""
+    i = real_axis('i', 3)
+    l = real_axis('l', 4)
+    tl = TL()
+    tl.H[i, 0] = tl.X[i]
+    tl.H[i, l + 1] = tl.H[i, l + 1] + tl.Delta[i, l]
+
+    with pytest.raises(ValueError, match="l\\+1"):
+        tl.to_morphism()
+
+
+def test_scan_rejects_unsized_iteration_axis():
+    """Finite Scan_N setup: the recurrence axis must have concrete size N."""
+    i = real_axis('i', 3)
+    l = real_axis('l')
+    tl = TL()
+    tl.H[i, 0] = tl.X[i]
+    tl.H[i, l + 1] = tl.H[i, l] + tl.Delta[i, l]
+
+    with pytest.raises(ValueError, match="no concrete size"):
+        tl.to_morphism()
+
+
+def test_scan_orthogonal_batch_axis_runs_independent_loops():
+    """Axiom 3: axes orthogonal to l are independent scan instances."""
+    b = real_axis('b', 2)
+    i = real_axis('i', 3)
+    l = real_axis('l', 4)
+    tl = TL()
+    tl.H[b, i, 0] = tl.X[b, i]
+    tl.H[b, i, l + 1] = tl.H[b, i, l] + tl.Delta[b, i, l]
+    mod = ConstructedModule.construct(tl.to_morphism())
+
+    X = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+    Delta = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4) / 10.0
+    result = mod(X, Delta)
+    H_out = result[0] if isinstance(result, tuple) else result
+
+    expected_batches = []
+    for batch in range(2):
+        H = X[batch].clone()
+        hist = [H.clone()]
+        for step in range(4):
+            H = H + Delta[batch, :, step]
+            hist.append(H.clone())
+        expected_batches.append(torch.stack(hist, dim=-1))
+    expected = torch.stack(expected_batches, dim=0)
+
+    assert torch.allclose(H_out, expected)
+
+
+def test_scan_step_axis_position_is_moved_to_last_before_slicing():
+    """Axiom 3 implementation: l may appear away from the last input axis."""
+    i = real_axis('i', 3)
+    l = real_axis('l', 4)
+    tl = TL()
+    tl.H[i, 0] = tl.X[i]
+    tl.H[i, l + 1] = tl.H[i, l] + tl.Delta[l, i]
+    mod = ConstructedModule.construct(tl.to_morphism())
+
+    X = torch.tensor([1.0, 2.0, 3.0])
+    Delta = torch.arange(12, dtype=torch.float32).reshape(4, 3)
+    result = mod(X, Delta)
+    H_out = result[0] if isinstance(result, tuple) else result
+
+    H = X.clone()
+    hist = [H.clone()]
+    for step in range(4):
+        H = H + Delta[step]
+        hist.append(H.clone())
+    expected = torch.stack(hist, dim=-1)
+
+    assert torch.allclose(H_out, expected)
+
+
+def test_scan_affine_fast_path_preserves_reference_recurrence():
+    """Algebra semantics: affine lowering agrees with the recurrence loop."""
+    i = real_axis('i', 3)
+    l = real_axis('l', 4)
+    tl = TL()
+    tl.H[i, 0] = tl.X[i]
+    tl.H[i, l + 1] = tl.A[i, l] * tl.H[i, l] + tl.B[i, l]
+    mod = ConstructedModule.construct(tl.to_morphism())
+
+    assert any(getattr(submodule, '_has_affine', False) for submodule in mod.modules())
+
+    X = torch.tensor([1.0, -2.0, 0.5])
+    A = torch.tensor(
+        [
+            [1.1, 0.9, 1.2, 0.8],
+            [0.5, 1.5, 0.75, 1.25],
+            [1.0, 1.0, 0.5, 2.0],
+        ]
+    )
+    B = torch.tensor(
+        [
+            [0.0, 1.0, -1.0, 0.5],
+            [2.0, 0.0, 1.0, -0.5],
+            [0.5, -0.25, 0.75, 1.0],
+        ]
+    )
+    result = mod(X, A, B)
+    H_out = result[0] if isinstance(result, tuple) else result
+
+    H = X.clone()
+    hist = [H.clone()]
+    for step in range(4):
+        H = A[:, step] * H + B[:, step]
+        hist.append(H.clone())
+    expected = torch.stack(hist, dim=-1)
+
+    assert torch.allclose(H_out, expected, atol=1e-5)
+
+
 def test_uncoupled_scan_mixed_with_non_scan_equations():
     """A plain equation feeding an uncoupled Scan must compile to ThreadedComposed."""
     from data_structure.ProductCategory import ThreadedComposed
