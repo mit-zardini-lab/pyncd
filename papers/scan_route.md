@@ -50,7 +50,12 @@ because `P` and `Q` are reserved for index shapes in `D` such as `St` shapes.
    7. [What actually factors out?](#67-what-actually-factors-out)
    8. [Relation to categorical deep learning](#68-relation-to-categorical-deep-learning)
 7. [What is deliberately not included](#7-what-is-deliberately-not-included)
-8. [Lean shape](#8-lean-shape)
+8. [Lean formalization ideas](#8-lean-formalization-ideas)
+   1. [Layer the formalization](#81-layer-the-formalization)
+   2. [Formalizing Scan](#82-formalizing-scan)
+   3. [Formalizing Route](#83-formalizing-route)
+   4. [Formalizing the unified non-weave schema](#84-formalizing-the-unified-non-weave-schema)
+   5. [Proof targets](#85-proof-targets)
 9. [Summary](#9-summary)
 
 ---
@@ -1621,47 +1626,106 @@ value-level parameter `ρ` has been produced.
 
 ---
 
-## 8. Lean shape
+## 8. Lean formalization ideas
 
-In Lean, the minimal extension can be represented by adding a `scan` constructor
-to the inductive type of Br morphisms, plus three theorem fields or axioms.
+This section sketches how the Scan, Route, and unified non-weave axioms could be
+represented in Lean. The snippets are schematic rather than checked Lean code;
+the point is to identify the data structures and theorem statements that should
+exist in a future formalization.
 
-The following is schematic Lean, not checked code.
+### 8.1 Layer the formalization
+
+The cleanest Lean development should avoid putting every idea into one large
+inductive type. Use layers that mirror the paper.
+
+1. **Base categorical layer.** Define a colored PROP `C`, an index PROP `D`, and
+   a right action:
+
+   ```lean
+   class DGradedPROP (C D : Type u) where
+     actObj : C.Obj -> D.Obj -> C.Obj
+     actHom : C.Hom X Y -> (P : D.Obj) -> C.Hom (actObj X P) (actObj Y P)
+     reindex : C.Obj -> D.Hom P Q -> C.Hom (actObj X Q) (actObj X P)
+   ```
+
+   This layer also provides point evaluation:
+
+   ```lean
+   evalAt : (p : D.Hom D.unit P) -> C.Hom (actObj X P) X
+   ```
+
+2. **Routing-envelope layer.** Add the structural operations used only to state
+   local laws: projections, pairings, and duplicated reads of input slices. This
+   can be a typeclass rather than part of the bare linear PROP.
+
+   ```lean
+   class RoutingEnvelope (C : Type u) where
+     projLeft  : C.Hom (tensor X Y) X
+     projRight : C.Hom (tensor X Y) Y
+     pair      : C.Hom Z X -> C.Hom Z Y -> C.Hom Z (tensor X Y)
+   ```
+
+3. **Para layer.** Represent parameterized morphisms separately:
+
+   ```lean
+   structure ParaHom (C : Type u) (X Y : C.Obj) where
+     Param : C.Obj
+     run   : C.Hom (tensor Param X) Y
+   ```
+
+   Reparameterizations should be explicit 2-cells:
+
+   ```lean
+   structure Reparam (f g : ParaHom C X Y) where
+     map : C.Hom g.Param f.Param
+     commutes : compose (tensorHom map (id X)) f.run = g.run
+   ```
+
+4. **Algebra layer.** Define algebras as strong monoidal functors compatible with
+   the `D`-action. Scan and Route then extend this algebra with preservation
+   fields.
+
+   ```lean
+   class DAlgebra (C D V : Type u) where
+     mapObj : C.Obj -> V.Obj
+     mapHom : C.Hom X Y -> V.Hom (mapObj X) (mapObj Y)
+     preservesAct : mapObj (actObj X P) = V.actObj (mapObj X) P
+   ```
+
+### 8.2 Formalizing Scan
+
+`Scan` can first be added as a generator in `C`. The generator should store only
+the recurrence data; the laws should be fields or axioms in a separate
+`HasScan` typeclass.
 
 ```lean
--- H, U, and X are Br objects.
--- step is the state update.
--- init is the initial-state map.
--- N is the finite number of steps.
-scan :
-  (step : BrHom (H.tensor U) H) ->
-  (init : BrHom X H) ->
-  (N : Nat) ->
-  BrHom (X.tensor (actObj U (L N))) (actObj H (L (N + 1)))
+class HasScan (C D : Type u) [DGradedPROP C D] where
+  L : Nat -> D.Obj
+
+  scan :
+    (step : C.Hom (tensor H U) H) ->
+    (init : C.Hom X H) ->
+    (N : Nat) ->
+    C.Hom (tensor X (actObj U (L N))) (actObj H (L (N + 1)))
 ```
 
-The base-case law states that evaluating at output time `0` gives the initial
-state.
+The base and step laws are pointwise equations.
 
 ```lean
 scan_base :
-  evalOutputTime (scan step init N) 0 = projectX.comp init
-```
+  evalAt (pt0 : D.Hom D.unit (L (N + 1))) ;; scan step init N =
+    projLeft ;; init
 
-The step law states that evaluating at output time `k + 1` gives the step
-applied to output time `k` and input time `k`.
-
-```lean
 scan_step :
-  k < N ->
-  evalOutputTime (scan step init N) (k + 1) =
+  (k : Fin N) ->
+  evalAt (ptSucc k : D.Hom D.unit (L (N + 1))) ;; scan step init N =
     pair
-      (evalOutputTime (scan step init N) k)
-      (projectInputs.comp (evalInputTime k))
-    |>.comp step
+      (evalAt (pt k) ;; scan step init N)
+      (projRight ;; evalAt (inputPt k))
+    ;; step
 ```
 
-The lift-distribution law states that independent batching commutes with scan.
+The lift law should be stated only under orthogonality hypotheses:
 
 ```lean
 scan_lift :
@@ -1670,72 +1734,204 @@ scan_lift :
     scan (actHom step P) (actHom init P) N
 ```
 
-The algebra preservation field extends the existing algebra structure.
+The algebra preservation law can live in an extension of `DAlgebra`.
 
 ```lean
-scan_preserve :
-  F.map (scan step init N) =
-    foldN (F.map step) (F.map init) N
+class ScanAlgebra (F : DAlgebra C D V) [HasScan C D] where
+  preserve_scan :
+    F.mapHom (scan step init N) =
+      foldN (F.mapHom step) (F.mapHom init) N
 ```
 
-Route is represented as a parameterized generator. The parameter object
-`RouteParam I E` stores value-level assignments of items to destinations.
+This setup makes the prefix theorem an ordinary induction over `Nat`, using
+`scan_base` at zero and `scan_step` at successors.
+
+### 8.3 Formalizing Route
+
+Route should be formalized in `Para(C)` first, then specialized by a concrete
+runtime route parameter. The route parameter object records value-level
+assignments from item points to destination points.
 
 ```lean
-route :
-  (handlers : HandlerFamily A B E) ->
-  BrParaHom (actObj A I) (actObj B I)
+structure RouteParam (D : Type u) (I E : D.Obj) where
+  assign : Point I -> Point E
 ```
 
-The itemwise dispatch law states that specializing the route parameter to `rho`
-and evaluating item `i` applies the handler selected by `rho i`.
+A handler family can be either point-indexed:
+
+```lean
+structure HandlerFamily (C D : Type u) (A B : C.Obj) (E : D.Obj) where
+  at : Point E -> C.Hom A B
+```
+
+or represented globally as a lifted morphism:
+
+```lean
+handler : C.Hom (actObj A E) (actObj B E)
+```
+
+The point-indexed form is often easier for the first formalization.
+
+```lean
+class HasRoute (C D : Type u) [DGradedPROP C D] where
+  route :
+    HandlerFamily C D A B E ->
+    ParaHom C (actObj A I) (actObj B I)
+
+  routeParam :
+    (I E : D.Obj) -> C.Obj
+```
+
+Specialization inserts a concrete `rho : RouteParam D I E` into the Para
+parameter wire.
+
+```lean
+specializeRoute :
+  ParaHom C (actObj A I) (actObj B I) ->
+  RouteParam D I E ->
+  C.Hom (actObj A I) (actObj B I)
+```
+
+The main dispatch law is pointwise:
 
 ```lean
 route_item :
-  evalItem (route handlers).specialize rho i =
-    evalItemInput i |>.comp (handlers.at (rho i))
+  evalAt i ;; specializeRoute (route handlers) rho =
+    evalAt i ;; handlers.at (rho.assign i)
 ```
 
-The fixed-route law states that a route induced by a static `D`-morphism reduces
-to the corresponding ordinary reindexing construction.
+The fixed-route law connects runtime route parameters back to ordinary
+`D`-morphisms:
 
 ```lean
+rhoOf : D.Hom I E -> RouteParam D I E
+
 route_fixed :
-  (eta : DHom I E) ->
-  (route handlers).specialize (rhoOf eta) =
+  (eta : D.Hom I E) ->
+  specializeRoute (route handlers) (rhoOf eta) =
     fixedRoute eta handlers
 ```
 
-The lift-distribution law states that independent batching commutes with route.
+The orthogonal lift and relabeling laws become:
 
 ```lean
 route_lift :
   Orthogonal P I ->
   Orthogonal P E ->
-  actParaHom (route handlers).specialize rho P =
-    (route (handlers.act P)).specialize (rho.act P)
-```
+  actHom (specializeRoute (route handlers) rho) P =
+    specializeRoute (route (handlers.act P)) (rho.act P)
 
-The relabeling law states that permuting destination names changes nothing when
-the route labels and handler family are permuted together.
-
-```lean
 route_relabel :
-  (sigma : DIso E E) ->
-  (route handlers).specialize rho =
-    (route (handlers.relabel sigma)).specialize (sigma.comp rho)
+  (sigma : D.Iso E E) ->
+  specializeRoute (route handlers) rho =
+    specializeRoute (route (handlers.relabel sigma)) (sigma.compRoute rho)
 ```
 
-The algebra preservation field says that Route compiles to runtime dispatch.
+The algebra preservation law states that the interpreted morphism is pointwise
+dispatch:
 
 ```lean
-route_preserve :
-  F.map ((route handlers).specialize rho) x i =
-    F.map (handlers.at (rho i)) (x i)
+class RouteAlgebra (F : DAlgebra C D V) [HasRoute C D] where
+  preserve_route :
+    F.mapHom (specializeRoute (route handlers) rho) x i =
+      F.mapHom (handlers.at (rho.assign i)) (x i)
 ```
 
-The prefix theorem is then proved by induction on the prefix length using
-`scan_base` and `scan_step`.
+### 8.4 Formalizing the unified non-weave schema
+
+Once Scan and Route are formalized separately, factor their common structure into
+a generic schema. The key object is a point presentation: an output index object
+`S`, a well-founded dependency relation on its points, and a local evaluator for
+each point.
+
+```lean
+structure PointPresentation (C D : Type u) [DGradedPROP C D] where
+  S : D.Obj
+  Y : C.Obj
+  Z : C.Obj
+  depends : Point S -> Point S -> Prop
+  wf : WellFounded depends
+  local :
+    (s : Point S) ->
+    PriorSlices depends s ->
+    C.Hom Z Y
+```
+
+The generator is then a morphism satisfying the point equations:
+
+```lean
+structure NonWeaveGenerator
+    (C D : Type u) [DGradedPROP C D]
+    (P : PointPresentation C D) where
+  gen : C.Hom P.Z (actObj P.Y P.S)
+  point_law :
+    (s : Point P.S) ->
+    evalAt s ;; gen =
+      P.local s (priorSlices gen s)
+```
+
+The shared axioms become typeclasses over `NonWeaveGenerator`:
+
+```lean
+class HasBoundary (G : NonWeaveGenerator C D P) where
+  boundary_law : BoundaryCase G
+
+class HasOrthogonalLift (G : NonWeaveGenerator C D P) where
+  lift_law :
+    Orthogonal Q P.S ->
+    actHom G.gen Q = liftedGenerator G Q
+
+class HasRelabeling (G : NonWeaveGenerator C D P) where
+  relabel_law :
+    PreservesLocalLaw sigma P ->
+    relabelGenerator sigma G = G
+
+class PreservesAlgebra (F : DAlgebra C D V) (G : NonWeaveGenerator C D P) where
+  semantic : V.Hom (F.mapObj P.Z) (F.mapObj (actObj P.Y P.S))
+  preserve : F.mapHom G.gen = semantic
+```
+
+This generic layer should not try to erase the operation-specific local laws.
+Instead, prove that Scan and Route instantiate the same interface:
+
+```lean
+scanAsNonWeave :
+  NonWeaveGenerator C D (scanPresentation step init N)
+
+routeAsNonWeave :
+  NonWeaveGenerator C D (routePresentation handlers rho)
+```
+
+### 8.5 Proof targets
+
+A useful Lean development would aim for the following theorems.
+
+1. **Point extensionality.** If two non-weave generators have equal point
+   evaluations at every point of `S`, then the generators are equal. This uses
+   the point-separation assumption for lifted objects.
+
+2. **Scan prefix theorem.** Restricting an `N`-step scan to a prefix gives the
+   smaller scan. The proof is induction over the prefix length.
+
+3. **Scan orthogonal batching theorem.** Independent `D`-axes commute with Scan.
+   This is a field of `HasScan` initially, and later can be discharged for
+   concrete algebras.
+
+4. **Route static specialization theorem.** If `rho = rhoOf eta`, the route is
+   equal to the ordinary fixed-route construction induced by `eta`.
+
+5. **Route relabeling theorem.** Destination names are irrelevant when `rho` and
+   the handler family are relabeled together.
+
+6. **Unified reuse theorem.** Any generator satisfying the non-weave schema,
+   orthogonal lift law, and algebra preservation law admits backend
+   implementations that are sound whenever they preserve the declared semantic
+   morphism.
+
+The practical payoff is that Lean can separate three concerns: the syntactic
+extension of the architecture category, the local equations that characterize a
+new generator, and the algebra-specific proof that a backend implementation
+preserves those equations.
 
 ---
 
