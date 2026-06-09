@@ -27,9 +27,10 @@ because `P` and `Q` are reserved for index shapes in `D` such as `St` shapes.
 3. [The weave criterion](#3-the-weave-criterion)
 4. [`Scan`: fixed temporal coupling](#4-scan-fixed-temporal-coupling)
 5. [`Route`: value-dependent indexing](#5-route-value-dependent-indexing)
-6. [What is deliberately not included](#6-what-is-deliberately-not-included)
-7. [Lean shape](#7-lean-shape)
-8. [Summary](#8-summary)
+6. [Axiom comparison](#6-axiom-comparison)
+7. [What is deliberately not included](#7-what-is-deliberately-not-included)
+8. [Lean shape](#8-lean-shape)
+9. [Summary](#9-summary)
 
 ---
 
@@ -1069,7 +1070,40 @@ coupled temporal dependence. Route needs Para laws for value-dependent indexing.
 
 ---
 
-## 6. What is deliberately not included
+## 6. Axiom comparison
+
+Both `Scan` and `Route` are added because the ordinary weave criterion is too
+strict for them. They share the same design pattern: add one distinguished
+generator, state pointwise equations that determine its behavior, require
+compatibility with orthogonal batching, and extend algebras with a preservation
+law. They differ in what data breaks the weave criterion.
+
+| Aspect | `Scan` | `Route` | Common pattern |
+| --- | --- | --- | --- |
+| Weave obstruction | Fixed temporal axis, but output points are coupled across time. | Item axis is fixed, but expert choice is a runtime value. | Both fail ordinary point naturality for principled reasons. |
+| Extra categorical home | Remains in `C` as a finite fold generator. | Lives in `Para(C)` with parameter object `R_{I,E}`. | Both are conservative extensions of the existing `D`-graded setting. |
+| Main parameter/data | Step `step : H ⊗ U -> H` and initializer `init : X -> H`. | Runtime route `ρ : I -> E` and experts `expert_e : A -> B`. | Both separate structural data from implementation strategy. |
+| Signature | `Scan_N(step, init) : X ⊗ (U ⊛ L_N) -> H ⊛ L_{N+1}`. | `Route_ρ({expert_e}) : A ⊛ I -> B ⊛ I` after specializing `ρ`. | Both consume lifted collections and produce lifted collections. |
+| Point law | `Scan_N(step, init) ; ev_{pt'_{k+1},H} = ⟨Scan_N(step, init) ; ev_{pt'_k,H}, π_U ; ev_{pt_k,U}⟩ ; step`. | `Route_ρ({expert_e}) ; ev_{i,B} = ev_{i,A} ; expert_{ρ(i)}`. | Both are specified by equations after evaluation at points. |
+| Base/static law | Base case: `Scan_N(step, init) ; ev_{pt_0,H} = π_X ; init`. | Fixed-route specialization: if `ρ = ρ_η`, Route agrees with the structural route induced by `η : I -> E`. | Both identify the non-dynamic part that ordinary categorical structure can already see. |
+| Orthogonal batching | `[Scan_N(step, init), P] ≅ Scan_N([step, P], [init, P])`. | `[Route_ρ({expert_e}), P] ≅ Route_{ρ ⊛ P}({[expert_e, P]})`. | Independent axes commute with the new generator. |
+| Symmetry law | No additional relabeling law is needed for the temporal order `L_N`. | Expert relabeling: `Route_ρ({expert_e}) = Route_{σ ∘ ρ}({expert^σ_e})`. | Symmetries must preserve observable computation. |
+| Algebra preservation | `F(Scan_N(step, init)) = fold_N(F(step), F(init))`. | `F(Route_ρ({expert_e}))(x)_i = F(expert_{ρ(i)})(x_i)`. | Compilation preserves the abstract generator equations. |
+| Compiler consequence | Prefix restriction, scan fusion, checkpointing, and associative-scan fast paths become law-governed. | Static-route lowering, expert packing/relabeling, sparse dispatch, and route batching become law-governed. | Axioms turn backend rewrites into semantics-preserving transformations. |
+
+The shortest summary is:
+
+```text
+Scan = fixed index structure + coupled point dependence.
+Route = point-local computation + value-dependent index choice.
+```
+
+That distinction explains why `Scan` needs finite-fold axioms in `C`, while
+`Route` needs parameterized dispatch axioms in `Para(C)`.
+
+---
+
+## 7. What is deliberately not included
 
 The minimal Scan and Route extensions intentionally exclude several larger
 features.
@@ -1112,7 +1146,7 @@ the value-level parameter `ρ` has been produced.
 
 ---
 
-## 7. Lean shape
+## 8. Lean shape
 
 In Lean, the minimal extension can be represented by adding a `scan` constructor
 to the inductive type of Br morphisms, plus three theorem fields or axioms.
@@ -1230,7 +1264,7 @@ The prefix theorem is then proved by induction on the prefix length using
 
 ---
 
-## 8. Summary
+## 9. Summary
 
 The minimal foundation for `Scan` is:
 
