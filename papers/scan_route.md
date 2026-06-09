@@ -257,24 +257,32 @@ over an index shape. More explicitly, a morphism
 g : X -> Y
 ```
 
-is a weave over a `D`-object `P` when it factors as
+is a weave over a `D`-object `P` when `X` and `Y` are structurally assembled
+from indexed versions of per-point objects `X0` and `Y0`, and `g` factors as
 
 ```text
-g = [f, P] ; ω
+g = α ; [f, P] ; ω
 ```
 
 where:
 
+- `α : X -> X0 ⊛ P` is structural input bookkeeping;
 - `f : X0 -> Y0` is a base operation in `C`;
-- `[f, P]` is the lift of `f` over `P`;
-- `ω` is assembled from reindexing maps and symmetry maps.
+- `[f, P] : X0 ⊛ P -> Y0 ⊛ P` is the lift of `f` over `P`;
+- `ω : Y0 ⊛ P -> Y` is structural output bookkeeping.
+
+Both `α` and `ω` are assembled from ordinary `D`-reindexing maps,
+associativity/unit isomorphisms, and symmetry maps. They prepare the input for
+the lifted operation and put its output into the exact domain and codomain shape
+of `g`; they are not new non-weave generators.
 
 A morphism satisfies **point naturality** over `P` when evaluating at a point of
 `P` commutes with applying the same base operation at every point. For a lifted
-operation `[f, P]`, this means that, for every point `p : I_D -> P`,
+operation `[f, P] : X0 ⊛ P -> Y0 ⊛ P`, this means that, for every point
+`p : I_D -> P`,
 
 ```text
-[f, P] ; ev_{p,Y} = ev_{p,X} ; f.
+[f, P] ; ev_{p,Y0} = ev_{p,X0} ; f.
 ```
 
 This equation says that evaluating a lifted operation at point `p` is the same
