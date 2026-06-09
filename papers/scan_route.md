@@ -26,7 +26,20 @@ because `P` and `Q` are reserved for index shapes in `D` such as `St` shapes.
 2. [Base setting](#2-base-setting)
 3. [The weave criterion](#3-the-weave-criterion)
 4. [`Scan`: fixed temporal coupling](#4-scan-fixed-temporal-coupling)
+   1. [Obstruction to being a weave](#41-obstruction-to-being-a-weave)
+   2. [Minimal extension](#42-minimal-extension)
+   3. [Axioms](#43-axiom-1-base-case)
+   4. [Algebra semantics](#46-algebra-semantics)
+   5. [Consequences](#47-consequences)
+   6. [Broader Scan instances and axiom stability](#48-broader-scan-instances-and-axiom-stability)
 5. [`Route`: value-dependent indexing](#5-route-value-dependent-indexing)
+   1. [Obstruction to being a weave](#51-obstruction-to-being-a-weave)
+   2. [Minimal extension](#52-minimal-extension)
+   3. [Axioms](#53-axiom-1-itemwise-dispatch)
+   4. [Algebra semantics](#57-algebra-semantics)
+   5. [Weighted multi-destination routing](#58-weighted-multi-destination-routing)
+   6. [Consequences](#59-consequences)
+   7. [Broader Route instances and axiom stability](#510-broader-route-instances-and-axiom-stability)
 6. [Axiom comparison](#6-axiom-comparison)
 7. [What is deliberately not included](#7-what-is-deliberately-not-included)
 8. [Lean shape](#8-lean-shape)
@@ -717,6 +730,8 @@ obstruction appears whenever a computation must choose a destination, handler,
 edge, block, slot, memory location, branch, or sample ancestor from runtime
 values.
 
+### 5.1 Obstruction to being a weave
+
 Let:
 
 ```text
@@ -745,8 +760,6 @@ Every item is sent to every destination, and a later fixed operation combines or
 selects the destination outputs. This is a weave when the destination axis `E`
 is fixed structure.
 
-### 5.1 Obstruction and value-level route data
-
 A dynamic routed computation instead computes a runtime routing function:
 
 ```text
@@ -773,6 +786,8 @@ Instead, it is a **value-level parameter**. A value-level parameter is data
 available to the concrete algebra, such as a tensor of route decisions, rather
 than symbolic structure available to the graded PROP.
 
+### 5.2 Minimal extension
+
 To model this, use **Para**. The category `Para(C)` has the same objects as
 `C`. A morphism from an object `A` to an object `B` is a pair:
 
@@ -783,6 +798,8 @@ To model this, use **Para**. The category `Para(C)` has the same objects as
 where `Θ` is a parameter object and `f` is a `C`-morphism using that parameter.
 Composition in `Para(C)` threads parameters by tensoring the parameter objects
 together.
+
+#### 5.2.1 Route parameter object
 
 For single-destination routing, let:
 
@@ -799,7 +816,7 @@ destinations. In a target algebra, an element
 
 of `R_{I,E}` assigns each item `i` a destination `ρ(i)`.
 
-### 5.2 Handler families
+#### 5.2.2 Handler families
 
 Let:
 
@@ -839,7 +856,7 @@ handler ; ev_{e,B} = ev_{e,A} ; handler_e.
 Here `ev_{e,A} : A ⊛ E -> A` and `ev_{e,B} : B ⊛ E -> B` are the evaluation maps
 derived from the `D`-action.
 
-### 5.3 Route signature
+#### 5.2.3 Route signature
 
 For index object `I`, destination object `E`, item object `A`, output object
 `B`, and handler family `{handler_e : A -> B}_{e : I_D -> E}`, add a parameterized
@@ -865,7 +882,7 @@ The object `A ⊛ I` is the collection of item inputs. The object `B ⊛ I` is t
 collection of item outputs. The parameter object `R_{I,E}` stores the runtime
 route decision.
 
-### 5.4 Axiom 1: itemwise dispatch
+### 5.3 Axiom 1: itemwise dispatch
 
 The **itemwise dispatch axiom** says that evaluating the routed output at item
 `i` is the same as evaluating the input at item `i`, then applying the handler
@@ -917,7 +934,7 @@ This is the Route analogue of the Scan step axiom. For Scan, the point law
 relates neighboring time points. For Route, the point law is item-local but
 depends on a value-level parameter.
 
-### 5.5 Axiom 2: fixed-route specialization
+### 5.4 Axiom 2: fixed-route specialization
 
 The **fixed-route specialization axiom** says that when the route is known
 statically, `Route` collapses to ordinary `D`-graded structure.
@@ -946,7 +963,7 @@ Because the points of `I` jointly separate morphisms, this pointwise equality
 determines the whole morphism. Thus a fixed route is not genuinely dynamic; it
 is recoverable from the ordinary action, reindexing, and handler family.
 
-### 5.6 Axiom 3: orthogonal lift distribution
+### 5.5 Axiom 3: orthogonal lift distribution
 
 Let:
 
@@ -987,7 +1004,7 @@ This axiom says that batching an independent route is the same as routing
 batched handlers. It is the categorical basis for vectorizing sparse routing
 across batch coordinates.
 
-### 5.7 Axiom 4: destination relabeling equivariance
+### 5.6 Axiom 4: destination relabeling equivariance
 
 Let:
 
@@ -1030,7 +1047,7 @@ This axiom prevents `Route` from depending on arbitrary names or storage order
 of destinations. Only the pairing between route decisions and handler
 implementations matters.
 
-### 5.8 Algebra semantics
+### 5.7 Algebra semantics
 
 Let `F : C -> V` be an algebra into a target actegory `V`. Extending `F` to the
 parameterized setting interprets Para parameters as ordinary target values.
@@ -1054,7 +1071,7 @@ Here:
 This is the runtime dispatch semantics. It is not expressible as a fixed
 `D`-morphism unless `ρ` is known before graph construction.
 
-### 5.9 Weighted multi-destination routing
+### 5.8 Weighted multi-destination routing
 
 Single-destination routing is the minimal categorical core. Weighted
 multi-destination routing adds two pieces of structure.
@@ -1098,19 +1115,19 @@ lift-distribution, destination relabeling equivariance, and algebra preservation
 with the selected handler replaced by the weighted combination of selected
 handlers.
 
-### 5.10 Consequences
+### 5.9 Consequences
 
 The Route axioms are enough to recover useful laws without pretending that a
 runtime route is a static `D`-morphism.
 
-#### 5.10.1 Static routes are ordinary structure
+#### 5.9.1 Static routes are ordinary structure
 
 If the route parameter `ρ` is induced by a fixed `D`-morphism `η : I -> E`, then
 the fixed-route specialization axiom identifies `Route_ρ` with the ordinary
 graded construction. Thus dense or statically routed computations remain in the
 weave fragment.
 
-#### 5.10.2 Dynamic routes are item-local but not structural
+#### 5.9.2 Dynamic routes are item-local but not structural
 
 The itemwise dispatch axiom says that each output item depends only on the
 corresponding input item and the handler chosen for that item:
@@ -1125,13 +1142,13 @@ This is not point naturality in the ordinary `D`-action, because `ρ(i)` is read
 from a value-level parameter. The computation is point-local in `I`, but the
 choice of structural destination coordinate is not fixed before runtime.
 
-#### 5.10.3 Destination names are irrelevant
+#### 5.9.3 Destination names are irrelevant
 
 Destination relabeling equivariance implies that optimization passes may reorder,
 pack, shard, or rename destinations as long as they transform route labels and
 handler implementations together. The observable morphism is unchanged.
 
-#### 5.10.4 Independent batching is safe
+#### 5.9.4 Independent batching is safe
 
 Orthogonal lift distribution implies that vectorizing `Route` across an
 independent axis `P` does not change semantics:
@@ -1147,7 +1164,7 @@ This is the Route counterpart of Scan's batched-loop law.
 Scan and Route therefore need different laws. Scan needs finite-fold laws for
 coupled temporal dependence. Route needs Para laws for value-dependent indexing.
 
-### 5.11 Broader Route instances and axiom stability
+### 5.10 Broader Route instances and axiom stability
 
 The general Route pattern is:
 
