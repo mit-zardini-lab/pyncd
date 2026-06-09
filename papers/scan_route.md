@@ -236,7 +236,8 @@ action of `D`, written:
 For pyncd, `V` is the category of PyTorch tensor spaces and tensor functions;
 `A ⊛_V P` appends the dimensions described by `P` to the tensor space `A`.
 
-An **algebra** of `C` in `V` is a strong symmetric monoidal functor:
+An **algebra** of `C` in a target actegory `V` is a strong symmetric monoidal
+functor:
 
 ```text
 F : C -> V
