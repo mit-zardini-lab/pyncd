@@ -40,7 +40,7 @@ because `P` and `Q` are reserved for index shapes in `D` such as `St` shapes.
    5. [Weighted multi-destination routing](#58-weighted-multi-destination-routing)
    6. [Consequences](#59-consequences)
    7. [Broader Route instances and axiom stability](#510-broader-route-instances-and-axiom-stability)
-6. [Axiom comparison](#6-axiom-comparison)
+6. [Unified non-weave generator axioms](#6-unified-non-weave-generator-axioms)
 7. [What is deliberately not included](#7-what-is-deliberately-not-included)
 8. [Lean shape](#8-lean-shape)
 9. [Summary](#9-summary)
@@ -1214,37 +1214,308 @@ target semantics of "choose" or "combine".
 
 ---
 
-## 6. Axiom comparison
+## 6. Unified non-weave generator axioms
 
-Both `Scan` and `Route` are added because the ordinary weave criterion is too
-strict for them. They share the same design pattern: add one distinguished
-generator, state pointwise equations that determine its behavior, require
-compatibility with orthogonal batching, and extend algebras with a preservation
-law. They differ in what data breaks the weave criterion.
+The preceding Scan and Route axioms suggest a more general perspective. `Scan`
+and `Route` are not unrelated exceptions. They are both **non-weave generators**:
+distinguished operations whose behavior is determined by pointwise equations,
+but whose pointwise equations are not the ordinary naturality law for a lifted
+base operation.
 
-| Aspect | `Scan` | `Route` | Common pattern |
+The overlap is clearest in this compressed table.
+
+| Aspect | `Scan` | `Route` | Shared abstraction |
 | --- | --- | --- | --- |
-| Weave obstruction | Fixed temporal axis, but output points are coupled across time. | Item axis is fixed, but destination choice is a runtime value. | Both fail ordinary point naturality for principled reasons. |
-| Extra categorical home | Remains in `C` as a finite fold generator. | Lives in `Para(C)` with parameter object `R_{I,E}`. | Both are conservative extensions of the existing `D`-graded setting. |
-| Main parameter/data | Step `step : H ⊗ U -> H` and initializer `init : X -> H`. | Runtime route `ρ : I -> E` and handlers `handler_e : A -> B`. | Both separate structural data from implementation strategy. |
-| Signature | `Scan_N(step, init) : X ⊗ (U ⊛ L_N) -> H ⊛ L_{N+1}`. | `Route_ρ({handler_e}) : A ⊛ I -> B ⊛ I` after specializing `ρ`. | Both consume lifted collections and produce lifted collections. |
-| Point law | `Scan_N(step, init) ; ev_{pt'_{k+1},H} = ⟨Scan_N(step, init) ; ev_{pt'_k,H}, π_U ; ev_{pt_k,U}⟩ ; step`. | `Route_ρ({handler_e}) ; ev_{i,B} = ev_{i,A} ; handler_{ρ(i)}`. | Both are specified by equations after evaluation at points. |
-| Base/static law | Base case: `Scan_N(step, init) ; ev_{pt_0,H} = π_X ; init`. | Fixed-route specialization: if `ρ = ρ_η`, Route agrees with the structural route induced by `η : I -> E`. | Both identify the non-dynamic part that ordinary categorical structure can already see. |
-| Orthogonal batching | `[Scan_N(step, init), P] ≅ Scan_N([step, P], [init, P])`. | `[Route_ρ({handler_e}), P] ≅ Route_{ρ ⊛ P}({[handler_e, P]})`. | Independent axes commute with the new generator. |
-| Symmetry law | No additional relabeling law is needed for the temporal order `L_N`. | Destination relabeling: `Route_ρ({handler_e}) = Route_{σ ∘ ρ}({handler^σ_e})`. | Symmetries must preserve observable computation. |
-| Algebra preservation | `F(Scan_N(step, init)) = fold_N(F(step), F(init))`. | `F(Route_ρ({handler_e}))(x)_i = F(handler_{ρ(i)})(x_i)`. | Compilation preserves the abstract generator equations. |
-| Broader instances | Weight-tied depth, iterative refinement, fixed-round message passing, solver loops, checkpointed/resource strategies. | Adapter selection, hard attention, learned clustering, per-sample graph routing, stochastic resampling, beam/speculative pruning. | The same axioms apply when the obstruction has the same shape. |
-| Compiler consequence | Prefix restriction, scan fusion, checkpointing, and associative-scan fast paths become law-governed. | Static-route lowering, destination packing/relabeling, sparse dispatch, and route batching become law-governed. | Axioms turn backend rewrites into semantics-preserving transformations. |
+| Weave obstruction | Fixed temporal axis, but output points are coupled across time. | Item axis is fixed, but destination choice is a runtime value. | The ordinary point-naturality square is the wrong local law. |
+| Working category | `C` | `Para(C)`, or a specialization back to `C` after choosing `ρ` | A category `K` containing the generator. |
+| Output shape | `H ⊛ L_{N+1}` | `B ⊛ I` | An output object `Y ⊛ S` with point evaluations. |
+| Local law | predecessor state plus current input | current input plus runtime-selected handler | Point slices are specified by local equations. |
+| Dependency between output points | well-founded predecessor relation on time | no output-point dependency | A point-dependency relation `≺` on `S`. |
+| Ordinary-structure boundary | base point `pt_0` uses `init`; prefix restriction is induced by `D`. | static `ρ_η` agrees with fixed `η : I -> E`. | Degenerate/static cases collapse to existing `D`-graded structure. |
+| Orthogonal batching | batch commutes with scan | batch commutes with route | independent `D`-axes commute with the generator. |
+| Symmetry | only order-preserving symmetries of time survive, usually just identity | destination relabeling is allowed | automorphisms preserving local laws are semantics-preserving. |
+| Algebra preservation | compile to `fold_N` | compile to dispatch | algebras interpret the generator by the intended computation. |
 
-The shortest summary is:
+### 6.1 Data for a non-weave generator
+
+Let `K` be the category in which the generator lives. For `Scan`, `K = C`. For
+`Route`, `K = Para(C)` before specializing the route parameter, and ordinary `C`
+after specializing a concrete `ρ`.
+
+A **non-weave generator schema** consists of the following data.
+
+1. An output index object:
+
+   ```text
+   S
+   ```
+
+   in `D`. Its points are morphisms `s : I_D -> S`.
+
+2. A point-dependency relation:
+
+   ```text
+   t ≺ s
+   ```
+
+   between points of `S`. The relation is **well-founded**, meaning there is no
+   infinite chain
+
+   ```text
+   ... ≺ s_2 ≺ s_1 ≺ s_0.
+   ```
+
+   This ensures that point equations can define the generator by induction over
+   output points. For `Route`, the relation is empty. For `Scan`, `pt'_k ≺
+   pt'_{k+1}`.
+
+3. A full domain object:
+
+   ```text
+   Z
+   ```
+
+   in `K`. For example, `Z = X ⊗ (U ⊛ L_N)` for `Scan`, while `Z = A ⊛ I`
+   for a specialized `Route`.
+
+4. A point output object:
+
+   ```text
+   Y
+   ```
+
+   in `C`, so the full output object is:
+
+   ```text
+   Y ⊛ S.
+   ```
+
+5. A generator:
+
+   ```text
+   G : Z -> Y ⊛ S
+   ```
+
+   in `K`, or in `C` after specializing any `Para` parameter.
+
+6. For each point `s : I_D -> S`, a **local evaluator**
+
+   ```text
+   Φ_s
+   ```
+
+   which computes the output slice at `s` from the external input data and from
+   previously defined output slices `G ; ev_{t,Y}` for points `t ≺ s`.
+
+The local evaluators are allowed to use the same ambient routing envelope used
+for `Scan`: projections, pairings, and duplicated reads of external inputs are
+routing metadata, not new linear PROP primitives.
+
+### 6.2 Unified axiom 1: well-founded point presentation
+
+For every point `s : I_D -> S`, the generator satisfies:
 
 ```text
-Scan = fixed index structure + coupled point dependence.
-Route = point-local computation + value-dependent index choice.
+G ; ev_{s,Y} = Φ_s({G ; ev_{t,Y}}_{t ≺ s}, external data).
 ```
 
-That distinction explains why `Scan` needs finite-fold axioms in `C`, while
-`Route` needs parameterized dispatch axioms in `Para(C)`.
+Here `{G ; ev_{t,Y}}_{t ≺ s}` denotes the family of already-defined output
+slices on which point `s` depends.
+
+This single axiom specializes to both Scan and Route.
+
+For `Scan`, take:
+
+```text
+G = Scan_N(step, init)
+S = L_{N+1}
+Y = H.
+```
+
+At the base point `pt_0`, there are no predecessors, and:
+
+```text
+Φ_{pt_0} = π_X ; init.
+```
+
+At point `pt'_{k+1}`, the only predecessor is `pt'_k`, and:
+
+```text
+Φ_{pt'_{k+1}}
+  =
+⟨
+  (G ; ev_{pt'_k,H}),
+  (π_U ; ev_{pt_k,U})
+⟩
+; step.
+```
+
+For `Route`, take:
+
+```text
+G = Route_ρ({handler_e})
+S = I
+Y = B.
+```
+
+The dependency relation is empty, and for each item point `i : I_D -> I`:
+
+```text
+Φ_i = ev_{i,A} ; handler_{ρ(i)}.
+```
+
+So Route is the special case where the point presentation is non-recursive but
+parameter-dependent.
+
+### 6.3 Unified axiom 2: ordinary-structure boundary
+
+A non-weave generator should agree with existing `D`-graded structure whenever
+its obstruction disappears.
+
+For `Scan`, the boundary is the set of points with no predecessors. In the
+first-order finite case this is the base point:
+
+```text
+Scan_N(step, init) ; ev_{pt_0,H} = π_X ; init.
+```
+
+Prefix restriction is then a theorem: restricting an `N`-step scan to a prefix
+gives the smaller scan.
+
+For `Route`, the boundary is the case where the runtime route parameter is
+induced by a fixed structural `D`-morphism:
+
+```text
+η : I -> E.
+```
+
+If `ρ_η` is the route parameter induced by `η`, then:
+
+```text
+Route_{ρ_η}({handler_e}) ; ev_{i,B}
+  =
+ev_{i,A} ; handler_{η(i)}.
+```
+
+Thus the unified boundary principle is:
+
+```text
+when the non-weave obstruction degenerates to ordinary structure,
+the generator agrees with the ordinary D-graded construction.
+```
+
+### 6.4 Unified axiom 3: orthogonal lift distribution
+
+Let `P` be a `D`-object orthogonal to the output index object `S` and to any
+index objects used by the generator's parameters. Orthogonal means the axes or
+index components are disjoint, as in the earlier Scan and Route sections.
+
+The generator must commute with lifting over `P`:
+
+```text
+[G, P] ≅ G^P.
+```
+
+Here `G^P` is the same generator built from the lifted local data.
+
+For `Scan`:
+
+```text
+G^P = Scan_N([step, P], [init, P]).
+```
+
+For `Route`:
+
+```text
+G^P = Route_{ρ ⊛ P}({[handler_e, P]}).
+```
+
+This is the most reusable shared axiom: independent batching is valid even when
+the generator is not a weave along its distinguished axis.
+
+### 6.5 Unified axiom 4: relabeling equivariance for harmless symmetries
+
+Let:
+
+```text
+σ : S -> S
+```
+
+be an isomorphism in `D`. If `σ` preserves the dependency relation `≺` and
+transports each local evaluator `Φ_s` to the corresponding evaluator
+`Φ_{σ(s)}`, then relabeling output points by `σ` does not change the observable
+computation.
+
+For `Scan`, the temporal order on `L_N` is part of the local law. Most
+permutations do not preserve predecessor structure, so this axiom is usually
+trivial: only the identity, or very special schedule automorphisms, apply.
+
+For `Route`, the item axis `I` is usually kept fixed while the destination axis
+`E` is relabeled. This gives the earlier destination relabeling law:
+
+```text
+Route_ρ({handler_e})
+  =
+Route_{σ ∘ ρ}({handler^σ_e}).
+```
+
+So the same principle applies, but the nontrivial symmetries live in different
+places.
+
+### 6.6 Unified axiom 5: algebra preservation
+
+Let:
+
+```text
+F : C -> V
+```
+
+be an algebra into a target actegory `V`, extended to `Para(C)` when the
+generator is parameterized. The algebra must interpret the generator as the
+intended target computation:
+
+```text
+F(G) = semantic_G.
+```
+
+For `Scan`:
+
+```text
+semantic_G = fold_N(F(step), F(init)).
+```
+
+For `Route`:
+
+```text
+semantic_G(x)_i = F(handler_{ρ(i)})(x_i).
+```
+
+This axiom is what lets backend rewrites and implementation strategies be
+checked against one abstract meaning.
+
+### 6.7 What actually factors out?
+
+The factored common structure is not "Scan and Route are the same operation."
+They are not. What factors out is the interface for adding generators that fail
+the ordinary weave criterion:
+
+1. a point-indexed output object `Y ⊛ S`;
+2. a well-founded point-presentation law;
+3. a boundary case that agrees with ordinary `D`-graded structure;
+4. orthogonal lift distribution;
+5. relabeling equivariance for symmetries preserving the local laws;
+6. algebra preservation.
+
+The part that remains operation-specific is the local evaluator `Φ_s`.
+
+```text
+Scan:  Φ_s may read earlier output slices.
+Route: Φ_s may read value-level routing parameters.
+```
+
+This is the useful unification: a future implementation or Lean development can
+share the scaffolding for non-weave generators while keeping the local equations
+specific to the generator being added.
 
 ---
 
