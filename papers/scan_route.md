@@ -1937,39 +1937,56 @@ preserves those equations.
 
 ## 9. Summary
 
-The minimal foundation for `Scan` is:
+`Scan` and `Route` are the two smallest extensions needed here because both sit
+just outside the ordinary weave fragment.
 
-1. Add `Scan_N(step, init)` as a generator with type
-   `X ⊗ (U ⊛ L_N) -> H ⊛ L_{N+1}`.
-2. Add the base-case axiom: the output at time `0` is `init`.
-3. Add the step axiom: the output at time `k + 1` is `step` applied to output
-   time `k` and input time `k`.
-4. Add the orthogonal lift-distribution axiom:
-   `[Scan_N(step, init), P] ≅ Scan_N([step, P], [init, P])`.
-5. Extend algebras with the preservation law:
-   `F(Scan_N(step, init)) = fold_N(F(step), F(init))`.
+For `Scan`, the obstruction is temporal coupling. The output at time `k + 1`
+depends on the output at time `k`, so point naturality for an ordinary lifted
+operation fails. The minimal foundation is to add the generator
 
-This is smaller than adding a new directed action or a full temporal category.
-The existing `D`-action already supplies point evaluation, prefix restriction,
-and ordinary batching. `Scan` only needs the finite fold laws that explain how
-its temporal points depend on earlier temporal points.
+```text
+Scan_N(step, init) : X ⊗ (U ⊛ L_N) -> H ⊛ L_{N+1}
+```
 
-The minimal foundation for single-destination `Route` is:
+with base, step, orthogonal lift-distribution, and algebra preservation laws:
 
-1. Put `Route` in `Para(C)`, with parameter object `R_{I,E}` storing runtime
-   assignments `ρ : I -> E`.
-2. Add the itemwise dispatch axiom:
-   `Route_ρ({handler_e}) ; ev_{i,B} = ev_{i,A} ; handler_{ρ(i)}`.
-3. Add the fixed-route specialization axiom: when `ρ` comes from a static
-   `D`-morphism, `Route` agrees with the ordinary reindexing construction.
-4. Add the orthogonal lift-distribution axiom:
-   `[Route_ρ({handler_e}), P] ≅ Route_{ρ ⊛ P}({[handler_e, P]})`.
-5. Add destination relabeling equivariance:
-   `Route_ρ({handler_e}) = Route_{σ ∘ ρ}({handler^σ_e})`.
-6. Extend algebras with the preservation law:
-   `F(Route_ρ({handler_e}))(x)_i = F(handler_{ρ(i)})(x_i)`.
+```text
+F(Scan_N(step, init)) = fold_N(F(step), F(init)).
+```
 
-Thus `Scan` and `Route` require different minimal extensions. `Scan` is a
-finite catamorphism over a fixed temporal object. `Route` is value-dependent
-indexing over a fixed family of destination handlers, and its categorical home is
-the parameterized `Para` layer rather than the ordinary `D`-graded lift.
+This is smaller than adding a new directed action or full temporal category. The
+existing `D`-action already supplies point evaluation, prefix restriction, and
+ordinary batching; `Scan` only adds the finite recurrence equations.
+
+For single-destination `Route`, the obstruction is value-dependent indexing. The
+item axis is fixed, but the destination choice `ρ : I -> E` is a runtime value
+rather than a static `D`-morphism. The minimal foundation is to put `Route` in
+`Para(C)`, add the parameter object `R_{I,E}`, and require itemwise dispatch,
+fixed-route specialization, orthogonal lift distribution, destination relabeling
+equivariance, and algebra preservation:
+
+```text
+F(Route_ρ({handler_e}))(x)_i = F(handler_{ρ(i)})(x_i).
+```
+
+The broader unification is that both are **non-weave generators**. A non-weave
+generator has an output object `Y ⊛ S`, a well-founded point presentation, a
+local evaluator `Φ_s`, a boundary case that collapses to ordinary `D`-graded
+structure, orthogonal lift distribution, harmless relabeling equivariance, and
+an algebra preservation law. `Scan` instantiates this schema with a predecessor
+relation on time. `Route` instantiates it with an empty output-dependency
+relation and a value-level routing parameter.
+
+This matches the categorical deep learning perspective: architectures are
+presented by generators and equations, while implementations are algebras of
+that presentation, often in `Para`. pyncd adds the shaped-tensor discipline:
+`D`-graded point evaluation, static reindexing, orthogonal axes, and explicit
+laws explaining when non-weave generators still commute with independent
+batching.
+
+A Lean development should mirror this layering. First formalize the `D`-graded
+PROP, point evaluation, routing envelope, `Para` morphisms, and `D`-compatible
+algebras. Then add `HasScan` and `HasRoute` typeclasses with their pointwise
+laws. Finally factor their shared structure into a `NonWeaveGenerator` interface
+with proof targets for point extensionality, Scan prefix restriction, Route
+static specialization, relabeling, orthogonal batching, and backend soundness.
