@@ -258,20 +258,8 @@ g : X -> Y
 ```
 
 is a weave over a `D`-object `P` when `X` and `Y` are structurally assembled
-from indexed versions of per-point objects `X0` and `Y0`, and `g` factors as
-
-Here **per-point** means "after fixing one point of the indexing object `P`."
-If `p : I_D -> P` is a point, then evaluating an indexed input `X0 ⊛ P` at
-`p` gives a slice of type `X0`:
-
-```text
-ev_{p,X0} : X0 ⊛ P -> X0.
-```
-
-Thus `X0` is the tensor-wire type seen at one chosen point of `P`, and `Y0`
-is the tensor-wire type produced at that same point. In pyncd's implemented
-case, if `P` is a batch axis `b` and the full input object has axes `(b, i)`,
-then fixing `b` to one value leaves the local object with axis `(i)`.
+from indexed versions of per-point objects `X0` and `Y0`,[^per-point] and `g`
+factors as
 
 ```text
 g = α ; [f, P] ; ω
@@ -286,6 +274,14 @@ where:
 - `f : X0 -> Y0` is a base operation in `C`;
 - `[f, P] : X0 ⊛ P -> Y0 ⊛ P` is the lift of `f` over `P`;
 - `ω : Y0 ⊛ P -> Y` is structural output bookkeeping.
+
+[^per-point]: Here **per-point** means "after fixing one point of the indexing
+    object `P`." If `p : I_D -> P` is a point, then evaluating an indexed input
+    `X0 ⊛ P` at `p` gives a slice of type `X0`, via `ev_{p,X0} : X0 ⊛ P -> X0`.
+    Thus `X0` is the tensor-wire type seen at one chosen point of `P`, and `Y0`
+    is the tensor-wire type produced at that same point. In pyncd's implemented
+    case, if `P` is a batch axis `b` and the full input object has axes `(b, i)`,
+    then fixing `b` to one value leaves the local object with axis `(i)`.
 
 Both `α` and `ω` are assembled from ordinary `D`-reindexing maps,
 associativity/unit isomorphisms, and symmetry maps. They prepare the input for
