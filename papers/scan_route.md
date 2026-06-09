@@ -9,6 +9,15 @@ Every symbol used below is introduced before it is used. The notation follows
 [graded_prop.md](graded_prop.md): composition is written in diagrammatic order,
 so `f ; g` means "first `f`, then `g`".
 
+Notation is kept uniform throughout. A morphism type is written with `->`.
+Category products are written with `×`; monoidal products inside a category are
+written with `⊗`. The lifted object is `X ⊛ P`. Evaluation at a point `p` of a
+`D`-object `P` on a `C`-object `X` is written `ev_{p,X}`. The symbol `ω` denotes
+ordinary weave reindexing metadata, `ρ` denotes a runtime Route parameter,
+`η` denotes a fixed structural route, and `σ` denotes an expert relabeling
+isomorphism. Generic Para parameter objects are written `Θ`, not `P` or `Q`,
+because `P` and `Q` are reserved for index shapes in `D` such as `St` shapes.
+
 ---
 
 ## Contents
@@ -103,7 +112,7 @@ A **`D`-graded colored PROP** consists of `C`, `D`, and the following structure.
 2. A **right action**
 
    ```text
-   act : C x D^op -> C
+   act : C × D^op -> C
    ```
 
    where `D^op` is the opposite category of `D`. On objects, the action appends
@@ -152,7 +161,7 @@ particular index value.
 For every point `p : I_D -> P`, the action gives an **evaluation map**
 
 ```text
-ev_p,X : X ⊛ P -> X
+ev_{p,X} : X ⊛ P -> X
 ```
 
 This map is derived from the same action functor, not added as a separate
@@ -169,14 +178,14 @@ Composing this with the action unit isomorphism
 υ_X : X ⊛ I_D ≅ X
 ```
 
-gives `ev_p,X`. Equivalently, `ev_p,X` is `[X, p]` followed by
+gives `ev_{p,X}`. Equivalently, `ev_{p,X}` is `[X, p]` followed by
 `υ_X`. When `X` is clear, we write this as `ev_p`.
 
 A **target actegory** is a symmetric monoidal category `V` equipped with a right
 action of `D`, written:
 
 ```text
-⊛_V : V x D^op -> V.
+⊛_V : V × D^op -> V.
 ```
 
 For pyncd, `V` is the category of PyTorch tensor spaces and tensor functions;
@@ -205,20 +214,20 @@ g : X -> Y
 is a weave over a `D`-object `P` when it factors as
 
 ```text
-g = [f, P] ; ρ
+g = [f, P] ; ω
 ```
 
 where:
 
 - `f : X0 -> Y0` is a base operation in `C`;
 - `[f, P]` is the lift of `f` over `P`;
-- `ρ` is assembled from reindexing maps and symmetry maps.
+- `ω` is assembled from reindexing maps and symmetry maps.
 
 The key test for being a weave is **point naturality**. A lifted operation must
 satisfy, for every point `p : I_D -> P`,
 
 ```text
-[f, P] ; ev_p,Y = ev_p,X ; f.
+[f, P] ; ev_{p,Y} = ev_{p,X} ; f.
 ```
 
 This equation says that evaluating a lifted operation at point `p` is the same
@@ -263,7 +272,7 @@ compute the output at time `l + 1`, one must first compute the output at time
 operation:
 
 ```text
-Scan ; ev_{l+1}  !=  ev_l ; step
+Scan ; ev_{l+1,H}  !=  ev_{l,U} ; step
 ```
 
 as a pointwise lifted operation. The right side is not even well-typed without
@@ -280,7 +289,7 @@ that the reindexing itself depends on runtime data.
 
 The minimal extension is to add `Scan` as a distinguished generator with three
 axioms. No new structure is needed on `D`, and no new action functor is needed
-beyond the existing `act : C x D^op -> C`.
+beyond the existing `act : C × D^op -> C`.
 
 #### 4.2.1 Temporal objects
 
@@ -427,7 +436,7 @@ pt_0 : I_D -> L_{N+1}
 be the point selecting time `0`. Then:
 
 ```text
-Scan_N(step, init) ; ev_{pt_0}
+Scan_N(step, init) ; ev_{pt_0,H}
   =
 π_X ; init.
 ```
@@ -436,7 +445,7 @@ Here:
 
 - `π_X : X ⊗ (U ⊛ L_N) -> X` is the projection that keeps the `X` component and
   discards the input-sequence component;
-- `ev_{pt_0} : H ⊛ L_{N+1} -> H` evaluates the output history at time `0`.
+- `ev_{pt_0,H} : H ⊛ L_{N+1} -> H` evaluates the output history at time `0`.
 
 The projection is the only reason this equation is not a bare PROP equation.
 The categorical content is the base-case equality; the projection just adapts
@@ -465,12 +474,12 @@ select output times `k` and `k + 1`, respectively.
 Then:
 
 ```text
-Scan_N(step, init) ; ev_{pt'_{k+1}}
+Scan_N(step, init) ; ev_{pt'_{k+1},H}
   =
 ⟨
-  (Scan_N(step, init) ; ev_{pt'_k})
+  (Scan_N(step, init) ; ev_{pt'_k,H})
 ,
-  (π_U ; ev_{pt_k})
+  (π_U ; ev_{pt_k,U})
 ⟩
 ; step.
 ```
@@ -478,9 +487,9 @@ Scan_N(step, init) ; ev_{pt'_{k+1}}
 Here:
 
 - `π_U : X ⊗ (U ⊛ L_N) -> U ⊛ L_N` keeps the per-step input sequence;
-- `ev_{pt_k} : U ⊛ L_N -> U` selects the input at time `k`;
-- `ev_{pt'_k} : H ⊛ L_{N+1} -> H` selects the output state at time `k`;
-- `ev_{pt'_{k+1}} : H ⊛ L_{N+1} -> H` selects the output state at time `k + 1`;
+- `ev_{pt_k,U} : U ⊛ L_N -> U` selects the input at time `k`;
+- `ev_{pt'_k,H} : H ⊛ L_{N+1} -> H` selects the output state at time `k`;
+- `ev_{pt'_{k+1},H} : H ⊛ L_{N+1} -> H` selects the output state at time `k + 1`;
 - `⟨-, -⟩` pairs two reads from the same scan input so that their outputs can be
   passed together to `step : H ⊗ U -> H`.
 
@@ -658,14 +667,15 @@ outputs. This is a weave when the expert axis `E` is fixed structure.
 
 ### 5.1 Obstruction and value-level route data
 
-A sparse top-1 mixture-of-experts layer instead computes a routing function:
+A sparse top-1 mixture-of-experts layer instead computes a runtime routing
+function:
 
 ```text
-r : I -> E
+ρ : I -> E
 ```
 
-from data-dependent gate values. The selected expert for item `i` is `r(i)`.
-Because `r` depends on tensor values, it is not a fixed `D`-morphism. Therefore
+from data-dependent gate values. The selected expert for item `i` is `ρ(i)`.
+Because `ρ` depends on tensor values, it is not a fixed `D`-morphism. Therefore
 there is no single reindexing map
 
 ```text
@@ -679,7 +689,7 @@ This is the `Route` obstruction:
 - `Scan` has fixed reindexing but coupled temporal dependence.
 - `Route` has uncoupled per-item execution but data-dependent reindexing.
 
-The map `r` is therefore not an object of `D` and not a morphism of `D`.
+The map `ρ` is therefore not an object of `D` and not a morphism of `D`.
 Instead, it is a **value-level parameter**. A value-level parameter is data
 available to the concrete algebra, such as a tensor of gate decisions, rather
 than symbolic structure available to the graded PROP.
@@ -688,10 +698,10 @@ To model this, use **Para**. The category `Para(C)` has the same objects as
 `C`. A morphism from an object `A` to an object `B` is a pair:
 
 ```text
-(P, f : P ⊗ A -> B)
+(Θ, f : Θ ⊗ A -> B)
 ```
 
-where `P` is a parameter object and `f` is a `C`-morphism using that parameter.
+where `Θ` is a parameter object and `f` is a `C`-morphism using that parameter.
 Composition in `Para(C)` threads parameters by tensoring the parameter objects
 together.
 
@@ -744,16 +754,16 @@ expert : A ⊛ E -> B ⊛ E
 such that evaluating at expert `e` gives `expert_e`:
 
 ```text
-expert ; ev_e,B = ev_e,A ; expert_e.
+expert ; ev_{e,B} = ev_{e,A} ; expert_e.
 ```
 
-Here `ev_e,A : A ⊛ E -> A` and `ev_e,B : B ⊛ E -> B` are the evaluation maps
+Here `ev_{e,A} : A ⊛ E -> A` and `ev_{e,B} : B ⊛ E -> B` are the evaluation maps
 derived from the `D`-action.
 
 ### 5.3 Route signature
 
 For index object `I`, expert object `E`, item object `A`, output object `B`,
-and expert family `{expert_e : A -> B}_{e in E}`, add a parameterized
+and expert family `{expert_e : A -> B}_{e : I_D -> E}`, add a parameterized
 generator:
 
 ```text
@@ -766,10 +776,10 @@ in `Para(C)`, with parameter object:
 R_{I,E}.
 ```
 
-Equivalently, as an ordinary `C`-morphism under the Para encoding, it has type:
+Equivalently, as an ordinary `C`-morphism under the Para encoding, write:
 
 ```text
-route_{I,E}({expert_e}) : R_{I,E} ⊗ (A ⊛ I) -> B ⊛ I.
+Route^C_{I,E}({expert_e}) : R_{I,E} ⊗ (A ⊛ I) -> B ⊛ I.
 ```
 
 The object `A ⊛ I` is the collection of item inputs. The object `B ⊛ I` is the
@@ -813,15 +823,15 @@ Route_ρ({expert_e}) : A ⊛ I -> B ⊛ I,
 satisfies:
 
 ```text
-Route_ρ({expert_e}) ; ev_i,B
+Route_ρ({expert_e}) ; ev_{i,B}
   =
-ev_i,A ; expert_{ρ(i)}.
+ev_{i,A} ; expert_{ρ(i)}.
 ```
 
 Here:
 
-- `ev_i,A : A ⊛ I -> A` selects the input item at `i`;
-- `ev_i,B : B ⊛ I -> B` selects the output item at `i`;
+- `ev_{i,A} : A ⊛ I -> A` selects the input item at `i`;
+- `ev_{i,B} : B ⊛ I -> B` selects the output item at `i`;
 - `expert_{ρ(i)} : A -> B` is the expert selected by the runtime route.
 
 This is the Route analogue of the Scan step axiom. For Scan, the point law
@@ -840,17 +850,18 @@ Let:
 ```
 
 be a fixed `D`-morphism, available at graph-construction time. Let `ρ_η` be the
-corresponding constant parameter value in `R_{I,E}`.
+corresponding structural parameter value in `R_{I,E}`.
 
 Then:
 
 ```text
-Route_{ρ_η}({expert_e}) ; ev_i,B
+Route_{ρ_η}({expert_e}) ; ev_{i,B}
   =
-ev_i,A ; expert_{η(i)}
+ev_{i,A} ; expert_{η(i)}
 ```
 
-for every point `i : I_D -> I`.
+for every point `i : I_D -> I`, where `η(i) : I_D -> E` is the point obtained
+by applying `η` to `i`.
 
 Because the points of `I` jointly separate morphisms, this pointwise equality
 determines the whole morphism. Thus a fixed route is not genuinely dynamic; it
@@ -879,7 +890,7 @@ The route parameter can be lifted pointwise over `P`. Write:
 
 for the value-level route that chooses, for each pair `(i, p)`, the same expert
 that `ρ` chooses for `i`. More general implementations may allow the route to
-vary over `P`; then the parameter object is `R_{I⊗P,E}` instead of
+vary over `P`; then the parameter object is `R_{I ⊗ P,E}` instead of
 `R_{I,E} ⊛ P`.
 
 The **orthogonal lift-distribution axiom** says:
@@ -940,7 +951,7 @@ This axiom prevents `Route` from depending on arbitrary names or storage order
 of experts. Only the pairing between route decisions and expert implementations
 matters.
 
-### 5.8 Algebra preservation
+### 5.8 Algebra semantics
 
 Let `F : C -> V` be an algebra into a target actegory `V`. Extending `F` to the
 parameterized setting interprets Para parameters as ordinary target values.
@@ -992,12 +1003,12 @@ combine_K : (W ⊗ B)^{⊗ K} -> B.
 Then the itemwise dispatch axiom becomes:
 
 ```text
-Route_ρ({expert_e}) ; ev_i,B
+Route_ρ({expert_e}) ; ev_{i,B}
   =
 ⟨
-  w_{i,1} ⊗ (ev_i,A ; expert_{e_{i,1}}),
+  w_{i,1} ⊗ (ev_{i,A} ; expert_{e_{i,1}}),
   ...,
-  w_{i,K} ⊗ (ev_i,A ; expert_{e_{i,K}})
+  w_{i,K} ⊗ (ev_{i,A} ; expert_{e_{i,K}})
 ⟩
 ; combine_K.
 ```
@@ -1025,9 +1036,9 @@ The itemwise dispatch axiom says that each output item depends only on the
 corresponding input item and the expert chosen for that item:
 
 ```text
-Route_ρ({expert_e}) ; ev_i,B
+Route_ρ({expert_e}) ; ev_{i,B}
   =
-ev_i,A ; expert_{ρ(i)}.
+ev_{i,A} ; expert_{ρ(i)}.
 ```
 
 This is not point naturality in the ordinary `D`-action, because `ρ(i)` is read
@@ -1243,7 +1254,7 @@ The minimal foundation for top-1 `Route` is:
 1. Put `Route` in `Para(C)`, with parameter object `R_{I,E}` storing runtime
    assignments `ρ : I -> E`.
 2. Add the itemwise dispatch axiom:
-   `Route_ρ({expert_e}) ; ev_i = ev_i ; expert_{ρ(i)}`.
+   `Route_ρ({expert_e}) ; ev_{i,B} = ev_{i,A} ; expert_{ρ(i)}`.
 3. Add the fixed-route specialization axiom: when `ρ` comes from a static
    `D`-morphism, `Route` agrees with the ordinary reindexing construction.
 4. Add the orthogonal lift-distribution axiom:
