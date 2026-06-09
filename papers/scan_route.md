@@ -110,8 +110,22 @@ For every point `p : I_D -> P`, the action gives an **evaluation map**
 ev_p,X : X ⊛ P -> X
 ```
 
-defined as `[X, p]` followed by the unit isomorphism `X ⊛ I_D ≅ X`. When `X` is
-clear, we write this as `ev_p`.
+This map is derived from the same action functor, not added as a separate
+generator. Since `act` is contravariant in its `D`-argument, the point
+`p : I_D -> P` is used as an arrow `p^op : P -> I_D` in `D^op`, giving
+
+```text
+act(id_X, p^op) : X ⊛ P -> X ⊛ I_D.
+```
+
+Composing this with the action unit isomorphism
+
+```text
+υ_X : X ⊛ I_D ≅ X
+```
+
+gives `ev_p,X`. Equivalently, `ev_p,X` is `[X, p]` followed by
+`υ_X`. When `X` is clear, we write this as `ev_p`.
 
 ---
 
