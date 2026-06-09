@@ -41,6 +41,14 @@ because `P` and `Q` are reserved for index shapes in `D` such as `St` shapes.
    6. [Consequences](#59-consequences)
    7. [Broader Route instances and axiom stability](#510-broader-route-instances-and-axiom-stability)
 6. [Unified non-weave generator axioms](#6-unified-non-weave-generator-axioms)
+   1. [Data for a non-weave generator](#61-data-for-a-non-weave-generator)
+   2. [Unified axiom 1: well-founded point presentation](#62-unified-axiom-1-well-founded-point-presentation)
+   3. [Unified axiom 2: ordinary-structure boundary](#63-unified-axiom-2-ordinary-structure-boundary)
+   4. [Unified axiom 3: orthogonal lift distribution](#64-unified-axiom-3-orthogonal-lift-distribution)
+   5. [Unified axiom 4: relabeling equivariance for harmless symmetries](#65-unified-axiom-4-relabeling-equivariance-for-harmless-symmetries)
+   6. [Unified axiom 5: algebra preservation](#66-unified-axiom-5-algebra-preservation)
+   7. [What actually factors out?](#67-what-actually-factors-out)
+   8. [Relation to categorical deep learning](#68-relation-to-categorical-deep-learning)
 7. [What is deliberately not included](#7-what-is-deliberately-not-included)
 8. [Lean shape](#8-lean-shape)
 9. [Summary](#9-summary)
@@ -76,10 +84,12 @@ attention, adapter selection, and stochastic resampling.
 An axiomatic formulation is useful for four reasons.
 
 First, it separates **what an operator means** from **how an implementation runs
-it**. A sequential loop, a checkpointed loop, and an associative parallel prefix
-can all implement the same `Scan` when they satisfy the same axioms. Likewise,
-a dense dispatch kernel, a sparse dispatch kernel, and a fused routed-computation
-kernel can all implement the same `Route` when they satisfy the same route laws.
+it**. A sequential loop and a checkpointed loop can implement the same `Scan`
+when they satisfy the same finite-recurrence axioms; if the step has additional
+associative structure, a parallel-prefix implementation can also be justified.
+Likewise, a dense dispatch kernel, a sparse dispatch kernel, and a fused
+routed-computation kernel can all implement the same `Route` when they satisfy
+the same route laws.
 
 Second, it identifies the exact obstruction to being a weave. `Scan` is not a
 weave because it couples neighboring temporal points. `Route` is not a weave
@@ -95,6 +105,14 @@ Fourth, an axiomatic boundary keeps the core small. The goal is not to add a
 general theory of loops, effects, routing, and dynamic shapes. The goal is to add
 only the equations that make finite scan and value-dependent route compositional
 inside the existing categorical framework.
+
+This is aligned with the categorical deep learning perspective of
+Gavranovic et al. (arXiv:2402.15332): architectures can be presented by
+generators and equations, while implementations are algebras of that
+presentation, often in a `Para`-style category of parameterized maps. The
+difference is that pyncd also carries a `D`-graded index action, so the Scan and
+Route equations must say how recurrence or value-dependent dispatch interacts
+with lifted tensor shapes.
 
 The rest of the note therefore presents `Scan` and `Route` in parallel. Each is
 introduced by its obstruction to the weave criterion, then given a signature,
@@ -1516,6 +1534,46 @@ Route: Φ_s may read value-level routing parameters.
 This is the useful unification: a future implementation or Lean development can
 share the scaffolding for non-weave generators while keeping the local equations
 specific to the generator being added.
+
+### 6.8 Relation to categorical deep learning
+
+The unified schema is also a shaped-tensor specialization of the categorical
+deep learning program: present an architecture by algebraic generators and
+relations, then interpret that presentation by algebras into concrete
+implementation categories. In that language, a non-weave generator is a new
+architecture generator, the local equations are its relations, and
+`F(G) = semantic_G` is the functorial implementation condition.
+
+For `Scan`, the match is direct. Categorical deep learning models recurrent
+neural networks as algebras or coalgebras for endofunctors lifted to `Para`;
+finite unrolling is then an algebra homomorphism, and weight tying is expressed
+by a parameter-copy reparameterization. The pyncd `Scan_N(step, init)` axiom is
+the same idea with the list object replaced by a finite `D`-index object
+`L_N`, point evaluation `ev_{pt_k,H}`, and an explicit orthogonal lift law. In
+short:
+
+```text
+CDL recurrence algebra + finite D-indexed shape = pyncd Scan.
+```
+
+For `Route`, `Para` supplies the natural home for runtime parameters and
+reparameterizations. The route parameter `ρ : I -> E`, handler family
+`handler_e`, and destination relabeling law can be read as parameterized
+architecture data plus a harmless reparameterization symmetry. What pyncd adds
+is the static index layer: the item axis `I`, destination object `E`, fixed-route
+specialization along `η : I -> E`, and orthogonal batching over unrelated
+`D`-axes. Thus:
+
+```text
+CDL parameterized maps + D-graded value-dependent indexing = pyncd Route.
+```
+
+This connection is useful but not a replacement for the present axioms. Ordinary
+categorical deep learning explains why generators, equations, `Para`, algebra
+homomorphisms, and reparameterizations are the right interfaces. The pyncd
+axioms add the missing `D`-graded shape discipline: point evaluation, failure of
+ordinary weave naturality, orthogonal lift distribution, and static-route
+boundary behavior.
 
 ---
 
