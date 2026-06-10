@@ -1,59 +1,30 @@
 <!-- markdownlint-disable MD013 -->
 # Integer Constants and Affine Index Arithmetic on Axes
 
-**Status:** design note. Defines the model; the detailed, file-level plan is in
-[index_arithmetic_plan.md](index_arithmetic_plan.md). **Phases 1–2 are implemented**:
-P1 (integer constants, incl. the scan follow-ups — `h[…, 3]`, Example 4 end-to-end)
-and P2 (affine **gather** — shift/stride/dilation/**convolution** — and injective
-**scatter** — upsampling/strided writes; § 9). P3 (scatter coverage/fill/conflict +
-range inference + offset-scatter) remains.
+The tensor-logic DSL gives index slots first-class **integer constants** and **affine
+arithmetic** on axes — e.g. `h[q, d_h, 3]`, `x[i+j]`, `x[2i+1]`, `Y[2i] = …`. Such an
+index expression is a morphism of the axis-stride category **St**, compiled as a
+reindexing composed around the einsum core. The Domingos tensor-logic formulation relies
+on this — convolution `Y[i] = Σ_j W[j]·X[i+j]`, recurrences `h[…, l+1]`, slices
+`h[…, 3]` — and St supplies the arithmetic; the DSL surfaces it at the equation layer.
 
-This note proposes giving the tensor-logic DSL first-class **integer constants** and
-**affine arithmetic** on axes at index positions — e.g. `h[q, d_h, 3]`,
-`x[i+j]`, `x[2i+1]` — and specifies how such index expressions are interpreted and
-compiled. It resolves a deficit surfaced while building the scan visualisation
-([iteration.md § 7.6](iteration.md#76-implementation-status-in-tsncd--and-what-remains)):
-reading a fixed slice `h[…, 3]` of an iterative tensor was rejected by the front-end
-(now supported — P1).
+A file-level implementation map is in [index_arithmetic_plan.md](index_arithmetic_plan.md).
 
 ---
 
 ## Contents
 
-- [1. The deficit](#1-the-deficit)
-- [2. St already provides the arithmetic](#2-st-already-provides-the-arithmetic)
-- [3. Affine index expressions](#3-affine-index-expressions)
-- [4. Interpretation is gated on the per-tensor iteration declaration](#4-interpretation-is-gated-on-the-per-tensor-iteration-declaration)
+- [1. St is the arithmetic of axes](#1-st-is-the-arithmetic-of-axes)
+- [2. Affine index expressions](#2-affine-index-expressions)
+- [3. The per-tensor iteration gate](#3-the-per-tensor-iteration-gate)
+- [4. Gather and scatter](#4-gather-and-scatter)
 - [5. Lowering to St](#5-lowering-to-st)
-- [6. Containing the blast radius](#6-containing-the-blast-radius)
-- [7. Validity and bounds](#7-validity-and-bounds)
-- [8. Subtleties and open questions](#8-subtleties-and-open-questions)
-- [9. Phasing](#9-phasing)
+- [6. Validity and bounds](#6-validity-and-bounds)
+- [7. Limitations](#7-limitations)
 
 ---
 
-## 1. The deficit
-
-Two gaps, both confirmed in the code:
-
-1. **No integer constants at an index slot.** `TensorRef.axes` is `Prod[RawAxis]`
-   ([TensorExpr.py:29](../data_structure/TensorExpr.py)); a slot can only hold an
-   axis. A literal `3` reaches the unification loop
-   ([TensorDSL.py:305–310](../data_structure/TensorDSL.py)) as a raw `int` and
-   throws `Elements are not all equal: RawAxis != int`.
-2. **Index arithmetic is conflated with predicates.** `RawAxis.__add__/__sub__` are
-   overloaded, but monkey-patched to build **Iverson predicates**
-   (`_rawaxis_add → IversonBinOp`, [TensorExpr.py:220](../data_structure/TensorExpr.py)),
-   and `__mul__` is deliberately excluded to avoid colliding with tensor-product. So
-   `l+1` builds a predicate term, not an index offset; the iteration `l±k` case is a
-   narrow special path (`IterNextRef`/`IterPrevRef`), not a general mechanism.
-
-The Domingos tensor-logic formulation relies on arithmetic over integer-valued
-indices (convolution `Y[i] = Σ_j W[j]·X[i+j]`, recurrences `h[…, l+1]`, slices). The
-capability is fundamental, and St already has it — the DSL simply does not surface it
-at the equation layer.
-
-## 2. St already provides the arithmetic
+## 1. St is the arithmetic of axes
 
 The axis-stride category **St** (weaves paper, Def. 8) *is* the arithmetic of axes:
 
@@ -67,75 +38,69 @@ In pyncd this is `StrideMorphism.from_matrix(*matrix)`
 ([StrideCategory.py:63](../data_structure/StrideCategory.py)). A **slice** is the
 special case built from an element `⟨c|` and identities (weaves paper, Fig. 3:
 "slices are reindexings built from elements and identities, and correspond to
-Pythonic `x[i,:,j]`"). So every index expression we want — constants, offsets,
-dilations, sums of axes — is already an St morphism. The fix is to make the DSL's
-index language a **surface syntax for St morphisms**.
+Pythonic `x[i,:,j]`"). Every index expression — constants, offsets, dilations, sums of
+axes — is an St morphism, and the DSL's index language is a **surface syntax for St
+morphisms**.
 
-## 3. Affine index expressions
+## 2. Affine index expressions
 
-Introduce an **index expression** at an index slot: an affine map over ℤ
+An index slot accepts an **affine map over ℤ**
 
 $$e \;=\; b + \textstyle\sum_k c_k\, a_k, \qquad b, c_k \in \mathbb{Z},\; a_k \text{ axes}.$$
 
-Cases:
-
 | expression | form | example |
 | --- | --- | --- |
-| bare axis | `a` (c=1, b=0) | `x[i]` (today) |
+| bare axis | `a` (c=1, b=0) | `x[i]` |
 | constant | `b` (no axes) | `h[…, 3]` |
 | offset | `a + b` | `h[…, l+1]`, `h[…, l-1]` |
 | sum of axes | `a + a'` | `X[i+j]` (convolution) |
 | dilated / strided | `c·a + b` | `x[2i+1]` |
 
-An index slot value is therefore one of: a `RawAxis` (bare axis), a Python `int`
-(constant), or an affine combination. The affine combination can **reuse the
-existing arithmetic AST** (`IversonBinOp`/`IversonUnaryOp`) and be *reinterpreted at
-the index position* — the slot's position already tells the parser it is an index,
-not a predicate. No new operator overloads are needed for `+`/`-`; see § 8 for `·`.
+An index slot value is therefore a `RawAxis` (bare axis), a Python `int` (constant), or
+an affine combination. The affine combination **reuses the arithmetic AST**
+(`IversonBinOp`/`IversonUnaryOp`), reinterpreted at the index position by
+`affine_normal_form` — the slot's position tells the parser it is an index, not a
+predicate, so there is no dedicated index-expression node and `+`/`-` need no new
+overloads. A coefficient `c·a` rides `RawAxis.__rmul__(int)` (`2*i`, restricted to
+integer coefficients so it does not collide with the tensor-product `__mul__`), with the
+`imul(...)` helper as the explicit form.
 
 Index expressions appear at **both read (RHS) and output (LHS) slots** — `x[i+j]`
-gathers, `Y[2i] = …` scatters. §§ 4–5 treat the two symmetrically.
+gathers, `Y[2i] = …` scatters. §§ 3–4 treat the two symmetrically.
 
 > **Affine boundary.** Expressions are restricted to the **affine** maps St provides
-> (`b + Σ cₖ aₖ`, linear + constant). Offset, strided, dilated, multi-axis, and
-> scatter access are all affine and in scope. **Binning by floor-division or
-> modulo** (`Y[i//k]`, `Y[i mod k]`) is *not* affine — out of scope, a separate and
-> larger extension. Note strided **decimation** `Y[i] = X[2i]` *is* affine (a strided
-> read), so most downsampling is already expressible; only `//`/`mod` binning is not.
+> (`b + Σ cₖ aₖ`, linear + constant). Offset, strided, dilated, multi-axis, and scatter
+> access are all affine and in scope. **Binning by floor-division or modulo**
+> (`Y[i//k]`, `Y[i mod k]`) is *not* affine — out of scope (§ 7). Strided **decimation**
+> `Y[i] = X[2i]` *is* affine, so most downsampling is expressible; only `//`/`mod`
+> binning is not.
 
-## 4. Interpretation is gated on the per-tensor iteration declaration
+## 3. The per-tensor iteration gate
 
 The same syntax `l+1` denotes two categorically different things:
 
 - on an **iteration** axis, `h[…, l+1] = f(h[…, l])` is a **recurrence** — the next
-  state defined from the current one. As established in
-  [iteration.md § A.4](iteration.md#a4-interaction-with-weaves-and-reindexings) this
-  is a **trace**: produced sequentially, *not* a static reindexing, and not
-  expressible as a `StrideMorphism`.
-- on a **non-iteration** axis, `i+1` (or `i+j`, `2i+1`) is a pure **affine
-  reindexing** — both sides' data already exist; it *is* a `StrideMorphism`.
+  state defined from the current one. Per
+  [iteration.md § A.4](iteration.md#a4-interaction-with-weaves-and-reindexings) this is
+  a **trace**: produced sequentially, *not* a static reindexing, and not expressible as
+  a `StrideMorphism`.
+- on a **non-iteration** axis, `i+1` (or `i+j`, `2i+1`) is a pure **affine reindexing**
+  — both sides' data already exist; it *is* a `StrideMorphism`.
 
-Same `+1`, opposite categorical content. So axis arithmetic cannot be lowered
-uniformly — it must be **gated on whether the axis is iterative for the tensor being
-read**. That is exactly what the iteration declaration provides.
+Same `+1`, opposite categorical content. So axis arithmetic is **gated on whether the
+axis is iterative for the tensor being read** — exactly what the iteration declaration
+provides.
 
-### 4.1 Per-tensor declaration (chosen model)
+### 3.1 Per-tensor declaration
 
 Iteration is declared **on the tensor**, `tl.h.iteration_axis(l)`
-([iteration.md § 2.1](iteration.md#21-declaration-on-the-tensor-not-the-axis)), not
-on the axis. We keep this model — it is what the DSL already implements (the
-`_iteration_axes` per-tensor registry and the Scan machinery), so the index-arithmetic
-work layers on top with no migration. Consequence: the discrimination is per
-**(tensor, axis)** — the same `l` may be a recurrence variable in one tensor and a
-plain index in another. The interpreter resolves `l+1` against the tensor whose slot
-it is, which is always in scope at the slot, so this is a single lookup, not a burden.
+([iteration.md § 2.1](iteration.md#21-declaration-on-the-tensor-not-the-axis)), not on
+the axis — the `_iteration_axes` per-tensor registry feeds the Scan machinery. The
+discrimination is therefore per **(tensor, axis)**: the same `l` may be a recurrence
+variable in one tensor and a plain index in another. The interpreter resolves `l+1`
+against the tensor whose slot it is, always in scope at the slot.
 
-(The Domingos per-axis alternative marks iteration on the *axis* with `*`: equation
-arithmetic is then locally readable without consulting the declaration, but an axis
-cannot double as a plain index and the existing per-tensor machinery would have to be
-migrated. We keep per-tensor; see § 8.)
-
-### 4.2 The discrimination rule
+### 3.2 The discrimination rule
 
 For each slot `s` of a tensor `T` carrying axis `a` and expression `e` (read = RHS,
 output = LHS):
@@ -148,53 +113,71 @@ output = LHS):
 | `h[…, 0]` (LHS) | yes | base case (history position 0) |
 | `h[…, 3]` (RHS) | yes | slice the materialised **history `L'`** (size `N+1`) → St reindexing |
 | `x[i+j]`, `x[2i+1]`, `x[3]` (RHS) | no | **gather** — affine read → `StrideMorphism` |
-| `Y[2i] = …`, `Out[0] = …` (LHS) | no | **scatter** — affine write → `StrideMorphism` on the output |
+| `Y[2i] = …`, `Y[i+1] = …` (LHS) | no | **scatter** — affine write → `StrideMorphism` on the output |
 
-Pseudocode the front-end applies at each index slot:
+The gate applied at each index slot:
 
 ```text
 if a is iterative for T and e advances/reads the recurrence (l, l±k):
-    → iteration semantics (existing Scan path)
+    → iteration semantics (Scan path)
 else:   # constant; affine over non-iteration axes;
         # or a constant/affine slice of T's already-materialised history
     → St affine reindexing (StrideMorphism)
 ```
 
-### 4.3 Three roles of the declaration
+An `axis+int` LHS (`Y[i+1]`) is syntactically identical to a recurrence (`h[…, l+1]`),
+and whether the tensor is iterative is not always known when the slot is parsed
+(`.iteration_axis()` may come later). That one decision is therefore made at **finalize**:
+`_reclassify_offset_scatters` routes such a write to a scatter unless the tensor carries
+a base case, a `.recur()` morphism, an explicit `.iteration_axis()`/`.recur()`
+declaration, or a self-referential body (an incomplete recurrence, which raises "no base
+case").
+
+### 3.3 Roles of the declaration
 
 1. **Disambiguate** recurrence (`l+1` defining next state, a trace) from affine
    reindexing (`i+1`, a static map).
-2. **Supply bounds** needed to interpret offsets and constants: the recurrence axis
-   `l` has size `N`; the materialised history `L'` has size `N+1`. A constant slice
-   `h[…, 3]` is only interpretable (and range-checkable, `0 ≤ 3 ≤ N`) given these.
-3. **Route** the lowering: iteration-axis recurrence arithmetic → Scan;
-   everything else → St reindexing.
+2. **Supply bounds**: the recurrence axis `l` has size `N`; the materialised history
+   `L'` has size `N+1`. A constant slice `h[…, 3]` is interpretable and range-checkable
+   (`0 ≤ 3 ≤ N`) given these.
+3. **Route** the lowering: iteration-axis recurrence arithmetic → Scan; everything else
+   → St reindexing.
 
-### 4.4 Gather (RHS) and scatter (LHS) are symmetric
+## 4. Gather and scatter
 
 St's affine morphisms run in both directions, so index arithmetic is symmetric:
 
 - a non-trivial expression on a **read** slot is a **gather** — an input reindexing
   composed *before* the core (strided/dilated/offset reads, convolution `X[i+j]`,
   decimation `X[2i]`);
-- a non-trivial expression on an **output** slot is a **scatter** — an output
-  reindexing composed *after* the core (upsampling `Y[2i] = X[i]`, constant-position
-  construction `Out[0] = a`, strided/blocked writes).
+- a non-trivial expression on an **output** slot is a **scatter** — an output reindexing
+  composed *after* the core (upsampling `Y[2i] = X[i]`, offset/padding `Y[i+1] = X[i]`,
+  strided/blocked writes).
 
-**The iteration base case and recurrence are already LHS index arithmetic.** Today
-the DSL writes `H[i, 0] = …` (LHS **constant**) and `H[i, l+1] = …` (LHS **affine**)
-and handles them by a dedicated iteration path. Under this model they are simply the
-LHS cases where the axis is iterative for that tensor — so the general mechanism
-**subsumes and unifies** the base case and the recurrence rather than treating them
-as special syntax. The per-tensor gate then reads symmetrically: LHS affine on an
-axis iterative for the defined tensor is the recurrence (→ Scan); LHS affine on a
-non-iteration axis is scatter (→ St reindexing on the output).
+A gather is **total** — every output coordinate is defined by its read. A scatter is
+**partial** and may conflict, so it carries coverage/fill/conflict obligations a gather
+does not.
 
-**Scatter semantics.** A scatter whose image does not cover the whole output axis
-leaves the uncovered coordinates undefined; the output must specify a fill (zero by
-default). Overlapping writes (a non-injective LHS map) require an explicit combine
-(error, or a declared reduction). These coverage/fill/conflict rules are what make
-general non-iteration scatter the genuinely harder part (§ 9).
+The iteration base case `H[i, 0]` (LHS constant) and recurrence `H[i, l+1]` (LHS affine)
+are themselves LHS index arithmetic — the LHS cases where the axis is iterative for the
+defined tensor. The general mechanism **subsumes** them: LHS affine on an iterative axis
+is the recurrence (→ Scan); LHS affine on a non-iteration axis is scatter (→ St
+reindexing on the output). Iteration is the special case, not a parallel path.
+
+**Scatter coverage, fill, and conflict** are declared per output with
+`tl.Y.scatter(fill=…, reduce=…)`:
+
+- a scatter whose image does not cover the whole output axis leaves the uncovered
+  coordinates at **`fill`** (zero by default); the runtime allocates
+  `torch.full(out_shape, fill)`;
+- a **non-injective** LHS map (overlapping writes) is **rejected at build time**
+  (`_scatter_injective` enumerates the value domain) unless `reduce='sum'` is declared,
+  in which case overlapping writes accumulate via `index_put_(…, accumulate=True)`.
+
+A gather may also appear **inside a recurrence body** (a shift/conv per scan step): the
+gather pre-pass runs on the recurrence/base bodies in `_finalize_iter`, gated so slots
+referencing the iteration axis stay on the Scan path, and hoists a non-iteration gather
+into a top-level `Reindex` feeding the scan.
 
 ## 5. Lowering to St
 
@@ -204,8 +187,7 @@ A read `T[e_1, …, e_n]` whose slots are affine expressions compiles to
 core_read(T over its plain axes)  ∘  reindexing
 ```
 
-where the reindexing is the `StrideMorphism.from_matrix` affine map from the
-equation's free (output) coordinates to `T`'s coordinates, one row per slot:
+one row per slot:
 
 - a **constant** `b` → an element `⟨b|` that fixes and drops that axis = a **slice**;
 - an **offset** `a + b` → a shift row;
@@ -217,92 +199,59 @@ The **output (LHS)** direction is the mirror image — a scatter compiles to
 reindexing  ∘  core_write(over plain output axes)
 ```
 
-with the `StrideMorphism` placed *after* the core, mapping the core's plain output
-coordinates onto the declared (affine) output positions, plus the fill/conflict
-handling of § 4.4. When the LHS axis is iterative this output reindexing is exactly
-the recurrence/base-case wiring the Scan already performs (§ 4.4), so iteration is
-the special case, not a parallel path.
+with the reindexing placed *after* the core, mapping the core's plain output coordinates
+onto the affine output positions, plus the fill/conflict handling of § 4. When the LHS
+axis is iterative this output reindexing is exactly the recurrence/base-case wiring the
+Scan performs.
 
-einops never sees the arithmetic (it cannot express affine index maps); St carries
-it, composed around the einsum core — exactly the weaves architecture, where
-reindexings surround the batch-lifted core operation.
+einops never sees the arithmetic (it cannot express affine index maps); St carries it,
+composed around the einsum core — the weaves architecture, where reindexings surround the
+batch-lifted core operation.
 
-## 6. Containing the blast radius
-
-The literal-int index currently breaks ~20 sites that assume every index has a
-`.uid` (`_build_linear_morphism`, `bc_signature`, the sum builder, the iteration
-finalizer). Rather than thread int-handling through all of them, add **one
-normalization pass** at equation-registration time that rewrites each affine-indexed
-factor into:
+**The normalization pass.** A single pass at equation-registration time
+(`_extract_const_slices`) rewrites each affine-indexed factor into
 
 ```text
-(factor over fresh plain axes)   +   (a StrideMorphism reindexing carrying the arithmetic)
+(factor over fresh plain axes)   +   (a reindexing carrying the arithmetic)
 ```
 
-After this pass, all downstream code sees only plain axes; the arithmetic lives
-entirely in the reindexing. This localises the change to the front-end and the
-new pass, leaving the contraction/broadcasting machinery untouched.
+so every downstream site (`_build_linear_morphism`, `bc_signature`, the sum builder, the
+iteration finalizer) sees only plain `RawAxis` indices and the contraction/broadcasting
+machinery is untouched. A constant slot has no axis to unify, so the pass drops it from
+the equation's free-axis set before unification.
 
-## 7. Validity and bounds
+**Runtime terms.** The runtime source of truth is a pair of dedicated terms — `Reindex`
+(gather) and `Scatter` (write) — carrying the affine spec explicitly as per-slot rows
+`(const, ((k, coeff), …))` plus axis sizes, realised by `ConstructedReindex` /
+`ConstructedScatter` via `arange`-grid advanced indexing. They are the St affine
+reindexings of this section; `StrideMorphism.from_matrix` is the categorical/diagram form
+(the tsncd hexagon), kept in sync by construction. The constant-only case keeps a lighter
+`Slice` term (`ConstructedSlice` = repeated `torch.select`).
 
-- **Constants:** static check `0 ≤ b < |A|` (for a history slice, `0 ≤ b ≤ N`).
-- **Affine maps:** the image must land within the target axis range, or the read is
-  declared partial (out-of-range handling is an explicit choice, not silent).
-- **Shift boundaries** in recurrences reuse the existing base-case / `max_lookback`
-  rule from the iteration design.
-- A **constant slot has no axis to unify** — the normalization pass must drop it from
-  the equation's free-axis set before unification (this is the precise fix to the
-  loop that throws `RawAxis != int`).
-- **Scatter coverage and conflicts (LHS):** an output map whose image misses some
-  output coordinates needs a declared **fill** (zero default); a non-injective output
-  map (overlapping writes) needs a declared **combine** (error or reduction). See
-  § 4.4.
+## 6. Validity and bounds
 
-## 8. Subtleties and open questions
+- **Constants:** static check `0 ≤ b < |A|` (for a history slice, `0 ≤ b ≤ N`) in
+  `_check_const_bound`; skipped when the axis size is unknown.
+- **Affine gather maps:** `_check_gather_bounds` computes the read interval `[lo, hi]`
+  from the slot's coefficients and the fan-out axis sizes; when the indexed input has a
+  concrete **declared** size it requires `0 ≤ lo` and `hi < size`, rejecting out-of-range
+  (including negative) reads. When the input size is undeclared the runtime advanced-index
+  catches any residual overrun.
+- **Affine scatter maps / output sizing:** when the output is **declared**
+  (`tl.Y.tensor(o)`), that size fixes the scatter shape (the tail beyond the image is
+  filled, not truncated) and the image must fit (`maxpos < size`); when undeclared, the
+  tight size `maxpos+1` is **inferred** from the map. Scatter coefficients and constant
+  must be non-negative.
+- **Shift boundaries** in recurrences reuse the base-case / `max_lookback` rule from the
+  iteration design.
+- **Scatter coverage and conflicts:** uncovered output coordinates take the declared
+  `fill` (zero default); a non-injective map is rejected unless a combine is declared
+  (`reduce='sum'`). See § 4.
 
-- **Disambiguation from Iverson** is positional (index slot vs. `[...]` predicate) —
-  already how the DSL separates the two contexts. The reinterpretation of the
-  arithmetic AST at index position must be unambiguous; a dedicated `IndexExpr` node
-  is an alternative to reusing `IversonBinOp` if positional reuse proves fragile.
-- **`__mul__` is globally excluded** (tensor product), so a coefficient `c·a` cannot
-  ride `__mul__`. `2*i` dispatches to `RawAxis.__rmul__(int)`, which we can define
-  restricted to integers without colliding with tensor-product; or expose a small
-  `idx(...)` helper. Decide explicitly.
-- **Per-tensor iteration** (§ 4.1): kept the existing per-tensor model
-  (`.iteration_axis()` / `_iteration_axes`), so no migration of the working iteration
-  machinery is needed and iteration.md § 2.1 stays correct. The Domingos per-axis
-  alternative is more locally readable but would require migrating that machinery; not
-  worth it here.
-- **Affine boundary** (§ 3): only linear+constant maps are in scope. Floor-division
-  and modulo binning (`Y[i//k]`, `Y[i mod k]`) are non-affine and explicitly out; a
-  later extension would need a richer index category than St's affine morphisms.
-- **Scatter is harder than gather:** a gather is total (every output coordinate is
-  defined by its read); a scatter is partial and may conflict, so it carries the
-  fill/combine obligations of § 4.4. This is why general non-iteration scatter is the
-  last phase even though LHS *iteration* arithmetic (base case, recurrence) already
-  works.
+## 7. Limitations
 
-## 9. Phasing
-
-LHS (output) indexing is **in scope**, not deferred — because the scan base case and
-recurrence are *already* LHS index arithmetic (§ 4.4). The phases split by difficulty,
-not by side:
-
-| Phase | Status | Scope | Unlocks |
-| --- | --- | --- | --- |
-| **P1** | ✅ **done** | integer **constants** at read slots → element/slice reindexing (`Slice` term + `ConstructedSlice` + the `_extract_const_slices` synthesis pass); the iteration base case (`H[…,0]`) and recurrence (`H[…,l+1]`) remain the existing LHS special cases | `h[…, 3]` (the scan output head); Example 4 end-to-end |
-| **P2** | ✅ **done** | affine **gather** (`Reindex` + `ConstructedReindex`: index-grid advanced-indexing) and injective **scatter** (`Scatter` + `ConstructedScatter`: zero-filled `index_put`) over non-iteration axes | shift/stride/dilation, **convolution** (=affine gather + contraction, verified vs `F.conv1d`); upsampling / strided writes |
-| **P3** | todo | scatter **coverage / fill / conflict** semantics (§ 4.4) + range inference; **offset-scatter** `Y[i+1]` (collides with the recurrence syntax, needs deferred routing) | robust general scatter |
-| *out of scope* | — | non-affine binning `Y[i//k]`, `Y[i mod k]` | (separate extension beyond St's affine maps) |
-
-P1 is the smallest increment and unblocked the slice we hit; it is implemented and
-merged, together with the **scan follow-ups** it exposed — `.linear()` weights inside
-a scan, l-positioned per-step weights, and static bounds on constant indices — so
-Example 4 builds, compiles, and runs exactly as documented. (General **LHS scatter**
-for non-iteration axes is part of P2/P3; only the iteration LHS special cases —
-base/recurrence — exist today.) P2 makes gather and scatter symmetric and folds the
-iteration special-cases into the one mechanism. P3 is the genuinely harder remainder
-— partial/overlapping output maps.
-
-The detailed, file-level steps for each phase are in
-[index_arithmetic_plan.md](index_arithmetic_plan.md).
+- **Non-affine binning** `Y[i//k]`, `Y[i mod k]` is out of scope — these are not affine
+  maps, and would need an index category richer than St's affine morphisms.
+- **Constant-position scatter** `Out[0] = a` (bare-constant LHS) is routed to the
+  iteration base case, not a non-iteration scatter; on a non-iterative tensor it errors.
+- **Coupled scans** do not run the in-step gather pre-pass (§ 4).

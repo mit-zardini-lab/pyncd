@@ -131,19 +131,35 @@ Goal: offsets, dilation, strides, multi-axis reads, and non-iteration scatter.
 
 ---
 
-## Phase 3 — scatter coverage / fill / conflict + bounds
+## Phase 3 — scatter coverage / fill / conflict + bounds  ✅ DONE
 
-Goal: robust general scatter and static range checking.
+Goal: robust general scatter and static range checking. Implemented:
 
-1. **Fill semantics**: an LHS map whose image misses coordinates requires a declared
-   fill (zero default); thread through to the runtime allocation.
-2. **Conflict semantics**: a non-injective LHS map requires a declared combine (error
-   by default, or a reduction).
-3. **Range inference**: validate every affine map lands in range; infer output axis
-   sizes from the maps where determinable; clear errors otherwise.
+1. **Fill semantics** ✅: `TensorProxy.scatter(fill=…)` records a per-output fill; the
+   `Scatter` term carries it and `ConstructedScatter` allocates `torch.full(out, fill)`
+   instead of zeros. Uncovered coordinates take the fill.
+2. **Conflict semantics** ✅: `_scatter_injective` enumerates the (small) value domain
+   at build time; a non-injective LHS map is rejected unless `scatter(reduce='sum')`
+   is declared, in which case `ConstructedScatter` uses `index_put_(…, accumulate=True)`.
+3. **Range inference** ✅: `_check_gather_bounds` rejects an affine **gather** whose
+   image leaves a declared input axis; the **scatter** builder validates the image
+   against a declared output size (and uses it for the shape, so the tail is filled),
+   inferring the tight size `maxpos+1` from the map otherwise.
+4. **Offset-scatter `Y[i+1]`** ✅: `axis+int` LHS no longer always means recurrence —
+   `_reclassify_offset_scatters` runs at finalize and re-routes such a write to a
+   scatter unless the tensor carries a base case / `.iteration_axis()` / `.recur()`
+   (`_explicit_iter`) or a self-referential body (an incomplete recurrence).
+5. **Affine gather in a scan step** ✅: `_extract_const_slices` takes an `iter_axis`
+   gate and runs on the recurrence/base bodies in `_finalize_iter`, hoisting the
+   gather into a top-level `Reindex` that feeds the scan (slots referencing the
+   iteration axis stay on the Scan path).
 
-**Verification (P3)**: partial scatter with zero-fill; conflicting writes rejected
-or reduced as declared; out-of-range maps caught statically.
+**Verification (P3)**: `tests/test_torch_compile.py` —
+`test_scatter_custom_fill`, `test_scatter_conflicting_writes_rejected`,
+`test_scatter_conflict_reduction_sum`, `test_gather_out_of_range_rejected`,
+`test_gather_negative_index_rejected`, `test_scatter_into_declared_output_size`,
+`test_scatter_overflows_declared_output_rejected`,
+`test_offset_scatter_is_not_a_recurrence`, `test_affine_gather_inside_scan_step`.
 
 ---
 

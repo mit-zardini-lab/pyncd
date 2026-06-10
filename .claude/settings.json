@@ -28,7 +28,8 @@
       "Bash(which mmdc *)",
       "Bash(rtk npx *)",
       "Bash(rm -f /tmp/mmd_*.mmd /tmp/mmd_*.svg /tmp/mmd_*.png)",
-      "Bash(awk 'NR>=337 && /^#{1,3} /' /Users/williammacready/code/python/pyncd/papers/iteration.md)"
+      "Bash(awk 'NR>=337 && /^#{1,3} /' /Users/williammacready/code/python/pyncd/papers/iteration.md)",
+      "Bash(python -c ' *)"
     ],
     "additionalDirectories": [
       "/tmp"

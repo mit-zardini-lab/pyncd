@@ -35,9 +35,10 @@ import torch
 5. [Predicates (Iverson brackets)](#5-predicates-iverson-brackets)
 6. [Normalisations and nonlinearities](#6-normalisations-and-nonlinearities)
 7. [Iteration and recurrence](#7-iteration-and-recurrence)
-8. [Compilation and execution](#8-compilation-and-execution)
-9. [Worked example: a small attention block](#9-worked-example-a-small-attention-block)
-10. [Further reading](#10-further-reading)
+8. [Index arithmetic](#8-index-arithmetic)
+9. [Compilation and execution](#9-compilation-and-execution)
+10. [Worked example: a small attention block](#10-worked-example-a-small-attention-block)
+11. [Further reading](#11-further-reading)
 
 ---
 
@@ -83,9 +84,9 @@ d = real_axis('d', 512)          # concrete size 512  → d._size == Integer(512
 d = real_axis('d')               # free size          → d._size is FreeNumeric
 ```
 
-**Sizes matter for two features:** auto-materialising predicates (§5) and iteration
-(§7) both require concrete integer sizes. Plain contractions do not — `axes(...)`
-is enough.
+**Sizes matter for three features:** auto-materialising predicates (§5), iteration
+(§7), and index-arithmetic range validation (§8) all require concrete integer sizes on
+the relevant axes. Plain contractions do not — `axes(...)` is enough.
 
 **`norm_axis`** marks the normalisation dimension on the *left-hand side* of a
 softmax/normalize equation. It also lets the compiler drop additive terms that are
@@ -361,10 +362,13 @@ is the iteration axis with a concrete step count `N`.
 > **The iteration axis is a plain `real_axis`** — there is no special iteration-axis
 > constructor (the only constructors are `axes`, `real_axis`, `norm_axis`, `nat_axis`;
 > `norm_axis` is for the softmax/normalize reduction dimension, §6, not iteration). The
-> similarly named `tl.H.iteration_axis(l)` is a *method*, not a constructor: it merely
-> *registers* an already-built `real_axis` as `H`'s recurrence axis so forward
-> references resolve (required for coupled recurrences; optional otherwise). The axis
-> needs a concrete integer size because that size is the step count `N`.
+> similarly named `tl.H.iteration_axis(l)` is a *method*, not a constructor: it
+> *registers* `H` as iterative and records `l` as its recurrence axis so forward
+> references resolve (required for coupled recurrences; optional for uncoupled ones when
+> both the base and step are written before `to_morphism()`). It also explicitly marks
+> the tensor as iterative — without it (and without a base case), an `axis+int` LHS is
+> reclassified as an offset scatter at finalize time (§8). The axis needs a concrete
+> integer size because that size is the step count `N`.
 
 ### Uncoupled (single state)
 
@@ -449,6 +453,26 @@ A real transformer layer follows the same contract: a pre-built morphism whose o
 input is the state and whose weights are already bound inside it (so it exposes no
 extra per-step inputs) — substitute it for `relu_step()` above.
 
+### History slices
+
+A downstream equation can read any fixed step of the scan output with a constant
+index. The materialised history has shape `(*state, N+1)` (base at index 0, then N
+steps), so valid indices are `0 ≤ c ≤ N`; an out-of-range index is rejected at build
+time. This is a special case of the constant-index gather in §8.
+
+```python
+i = real_axis('i', 3); l = real_axis('l', 4)
+tl = TL()
+tl.H[i, 0]     = tl.X[i]
+tl.H[i, l + 1] = tl.H[i, l] + tl.Delta[i, l]
+tl.Y[i]        = tl.H[i, 3]   # read step 3 (base is index 0; N=4 so 0..4 are valid)
+
+mod = ConstructedModule.construct(tl.to_morphism())
+X = torch.tensor([1., 2., 3.]); Delta = torch.ones(3, 4)
+out = mod(X, Delta); out = out[0] if isinstance(out, tuple) else out
+assert torch.allclose(out, torch.tensor([4., 5., 6.]))
+```
+
 ### Associative-scan fast path
 
 When the recurrence is **affine in the state** — `H[l+1] = A_l · H[l] + b_l` — the
@@ -458,7 +482,243 @@ compile time; no user action is needed.
 
 ---
 
-## 8. Compilation and execution
+## 8. Index arithmetic
+
+An index slot accepts an **affine expression** `b + Σ cₖ aₖ` (b, cₖ ∈ ℤ, aₖ axes) —
+not just a bare axis:
+
+| expression | form | example |
+|---|---|---|
+| bare axis | `a` | `X[i]` — unchanged |
+| constant | `b` (no axes) | `X[i, 3]` — fixed slice |
+| offset | `a + b` | `X[i + 1]` — shift right by 1 |
+| strided / dilated | `c·a + b` | `X[2*i + 1]` — every-other with offset |
+| sum of axes | `a + a'` | `X[i + k]` — convolution window |
+
+A coefficient is written `c * axis` — `int * RawAxis` resolves through `__rmul__`;
+`__mul__` is reserved for tensor product and is not overloaded. Floor-division and
+modulo (`//`, `mod`) are outside the affine boundary and are not supported.
+
+An affine expression on a **read (RHS) slot** is a **gather** — an input reindexing
+composed before the contraction. An affine expression on a **write (LHS) slot** is a
+**scatter** — an output reindexing composed after the contraction, zero-filling
+coordinates the image does not reach by default.
+
+**The iteration gate.** An `axis+int` LHS (`Y[i+1]`) has the same syntax as a
+recurrence step (`H[i, l+1]`). The two are distinguished at finalize time: if the
+tensor carries a base case, a `.recur()` morphism, or an explicit `.iteration_axis()`
+call it remains a recurrence; otherwise it is reclassified as a scatter (§7 explains
+the full iteration model).
+
+### Constant reads
+
+A literal integer in an index slot selects one coordinate and drops that axis from the
+equation:
+
+```python
+i = real_axis('i', 4)
+tl = TL()
+tl.Y[i] = tl.X[i, 3]      # Y[i] = X[i, 3]; the column axis is dropped
+
+mod = ConstructedModule.construct(tl.to_morphism())
+X = torch.arange(20.).reshape(4, 5)
+out = mod(X); out = out[0] if isinstance(out, tuple) else out
+assert torch.allclose(out, X[:, 3])
+```
+
+Multiple constant slots work simultaneously — `X[3, j, 2]` selects row 3, column 2,
+leaving only the `j` axis free. When the input is declared (`.tensor(*shape)`),
+constants are range-checked at build time (`0 ≤ c < |axis|`).
+
+### Affine gather (RHS)
+
+**Shift.** `X[i + 1]` reads one position ahead; `X[i - 1]` one behind:
+
+```python
+i = real_axis('i', 5)
+tl = TL()
+tl.Y[i] = tl.X[i + 1]     # Y[i] = X[i+1]; reads positions 1..5 of X
+
+mod = ConstructedModule.construct(tl.to_morphism())
+X = torch.arange(7.)
+out = mod(X); out = out[0] if isinstance(out, tuple) else out
+assert torch.allclose(out, X[1:6])
+```
+
+**Stride / decimation.** A coefficient strides over the input:
+
+```python
+i = real_axis('i', 5)
+tl = TL()
+tl.Y[i] = tl.X[2 * i]     # Y[i] = X[2i]; every other element starting at 0
+
+mod = ConstructedModule.construct(tl.to_morphism())
+X = torch.arange(10.)
+out = mod(X); out = out[0] if isinstance(out, tuple) else out
+assert torch.allclose(out, X[::2])
+```
+
+**Dilation.** Combine stride and offset (`X[2*i + 1]` = odd-indexed elements):
+
+```python
+i = real_axis('i', 5)
+tl = TL()
+tl.Y[i] = tl.X[2 * i + 1]
+
+mod = ConstructedModule.construct(tl.to_morphism())
+X = torch.arange(11.)
+out = mod(X); out = out[0] if isinstance(out, tuple) else out
+assert torch.allclose(out, X[1::2])
+```
+
+**Multi-axis gather / convolution window.** When a slot combines two axes with `+`,
+the gather builds a full index grid. Contracting over the kernel axis gives conv1d:
+
+```python
+import torch.nn.functional as F
+Cout, Cin, K, Lout = 2, 3, 3, 6
+co = real_axis('co', Cout); ci = real_axis('ci', Cin)
+i  = real_axis('i',  Lout); k  = real_axis('k',  K)
+
+tl = TL()
+tl.Y[co, i] = tl.W[co, ci, k] * tl.X[ci, i + k]   # sum over ci and k
+
+mod = ConstructedModule.construct(tl.to_morphism())
+W = torch.randn(Cout, Cin, K); X = torch.randn(Cin, Lout + K - 1)
+# X appears first in the equation (i+k slot), so it is the first external input.
+out = mod(X, W); out = out[0] if isinstance(out, tuple) else out
+assert torch.allclose(out, F.conv1d(X.unsqueeze(0), W).squeeze(0), atol=1e-4)
+```
+
+**Range validation.** When the input is declared with `.tensor(*shape)`, the compiler
+checks that the entire read interval `[lo, hi]` lands within `[0, size)`. Out-of-range
+reads — including negative ones — are rejected at build time with a message naming the
+axis:
+
+```python
+a = real_axis('a', 4); i = real_axis('i', 4)
+tl = TL()
+tl.X.tensor(a)
+# tl.Y[i] = tl.X[i + 2]   # would raise: reads positions 2..5, but size is 4
+# tl.Y[i] = tl.X[i - 1]   # would raise: reads position -1 at i=0
+```
+
+### Affine scatter (LHS)
+
+An affine expression on the LHS places the computed value at affine output positions.
+Coordinates the image does not reach take the fill (zero by default).
+
+**Offset scatter.** Shift right by 1; position 0 stays at zero:
+
+```python
+i = real_axis('i', 4)
+tl = TL()
+tl.Y[i + 1] = tl.X[i]     # Y[1..4] = X[0..3]; Y[0] = 0
+
+mod = ConstructedModule.construct(tl.to_morphism())
+X = torch.tensor([1., 2., 3., 4.])
+out = mod(X); out = out[0] if isinstance(out, tuple) else out
+exp = torch.zeros(5); exp[1:] = X
+assert torch.allclose(out, exp)
+```
+
+The output size is **inferred** from the map when the output is undeclared
+(`maxpos + 1`, where `maxpos = const + Σ coeff · (axis_size − 1)`). Declaring the
+output with `.tensor(o)` uses that fixed size — so the tail beyond the image is filled
+rather than truncated — and requires the image to fit within it:
+
+```python
+i = real_axis('i', 4); o = real_axis('o', 10)
+tl = TL()
+tl.Y.tensor(o)             # output fixed at size 10; positions 7..9 stay zero
+tl.Y[2 * i] = tl.X[i]
+
+mod = ConstructedModule.construct(tl.to_morphism())
+X = torch.tensor([1., 2., 3., 4.])
+out = mod(X); out = out[0] if isinstance(out, tuple) else out
+assert out.shape == (10,) and torch.allclose(out[0::2][:4], X)
+```
+
+**Upsampling.** Stride the LHS to leave gaps (zero-filled):
+
+```python
+i = real_axis('i', 4)
+tl = TL()
+tl.Y[2 * i] = tl.X[i]     # even positions get X; odd positions stay zero
+
+mod = ConstructedModule.construct(tl.to_morphism())
+X = torch.tensor([1., 2., 3., 4.])
+out = mod(X); out = out[0] if isinstance(out, tuple) else out
+exp = torch.zeros(7); exp[0::2] = X
+assert torch.allclose(out, exp)
+```
+
+### Scatter fill and conflict
+
+**Custom fill.** Override the default zero fill with `.scatter(fill=…)`:
+
+```python
+i = real_axis('i', 4)
+tl = TL()
+tl.Y.scatter(fill=-1.)     # uncovered positions get -1
+tl.Y[2 * i] = tl.X[i]
+
+mod = ConstructedModule.construct(tl.to_morphism())
+X = torch.tensor([1., 2., 3., 4.])
+out = mod(X); out = out[0] if isinstance(out, tuple) else out
+exp = torch.full((7,), -1.); exp[0::2] = X
+assert torch.allclose(out, exp)
+```
+
+**Conflicting writes.** A non-injective LHS map — where multiple input coordinates map
+to the same output position — is **rejected at build time** unless a reduction is
+declared. Declare `reduce='sum'` to accumulate overlapping writes:
+
+```python
+i = real_axis('i', 3); j = real_axis('j', 3)
+tl = TL()
+tl.Y.scatter(reduce='sum')
+tl.Y[i + j] = tl.X[i, j]   # Y[k] = Σ_{i+j=k} X[i,j]  (polynomial product coefficients)
+
+mod = ConstructedModule.construct(tl.to_morphism())
+X = torch.randn(3, 3)
+out = mod(X); out = out[0] if isinstance(out, tuple) else out
+exp = torch.zeros(5)
+for a in range(3):
+    for b in range(3):
+        exp[a + b] += X[a, b]
+assert torch.allclose(out, exp)
+```
+
+Without the `.scatter(reduce='sum')` declaration, `tl.Y[i + j] = tl.X[i, j]` would
+raise a `ValueError` at assignment time naming the overlapping positions.
+
+### Affine gather inside a scan step
+
+A gather over a **non-iteration** axis works inside a recurrence body. The compiler
+hoists it into a top-level `Reindex` entry that feeds the scan; slots referencing the
+iteration axis (`l`) stay on the Scan path.
+
+```python
+i = real_axis('i', 4); l = real_axis('l', 3)
+tl = TL()
+tl.H[i, 0]     = tl.X[i]
+tl.H[i, l + 1] = tl.H[i, l] + tl.D[i + 1, l]   # D[i+1, l]: gather over i, pass-through on l
+
+mod = ConstructedModule.construct(tl.to_morphism())
+X = torch.zeros(4); D = torch.randn(5, 3)
+# The hoisted Reindex for D is ordered before the Scan in topological order,
+# making D the first external input.
+out = mod(D, X); out = out[0] if isinstance(out, tuple) else out
+H = X.clone(); hist = [H.clone()]
+for s in range(3):
+    H = H + D[1:5, s]; hist.append(H.clone())
+assert torch.allclose(out, torch.stack(hist, dim=-1))
+```
+
+---
+
+## 9. Compilation and execution
 
 Pick the entry point by what you built:
 
@@ -503,7 +763,7 @@ assert out.shape == (3, 8)
 
 ---
 
-## 9. Worked example: a small attention block
+## 10. Worked example: a small attention block
 
 Multi-head scaled-dot-product attention with a causal mask, compiled and run:
 
@@ -532,11 +792,14 @@ second equation reading `Attn`; `to_morphism()` topologically orders the two and
 
 ---
 
-## 10. Further reading
+## 11. Further reading
 
 - **[bool_semiring_extension.md](bool_semiring_extension.md)** — the Boolean semiring
   `(𝔹, ∨, ∧)`: predicate datatypes, the ι/H promotion–demotion retraction, masked
   reductions, acset serialisation, and tsncd rendering.
+- **[index_arithmetic.md](../papers/index_arithmetic.md)** — the categorical model (St
+  affine morphisms), the per-tensor iteration gate, and implementation notes for
+  constant reads, affine gathers, scatters, range validation, and the normalization pass.
 - **`torch_compile/materialise.py`** — `materialise_iverson` and the expanded-buffer
   performance tradeoff for repeated predicate axes.
 - **Tests as examples** — `tests/test_tensor_dsl.py` (DSL construction) and

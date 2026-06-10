@@ -129,12 +129,37 @@ class Scatter(fd.Term):
     The value is indexed by ``in_axes``; for output slot ``s``,
     ``rows[s] = (const_s, ((k, coeff), ...))`` places it at output coordinate
     ``const_s + Σ coeff·in_axes[k]``.  ``out_shape`` is the (inferred) output size
-    per slot.  P2 assumes an injective map and zero fill; overlap/partial coverage
-    and custom fill are P3.
+    per slot.  Uncovered coordinates take ``fill`` (zero default, P3).  An
+    injective map writes directly; a non-injective map (overlapping writes) is
+    rejected at build time unless ``reduce`` declares a combine ('sum'), in which
+    case overlapping writes accumulate (design note §4.4, P3).
     """
     in_axes: fd.Prod[sc.RawAxis]
     out_shape: fd.Prod[int]
     rows: fd.Prod
+    fill: float = 0.0
+    reduce: str | None = None
+
+
+def _scatter_injective(in_sizes: tuple[int, ...], rows: tuple) -> bool:
+    """True iff the affine scatter map is injective over the value domain.
+
+    Enumerates the (small) input coordinate box and checks that no two distinct
+    input coordinates map to the same output tuple.  ``rows[s] = (const, ((k, c), ...))``
+    gives output slot ``s`` as ``const + Σ c·coord[k]``.  Used to reject overlapping
+    writes at build time unless a reduction is declared (design note §4.4, P3).
+    """
+    from itertools import product
+    seen: set[tuple[int, ...]] = set()
+    for coord in product(*[range(s) for s in in_sizes]):
+        out = tuple(
+            const + sum(c * coord[k] for k, c in terms)
+            for const, terms in rows
+        )
+        if out in seen:
+            return False
+        seen.add(out)
+    return True
 
 
 def _topo_sort_entries(entries):
@@ -323,6 +348,14 @@ class TL:
         # Iterative tensor support: keyed by tensor name string
         self._pending_iter: dict[str, dict] = {}       # {'base': (...), 'recur': (...)}
         self._iteration_axes: dict[str, sc.RawAxis] = {}  # name → l axis
+        # Names declared iterative explicitly via .iteration_axis()/.recur().  A
+        # tensor in _iteration_axes but NOT here was registered only implicitly by
+        # an `axis+int` LHS, which at finalize is reclassified to a scatter unless it
+        # also carries a base case (design note papers/index_arithmetic.md §4, P3).
+        self._explicit_iter: set[str] = set()
+        # Per-output scatter options declared via TensorProxy.scatter(): the fill
+        # for uncovered coordinates and the combine for overlapping writes (P3).
+        self._scatter_opts: dict[str, dict] = {}       # name → {'fill', 'reduce'}
         self._iter_finalized: bool = False
 
     @property
@@ -603,6 +636,7 @@ class TL:
                 const, coeffs = affine_normal_form(idx)
                 rows.append((const, tuple((fan_idx(ax), c) for ax, c in coeffs.items())))
         fan_axes = tuple(fan_out)
+        self._check_gather_bounds(f.name, rows, fan_axes)
         n = getattr(self, '_slice_counter', 0)
         self._slice_counter = n + 1
         base = f.name.body if isinstance(f.name.body, str) else 'T'
@@ -612,7 +646,39 @@ class TL:
         self._name_to_axes[fresh] = fan_axes
         return IndexedTensor(fresh, fan_axes)
 
-    def _extract_const_slices(self, value):
+    def _check_gather_bounds(self, name, rows, fan_axes) -> None:
+        """Range inference (P3): reject an affine gather whose image leaves a
+        declared input axis.  Each input slot ``p`` reads ``const + Σ c·aₖ``; with
+        the fan-out axis sizes the read interval ``[lo, hi]`` is known, so when the
+        indexed input has a concrete declared size we require ``0 ≤ lo`` and
+        ``hi < size``.  Skipped when the input or a fan-out size is unknown (the
+        runtime advanced-index then catches any residual out-of-range read)."""
+        key = name.body if isinstance(name.body, str) else None
+        decl = self._declarations.get(key) if key else None
+        if decl is None:
+            return
+        fan_sizes = [
+            ax._size._value if isinstance(ax._size, nm.Integer) else None
+            for ax in fan_axes
+        ]
+        for p, (const, terms) in enumerate(rows):
+            if p >= len(decl.shape):
+                continue
+            ax = decl.shape[p]
+            if not isinstance(ax._size, nm.Integer):
+                continue
+            size = ax._size._value
+            if any(fan_sizes[k] is None for k, _ in terms):
+                continue
+            lo = const + sum(c * (0 if c >= 0 else fan_sizes[k] - 1) for k, c in terms)
+            hi = const + sum(c * (fan_sizes[k] - 1 if c >= 0 else 0) for k, c in terms)
+            if lo < 0 or hi >= size:
+                raise ValueError(
+                    f"affine gather reads positions [{lo}, {hi}] out of range for "
+                    f"axis {p} of '{key}' (size {size})"
+                )
+
+    def _extract_const_slices(self, value, iter_axis: sc.RawAxis | None = None):
         """Rewrite RHS factors carrying literal-int index slots into slice entries.
 
         A constant index read ``T[..., c, ...]`` becomes a fresh intermediate
@@ -621,10 +687,32 @@ class TL:
         axes.  The slice entry is appended to ``self._entries`` and threads through
         the normal ThreadedComposed machinery (papers/index_arithmetic_plan.md, P1).
         Returns the value with const-indexed factors replaced.
+
+        When ``iter_axis`` is supplied (scan-step pre-pass, P3), a factor whose
+        affine slot references that axis is left untouched — the recurrence /
+        look-back arithmetic stays on the Scan path (gate, design note §4); only
+        gathers over non-iteration axes are rewritten.
         """
+        from data_structure.TensorExpr import affine_normal_form
+
+        def _affine_uses_iter(f) -> bool:
+            if iter_axis is None:
+                return False
+            for idx in f.indices:
+                if isinstance(idx, (IversonBinOp, IversonUnaryOp)):
+                    try:
+                        _, coeffs = affine_normal_form(idx)
+                    except ValueError:
+                        continue
+                    if any(ax.uid == iter_axis.uid for ax in coeffs):
+                        return True
+            return False
+
         def rewrite_factor(f):
             if not isinstance(f, IndexedTensor):
                 return f
+            if _affine_uses_iter(f):
+                return f                                   # recurrence/look-back: Scan path
             has_affine = any(isinstance(idx, (IversonBinOp, IversonUnaryOp))
                              for idx in f.indices)
             has_const = any(isinstance(idx, int) for idx in f.indices)
@@ -744,9 +832,12 @@ class TL:
                     return k
             raise ValueError("scatter LHS axis is not produced by the body")
 
+        name_str = lhs_name.body if lhs_name and isinstance(lhs_name.body, str) else None
+        decl = self._declarations.get(name_str) if name_str else None
+
         out_shape: list[int] = []
         rows: list = []
-        for ix in lhs_indices:
+        for s, ix in enumerate(lhs_indices):
             const, coeffs = (0, {ix: 1}) if isinstance(ix, sc.RawAxis) else affine_normal_form(ix)
             if const < 0:
                 raise ValueError("affine scatter requires a non-negative constant (P2)")
@@ -759,10 +850,47 @@ class TL:
                     raise ValueError(f"affine scatter needs a concrete size for axis {ax}")
                 terms.append((vidx(ax), c))
                 maxpos += c * (ax._size._value - 1)
-            out_shape.append(maxpos + 1)
+            # Range inference (P3): a declared output axis fixes the size (so the
+            # tail beyond the image is filled, not truncated) and the image must
+            # fit; otherwise infer the tight size maxpos+1 from the map.
+            declared = (
+                decl.shape[s]._size._value
+                if decl is not None and s < len(decl.shape)
+                and isinstance(decl.shape[s]._size, nm.Integer)
+                else None
+            )
+            if declared is not None:
+                if maxpos >= declared:
+                    raise ValueError(
+                        f"affine scatter for '{name_str}' writes position {maxpos} "
+                        f"out of range for declared output axis {s} (size {declared})"
+                    )
+                out_shape.append(declared)
+            else:
+                out_shape.append(maxpos + 1)
             rows.append((const, tuple(terms)))
 
-        scat = Scatter(in_axes=value_axes, out_shape=tuple(out_shape), rows=tuple(rows))
+        # Coverage / conflict (P3): a non-injective affine map (overlapping writes)
+        # is rejected unless the user declared a reduction; the fill covers the
+        # coordinates the image misses.
+        opts = self._scatter_opts.get(name_str, {}) if name_str else {}
+        fill = float(opts.get('fill', 0.0))
+        reduce = opts.get('reduce', None)
+        in_sizes = tuple(
+            ax._size._value for ax in value_axes
+            if isinstance(ax._size, nm.Integer)
+        )
+        if reduce is None and len(in_sizes) == len(value_axes):
+            if not _scatter_injective(in_sizes, tuple(rows)):
+                raise ValueError(
+                    f"scatter for '{name_str}' has overlapping writes (non-injective "
+                    f"affine map); declare a combine via .scatter(reduce='sum')"
+                )
+
+        scat = Scatter(
+            in_axes=value_axes, out_shape=tuple(out_shape), rows=tuple(rows),
+            fill=fill, reduce=reduce,
+        )
         self._entries.append((lhs_name, scat, value_axes, (val_name,)))
         if lhs_name is not None:
             self._name_to_axes[lhs_name] = value_axes
@@ -1007,6 +1135,7 @@ class TL:
         non_iter_indices: tuple[sc.RawAxis, ...],
         iter_dim: int,
         value: RHSExpression | SumExpr,
+        raw_lhs_indices: tuple = (),
     ) -> None:
         entry = self._pending_iter.setdefault(name_str, {})
         if 'recur' in entry:
@@ -1015,6 +1144,9 @@ class TL:
             )
         self._iteration_axes[name_str] = l
         entry['recur'] = (non_iter_indices, value)
+        # Stash the raw `axis+int` LHS so finalize can reclassify this as a scatter
+        # if the tensor turns out to carry no base case / iteration declaration.
+        entry['recur_raw_lhs'] = (raw_lhs_indices, value)
         # Register full shape (with l in original position) for cross-equation unification
         full: list[sc.RawAxis] = list(non_iter_indices)
         full.insert(iter_dim, l)
@@ -1174,11 +1306,49 @@ class TL:
         )
         self._entries.append((group_lhs, scan, combined_step_out + (l,), ()))
 
+    def _value_reads_name(self, value, name: fd.DynamicName) -> bool:
+        """True iff any factor in the RHS value reads tensor ``name`` (self-state)."""
+        factors = (
+            value.factors if isinstance(value, RHSExpression)
+            else [f for t in value.terms for f in t.factors]
+        )
+        return any(
+            isinstance(f, IndexedTensor) and f.name == name for f in factors
+        )
+
+    def _reclassify_offset_scatters(self) -> None:
+        """Re-route ``axis+int`` LHS writes that are scatters, not recurrences.
+
+        An ``axis+int`` LHS provisionally registered a recurrence in __setitem__.
+        At finalize, a tensor with such a write but no base case, no ``recur()``
+        morphism, and no explicit ``.iteration_axis()`` is an offset-scatter
+        (``Y[i+1] = X[i]``), not a recurrence (design note §4, P3).  A body that
+        reads the tensor itself is left as a (base-case-less) recurrence so the
+        existing "no base case" error still fires.
+        """
+        for name_str in list(self._pending_iter.keys()):
+            entry = self._pending_iter[name_str]
+            if 'recur' not in entry:
+                continue
+            if 'base' in entry or 'recur_morphism' in entry:
+                continue
+            if name_str in self._explicit_iter:
+                continue
+            raw_lhs, value = entry['recur_raw_lhs']
+            if self._value_reads_name(value, fd.DynamicName(name_str)):
+                continue  # self-referential: a recurrence missing its base case
+            del self._pending_iter[name_str]
+            self._iteration_axes.pop(name_str, None)
+            self._name_to_axes.pop(fd.DynamicName(name_str), None)
+            self._register_scatter(fd.DynamicName(name_str), raw_lhs, value)
+
     def _finalize_iter(self) -> None:
         """Build Scan morphisms from _pending_iter and append to _entries."""
         if self._iter_finalized:
             return
         self._iter_finalized = True
+
+        self._reclassify_offset_scatters()
 
         # Group tensors by iteration axis uid; coupled groups processed separately.
         axis_uid_to_names: dict[int, list[str]] = {}
@@ -1217,6 +1387,9 @@ class TL:
 
             lhs_name = fd.DynamicName(name_str)
             base_out, base_value, base_literal = entry['base']
+            # P3: rewrite affine gathers over non-iteration axes in the base body
+            # into top-level Reindex/Slice entries feeding the scan (gate on l).
+            base_value = self._extract_const_slices(base_value, iter_axis=l)
 
             # Check 4.2: base case must be at l=0.
             if base_literal != 0:
@@ -1238,6 +1411,9 @@ class TL:
                 step_out, recur_value = entry['recur']
                 # Check 4.4: no l+1 on RHS.
                 self._check_no_lnext_on_rhs(recur_value, l, name_str)
+                # P3: rewrite affine gathers over non-iteration axes in the step
+                # body into top-level Reindex/Slice entries feeding the scan.
+                recur_value = self._extract_const_slices(recur_value, iter_axis=l)
                 state_name_dn  = lhs_name
                 state_proxy_dn = fd.DynamicName(name_str + '_state')
                 step_ctx = self._ctx.without(l.uid)
@@ -1437,7 +1613,8 @@ class TensorProxy:
             iter_ref = indices[iter_pos]
             l = iter_ref.lhs
             non_iter = tuple(idx for i, idx in enumerate(indices) if i != iter_pos)
-            self._registry._register_iter_recur(self._name, l, non_iter, iter_pos, value)
+            self._registry._register_iter_recur(
+                self._name, l, non_iter, iter_pos, value, indices)
             return
 
         # Detect base-case LHS: one slot is a literal int (e.g. 0)
@@ -1473,6 +1650,7 @@ class TensorProxy:
                 "use real_axis('name', N)."
             )
         self._registry._iteration_axes[self._name] = l
+        self._registry._explicit_iter.add(self._name)
         return self
 
     def recur(self, axis: sc.RawAxis, morphism: object) -> TensorProxy:
@@ -1499,8 +1677,23 @@ class TensorProxy:
                 "use real_axis('name', N)."
             )
         self._registry._iteration_axes[self._name] = axis
+        self._registry._explicit_iter.add(self._name)
         entry = self._registry._pending_iter.setdefault(self._name, {})
         entry['recur_morphism'] = morphism
+        return self
+
+    def scatter(self, *, fill: float = 0.0, reduce: str | None = None) -> TensorProxy:
+        """Declare scatter coverage/conflict options for this (affine-LHS) output.
+
+        ``fill`` is the value for output coordinates the affine map does not cover
+        (zero default).  ``reduce`` declares how overlapping writes combine: the
+        default ``None`` rejects a non-injective map at build time; ``'sum'``
+        accumulates overlapping writes (design note papers/index_arithmetic.md §4.4).
+        """
+        if reduce not in (None, 'sum'):
+            raise ValueError(
+                f"scatter reduce must be None or 'sum', got {reduce!r}")
+        self._registry._scatter_opts[self._name] = {'fill': fill, 'reduce': reduce}
         return self
 
     def tensor(self, *shape: sc.RawAxis) -> TensorProxy:

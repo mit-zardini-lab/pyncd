@@ -263,6 +263,8 @@ class ConstructedScatter(ConstructedModule):
         )
         self.out_shape = tuple(int(s) for s in target.out_shape)
         self.rows = target.rows
+        self.fill = float(getattr(target, 'fill', 0.0))
+        self.reduce = getattr(target, 'reduce', None)
 
     def forward(self, *xs: torch.Tensor) -> torch.Tensor:
         value = xs[0]
@@ -276,8 +278,14 @@ class ConstructedScatter(ConstructedModule):
             for k, coeff in terms:
                 idx = idx + int(coeff) * grids[k]
             index.append(idx)
-        out = torch.zeros(self.out_shape, dtype=value.dtype, device=value.device)
-        out[tuple(index)] = value
+        out = torch.full(
+            self.out_shape, self.fill, dtype=value.dtype, device=value.device)
+        if self.reduce == 'sum':
+            # Overlapping writes accumulate (declared combine).  index_put_ with
+            # accumulate=True is the only path that sums duplicate destinations.
+            out.index_put_(tuple(index), value, accumulate=True)
+        else:
+            out[tuple(index)] = value
         return out
 
 ##################

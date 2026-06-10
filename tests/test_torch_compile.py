@@ -1720,3 +1720,136 @@ def test_affine_scatter_strided_2d():
     y = mod(X); y = y[0] if isinstance(y, tuple) else y
     exp = torch.zeros(7, 3); exp[0::2, :] = X
     assert tuple(y.shape) == (7, 3) and torch.allclose(y, exp)
+
+
+def test_gather_out_of_range_rejected():
+    """P3 range inference: an affine gather whose image leaves a declared input
+    axis is rejected statically (X[i+2] reads positions 2..5 of a size-4 axis)."""
+    a = real_axis('a', 4); i = real_axis('i', 4)
+    tl = TL()
+    tl.X.tensor(a)
+    with pytest.raises(ValueError, match="out of range|range"):
+        tl.Y[i] = tl.X[i + 2]
+
+
+def test_gather_negative_index_rejected():
+    """P3 range inference: a gather reading a negative coordinate is rejected
+    (X[i-1] reads -1 at i=0)."""
+    a = real_axis('a', 4); i = real_axis('i', 4)
+    tl = TL()
+    tl.X.tensor(a)
+    with pytest.raises(ValueError, match="out of range|range"):
+        tl.Y[i] = tl.X[i - 1]
+
+
+def test_scatter_into_declared_output_size():
+    """P3 range inference: a declared output size sets the scatter shape, so the
+    tail beyond the image is filled rather than truncated to the image extent."""
+    i = real_axis('i', 4); o = real_axis('o', 10)
+    tl = TL()
+    tl.Y.tensor(o)
+    tl.Y[2 * i] = tl.X[i]
+    mod = ConstructedModule.construct(tl.to_morphism())
+    X = torch.tensor([1.0, 2.0, 3.0, 4.0])
+    y = mod(X); y = y[0] if isinstance(y, tuple) else y
+    exp = torch.zeros(10); exp[0:8:2] = X
+    assert tuple(y.shape) == (10,) and torch.allclose(y, exp), f"{y}"
+
+
+def test_scatter_overflows_declared_output_rejected():
+    """P3 range inference: a scatter whose image exceeds the declared output size
+    is rejected statically (Y[2*i], i in 0..3 -> max pos 6, declared size 5)."""
+    i = real_axis('i', 4); o = real_axis('o', 5)
+    tl = TL()
+    tl.Y.tensor(o)
+    with pytest.raises(ValueError, match="out of range|range|exceed"):
+        tl.Y[2 * i] = tl.X[i]
+
+
+def test_scatter_custom_fill():
+    """P3 scatter fill: uncovered output coordinates take the declared fill value."""
+    i = real_axis('i', 4)
+    tl = TL()
+    tl.Y.scatter(fill=-1.0)
+    tl.Y[2 * i] = tl.X[i]
+    mod = ConstructedModule.construct(tl.to_morphism())
+    X = torch.tensor([1.0, 2.0, 3.0, 4.0])
+    y = mod(X); y = y[0] if isinstance(y, tuple) else y
+    exp = torch.full((7,), -1.0); exp[0::2] = X
+    assert torch.allclose(y, exp), f"{y} != {exp}"
+
+
+def test_scatter_conflicting_writes_rejected():
+    """P3 conflict: a non-injective scatter with no declared reduction is rejected.
+
+    Y[i+j] = X[i,j] maps several (i,j) to the same output coordinate (overlap),
+    which must fail loud rather than silently keep one arbitrary write.
+    """
+    i = real_axis('i', 3); j = real_axis('j', 3)
+    tl = TL()
+    with pytest.raises(ValueError, match="overlap|conflict|injective|reduce"):
+        tl.Y[i + j] = tl.X[i, j]
+
+
+def test_scatter_conflict_reduction_sum():
+    """P3 conflict: a declared sum reduction accumulates overlapping writes.
+
+    Y[i+j] = X[i,j] with reduce='sum' is the polynomial-coefficient accumulate:
+    out[k] = sum_{i+j=k} X[i,j].
+    """
+    i = real_axis('i', 3); j = real_axis('j', 3)
+    tl = TL()
+    tl.Y.scatter(reduce='sum')
+    tl.Y[i + j] = tl.X[i, j]
+    mod = ConstructedModule.construct(tl.to_morphism())
+    X = torch.randn(3, 3)
+    y = mod(X); y = y[0] if isinstance(y, tuple) else y
+    exp = torch.zeros(5)
+    for a in range(3):
+        for b in range(3):
+            exp[a + b] += X[a, b]
+    assert torch.allclose(y, exp), f"{y} != {exp}"
+
+
+def test_affine_gather_inside_scan_step():
+    """P3: an affine gather on a non-iteration axis inside a recurrence body.
+
+    The gather pre-pass runs only in _register_entry, not for scan steps built in
+    _finalize_iter; this exercises running it for the step too.  D[i+1, l] shifts D
+    along the non-iteration axis i (l passes through) and is added each step.
+    """
+    i = real_axis('i', 4); l = real_axis('l', 3)
+    tl = TL()
+    tl.H[i, 0] = tl.X[i]
+    tl.H[i, l + 1] = tl.H[i, l] + tl.D[i + 1, l]
+    mod = ConstructedModule.construct(tl.to_morphism())
+    X = torch.zeros(4); D = torch.randn(5, 3)
+    # The synthesised gather entry (Reindex over D) precedes the Scan, so D's
+    # gathered input is ordered first — the same convention as the P2 conv gather.
+    out = mod(D, X); out = out[0] if isinstance(out, tuple) else out
+    H = X.clone(); hist = [H.clone()]
+    for s in range(3):
+        H = H + D[1:5, s]; hist.append(H.clone())
+    assert torch.allclose(out, torch.stack(hist, dim=-1)), f"{out}"
+
+
+def test_offset_scatter_is_not_a_recurrence():
+    """P3 offset-scatter: Y[i+1] = X[i] writes a shifted, zero-filled copy.
+
+    The `axis+int` LHS collides with the recurrence syntax (H[..., l+1]); with no
+    base case / iteration declaration for Y, the routing decision (made at finalize
+    time) must classify it as a scatter, not a recurrence.  Position 0 is left at
+    the zero fill; positions 1..4 carry X[0..3].
+    """
+    from data_structure.TensorDSL import Scatter, Scan
+    i = real_axis('i', 4)
+    tl = TL(); tl.Y[i + 1] = tl.X[i]
+    m = tl.to_morphism()
+    content = m.content if hasattr(m, 'content') else (m,)
+    assert any(isinstance(c, Scatter) for c in content), "expected a Scatter entry"
+    assert not any(isinstance(c, Scan) for c in content), "must not be a Scan"
+    mod = ConstructedModule.construct(m)
+    X = torch.tensor([1.0, 2.0, 3.0, 4.0])
+    y = mod(X); y = y[0] if isinstance(y, tuple) else y
+    exp = torch.zeros(5); exp[1:5] = X
+    assert torch.allclose(y, exp), f"{y} != {exp}"

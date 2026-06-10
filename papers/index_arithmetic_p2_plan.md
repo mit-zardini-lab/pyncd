@@ -3,11 +3,11 @@
 
 > **Status: 2a (gather) and 2b (injective scatter) implemented** on branch
 > `p2-affine-gather` — `Reindex`/`ConstructedReindex` and `Scatter`/`ConstructedScatter`,
-> verified incl. conv1d vs `F.conv1d` and upsampling. Deferred to **P3**: scatter
-> coverage/fill/conflict, range inference, and **offset-scatter** `Y[i+1]` (collides
-> with the `axis+int` recurrence syntax — needs the recur-vs-scatter routing decision
-> moved to finalize time). Affine *inside a scan step* is also not yet wired (the
-> pre-pass runs in `_register_entry`, not `_build_step_morph`).
+> verified incl. conv1d vs `F.conv1d` and upsampling. The items once deferred to **P3**
+> are now **done** (see [index_arithmetic_plan.md](index_arithmetic_plan.md) Phase 3):
+> scatter coverage/fill/conflict, range inference, **offset-scatter** `Y[i+1]` (the
+> recur-vs-scatter routing decision is now made at finalize time), and affine gather
+> *inside a scan step* (the pre-pass runs on the step/base bodies in `_finalize_iter`).
 
 Builds on the merged P1 (integer constants) and its machinery. Design model:
 [index_arithmetic.md](index_arithmetic.md); phase overview:
