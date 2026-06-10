@@ -189,17 +189,18 @@ inductive WeaveSlot
   | tiled : WeaveSlot           -- contracted axis: the base op processes the full extent of this axis
 -- Python: WeaveMode.TILED ↔ .fixed (retained); concrete Axis slot ↔ .tiled (contracted) — convention inverted
 
-abbrev Weave := List WeaveSlot
--- Python: Weave[B, A]
+abbrev WeaveShape := List WeaveSlot
+-- per-array slot list; distinct from §5's `structure Weave (g)` (the cartesian-lift factorization datum)
+-- Python: Weave[B, A] (the Python type is named Weave; it maps to WeaveShape here)
 
-def Weave.targetAxes (w : Weave) : StObj :=
+def WeaveShape.targetAxes (w : WeaveShape) : StObj :=
   w.filterMap fun | .fixed a => some a | _ => none
 
 structure BrBase (dom cod : BrObj) where
   op           : String
   degree       : StObj                          -- shared loop shape P
-  inputWeaves  : Fin dom.length → Weave
-  outputWeaves : Fin cod.length → Weave
+  inputWeaves  : Fin dom.length → WeaveShape
+  outputWeaves : Fin cod.length → WeaveShape
   -- Each reindexing is a St morphism P → (target axes of that input's weave).
   -- This is the locus where St lives inside Br.
   reindexings  : ∀ i : Fin dom.length,
@@ -260,10 +261,10 @@ The base class above is deliberately lightweight, so its `St`/`Br` instances kee
 
 ```lean
 -- Strictify FreeMonoidalCategory (Discrete O); produced once, used by all §9 theorems.
-instance [ColoredPROP O] : CategoryTheory.MonoidalCategory ob := …
-instance [ColoredPROP O] : CategoryTheory.SymmetricCategory ob := …
+instance [ColoredPROP O] : CategoryTheory.MonoidalCategory O := …
+instance [ColoredPROP O] : CategoryTheory.SymmetricCategory O := …
 ```
 
-This is the hybrid foundation of decision **D3**: everything **above** the seam — the instances and executable defs (`St`, `Br`, `StMat.comp`, the union-find of [§7](#7-grothendieck-split-and-composition-as-pushout)) — speaks `ColoredPROP`; everything **below** it — the [§9](#9-the-propositions-as-generic-theorems) theorems — speaks Mathlib. The adapter *is* the proposition/computation boundary of [§1](#1-orientation-one-structure-one-seam) made into a definition: it is the one place where "what Lean computes" is handed to "what Lean proves."
+This is the hybrid foundation of the proposition/computation separation: everything **above** the seam — the instances and executable defs (`St`, `Br`, `StMat.comp`, the union-find of [§7](#7-grothendieck-split-and-composition-as-pushout)) — speaks `ColoredPROP`; everything **below** it — the [§9](#9-the-propositions-as-generic-theorems) theorems — speaks Mathlib. The adapter *is* the proposition/computation boundary of [§1](#1-orientation-one-structure-one-seam) made into a definition: it is the one place where "what Lean computes" is handed to "what Lean proves."
 
-The adapter is produced **once** and reused by every §9 theorem; per-instance proof obligations recur, but the bridge does not. The strictification strategy (caveat C2) is the crux: Mathlib categories are not strict, so the development is carried out over `FreeMonoidalCategory (Discrete O)` and **strictified once**, so that downstream all associators and unitors become `Iso.refl` and the PROP equations (`tensor_assoc`, `tensor_unit_l`, `tensor_unit_r`) hold definitionally rather than up to coherent isomorphism. This is what lets a `ColoredPROP` law stated with `=` line up with a Mathlib `MonoidalCategory` whose coherences are isos.
+The adapter is produced **once** and reused by every §9 theorem; per-instance proof obligations recur, but the bridge does not. The strictification strategy is the crux: Mathlib categories are not strict, so the development is carried out over `FreeMonoidalCategory (Discrete O)` and **strictified once**, so that downstream all associators and unitors become `Iso.refl` and the PROP equations (`tensor_assoc`, `tensor_unit_l`, `tensor_unit_r`) hold definitionally rather than up to coherent isomorphism. This is what lets a `ColoredPROP` law stated with `=` line up with a Mathlib `MonoidalCategory` whose coherences are isos.
