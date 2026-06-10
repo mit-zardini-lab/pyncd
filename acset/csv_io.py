@@ -54,10 +54,9 @@ def _numeric_str(n: nm.Numeric) -> str:
     if isinstance(n, nm.Integer):
         return str(n._value)
     if isinstance(n, nm.FreeNumeric):
-        # Only _id is stored; uid._name (set by RawAxis.named()) is dropped.
-        # FreeNumeric.__eq__ hashes uid including _name, so original != deserialized.
-        # Fix would require either serialising _name+settings or changing
-        # FreeNumeric.numeric_hash() to use _id only.
+        # FreeNumeric._id is serialized; _name (display metadata) is not. numeric_hash()
+        # hashes _id only, so round-tripped FreeNumeric values compare equal to their
+        # originals despite the lost display name.
         return f'?{n.uid._id}'
     raise ValueError(f'cannot serialize Numeric of type {type(n).__name__}')
 

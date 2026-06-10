@@ -5,7 +5,7 @@ import data_structure.Term as fd
 import data_structure.Numeric as nm
 from data_structure.StrideCategory import RawAxis, StrideMorphism
 from data_structure.TensorLogic import TensorEquation, TensorProgram
-from data_structure.TensorExpr import TensorRef
+from data_structure.TensorExpr import TensorRef, IversonBinOp
 from data_structure.Operators import Linear, SoftMax
 from data_structure.TensorDSL import NormAxis
 
@@ -425,6 +425,26 @@ def test_sbr_roundtrip_normaxis_type_in_norm_axis_field(tmp_path):
     output = next(a for a in rt.arrays if not a.is_input)
     assert output.norm_axis is not None
     assert output.norm_axis._type is NormAxis
+
+
+def test_sbr_roundtrip_wire_label(tmp_path):
+    """wire_label must survive a CSV round-trip:
+    a lost wire_label would leave the BOOL-typed input wire unlabelled in Lean."""
+    p = RawAxis(_size=nm.Integer(4))
+    q = RawAxis(_size=nm.Integer(4))
+    pred_factor = IversonBinOp('<=', p, q)
+    eq = TensorEquation(
+        lhs_name=fd.DynamicName.from_str('Y'),
+        lhs_indices=[p, q],
+        rhs=(pred_factor,),
+    )
+    inst = from_tensor_equation(eq)
+    write_sbr(inst, tmp_path)
+    rt = read_sbr(tmp_path)
+    bool_arr_orig = next(a for a in inst.arrays if a.is_input)
+    bool_arr_rt   = next(a for a in rt.arrays   if a.is_input)
+    assert bool_arr_orig.wire_label is not None
+    assert bool_arr_rt.wire_label == bool_arr_orig.wire_label
 
 
 # ---------------------------------------------------------------------------
