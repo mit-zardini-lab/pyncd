@@ -96,7 +96,7 @@ A single stated adapter turning a `ColoredPROP O` into a Mathlib strict symmetri
 
 ```lean
 class DGradedColoredPROP (D C : Type) [ColoredPROP D] [ColoredPROP C] where
-  sh    : ColoredPROP.gen (ob := C) → C        -- shape map on colors; extends to sh* (monoid hom)
+  sh    : ColoredPROP.gen (ob := C) → D        -- shape map: each C-color's underlying D-shape; extends to sh* (monoid hom)
   act   : (C ×ᶜ Dᵒᵖ) ⥤ C                        -- lift action (Mathlib functor, via seam)
   δ     : ∀ X Y P, act.obj (tensor X Y, P) ≅ tensor (act.obj (X,P)) (act.obj (Y,P))
   δ0    : ∀ P, act.obj (unit, P) ≅ unit
