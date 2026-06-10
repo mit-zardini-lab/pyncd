@@ -47,7 +47,7 @@ class FreeNumeric(Numeric):
     def field(cls):
         return field(default_factory=lambda: FreeNumeric())
     def numeric_hash(self) -> int:
-        return (hash(self.uid)+ 12435) % HASH_MODULO 
+        return (self.uid._id + 12435) % HASH_MODULO
 
 @dataclass(frozen=True, eq=False)
 class Integer(Numeric):

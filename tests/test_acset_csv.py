@@ -439,6 +439,29 @@ def _all_subclasses(cls: type) -> set[type]:
     return result
 
 
+def test_free_numeric_roundtrip_equality(tmp_path):
+    """FreeNumeric sizes compare equal before and after CSV round-trip.
+
+    RawAxis.named() creates axes whose _size is a FreeNumeric with uid._name set.
+    After CSV write/read the _name is lost (not serialized), so the deserialized
+    FreeNumeric has uid._name=None. Equality must still hold because identity
+    is uid._id, not the display name.
+    """
+    from data_structure.StrideCategory import RawAxis
+    m = StrideMorphism.from_matrix((1,), dom_names=('p',), cod_names=('q',))
+    inst = from_stride_morphism(m)
+    write_sst(inst, tmp_path)
+    rt = read_sst(tmp_path)
+
+    original_sizes = {uid._id: size for uid, size in inst.axis_sizes.items()}
+    for rt_uid, rt_size in rt.axis_sizes.items():
+        orig_size = original_sizes[rt_uid._id]
+        assert orig_size == rt_size, (
+            f"Size mismatch after round-trip for axis {rt_uid._id}: "
+            f"{orig_size!r} != {rt_size!r}"
+        )
+
+
 def test_uid_registry_covers_all_axis_subclasses():
     """Every concrete RawAxis subclass must appear in the UID type registry.
 
