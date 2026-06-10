@@ -84,6 +84,7 @@ class SampleRow:
     src_uid:         fd.UID
     tgt_uid:         fd.UID
     coeff:           nm.Numeric
+    offset:          nm.Numeric = field(default_factory=lambda: nm.Integer(0))
 
 
 @dataclass

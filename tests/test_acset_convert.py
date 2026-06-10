@@ -74,6 +74,21 @@ def test_stride_morphism_non_unit_coeff():
     assert inst.entries[0].coeff == Integer(2)
 
 
+def test_sample_row_has_offset_zero():
+    """All TensorEquation samples must start at offset zero:
+    non-zero offset would shift the reindexing window, corrupting index alignment."""
+    p = RawAxis(_size=Integer(4))
+    k = RawAxis(_size=Integer(8))
+    eq = TensorEquation(
+        lhs_name=fd.DynamicName.from_str('Y'),
+        lhs_indices=[p],
+        rhs=(TensorRef(fd.DynamicName.from_str('X'), (p, k)),),
+    )
+    inst = from_tensor_equation(eq)
+    assert inst.samples, "expected at least one SampleRow"
+    assert all(s.offset == Integer(0) for s in inst.samples)
+
+
 # ── from_tensor_equation ────────────────────────────────────────────────────
 
 def _matmul_eq():

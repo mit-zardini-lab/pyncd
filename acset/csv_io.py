@@ -188,7 +188,7 @@ def write_sbr(inst: SBrInstance, directory: Path) -> None:
 
     with open(directory / 'samples.csv', 'w', newline='', encoding='utf-8') as f:
         w = csv.DictWriter(f, fieldnames=[
-            'equation_idx', 'reindexing_slot', 'src_uid', 'tgt_uid', 'coeff',
+            'equation_idx', 'reindexing_slot', 'src_uid', 'tgt_uid', 'coeff', 'offset',
         ])
         w.writeheader()
         for s in inst.samples:
@@ -198,6 +198,7 @@ def write_sbr(inst: SBrInstance, directory: Path) -> None:
                 'src_uid':         _uid_str(s.src_uid),
                 'tgt_uid':         _uid_str(s.tgt_uid),
                 'coeff':           _numeric_str(s.coeff),
+                'offset':          _numeric_str(s.offset),
             })
 
 
@@ -273,6 +274,7 @@ def read_sbr(directory: Path) -> SBrInstance:
                 src_uid=_parse_uid(row['src_uid']),
                 tgt_uid=_parse_uid(row['tgt_uid']),
                 coeff=_parse_numeric(row['coeff']),
+                offset=_parse_numeric(row['offset']) if 'offset' in row else nm.Integer(0),
             ))
 
     return inst

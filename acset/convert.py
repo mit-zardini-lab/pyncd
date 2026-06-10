@@ -176,6 +176,7 @@ def _add_equation(
                     src_uid=ax.uid,
                     tgt_uid=ax.uid,
                     coeff=nm.Integer(1),
+                    offset=nm.Integer(0),
                 ))
 
 

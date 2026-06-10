@@ -233,8 +233,9 @@ def test_write_sbr_array_axes_headers(tmp_path):
 def test_write_sbr_samples_headers(tmp_path):
     write_sbr(_identity_sbr(), tmp_path)
     with open(tmp_path / 'samples.csv') as f:
-        expected = {'equation_idx', 'reindexing_slot', 'src_uid', 'tgt_uid', 'coeff'}
-        assert set(csv.DictReader(f).fieldnames) == expected
+        assert set(csv.DictReader(f).fieldnames) == {
+            'equation_idx', 'reindexing_slot', 'src_uid', 'tgt_uid', 'coeff', 'offset',
+        }
 
 
 def test_write_sbr_two_equations_row_count(tmp_path):
@@ -339,6 +340,15 @@ def test_sbr_roundtrip_sample_coeffs(tmp_path):
     orig = sorted(_numeric_stable_key(s.coeff) for s in inst.samples)
     got  = sorted(_numeric_stable_key(s.coeff) for s in rt.samples)
     assert orig == got
+
+
+def test_sbr_roundtrip_sample_offset_zero(tmp_path):
+    """offset must survive a CSV round-trip:
+    a lost or corrupted offset would silently shift reindexing into the wrong window."""
+    inst = _identity_sbr()
+    write_sbr(inst, tmp_path)
+    rt = read_sbr(tmp_path)
+    assert all(s.offset == nm.Integer(0) for s in rt.samples)
 
 
 def test_sbr_roundtrip_linear_bias_false(tmp_path):
