@@ -389,10 +389,10 @@ recovers the fully-sized graded PROP (graded_prop.md Prop 8.3).
 
 ```lean
 -- Dat valued in (discrete categories of) size-assignments over the semiring `Numeric`.
-def Dat [ColoredPROP C] : Cᵒᵖ ⥤ Type := …      -- the data functor; trivial on morphisms
+def Dat [ColoredPROP C] : Cˢʰᵃʳᵖ ⥤ Type := …   -- the data functor; trivial on morphisms (graded_prop.md Def 5.1)
 def Dat' [ColoredPROP C] : Cˢʰᵃʳᵖ ⥤ CategoryTheory.Cat := …   -- as a functor into Cat
 -- C ≅ Grothendieck Dat'      -- CategoryTheory.Grothendieck of the data functor
-example : C ≌ CategoryTheory.Grothendieck Dat' := … -- `Iso.refl`-level when C is *built* as ∫Dat
+example : C ≅ CategoryTheory.Grothendieck Dat' := … -- `Iso.refl`-level when C is *built* as ∫Dat
 ```
 
 Mathlib supplies `CategoryTheory.Grothendieck` for the Grothendieck construction of a functor into `Cat`; with `Dat` valued in discrete categories of size-assignments, `∫Dat` is a direct instance. The iso `C ≅ ∫Dat` is a per-instantiation theorem in general, but it is **definitional — `Iso.refl` — if `C` is *built* as `∫Dat`**, which is the recommended posture: define the sized PROP as the integral, and the splitting is true by construction rather than by proof.
