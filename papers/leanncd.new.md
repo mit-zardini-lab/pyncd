@@ -268,3 +268,68 @@ instance [ColoredPROP O] : CategoryTheory.SymmetricCategory O := …
 This is the hybrid foundation of the proposition/computation separation: everything **above** the seam — the instances and executable defs (`St`, `Br`, `StMat.comp`, the union-find of [§7](#7-grothendieck-split-and-composition-as-pushout)) — speaks `ColoredPROP`; everything **below** it — the [§9](#9-the-propositions-as-generic-theorems) theorems — speaks Mathlib. The adapter *is* the proposition/computation boundary of [§1](#1-orientation-one-structure-one-seam) made into a definition: it is the one place where "what Lean computes" is handed to "what Lean proves."
 
 The adapter is produced **once** and reused by every §9 theorem; per-instance proof obligations recur, but the bridge does not. The strictification strategy is the crux: Mathlib categories are not strict, so the development is carried out over `FreeMonoidalCategory (Discrete O)` and **strictified once**, so that downstream all associators and unitors become `Iso.refl` and the PROP equations (`tensor_assoc`, `tensor_unit_l`, `tensor_unit_r`) hold definitionally rather than up to coherent isomorphism. This is what lets a `ColoredPROP` law stated with `=` line up with a Mathlib `MonoidalCategory` whose coherences are isos.
+
+## 4. The core: `DGradedColoredPROP D C`
+
+Everything above is the base on which the actual subject of this document sits. A `D`-graded colored PROP ([graded_prop.md §3.1](graded_prop.md#31-data)) is a colored PROP `C` (the *operations*) together with the data that exhibits it over a second colored PROP `D` (the *index*): a shape map, a lift action, and the distributivity and action-coherence isomorphisms making `C` a right `D`-actegory. The core class collects exactly that data plus the four named laws.
+
+```lean
+class DGradedColoredPROP (D C : Type) [ColoredPROP D] [ColoredPROP C] where
+  sh    : ColoredPROP.gen (ob := C) → C        -- shape map on colors; extends to sh* (monoid hom)
+  act   : (C ×ᶜ Dᵒᵖ) ⥤ C                        -- lift action (Mathlib functor, via seam)
+  δ     : ∀ X Y P, act.obj (tensor X Y, P) ≅ tensor (act.obj (X,P)) (act.obj (Y,P))
+  δ0    : ∀ P, act.obj (unit, P) ≅ unit
+  υ     : ∀ X, act.obj (X, unit_D) ≅ X
+  α     : ∀ X P Q, act.obj (act.obj (X,P), Q) ≅ act.obj (X, tensor Q P)
+  sh_act         : ∀ X P, sh* (act.obj (X,P)) = tensor (sh* X) P     -- (Sh-⊛)
+  act_unit_assoc : …    -- actegory triangle + pentagon (υ, α coherences) → right D-actegory
+  dist_coh       : …    -- δ, δ0 naturality + interchange with υ/α/σ
+  broadcast_gen  : …    -- (Broadcast-gen): every C-morphism = [f,P] ; ρ, f degree-trivial
+```
+
+Each field is a direct transcription of the [graded_prop.md §3.1](graded_prop.md#31-data) data. `sh` is the **shape map** `sh : O_C → Ob D` sending each `C`-color to its underlying `D`-shape (its list of sub-wires); it extends to the monoid homomorphism `sh*` on objects used by the (Sh-⊛) law. `act` is the **lift action** `act : C × Dᵒᵖ ⥤ C` — a Mathlib functor, available because the seam adapter of [§3](#3-the-seam-adapter-into-mathlib) makes `C` and `D` Mathlib categories. Its two specializations are theory.md's lift notation: `[f, P] := act(f, 𝟙_P)` is the **batch lift** of `f` (covariant in `C`), and `[X, η] := act(𝟙_X, η)` is the **reindexing** along `η : P → Q` (contravariant in `D`, since `D` enters opposite). `-- Python: batch lift [f,P]`
+
+The four isomorphism fields are the **distributivity** and **action-coherence** isos. `δ` and `δ0` make the lift distribute over juxtaposition — `(X ⊗ Y) ⊛ P ≅ (X ⊛ P) ⊗ (Y ⊛ P)` and `I_C ⊛ P ≅ I_C`. `υ` and `α` are the actegory coherence isos — `υ : X ⊛ I_D ≅ X` (lifting by the unit shape is trivial) and `α : (X ⊛ P) ⊛ Q ≅ X ⊛ (Q ⊗ P)` (composing two lifts; the order `Q ⊗ P` is what makes `⊛` a **right** action of `(D, ⊗, I_D)`). Together `υ`/`α` are precisely the unitor and multiplicator exhibiting `C` as a right `D`-actegory.
+
+The four `Prop`-valued fields are the named laws of [graded_prop.md §3.2](graded_prop.md#32-axioms), one field each:
+
+- `sh_act` is **(Sh-⊛)**: `sh*(X ⊛ P) = sh*(X) ⊗ P` — lifting by `P` appends `P` to the shape.
+- `act_unit_assoc` bundles **(Act-unit / Act-assoc)**: `υ` and `α` satisfy the triangle and pentagon coherences, i.e. `C` is a right `D`-actegory.
+- `dist_coh` bundles **(Dist-nat / Dist-coh)**: `δ`, `δ0` are natural and satisfy the interchange coherence with `υ`, `α`, and the symmetry `σ` — the lift is a strong symmetric monoidal action in the `C`-variable.
+- `broadcast_gen` is **(Broadcast-gen)**: every `C`-morphism factors as `[f, P] ; ρ` with `f` degree-trivial (built without `act` over a non-unit `P`) and `ρ` a reindexing assembled from `act(𝟙, −)` and the coherence isos. This is the generation principle that makes weaves ([§5](#5-weaves-as-cartesian-lift-data)) exist.
+
+Note that **(Act-functor)** of [graded_prop.md §3.2](graded_prop.md#32-axioms) (`act` respects identities and composition in both variables, so `[f ; g, P] = [f, P] ; [g, P]`) and **(Sh-⊗)** (`sh*` is a monoid homomorphism) are not separate fields: the first is the `Functor` laws already carried by `act`, the second is built into the definition of `sh*` from `sh`. And **(Elem-C)** is not here either — it is the `elemental` field of `ColoredPROP` ([§2](#2-the-base-coloredprop)), inherited from the instance `[ColoredPROP C]`.
+
+`D` and `C` are **explicit class parameters**, not `outParam`s. This is deliberate: with both free, Lean's instance search needs them pinned for `[DGradedColoredPROP D C]` to resolve predictably (and so that `Br`-as-graded and `Br`-as-index occupy distinct instance positions without collision). The instance-resolution discipline this implies is taken up in [§11](#11-lean-formalization-notes).
+
+### 4.1 Derived: `ev_p` and Eq. 3
+
+Theory.md's batch-lift defining property (Eq. 3) is **not** an axiom of the core class — it falls out of `act` being a functor. For a point `p : I_D → P` in `D`, the *slice at `p`* is a derived natural transformation, and its naturality square is Eq. 3.
+
+```lean
+def ev_p [DGradedColoredPROP D C] (p : hom unit_D P) : (act ⊛ P) ⟶ Id := act.map ⟨𝟙, p⟩ ≫ υ
+-- Eq. 3:  [f,P] ≫ (Y ⊛ p) = (X ⊛ p) ≫ f   -- naturality of ev_p, from Functor.map_comp
+```
+
+`ev_p` is a `def`, not a field: it is `act.map ⟨𝟙, p⟩` post-composed with the unitor `υ`, a natural transformation `(− ⊛ P) ⇒ (− ⊛ I_D) ≅ Id_C`. Because `act` is a functor, each `ev_p` is *automatically* natural — its naturality square at `f : X → Y` is exactly **(Eq. 3)** `[f, P] ; (Y ⊛ p) = (X ⊛ p) ; f`, discharged by `Functor.map_comp`. So Eq. 3 is **built in** by functoriality of `act`, not posited ([graded_prop.md §3.2](graded_prop.md#32-axioms)). The genuine content lives elsewhere: it is `elemental` (the points `ev_p` jointly separate morphisms) that pins down the weave of [§5](#5-weaves-as-cartesian-lift-data) — Eq. 3 alone holds for free and does not force the factorization.
+
+## 5. Weaves as cartesian-lift data
+
+The (Broadcast-gen) law says every `C`-morphism factors as `[f, P] ; ρ`. A **weave** is a witness of that factorization for a particular morphism — and, as [graded_prop.md §3.3](graded_prop.md#33-weaves-as-cartesian-lift-data) shows, it is precisely the cartesian-lift datum of the grading fibration `C → D`.
+
+> **Naming.** `WeaveShape` ([§2](#2-the-base-coloredprop)) is the *per-array slot list* (`List WeaveSlot`, the shape of one wire). The `Weave g` below is a *different* concept: the cartesian-lift factorization witness for a whole morphism `g`. The Python type named `Weave` maps to the former; this `structure Weave` is the latter.
+
+```lean
+structure Weave [DGradedColoredPROP D C] {X Y : C} (g : hom X Y) where
+  f       : hom X' Y'    -- base op (degree-trivial)
+  P       : D
+  ρ       : …            -- reindexing assembled from act(id,−) + coherence isos
+  factors : g = [f, P] ≫ ρ
+
+theorem weave_unique [DGradedColoredPROP D C] {X Y} (g : hom X Y) :
+    Subsingleton (Weave g)         -- Prop 8.2, from elemental + broadcast_gen
+```
+
+A `Weave g` records the (Broadcast-gen) factorization of `g`: a degree-trivial base op `f`, a degree `P ∈ D`, a reindexing `ρ` (assembled from `act(𝟙, −)` and the coherence isos), and a proof that `g = [f, P] ; ρ`. Per wire, the shape `sh(color) ∈ Ob D` is a list of sub-colors that the factorization partitions into **target** sub-colors (acted on directly by `f`) and **tiling** sub-colors (supplied by the degree `P` through `ρ`); the permutation relating the canonical "targets-first" order to the wire's actual sub-color order is theory.md's `Ω_w`, recovered from the symmetry `σ`. This is **precisely the cartesian-lift datum** of the grading fibration `C → D` ([graded_prop.md §3.3](graded_prop.md#33-weaves-as-cartesian-lift-data)): a weave is the choice of how a morphism's wires sit over their `D`-shapes, with the tiling part pulled back along the degree. `-- Python: Weave._shape records the per-wire TILED/target partition`
+
+`weave_unique` (Proposition 8.2) makes `Weave g` a `Subsingleton` — at most one weave, up to the canonical coherence isos. This is what turns `Weave` into a **datum, not a choice**: the factorization is forced, not selected. The proof draws on both the `elemental` field of `[ColoredPROP C]` (points separate morphisms, so the degree `P` and the target/tiling partition are determined) and `broadcast_gen` (a factorization exists at all). Without `elemental`, Eq. 3 would still hold by functoriality but the `(f, P, ρ)` factorization would not be unique.
