@@ -374,3 +374,161 @@ class SymmetryGraded (D C : Type) (T : Monad D) [ColoredPROP D] [ColoredPROP C]
 Both are **signed stubs**: the class is declared with its parameters and its `extends DGradedColoredPROP`, but the fields are deferred (`…`) — the data is named, the bodies are future work.
 
 `ParaAlgebra` (the `Para` refinement mixin on `construct()`) is *not* introduced here. It is presented in [§7](#7-grothendieck-split-and-composition-as-pushout) alongside the `Algebra` class, because it layers on the algebra — refining `Para(C) → Para(V)` as a 2-functor, with weight tying as passes-as-2-cells — rather than on the graded PROP. It is listed in this section's title only because it belongs to the same mixin family.
+
+## 7. Grothendieck split and composition as pushout
+
+Two of the constructions the current design parked in its "representation layer" — symbolic axis *sizes* and axis *identity/alignment* — are, on the graded-PROP reading, ordinary categorical data. Sizes are the **fiber of a Grothendieck construction**; alignment is a **pushout/coequalizer**. This section states both, and then makes the proposition/computation seam of [§1](#1-orientation-one-structure-one-seam) concrete: the categorical objects are the *specification*, and the executable structures carried forward from the old "Layer 2" (a fresh-UID counter, a union-find `Context`) are the *implementation* that realizes it. There is no separate representation layer; the old Layer 2 is dissolved into this single development.
+
+### 7.1 The structure/data split as `∫Dat`
+
+Strip the numeric content from the `D`-colors and one is left with the **structural index PROP** `D♯` (colors are formal size-symbols, morphisms are symbolic reindexings); `C♯` is then `D♯`-graded ([graded_prop.md §5](graded_prop.md#5-the-structuredata-split-as-a-grothendieck-construction)). A **data functor** `Dat : C♯ → Set` sends each structural object to its set of admissible size-assignments, acting *trivially on morphisms* — data is unconstrained by connectivity ([acset.md §The Grothendieck Construction](acset.md#the-grothendieck-construction)). The **Grothendieck construction** `∫Dat` has objects `(c, d)` with `c ∈ C♯` and `d ∈ Dat(c)`, and morphisms the `C♯`-morphisms with no compatibility condition on data, and
+
+> **`C ≅ ∫Dat`**
+
+recovers the fully-sized graded PROP (graded_prop.md Prop 8.3).
+
+```lean
+-- Dat valued in (discrete categories of) size-assignments over the semiring `Numeric`.
+def Dat [ColoredPROP C] : Cᵒᵖ ⥤ Type := …      -- the data functor; trivial on morphisms
+def Dat' [ColoredPROP C] : Cˢʰᵃʳᵖ ⥤ CategoryTheory.Cat := …   -- as a functor into Cat
+-- C ≅ Grothendieck Dat'      -- CategoryTheory.Grothendieck of the data functor
+example : C ≌ CategoryTheory.Grothendieck Dat' := … -- `Iso.refl`-level when C is *built* as ∫Dat
+```
+
+Mathlib supplies `CategoryTheory.Grothendieck` for the Grothendieck construction of a functor into `Cat`; with `Dat` valued in discrete categories of size-assignments, `∫Dat` is a direct instance. The iso `C ≅ ∫Dat` is a per-instantiation theorem in general, but it is **definitional — `Iso.refl` — if `C` is *built* as `∫Dat`**, which is the recommended posture: define the sized PROP as the integral, and the splitting is true by construction rather than by proof.
+
+### 7.2 `FreeNumeric` is the fiber, not a layer
+
+The `Numeric := MvPolynomial String ℕ` of [§2.1](#21-numeric) is precisely the data the fiber `Dat(c)` ranges over. A symbolic axis size is a term in the free commutative semiring on `String`-named generators; a `FreeNumeric` — the Python `UTerm` that names an as-yet-unknown size — is a single generator `MvPolynomial.X s`, carrying no interpretation until indeterminates are substituted.
+
+```lean
+abbrev Numeric := MvPolynomial String ℕ
+-- MvPolynomial.X s  -- a FreeNumeric: a symbolic axis size, the fiber datum Dat(c)
+-- a size-assignment d ∈ Dat(c) picks a Numeric for each structural axis-symbol of c
+```
+
+The point of stating this here is the **dissolution**: in the old design `FreeNumeric`, symbolic sizes, and `Numeric` lived in "Layer 2 — Representation," as if they were non-mathematical bookkeeping. They are not. They are the **`Dat(c)` fiber data** of the Grothendieck construction of [§7.1](#71-the-structuredata-split-as-dat) — as categorical as the structural skeleton `C♯` itself. There is no representation layer to carry them; they are part of the single graded-PROP development, living in the fiber over `C♯`.
+
+### 7.3 Composition as pushout
+
+Autoalignment (`@`, `Context`) builds a composite from separately-constructed pieces by gluing them along a shared boundary. This is **not** the primitive composition of morphisms in `C`; it is the composition of *open systems* — structured cospans of acset presentations, each carrying explicit input/output interfaces ([graded_prop.md §6](graded_prop.md#6-composition-as-pushout)). It has two stages, and **only the second is a colimit**.
+
+**Stage 1 — interface discovery (heuristic, *not* categorical).** Decide *which* boundary colors of `cod(f)` and `dom(g)` are identified — construct the span `B → inst f`, `B → inst g`. pyncd does this by positional pairing plus shape-based `(name, size)` matching, inserting identities and prepending rearrangements to reconcile arity and order. This step is a **choice**: it is correct exactly when the `(name, size)` signature determines the axis, and a wrong choice silently over- or under-glues. **Nothing here is a pushout** — it is the construction of the span the pushout will act on. The interesting, failure-prone part of composition — where composition actually *fails*, where the design decision lives — is here, *outside* the colimit.
+
+**Stage 2 — gluing (the pushout).** Given the span, the composite is the **pushout** that identifies the matched boundary colors `B` (the cup), computed componentwise over the schema. On the `Axis` component it is a **coequalizer of UIDs** — exactly what `Context` union-find computes; the **canonical class representative is the universal cocone vertex**. Because pyncd chooses canonical representatives, the pushout is taken on the nose, which strictifies cospan composition so that `;` is *strictly* associative.
+
+```lean
+-- Inst(C♯) is a finitely-cocomplete copresheaf category; Stage 2 is a Mathlib colimit:
+-- CategoryTheory.Limits.pushout (span legs B → inst f, B → inst g)
+-- Stage 1 (span construction) is NOT part of it and is implemented separately.
+-- Associativity of `;` is the pasting lemma for pushouts, strictified by the
+-- canonical-representative choice — no bespoke proof over `Context` is needed (Prop 8.5).
+```
+
+The failure mode lives in the *attributes*, not the structure: the pushout requires the size/datatype data on glued axes to **unify**, and "no consistent attribute assignment" is precisely "the pushout does not exist." `Context` handles the `Axis`-component coequalizer; the size-consistency check is the remainder of the pushout. So [§6 of graded_prop.md](graded_prop.md#6-composition-as-pushout) is a *correctness/specification lens, not a composition algorithm*: the pushout explains and certifies what `Context` does; it does not replace it.
+
+### 7.4 The seam, concrete: union-find realizes the coequalizer
+
+This is where the proposition/computation seam of [§1](#1-orientation-one-structure-one-seam) becomes tangible. The coequalizer of [§7.3](#73-composition-as-pushout) is the **specification**; the executable structures carried forward from the old "Layer 2" are the **implementation**. They meet at the seam, and neither replaces the other.
+
+**Fresh-UID counter — `TermM`.** Constructing a new symbolic axis mints a fresh identity. Python does this with `random.randint` as a construction side-effect; Lean 4 is pure, so the fresh-name counter is threaded explicitly as a state monad. This is the *executable* side — it computes identities; it proves nothing.
+
+```lean
+abbrev UID := ℕ
+
+structure UData where
+  uid  : UID
+  name : Option DynamicName
+
+abbrev TermM := StateM ℕ            -- the fresh-UID counter monad
+
+def freshUData : TermM UData := do
+  let n ← get; set (n + 1); return ⟨n, none⟩
+-- Constructing a new axis / FreeNumeric runs in TermM; pure code (composition, proofs) does not.
+-- A counter, not random ints: term construction becomes reproducible and testable.
+-- UIDs carry no semantic content — only equality/inequality of two UIDs matters.
+```
+
+**Union-find — `Context` / `EqClass`.** The `Axis`-component coequalizer is *computed* as a pure-functional union-find. An `EqClass` is one equivalence class — a `Finset` of UIDs together with its canonical representative; a `Context` is a disjoint list of them. `Context.merge` unions a new class with any overlapping existing ones (Python's `Context.append_bucket`); `Context.apply` substitutes every UID by its class representative throughout a term. The **canonical representative is the member with the largest UID** — and *this is the universal cocone vertex* of the Stage-2 pushout: choosing it on the nose is what strictifies composition.
+
+```lean
+/-- One equivalence class: a set of UIDs with one canonical representative. -/
+structure EqClass (α : Type*) where
+  bucket    : Finset UID
+  canonical : WithUID α            -- representative chosen by largest UID = cocone vertex
+
+/-- A context is a disjoint list of equality classes. -/
+structure Context (α : Type*) where
+  classes : List (EqClass α)
+
+/-- Merge a new class in, unioning with any overlapping classes (= Context.append_bucket). -/
+def Context.merge (ctx : Context α) (cls : EqClass α) : Context α :=
+  let overlapping := ctx.classes.filter (fun c => ¬ c.bucket.Disjoint cls.bucket)
+  let merged : EqClass α := overlapping.foldl
+    (fun acc c => ⟨acc.bucket ∪ c.bucket,
+                   if acc.canonical.data.uid ≥ c.canonical.data.uid
+                   then acc.canonical else c.canonical⟩)
+    cls
+  ⟨merged :: ctx.classes.filter (fun c => c.bucket.Disjoint cls.bucket)⟩
+
+/-- Substitute every UID in each class by its canonical representative throughout a term. -/
+def Context.apply [TermTraversable α] (ctx : Context α) (target : α) : α :=
+  ctx.classes.foldl (fun t cls =>
+    TermTraversable.traverseUID
+      (fun d => if d.uid ∈ cls.bucket then cls.canonical.data else d) t)
+    target
+```
+
+The framing is the whole point. **The pushout/coequalizer is the spec; union-find plus the fresh-name counter is the implementation; they meet at the seam.** The Stage-2 colimit *certifies* the gluing — associativity (the pasting lemma), the precise error semantics ("no cocone" = alignment failure, "inconsistent attributes" = size mismatch), the canonical representative as cocone vertex — while `Context` *computes* it in near-linear time. A Lean development proves the coequalizer is what it claims; it does not re-derive `Context` line-by-line, and pyncd would never invoke a generic colimit solver. The substitution machinery `Context.apply` rides on a `TermTraversable` typeclass — the Lean stand-in for Python's reflective `deep_reconstruct`, one explicit traversal instance per decorated type — but that, the `WithUID` decoration, and `DynamicName` are display/identity bookkeeping on the executable side, never propositional content.
+
+### 7.5 Algebras and `construct()`
+
+The algebra `F` (graded_prop.md Def 7.2 / [§7](graded_prop.md#7-algebras-construct-and-the-para-refinement)) is the strong symmetric monoidal, `D`-equivariant functor `C → V` into a target actegory — the categorical content of `ConstructedModule.construct()`. Its full class (`Algebra D C V` with the `F`/`equivar`/`coh` fields, the `TargetActegory`, and the `ParaAlgebra` refinement) belongs to the propositions/instantiation development; here it is named only so the §8 correspondence table has a home for it, and because the trained model is a *section of the Para fibration over `∫Dat`* — tying the algebra back to the Grothendieck split of [§7.1](#71-the-structuredata-split-as-dat).
+
+## 8. Acsets and Python interop
+
+### 8.1 `SBrInstance` as a finite presentation of an `∫Dat`-morphism
+
+An acset instance is a **finite presentation of a single `∫Dat`-morphism**: its `C♯`-part is the connectivity, its `Dat`-part the sizes, coefficients, and datatypes ([graded_prop.md §5](graded_prop.md#5-the-structuredata-split-as-a-grothendieck-construction)). For `Br` the schema is `S_Br` and the instance is `SBrInstance`; the schema, the five entity types (`Axis`, `Equation`, `Array`, `ArrayAxis`, `Sample`), the C-set/attribute split, and the worked encoding are developed in [acset.md](acset.md) — referenced here, not re-derived. What matters for the Lean encoding is the relationship to [§7](#7-grothendieck-split-and-composition-as-pushout): an `SBrInstance` exported via `write_sbr`/`read_sbr` *is* a functor `G : S_Br → Set` — one point of the `S_Br`-instance category, i.e. one `∫Dat`-morphism — and its CSV tables are the C-set/attribute halves of that morphism written separately.
+
+The `SBrInstance`'s four tables become a Lean `structure` whose fields are finite lists, mirroring acset.md's [Lean encoding section](acset.md#from-sbrinstance-to-a-diagram-in-br-a-lean-encoding):
+
+```lean
+structure SBrInstance where
+  equations  : List EquationRow                 -- one row per Equation
+  arrays     : List ArrayRow                    -- Array rows: slot, is_input, datatype_tag, op_predicate, …
+  array_axes : List ArrayAxisRow                -- ArrayAxis rows: is_target, position (the Weave._shape interleaving)
+  samples    : List SampleRow                   -- Sample rows: (src, tgt, coeff, offset) — the affine reindexing
+  axis_sizes : List (UID × Numeric)             -- the Dat-part: each axis-UID's symbolic size
+```
+
+acset.md interprets this `G` as a strict monoidal functor `D : J → Br` from a finite index category `J` (objects = the program's arrays, morphisms = its equations) into the `Br` of [§2.3](#23-br--free-category-over-broadcasted-base-morphisms), using two Mathlib shortcuts that are exactly this document's choices: **`MvPolynomial String ℕ` for `Numeric`** (so `ring` discharges the `StMat` laws — the `Dat`-fiber type of [§7.2](#72-freenumeric-is-the-fiber-not-a-layer)) and **`Matrix` for `StMat.coeffs`** (for the matrix lemmas). `J` is the *free strict monoidal category* on the equation quiver — Mathlib's `FreeMonoidalCategory` strictified — so specifying `D` on generators determines it uniquely; the functor laws are a consequence. The `axis_sizes` table populates the `Dat(c)` fiber; the `equations`/`arrays`/`array_axes`/`samples` connectivity is the `C♯`-morphism. This `D : J → Br` is the finite, written-down witness of one object/morphism of the `Grothendieck Dat'` instance of [§7.1](#71-the-structuredata-split-as-dat).
+
+### 8.2 The seam made tangible
+
+The acset tables and their CSV serialization are the **executable realization** of the `∫Dat` *specification* — the same proposition/computation seam as [§7](#7-grothendieck-split-and-composition-as-pushout), now in fully concrete form. `write_sbr`/`read_sbr` write the two halves of an `∫Dat`-morphism to separate tables — connectivity (the C-set part: `equations`, `arrays`, `array_axes`, `samples`) and data (the attribute part: `axis_sizes`, coefficients, datatypes) — which is precisely the Grothendieck split serialized. The same `Axis` UIDs appear in the term world's `Weave` objects and in the acset's `ArrayAxis` rows, so any `Context`-mediated unification (the [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) coequalizer computation) is reflected in both views without a round-trip. The categorical object `∫Dat` is what a Lean development *proves about*; the acset tables and CSV are what pyncd *computes and stores*. They meet at the seam.
+
+### 8.3 Consolidated Python correspondence
+
+The tables below collect the systematic Lean ↔ Python correspondence, **organized by the new tower** — base, core, mixins, the Grothendieck/pushout seam, the acset realization — rather than by the dissolved Layer 1 / Layer 2 split. Inline one-line pointers in earlier sections (e.g. `act` ↔ batch lift, `BrBase` ↔ `Broadcasted`) are the local view; this is the systematic one.
+
+| Lean (new tower) | Python | Notes |
+| --- | --- | --- |
+| `SmallCategory` / `ColoredPROP` | implicit / `ProductCategory` | category and monoidal laws are unstated in Python; paper-level only |
+| `ColoredPROP.elemental` | — | new `(Elem)` field; no Python witness |
+| `List gen` (objects) | `ProdObject[L]` | Python wraps `tuple[L,…]` in a Term; Lean uses `List` directly |
+| `StMat` | `StrideMorphism` | stride *matrix* (`Matrix … Numeric` + bias) vs bundled stride record |
+| `BrBase` | `Broadcasted` | base op + reindexings; `Fin`-indexed weaves vs runtime tuples |
+| `BrMorph` | `Composed` | free list of `BrBase` vs `content: tuple[M,…]` |
+| `ProductOfMorphisms` ↔ `tensorHom` | `ProductOfMorphisms[L, M]` | `ColoredPROP.tensorHom` (a morphism) vs a data wrapper |
+| `DGradedColoredPROP.act` | batch lift `[f,P]` | the lift action; `[f,P] = act(f, 𝟙_P)`, `[X,η] = act(𝟙_X, η)` |
+| `WeaveShape` / `structure Weave` | `Weave._shape` | per-array shape (`WeaveShape`); §5's `structure Weave` = the cartesian-lift factorization witness |
+| `∫Dat` instance (`Grothendieck Dat'`) | `SBrInstance` | finite presentation of one `∫Dat`-morphism |
+| `Numeric` = `MvPolynomial String ℕ` | `Numeric` / `FreeNumeric` | the `Dat(c)` fiber; `MvPolynomial.X s` ↔ a `FreeNumeric` generator |
+| `Context` / `EqClass` | `Context` / `EqualityClass` | union-find = the *implementation* of the coequalizer ([§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer)) |
+| `TermM` = `StateM ℕ` | random-int UID side-effect | the fresh-name counter; Lean threads state, Python mutates a global source |
+| `TermTraversable` | `deep_reconstruct` | per-type traversal instance vs `__dataclass_fields__` reflection |
+| `Algebra.F` | `ConstructedModule.construct()` | the algebra functor `C → V` (full class in the §7.5 / propositions development) |
+| `DynamicName` | `DynamicName` | display only — see [§12](#12-appendix-out-of-scope), out of scope |
+
+The single coherent message of the table: every row that the old design would have filed under "Layer 2 — Representation" (`Numeric`/`FreeNumeric`, `Context`/`EqClass`, `TermM`, `TermTraversable`, `DynamicName`) is now placed by its categorical role — fiber datum, coequalizer implementation, fresh-name counter, traversal, or display — on one side or the other of the proposition/computation seam. There is no representation layer; there is one tower with one seam.
