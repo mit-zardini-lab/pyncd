@@ -167,14 +167,19 @@ at the definition site and allows the compiler to reject equations that use `l`
 on the LHS without an offset (which would be an ambiguous write to an arbitrary
 slice).
 
-`l+1` is implemented by `RawAxis.__add__(int)`, which returns a typed
-`IterNextRef` object that `__setitem__` recognises. It is only valid at the `l`
-slot of the LHS of a tensor declared with `.iteration_axis(l)`.
+`l+1` is implemented via a monkey-patch in `TensorExpr.py` that sets
+`RawAxis.__add__ = _rawaxis_add`, which returns `IversonBinOp('+', l, 1)`.
+`__setitem__` detects this pattern — an `IversonBinOp('+', RawAxis, int)` in a
+LHS index slot — and routes the assignment to `_register_iter_recur` rather
+than the normal `_register_entry` path. There is no separate `IterNextRef`
+type.
 
-The symmetric operation `RawAxis.__sub__(int)` returns an `IterPrevRef` for use
-on the RHS, intended to support two-term recurrences that read two previous
-steps. **This case is design-only — the type exists, but compiler and morphism
-support are not yet implemented (§5).** The remainder of this subsection
+The symmetric operation `RawAxis.__sub__(int)` returns `IversonBinOp('-', l, 1)`
+via the same monkey-patch, intended to support two-term recurrences that read
+two previous steps. **This case is design-only — `IversonBinOp('-', l, 1)` is
+produced by the monkey-patch but compiler and morphism support for it as a RHS
+recurrence reference are not yet implemented (§5).** The remainder of this
+subsection
 describes the *planned* rule:
 
 ```python
@@ -186,7 +191,7 @@ one for `l=1`). The planned compiler rule infers that the inductive step must
 start at `l=1` — not `l=0` — because reading `H[i, l-1]` at `l=0` would
 reference the non-existent slice `H[:, -1]`. The rule is: the recurrence starts
 at `l = max_lookback`, where `max_lookback` is the largest offset among all
-`IterPrevRef` references on the RHS (here, 1), and exactly `max_lookback` base
+`IversonBinOp('-', l, k)` look-back patterns on the RHS (here, 1), and exactly `max_lookback` base
 case equations must be present.
 
 ```python
@@ -195,7 +200,9 @@ tl.H[i, l+1] = tl.H[i, l] + tl.H[i, l-1]   # design only (§5); no bound predica
 ```
 
 Multi-step look-back is out of scope for the current static design (§5); the
-`IterPrevRef` type anticipates it.
+`IversonBinOp('-', l, k)` produced by `l - k` anticipates it (the expression
+already evaluates correctly at the Python level via the monkey-patch; compiler
+and morphism support are what remain to be built).
 
 ### 2.4 Semantics of `l` on the RHS
 
@@ -306,9 +313,9 @@ iteration range is `[0, l._size._value - 1]`. An unsized `l` is a static error.
 The iteration range starts at 0 by convention. The base case equation must
 have the literal `0` at the `l` slot. A mismatch — e.g. a base case at `l=2`
 — leaves steps `0` and `1` undefined and is rejected. For two-term recurrences
-using `IterPrevRef`, a second base case at `l=1` must also be present; the
-compiler derives the required number of base cases from the maximum look-back
-offset among all `IterPrevRef` references in the recurrence equation.
+(design only; see §5), a second base case at `l=1` must also be present; the
+compiler would derive the required number of base cases from the maximum
+look-back offset among all `IversonBinOp('-', l, k)` references on the RHS.
 
 ### 4.3 Exactly one base case and one recurrence per iterative tensor
 
@@ -323,8 +330,9 @@ Zero, or more than one, of either is an error.
 
 Within any recurrence equation over `l`, an expression `H[..., l+1]` on the
 RHS reads a step that has not yet been computed. This is a static error. The
-compiler scans all RHS index tuples for `IterNextRef` objects and rejects any
-that appear.
+compiler scans all RHS index tuples for `IversonBinOp('+', axis, ...)` where
+the axis UID matches the recurrence axis and rejects any that appear
+(`_check_no_lnext_on_rhs` in `TensorDSL.py`).
 
 ### 4.5 `l` is not a contraction axis within a recurrence equation
 
@@ -363,9 +371,12 @@ by an input tensor's shape, the Iverson predicate cannot express it. A
 axis, would handle this case but is left for a later design iteration.
 
 **Multi-step look-back.** Recurrences of the form `H[i, l+1] = f(H[i, l], H[i, l-1])`
-require reading two previous steps. The DSL types (`IterPrevRef`, base case
-counting) are sketched in §2.3, but compiler and morphism support for this case
-are not part of the current implementation.
+require reading two previous steps. The expression `H[i, l-1]` already
+evaluates at the Python level — `l - 1` produces `IversonBinOp('-', l, 1)` via
+the monkey-patch — but the compiler does not yet classify this pattern as a
+valid look-back reference, and morphism support for multi-step look-back is not
+part of the current implementation. The base-case counting design is sketched in
+§2.3.
 
 **Non-sequential iteration order.** The compiled execution always steps `l`
 from lower to upper in unit increments. Reverse-mode, stride-2, or arbitrary
@@ -373,11 +384,11 @@ permutation orderings are not expressible.
 
 **Coupled recurrences with subset outputs.** When two or more tensors are
 coupled under `.iteration_axis(l)` and a downstream equation in the same `TL`
-session consumes only a subset of the coupled outputs, the chaining is
-incorrect: `ConstructedComposed` feeds the full output tuple to the next
-module, which expects a single tensor. Coupled scans must therefore be
-terminal in their `TL` session. Routing individual coupled outputs into
-further equations is not yet supported.
+session consumes only a subset of the coupled outputs, the live-pool routing in
+`ConstructedThreadedComposed` must correctly identify which state tensor maps
+to which downstream input. This routing is not yet verified for all coupled
+configurations. Routing individual coupled outputs into further equations may
+not work in all cases.
 
 ---
 
@@ -389,11 +400,13 @@ identifies the points of significant complexity.
 
 ### 6.1 Required DSL changes
 
-**New index reference types.** `RawAxis.__add__(int)` must return a typed
-`IterNextRef(axis, offset)` object rather than raising an error or returning an
-integer. `__setitem__` on `TensorProxy` recognises `IterNextRef` at an axis slot
-and records a recurrence equation. Symmetrically, `RawAxis.__sub__(int)` returns
-`IterPrevRef(axis, offset)` for use on the RHS in two-term recurrences.
+**Axis arithmetic via monkey-patch.** `TensorExpr.py` sets
+`RawAxis.__add__ = _rawaxis_add` and `RawAxis.__sub__ = _rawaxis_sub` at
+module-load time, so `l + 1` produces `IversonBinOp('+', l, 1)` and `l - 1`
+produces `IversonBinOp('-', l, 1)`. No separate `IterNextRef` or `IterPrevRef`
+types exist. `__setitem__` on `TensorProxy` detects an `IversonBinOp('+', RawAxis, int)`
+pattern in a LHS index slot and routes the assignment to `_register_iter_recur`
+rather than the normal `_register_entry` path.
 
 **Literal integer at the iteration axis slot.** `TensorProxy.__setitem__`
 currently expects `RawAxis` objects as indices. It must be extended to accept a
@@ -436,7 +449,7 @@ receive the correct axes for unification. The base case registration does not
 update `_name_to_axes[H]`. When the recurrence entry `H[i, l+1] = ...` is
 stored in `_pending_iter`, `_name_to_axes[H]` is set immediately to the full
 shape: `decl.shape` from `_declarations[H]` if declared, or `(i, l)` inferred
-from the recurrence LHS by replacing `IterNextRef(l, 1)` with `l`. If a
+from the recurrence LHS by replacing `IversonBinOp('+', l, 1)` with `l`. If a
 downstream equation references `H[i, l]` before the recurrence entry is
 processed, `_name_to_axes[H]` will be absent and no unification is attempted —
 consistent with existing behavior for forward references.
@@ -514,6 +527,10 @@ class Scan(fd.Term):
                           # coupled only: for each step morphism, the indices (into
                           # the canonical states tuple) it reads, in morphism-domain order.
                           # Empty tuple = all states in canonical order 0..n_states-1.
+    step_x_l_positions: tuple[int, ...] = ()
+                          # uncoupled only: axis position of l within each per-step
+                          # input as declared (e.g. W[l, i] → 0).  ConstructedScan
+                          # moves l to last before slicing.  Empty = l already last.
 ```
 
 `Scan` is directly analogous to the functional programming primitives `foldl`
@@ -603,18 +620,25 @@ sequential loop path:
 
 ```python
 def forward(self, *xs):
-    base_xs  = xs[:self.n_base]
-    step_xs  = xs[self.n_base:]
-    H0 = base_module(*base_xs)        # initial state
+    base_xs = xs[:self.n_base]
+    step_xs = xs[self.n_base:]
+    # Move l to the last axis of each per-step input that declares it elsewhere
+    # (e.g. W[l, i] has l at position 0; move it to -1 before slicing).
+    if self.step_x_l_positions:
+        step_xs = tuple(
+            x.movedim(p, -1) if p not in (-1, x.ndim - 1) else x
+            for x, p in zip(step_xs, self.step_x_l_positions)
+        )
+    H0 = to_tuple(self.base_module(*base_xs))[0]   # initial state
     if self._has_affine:
         return self._assoc_scan_forward(H0, step_xs)
-    return self._run_loop(H0, step_xs)
+    return self._loop(H0, step_xs)   # _loop is _run_loop wrapped in dynamo.disable
 
 def _run_loop(self, H, step_xs):
     outputs = [H]
     for l_idx in range(self.N):
         sliced = tuple(x[..., l_idx] for x in step_xs)  # l-last: slice trailing dim
-        H = step_module(H, *sliced)
+        H = to_tuple(self.step_module(H, *sliced))[0]   # unwrap tuple outputs
         outputs.append(H)
     return torch.stack(outputs, dim=-1)   # (*state, N+1)
 ```
@@ -630,20 +654,37 @@ combine function `(A₂, b₂) ∘ (A₁, b₁) = (A₂·A₁, A₂·b₁ + b₂
 is applied to `H0` to produce the full state sequence:
 
 ```python
+def _batch_module(self, module, positions, step_xs):
+    """Apply module to each l-step via vmap, returning shape (N, *out)."""
+    inputs_full = tuple(step_xs[j] for j in positions)  # each (*feat, N)
+    inputs_lf   = tuple(x.movedim(-1, 0) for x in inputs_full)  # (N, *feat)
+    return torch.vmap(module)(*inputs_lf)                # (N, *out)
+
 def _assoc_scan_forward(self, H0, step_xs):
-    # Batch over N via vmap; A_all/b_all have shape (N, *out).
-    A_all = vmap(A_module)(step_xs[a_positions, ...].movedim(-1, 0))
-    b_all = vmap(b_module)(step_xs[b_positions, ...].movedim(-1, 0))
+    # Batch A_l and b_l for all N steps via vmap; shape (N, *out).
+    # If A_module is None the recurrence is H[l+1] = H[l] + b_l (identity scale).
+    # If b_module is None the recurrence is H[l+1] = A_l · H[l] (no bias).
+    A_all = (self._batch_module(self.A_module, self.a_positions, step_xs)
+             if self.A_module is not None
+             else torch.ones(self.N, *H0.shape, device=H0.device, dtype=H0.dtype))
+    b_all = (self._batch_module(self.b_module, self.b_positions, step_xs)
+             if self.b_module is not None
+             else torch.zeros(self.N, *H0.shape, device=H0.device, dtype=H0.dtype))
+
+    is_matrix = self._state_matrix  # True when state has contracted (non-tiled) axes
 
     def combine(s1, s2):
         A1, b1 = s1; A2, b2 = s2
         if is_matrix:
-            return einsum('ij,jk->ik', A2, A1), einsum('ij,j->i', A2, b1) + b2
+            return torch.einsum('ij,jk->ik', A2, A1), torch.einsum('ij,j->i', A2, b1) + b2
         return A2 * A1, A2 * b1 + b2
 
-    A_prefix, b_prefix = associative_scan(combine, (A_all, b_all), dim=0, combine_mode='generic')
-    H_seq = (einsum('nij,j->ni', A_prefix, H0) + b_prefix) if is_matrix else (A_prefix * H0 + b_prefix)
-    return cat([H0.unsqueeze(0), H_seq], dim=0).movedim(0, -1)  # (*state, N+1)
+    A_prefix, b_prefix = _associative_scan(
+        combine, (A_all, b_all), dim=0, combine_mode='generic')
+    H_seq = (torch.einsum('nij,j->ni', A_prefix, H0) + b_prefix
+             if is_matrix else A_prefix * H0 + b_prefix)
+    H_lf = torch.cat([H0.unsqueeze(0), H_seq], dim=0)  # (N+1, *state)
+    return H_lf.movedim(0, -1)                          # (*state, N+1)
 ```
 
 `combine_mode='generic'` is used in all cases (scalar and matrix) because
@@ -706,9 +747,10 @@ def _run_loop_coupled(self, states, step_xs_per_state):
 ```
 
 The return value is a `tuple[Tensor, ...]` of shape `(*state_k, N+1)` per
-state, in canonical (sorted-by-name) order. `ConstructedComposed.forward` uses
-`to_tuple` on sub-module outputs, so the tuple propagates correctly through
-downstream composition chains.
+state, in canonical (sorted-by-name) order. `ConstructedThreadedComposed.forward`
+uses `to_tuple` on sub-module outputs and extends its live pool with the tuple
+elements, so individual states are accessible to downstream equations by their
+pool index.
 
 ### 6.5 Complexities
 
@@ -762,9 +804,9 @@ input counts and domain routing are correct even when a step morphism is
 independent of some other states in the group. `ConstructedScan._run_loop_coupled`
 applies Jacobi semantics: every step module sees the OLD states before any is
 replaced, and the forward method returns a tuple of history tensors (one per
-state) that `ConstructedComposed` propagates via its existing `to_tuple`
-handling. Known limitation: downstream TL equations that consume only a subset
-of coupled outputs cannot be chained in the same `TL` session.
+state) that `ConstructedThreadedComposed` propagates via its live-pool routing.
+Known limitation: downstream TL equations that consume only a subset of coupled
+outputs may not route correctly in all configurations (§5).
 
 **`torch.compile` transparency.** A Python `for` loop in `ConstructedScan._run_loop`
 is not FX-graph-transparent. `torch.compile` will attempt to trace through it,

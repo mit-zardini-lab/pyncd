@@ -13,7 +13,7 @@ relevant PyTorch internals; the main content is the pyncd compilation pipeline.
 A Br morphism expressed in pyncd's DSL passes through three stages before it
 can be executed:
 
-```
+```text
 Python DSL (TensorDSL / operator constructors)
       │
       │  __setitem__  →  _register_entry()   ← called once per equation,
@@ -210,21 +210,27 @@ element of a `Composed` chain rather than as a top-level morphism.
 
 ## 3. Stage 2 — Categorical IR to `nn.Module`: `ConstructedModule.construct()`
 
-The entry point (`torch_compile/torch_compile.py:42`) is a class method that
+The entry point (`torch_compile/torch_compile.py:54`) is a class method that
 pattern-matches on the morphism type. Stage 1 may produce a `Broadcasted`
 (single-chain assignment), a `Composed(ProductOfMorphisms, AdditionOp_br)`
-(additive sum), or a `Composed` of multiple entries (multi-equation `TL`);
+(additive sum), a `ThreadedComposed` (multi-equation `TL`, the general path),
+or one of the index-arithmetic morphisms (`Scan`, `Slice`, `Reindex`, `Scatter`);
 all are handled by the same match:
 
 ```python
 @classmethod
 def construct(cls, target: cat.Morphism) -> ConstructedModule:
     match target:
-        case cat.Rearrangement():  return ConstructedRearrangement(target)
-        case cat.ProductOfMorphisms(): return ConstructedProduct(target)
-        case cat.Composed():       return ConstructedComposed(target)
-        case cat.Block():          return ConstructedBlock(target)
-        case cat.Broadcasted():    return cls.construct_broadcasted(target)
+        case cat.Rearrangement():       return ConstructedRearrangement(target)
+        case cat.ProductOfMorphisms():  return ConstructedProduct(target)
+        case cat.ThreadedComposed():    return ConstructedThreadedComposed(target)
+        case cat.Composed():            return ConstructedComposed(target)
+        case cat.Block():               return ConstructedBlock(target)
+        case cat.Broadcasted():         return cls.construct_broadcasted(target)
+        case Scan():                    return ConstructedScan(target)
+        case Slice():                   return ConstructedSlice(target)
+        case Reindex():                 return ConstructedReindex(target)
+        case Scatter():                 return ConstructedScatter(target)
 ```
 
 For `Broadcasted` morphisms, `construct_broadcasted()` looks up the operator
@@ -306,15 +312,11 @@ class ConstructedTensorEquation(ConstructedModule, operation_key=cat.TensorEquat
         self._caller_positions = [i for i, s in enumerate(self._factor_slots) if s is None]
 
     def forward(self, *xs):
-        caller_idx = 0
-        full_tensors = []
-        for slot in self._factor_slots:
-            if slot is not None:
-                full_tensors.append(getattr(self, slot))  # pre-built buffer
-            else:
-                full_tensors.append(xs[caller_idx])       # caller-provided
-                caller_idx += 1
-        result = einops.einsum(*full_tensors, self.signature)
+        # Caller inputs (*xs) first, then auto-buffered Iverson tensors.
+        # generate_tensor_equation_signature() appends buffer segments after
+        # domain segments so the einops string matches this ordering.
+        buffer_inputs = [getattr(self, s) for s in self._factor_slots if s is not None]
+        result = einops.einsum(*xs, *buffer_inputs, self.signature)
         if self.demote:
             return (result > 0).to(result.dtype)          # Heaviside for Bool output
         return result
@@ -380,10 +382,11 @@ class ConstructedLinear(ConstructedModule, operation_key=ops.Linear):
 Wraps `nn.Embedding` for `Embedding` operators. The embedding table is indexed
 by a `Natural`-typed input weave; the output weave carries `Reals`.
 
-### 4.5 `ConstructedNorm` — layer normalisation
+### 4.5 `ConstructedNorm` — sum normalisation
 
-Wraps `nn.LayerNorm` for `Normalize` operators. The normalised axes are read
-from the output weave shape.
+Handles `Normalize` operators. Computes `x / x.sum(dim).clamp(min=1e-8)` —
+**sum-normalisation**, not LayerNorm. The reduction dimension is determined by
+`bcast.get_displacement(target)`, falling back to the last axis if unresolvable.
 
 ### 4.6 `ConstructedRearrangement` — axis permutation
 
@@ -398,11 +401,29 @@ instances. The function is looked up in `functions_registry` and wrapped by
 `broadcast_func()`. Built-in examples:
 
 | Operator | PyTorch function |
-|---|---|
+| --- | --- |
 | `SoftMax` | `torch.softmax(x, dim=…)` |
 | `AdditionOp` | `lambda x, y: x + y` |
 | `Elementwise` | `torch.relu` |
+| `ReLU` | `torch.relu` |
 | `WeightedTriangularLower` | custom `weighted_triangular_lower()` |
+
+### 4.8 `ConstructedMaskedSoftMax` — softmax with Iverson gate
+
+Handles `MaskedSoftMax` operators (produced by `softmax(expr, where=…)` in the
+DSL). Each Iverson factor in `op.iverson_factors` is pre-materialised as a
+buffer, then collapsed to a diagonal if any axis appears more than once (using
+`_iverson_diagonal`). In `forward`, each mask buffer is permuted and
+unsqueeze-broadcast to the score shape using compile-time `op.mask_alignments`
+metadata, then `masked_fill(-inf)` excludes positions before `torch.softmax`.
+
+### 4.9 `ConstructedMaskedNormalize` — normalize with Iverson gate
+
+Handles `MaskedNormalize` operators (produced by `normalize(expr, where=…)`).
+Structurally identical to `ConstructedMaskedSoftMax` but instead of
+`masked_fill(-inf)` it zeros excluded positions by elementwise-multiplying by
+the mask, then applies the sum-normalization denominator — so masked output
+positions are exactly zero.
 
 ---
 
@@ -453,7 +474,27 @@ tensors whose leading dimensions are the full degree.
 
 ---
 
-## 6. Composite Morphisms
+## 6. Composite and Structural Morphisms
+
+### `ConstructedThreadedComposed` — live-pool routing
+
+The output of `tl.to_morphism()` for any multi-equation program. Unlike
+`ConstructedComposed`, which threads the output of each step as the full input
+to the next, `ConstructedThreadedComposed` maintains a **live pool** of all
+tensors produced so far. Each morphism in `target.content` receives a specific
+slice of that pool (recorded in `target.routing`); its outputs are appended to
+the pool. The final outputs are the last morphism's return values. This allows
+later morphisms to read tensors produced by any earlier step, not just the
+immediately preceding one — needed when equations share intermediate values.
+
+```python
+def forward(self, *xs):
+    live = list(xs)
+    for module, route in zip(self.chain, self.routing):
+        last = to_tuple(module(*(live[i] for i in route)))
+        live.extend(last)
+    return last
+```
 
 ### `ConstructedComposed` — sequential composition
 
@@ -489,7 +530,61 @@ the output of each copy as input to the next. A single repetition is simply
 
 ---
 
-## 7. PyTorch Compilation Background
+## 7. Index-Arithmetic and Iteration Morphisms
+
+These morphisms are produced by the DSL's index-arithmetic and recurrence
+features and are matched directly in `construct()` — they bypass
+`construct_broadcasted()` and the operator registries entirely.
+
+### `ConstructedSlice` — constant-index read
+
+Realises a `Slice` morphism (`tl.Y[i] = tl.X[i, 3]`). In `forward`, applies
+`torch.select` once per constant slot in high-to-low position order so that
+earlier axis positions stay valid as later axes are dropped.
+
+### `ConstructedReindex` — affine gather
+
+Realises a `Reindex` morphism (shift, stride, dilation, convolution window,
+diagonal). In `forward`, builds one `torch.arange` grid per output axis, then
+for each input axis computes the affine index `const + Σ coeff·grid[k]` and
+uses them together as an advanced index into the input tensor. All output axes
+must have concrete sizes (required at construction time).
+
+### `ConstructedScatter` — affine scatter
+
+Realises a `Scatter` morphism (`tl.Y[2*i] = tl.X[i]`). In `forward`, builds
+an output tensor pre-filled with `self.fill` (default `0`), then places values
+at the affine output positions via advanced indexing. When `self.reduce == 'sum'`
+it uses `index_put_(accumulate=True)` to handle non-injective maps; otherwise
+a plain assignment is used (and a non-injective map would have been rejected at
+build time).
+
+### `ConstructedScan` — iterative recurrence
+
+Realises a `Scan` morphism (produced by base-case + step equations, or
+`.recur()`). Has two modes:
+
+**Uncoupled** (`n_states == 1`): `forward(*xs)` receives base-case inputs
+`xs[:n_base]` followed by per-step inputs `xs[n_base:]` (each with step count
+`N` as the **last** dimension). It runs the base module once to get `H0`, then
+either:
+
+- **Associative scan fast path** — when the step is affine in the state
+  (`H[l+1] = A_l·H[l] + b_l`), detected at compile time: batches `A_l` and
+  `b_l` via `torch.vmap` then calls `torch.associative_scan` for O(log N)
+  parallel execution.
+- **Sequential loop** — general case; wrapped in `torch._dynamo.disable` to
+  prevent Dynamo from unrolling the Python loop.
+
+Output shape: `(*state, N+1)` — the base value at index 0, then N steps.
+
+**Coupled** (`n_states > 1`, Jacobi): multiple states update simultaneously,
+each step seeing the *old* values of all states. Returns a tuple of
+`(*state_k, N+1)` tensors in canonical (name-sorted) order.
+
+---
+
+## 9. PyTorch Compilation Background
 
 This section describes what happens when `torch.compile` is applied to a
 `ConstructedModule`. It can be skipped if you are only interested in how
@@ -573,7 +668,7 @@ FX graphs exist at two levels corresponding to stages 1 and 2:
 
 ---
 
-## 8. Bool Semiring in the Compilation Pipeline
+## 10. Bool Semiring in the Compilation Pipeline
 
 pyncd's bool semiring is implemented at two levels that are worth keeping
 distinct: the **symbolic level** (pyncd Python objects describing the
@@ -718,7 +813,7 @@ einops.einsum(…)            →   aten.einsum          →  Reduction or Exter
 
 ---
 
-## 9. Worked Example: Causal Masked Two-Hop Graph Attention
+## 11. Worked Example: Causal Masked Two-Hop Graph Attention
 
 This section traces a richer computation end-to-end through the pipeline. It
 involves three inputs in one stage, the Bool semiring with an Iverson predicate,
@@ -1149,18 +1244,25 @@ the `gt → to` epilogue for Gate, one without for Y.
 | --- | --- | --- |
 | DSL assignment (single chain) | `TL`, `_build_rhs_morphism` | `__setitem__` → `bc_signature()` internally |
 | DSL assignment (additive sum) | `TL`, `_build_sum_morphism` | `__setitem__` → `Composed(ProductOfMorphisms, AdditionOp_br)` |
-| Categorical IR retrieval | `TL` | `tl.to_morphism()` |
+| Categorical IR retrieval | `TL` | `tl.to_morphism()` → `ThreadedComposed` |
 | Categorical IR | `Broadcasted`, `Weave`, `Axis` | `bc_signature()` on each operator |
 | Operator dispatch | `ConstructedModule` | `.construct()`, `operation_registry` |
 | Einsum/contraction | `ConstructedTensorEquation` | `generate_tensor_equation_signature()` |
 | Einops rearrangement | `ConstructedEinops` | `generate_einops_signature()` |
+| Masked softmax | `ConstructedMaskedSoftMax` | `masked_fill(-inf)` + `torch.softmax` |
+| Masked normalize | `ConstructedMaskedNormalize` | zero-mask + sum-normalization |
 | Learned linear | `ConstructedLinear`, `Multilinear` | `torch.tensordot` |
 | Embedding | `ConstructedEmbedding` | `nn.Embedding` |
-| Normalisation | `ConstructedNorm` | `nn.LayerNorm` |
+| Sum normalisation | `ConstructedNorm` | `x / x.sum(dim).clamp(min=1e-8)` |
 | Functional ops | `Lambda` | `functions_registry` + `broadcast_func()` |
 | Broadcasting | `broadcast_func()` | `vmap`, reshape, or `dim=` |
+| Live-pool routing | `ConstructedThreadedComposed` | pool + `routing` indices |
 | Sequential composition | `ConstructedComposed` | `nn.Sequential` chain |
 | Parallel morphisms | `ConstructedProduct` | `target.partition()` |
 | Repetition | `ConstructedBlock` | `nn.Sequential` copies |
+| Constant-index read | `ConstructedSlice` | `torch.select` per slot |
+| Affine gather | `ConstructedReindex` | `meshgrid` + advanced index |
+| Affine scatter | `ConstructedScatter` | `index_put_` / advanced assignment |
+| Iterative recurrence | `ConstructedScan` | `associative_scan` or sequential loop |
 | Bool semiring | `demote` flag | Heaviside `(x > 0).to(dtype)` |
 | PyTorch compilation | `torch.compile` | Dynamo → AOTAutograd → Inductor |

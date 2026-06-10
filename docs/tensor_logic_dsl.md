@@ -71,9 +71,9 @@ Python axis object used in two places means the same index. Four constructors:
 | Constructor | Returns | Use |
 |---|---|---|
 | `axes('i j k')` | tuple of `RawAxis` (free size) | quick, unsized index variables |
-| `real_axis('d', 512)` | `RawAxis` (ℝ dimension, optional size) | a real-valued dimension |
+| `real_axis('d', 512)` | `RawAxis` (optional size) | named axis, typically a feature dimension |
 | `norm_axis('x', N)` | `NormAxis` | the axis a softmax/normalize reduces over |
-| `nat_axis('t', 50000)` | `NatAxis` | a natural-number / index dimension (ℕ) |
+| `nat_axis('t', 50000)` | `NatAxis` | named axis, typically a discrete index dimension |
 
 ```python
 i, j, k = axes('i j k')          # variadic-in-one-string
@@ -84,8 +84,8 @@ d = real_axis('d', 512)          # concrete size 512  → d._size == Integer(512
 d = real_axis('d')               # free size          → d._size is FreeNumeric
 ```
 
-**Sizes matter for three features:** auto-materialising predicates (§5), iteration
-(§7), and index-arithmetic range validation (§8) all require concrete integer sizes on
+**Sizes matter for three features:** auto-materialising predicates ([§5](#5-predicates-iverson-brackets)), iteration
+([§7](#7-iteration-and-recurrence)), and index-arithmetic range validation ([§8](#8-index-arithmetic)) all require concrete integer sizes on
 the relevant axes. Plain contractions do not — `axes(...)` is enough.
 
 **`norm_axis`** marks the normalisation dimension on the *left-hand side* of a
@@ -94,6 +94,16 @@ constant along that axis (`softmax(f + c) == softmax(f)` when `c` does not depen
 the norm axis).
 
 **`nat_axis`** marks an index dimension.
+
+**On the `real_` and `nat_` qualifiers.** Despite the names, neither `real_axis`
+nor `nat_axis` attaches a datatype to the axis. Datatypes (`Reals()`, `Natural()`,
+`Bool()`) live on `Weave` objects and are determined by tensor declarations
+(`.predicate()`, `.linear()`, etc.), not by axis constructors. The qualifiers are
+advisory labels: `real_axis` is identical to `axes()` except for accepting a name
+and optional concrete size; `nat_axis` produces a `NatAxis` subclass that the
+compiler treats as a plain `RawAxis` for all purposes except acset serialisation
+metadata. The distinction is useful as documentation — ℝ feature dimensions vs.
+ℕ index dimensions — but the compiler does not enforce it.
 
 ---
 
@@ -153,7 +163,7 @@ tl.Wq.linear(out_axes=(i,), in_axes=(k,))                    # a Linear layer we
 - **`.tensor(*shape)`** — default contraction semantics, no promotion.
 - **`.predicate(*shape)`** — marks the name `Bool`-typed. When such a tensor is the
   *output* of an equation, the einsum result is demoted with the Heaviside step
-  $H(x)=\mathbf 1[x>0]$ to `{0,1}` (∃/∧ semantics — see §6). Axes are not promoted.
+  $H(x)=\mathbf 1[x>0]$ to `{0,1}` (∃/∧ semantics — see [§6](#6-normalisations-and-nonlinearities)). Axes are not promoted.
 - **`.linear(*, out_axes, in_axes, bias=False)`** — marks the name as the weight of a
   **Linear/affine layer**. When it multiplies an activation in an equation, the
   contraction compiles to an `ops.Linear` operator (an `L` box) instead of an einsum:
@@ -163,6 +173,20 @@ tl.Wq.linear(out_axes=(i,), in_axes=(k,))                    # a Linear layer we
   e.g. a QKV projection `tl.Wq.linear(out_axes=(h, k), in_axes=(d,))` used as
   `tl.Q[q, h, k] = tl.Wq[h, k, d] * tl.X[q, d]` maps `d → (h, k)`. See
   [dsl_examples.md](dsl_examples.md) Example 1 for an MLP built from `.linear()` layers.
+- **`.scatter(*, fill=0.0, reduce=None)`** — configures output behaviour for a tensor
+  whose LHS uses an affine expression (`tl.Y[2*i]`, `tl.Y[i+j]`). `fill` sets the
+  value written to output coordinates the affine map does not reach (default `0`).
+  `reduce='sum'` permits non-injective maps by accumulating overlapping writes; without
+  it, a non-injective LHS is rejected at build time. See [§8](#8-index-arithmetic) for
+  examples (custom fill, upsampling, convolution-coefficient scatter).
+- **`.iteration_axis(l)`** — registers a tensor as iterative and records `l` as its
+  recurrence axis. The iteration axis is a plain `real_axis` whose concrete integer size
+  is the step count `N`; there is no special iteration-axis constructor. This call is
+  required for coupled recurrences (where a step equation reads a sibling state that has
+  not yet been written) and optional for uncoupled ones. It also gates the LHS syntax:
+  without it (and without a base case), an `axis+int` write — `tl.Y[i+1]` — is
+  reclassified as an offset scatter at finalize time. See [§7](#7-iteration-and-recurrence)
+  for the full iteration model, calling convention, and coupled vs. uncoupled examples.
 
 ---
 
@@ -361,13 +385,13 @@ is the iteration axis with a concrete step count `N`.
 
 > **The iteration axis is a plain `real_axis`** — there is no special iteration-axis
 > constructor (the only constructors are `axes`, `real_axis`, `norm_axis`, `nat_axis`;
-> `norm_axis` is for the softmax/normalize reduction dimension, §6, not iteration). The
+> `norm_axis` is for the softmax/normalize reduction dimension, [§6](#6-normalisations-and-nonlinearities), not iteration). The
 > similarly named `tl.H.iteration_axis(l)` is a *method*, not a constructor: it
 > *registers* `H` as iterative and records `l` as its recurrence axis so forward
 > references resolve (required for coupled recurrences; optional for uncoupled ones when
 > both the base and step are written before `to_morphism()`). It also explicitly marks
 > the tensor as iterative — without it (and without a base case), an `axis+int` LHS is
-> reclassified as an offset scatter at finalize time (§8). The axis needs a concrete
+> reclassified as an offset scatter at finalize time ([§8](#8-index-arithmetic)). The axis needs a concrete
 > integer size because that size is the step count `N`.
 
 ### Uncoupled (single state)
@@ -458,7 +482,7 @@ extra per-step inputs) — substitute it for `relu_step()` above.
 A downstream equation can read any fixed step of the scan output with a constant
 index. The materialised history has shape `(*state, N+1)` (base at index 0, then N
 steps), so valid indices are `0 ≤ c ≤ N`; an out-of-range index is rejected at build
-time. This is a special case of the constant-index gather in §8.
+time. This is a special case of the constant-index gather in [§8](#8-index-arithmetic).
 
 ```python
 i = real_axis('i', 3); l = real_axis('l', 4)
@@ -507,7 +531,7 @@ coordinates the image does not reach by default.
 **The iteration gate.** An `axis+int` LHS (`Y[i+1]`) has the same syntax as a
 recurrence step (`H[i, l+1]`). The two are distinguished at finalize time: if the
 tensor carries a base case, a `.recur()` morphism, or an explicit `.iteration_axis()`
-call it remains a recurrence; otherwise it is reclassified as a scatter (§7 explains
+call it remains a recurrence; otherwise it is reclassified as a scatter ([§7](#7-iteration-and-recurrence) explains
 the full iteration model).
 
 ### Constant reads
@@ -732,6 +756,22 @@ Pick the entry point by what you built:
 
 The usual path is `construct(tl.to_morphism())`. For a single plain equation,
 `construct(tl.bc_signature())` is equivalent and slightly more direct.
+
+**Inspecting the einops signature.** `generate_tensor_equation_signature(bc)` takes a
+single-equation `Broadcasted` and returns the einops contraction string that
+`ConstructedTensorEquation` will use — useful for debugging contraction structure:
+
+```python
+from torch_compile.torch_compile import generate_tensor_equation_signature
+
+i, j, k = axes('i j k')
+tl = TL(); tl.Y[i, j] = tl.W[i, k] * tl.X[k, j]
+print(generate_tensor_equation_signature(tl.bc_signature()))
+# '... y0 x0, ... x0 y1 -> ... y0 y1'
+```
+
+Degree axes get tags `y0, y1, …`; contracted axes get `x0, x1, …`. The same axis
+object always receives the same tag, so shared UIDs across weaves contract correctly.
 
 ```python
 tl = TL(); i, j, k = axes('i j k')
