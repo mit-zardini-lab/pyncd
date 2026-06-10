@@ -63,7 +63,8 @@ class ArrayRow:
     max_value:       nm.Numeric | None = None
     bias:            bool | None       = None
     elementwise_fn:  str | None        = None
-    iverson_expr:    str | None        = None
+    op_predicate:    str | None        = None   # MASKED_SOFTMAX/MASKED_NORMALIZE outputs only
+    wire_label:      str | None        = None   # BOOL-typed rhs Iverson factor inputs only
 
 
 @dataclass

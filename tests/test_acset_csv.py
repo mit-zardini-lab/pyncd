@@ -215,12 +215,11 @@ def test_write_sbr_equations_headers(tmp_path):
 def test_write_sbr_arrays_headers(tmp_path):
     write_sbr(_identity_sbr(), tmp_path)
     with open(tmp_path / 'arrays.csv') as f:
-        expected = {
+        assert set(csv.DictReader(f).fieldnames) == {
             'equation_idx', 'slot', 'name', 'is_input', 'operator_tag',
             'norm_axis', 'datatype_tag', 'max_value', 'bias', 'elementwise_fn',
-            'iverson_expr',
+            'op_predicate', 'wire_label',
         }
-        assert set(csv.DictReader(f).fieldnames) == expected
 
 
 def test_write_sbr_array_axes_headers(tmp_path):

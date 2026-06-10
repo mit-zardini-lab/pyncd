@@ -32,7 +32,7 @@ class _OpFields:
     tag: OpTag
     bias: bool | None
     elementwise_fn: str | None
-    iverson_expr: str | None = None
+    op_predicate: str | None = None
 
 
 _TAG_FROM_TYPE: dict[type, OpTag] = {
@@ -65,7 +65,7 @@ def _operator_fields(op) -> _OpFields:
             else:
                 parts = ' '.join(_serialize_iverson(p) for p in preds)
                 expr = f'(and {parts})'
-            return _OpFields(OpTag.MASKED_SOFTMAX, None, None, iverson_expr=expr)
+            return _OpFields(OpTag.MASKED_SOFTMAX, None, None, op_predicate=expr)
         return _OpFields(OpTag.SOFTMAX, None, None)
     if isinstance(op, ops.Normalize):
         if op.where_predicate:
@@ -75,7 +75,7 @@ def _operator_fields(op) -> _OpFields:
             else:
                 parts = ' '.join(_serialize_iverson(p) for p in preds)
                 expr = f'(and {parts})'
-            return _OpFields(OpTag.MASKED_NORMALIZE, None, None, iverson_expr=expr)
+            return _OpFields(OpTag.MASKED_NORMALIZE, None, None, op_predicate=expr)
         return _OpFields(OpTag.NORMALIZE, None, None)
     tag = _TAG_FROM_TYPE.get(type(op))
     if tag is None:
@@ -125,7 +125,7 @@ def _add_equation(
         max_value=out_max_value,
         bias=op.bias,
         elementwise_fn=op.elementwise_fn,
-        iverson_expr=op.iverson_expr,
+        op_predicate=op.op_predicate,
     ))
     for pos, ax in enumerate(eq.lhs_indices):
         inst.axis_sizes[ax.uid] = ax.local_size()
@@ -155,7 +155,7 @@ def _add_equation(
                 name=None,
                 is_input=True,
                 datatype_tag=DataTag.BOOL,
-                iverson_expr=_serialize_iverson(factor),
+                wire_label=_serialize_iverson(factor),
             ))
         for pos, ax in enumerate(input_axes):
             inst.axis_sizes[ax.uid] = ax.local_size()

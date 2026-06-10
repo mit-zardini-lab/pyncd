@@ -154,7 +154,7 @@ def write_sbr(inst: SBrInstance, directory: Path) -> None:
         w = csv.DictWriter(f, fieldnames=[
             'equation_idx', 'slot', 'name', 'is_input', 'operator_tag',
             'norm_axis', 'datatype_tag', 'max_value', 'bias', 'elementwise_fn',
-            'iverson_expr',
+            'op_predicate', 'wire_label',
         ])
         w.writeheader()
         for a in inst.arrays:
@@ -169,7 +169,8 @@ def write_sbr(inst: SBrInstance, directory: Path) -> None:
                 'max_value':     _numeric_str(a.max_value) if a.max_value is not None else '',
                 'bias':          _bool_str(a.bias),
                 'elementwise_fn': a.elementwise_fn or '',
-                'iverson_expr':  a.iverson_expr or '',
+                'op_predicate':  a.op_predicate or '',
+                'wire_label':    a.wire_label   or '',
             })
 
     with open(directory / 'array_axes.csv', 'w', newline='', encoding='utf-8') as f:
@@ -253,7 +254,8 @@ def read_sbr(directory: Path) -> SBrInstance:
                 max_value=_parse_numeric(row['max_value']) if row['max_value'] else None,
                 bias=_parse_bool(row['bias']),
                 elementwise_fn=row['elementwise_fn'] or None,
-                iverson_expr=row.get('iverson_expr') or None,
+                op_predicate=row.get('op_predicate') or None,
+                wire_label=row.get('wire_label') or None,
             ))
 
     with open(directory / 'array_axes.csv', newline='', encoding='utf-8') as f:

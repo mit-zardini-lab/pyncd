@@ -608,7 +608,7 @@ def test_iverson_factor_produces_bool_array_row():
 
 
 def test_iverson_factor_serializes_expr():
-    """An Iverson factor's ArrayRow stores a non-empty iverson_expr string."""
+    """An Iverson factor's ArrayRow stores a non-empty wire_label string."""
     q = RawAxis.named('q')
     x = RawAxis.named('x')
     pred = q < x
@@ -623,8 +623,8 @@ def test_iverson_factor_serializes_expr():
     )
     inst = from_tensor_equation(eq)
     iverson_array = next(a for a in inst.arrays if a.slot == 2)
-    assert iverson_array.iverson_expr is not None
-    assert len(iverson_array.iverson_expr) > 0
+    assert iverson_array.wire_label is not None
+    assert len(iverson_array.wire_label) > 0
 
 
 def test_iverson_factor_axes_are_registered():
@@ -662,8 +662,8 @@ def test_masked_softmax_operator_tag():
     assert out.operator_tag == OpTag.MASKED_SOFTMAX
 
 
-def test_masked_softmax_iverson_expr_populated():
-    """The output array for MASKED_SOFTMAX must have iverson_expr set to the serialized predicate."""
+def test_masked_softmax_op_predicate_populated():
+    """The output array for MASKED_SOFTMAX must have op_predicate set to the serialized predicate."""
     from data_structure.TensorDSL import norm_axis, real_axis
     q = real_axis('q', 4)
     x = norm_axis('x', 4)
@@ -676,8 +676,8 @@ def test_masked_softmax_iverson_expr_populated():
     )
     inst = from_tensor_equation(eq)
     out = next(a for a in inst.arrays if not a.is_input)
-    assert out.iverson_expr is not None
-    assert '<=' in out.iverson_expr
+    assert out.op_predicate is not None
+    assert '<=' in out.op_predicate
 
 
 def test_plain_softmax_is_still_softmax():
@@ -693,11 +693,11 @@ def test_plain_softmax_is_still_softmax():
     inst = from_tensor_equation(eq)
     out = next(a for a in inst.arrays if not a.is_input)
     assert out.operator_tag == OpTag.SOFTMAX
-    assert out.iverson_expr is None
+    assert out.op_predicate is None
 
 
 def test_masked_softmax_roundtrips_through_csv(tmp_path):
-    """MASKED_SOFTMAX with iverson_expr round-trips through write_sbr/read_sbr."""
+    """MASKED_SOFTMAX with op_predicate round-trips through write_sbr/read_sbr."""
     from acset.csv_io import write_sbr, read_sbr
     from data_structure.TensorDSL import norm_axis, real_axis
     q = real_axis('q', 4)
@@ -714,8 +714,8 @@ def test_masked_softmax_roundtrips_through_csv(tmp_path):
     inst2 = read_sbr(tmp_path)
     out2 = next(a for a in inst2.arrays if not a.is_input)
     assert out2.operator_tag == OpTag.MASKED_SOFTMAX
-    assert out2.iverson_expr is not None
-    assert '<=' in out2.iverson_expr
+    assert out2.op_predicate is not None
+    assert '<=' in out2.op_predicate
 
 
 def test_masked_normalize_serialises_to_masked_normalize_tag():
@@ -731,4 +731,42 @@ def test_masked_normalize_serialises_to_masked_normalize_tag():
     inst = from_tensor_equation(eq)
     out_row = next(r for r in inst.arrays if not r.is_input)
     assert out_row.operator_tag == OpTag.MASKED_NORMALIZE
-    assert out_row.iverson_expr is not None
+    assert out_row.op_predicate is not None
+
+
+def test_masked_softmax_uses_op_predicate():
+    """MASKED_SOFTMAX must set op_predicate and leave wire_label None:
+    conflating them would cause downstream Lean consumers to apply mask logic to the wrong object."""
+    from data_structure.TensorDSL import NormAxis
+    from data_structure.TensorExpr import IversonBinOp
+    p = RawAxis(_size=Integer(4))
+    q = RawAxis(_size=Integer(4))
+    norm = NormAxis(_size=Integer(4))
+    eq = TensorEquation(
+        lhs_name=fd.DynamicName.from_str('Y'),
+        lhs_indices=[p, q],
+        rhs=(TensorRef(fd.DynamicName.from_str('X'), (p, q)),),
+        operator=SoftMax(where_predicate=[IversonBinOp('<=', q, norm)]),
+    )
+    inst = from_tensor_equation(eq)
+    out_arr = next(a for a in inst.arrays if not a.is_input)
+    assert out_arr.op_predicate is not None and len(out_arr.op_predicate) > 0
+    assert out_arr.wire_label is None
+
+
+def test_bool_input_uses_wire_label():
+    """A BOOL-typed rhs Iverson factor must set wire_label and leave op_predicate None:
+    conflating them would cause Lean to treat a wire label as a mask predicate."""
+    from data_structure.TensorExpr import IversonBinOp
+    p = RawAxis(_size=Integer(4))
+    q = RawAxis(_size=Integer(4))
+    pred_factor = IversonBinOp('<=', p, q)
+    eq = TensorEquation(
+        lhs_name=fd.DynamicName.from_str('Y'),
+        lhs_indices=[p, q],
+        rhs=(pred_factor,),
+    )
+    inst = from_tensor_equation(eq)
+    bool_arr = next(a for a in inst.arrays if a.is_input)
+    assert bool_arr.wire_label is not None and len(bool_arr.wire_label) > 0
+    assert bool_arr.op_predicate is None
