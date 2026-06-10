@@ -193,6 +193,9 @@ ProdCategory[L, M] = M                         -- atomic base morphism
                    | Rearrangement[L]          -- permutation / copy / discard
                    | Block[L, M]               -- named sub-expression
                    | Scan[L, M]               -- iterative scan (see §6)
+                   | Slice                    -- constant-index read (index arithmetic)
+                   | Reindex                  -- affine gather (index arithmetic)
+                   | Scatter                  -- affine scatter (index arithmetic)
 ```
 
 The framework specialises to two concrete categories.
@@ -571,23 +574,19 @@ For programs that need to inspect or re-process the underlying `TensorEquation` 
 ```python
 tl.W_in.tensor(real_axis('d_ff', 2048), real_axis('d', 512))
 tl.Mask.predicate(real_axis('q'), real_axis('x'))
-tl.E.selection(nat_axis('v', 50257), real_axis('d', 512))
+tl.Wq.linear(out_axes=(h, k), in_axes=(d,))
 ```
 
-Declarations are registered via `.tensor()`, `.predicate()`, and `.selection()` on a `TensorProxy` and stored in `TL._declarations`. They have two effects at indexing time: **arity checking** (the number of indices must match the declared shape) and **axis promotion** for SELECTION kinds. SELECTION tensors promote indices at positions declared as `NatAxis` to `NatAxis`. PREDICATE tensors carry `Bool` datatype metadata (used in `bc_signature()`) but do not promote axes. TENSOR declarations perform no promotion — they carry shape and size metadata only.
+Declarations are registered via `.tensor()`, `.predicate()`, `.linear()`, `.scatter()`, and `.iteration_axis()` on a `TensorProxy` and stored in `TL._declarations`. The first two have one effect at indexing time: **arity checking** (the number of indices must match the declared shape). PREDICATE tensors additionally carry `Bool` datatype metadata (used in `bc_signature()`). `.linear()` marks the tensor as a learned weight; when it multiplies an activation the contraction compiles to `ops.Linear` (an `L` box) rather than an einsum, with the weight as an internal parameter. Declarations are **entirely optional** — when absent, all existing behaviour (contraction detection, UID-based axis unification, `bc_signature()`, `to_morphism()`) is unchanged.
 
-**Typed axes** encode the ℕ vs ℝ distinction and optional concrete sizes directly on `Axis` objects:
+**Axis constructors** accept an optional concrete size. `real_axis` and `nat_axis` both return `RawAxis` subclasses and carry no compiler-enforced datatype — datatypes live on `Weave` objects, not axes. The qualifiers are advisory labels for documentation: `real_axis` is a convenience wrapper for a named, optionally-sized `RawAxis`; `nat_axis` returns a `NatAxis` subclass that the compiler treats as a plain `RawAxis` for all morphism-building purposes, used only in acset serialisation metadata:
 
 ```python
 nat_axis('v', 50257)   # NatAxis with _size = Integer(50257)
-nat_axis('v')          # NatAxis with _size = FreeNumeric  (type only, no size)
+nat_axis('v')          # NatAxis with _size = FreeNumeric
 real_axis('d', 512)    # RawAxis with _size = Integer(512)
-real_axis('d')         # RawAxis with _size = FreeNumeric  (type only, no size)
+real_axis('d')         # RawAxis with _size = FreeNumeric
 ```
-
-`NatAxis` is a frozen zero-field dataclass subclass of `RawAxis`, following the same pattern as the existing `NormAxis`. The type distinction is carried by the Python class; size is carried by the `_size` field inherited from `Axis`. A declaration without concrete sizes is valid and serves as a kind annotation without binding sizes.
-
-Declarations are **entirely optional**. When absent, all existing behaviour — contraction detection, UID-based axis unification, `bc_signature()`, `to_morphism()` — is completely unchanged.
 
 #### Implicit threading: `ThreadedComposed` and the live-pool model
 
@@ -630,11 +629,11 @@ tl.A[q, m]          = normalize(tl.Attn[q, m] + tl.H[q, m])   # H threaded, no f
 
 **Dead code elimination.** `to_morphism()` runs a backward BFS from the final entry over `input_names` before building the routing table. Equations whose output is never consumed by any downstream step (dead code) are dropped from the compiled `content` tuple, so the resulting `ThreadedComposed` contains no unreachable steps.
 
-**Scan in the live pool.** Uncoupled `Scan` entries (a single recurrent state, `n_states == 1`) now populate `input_names` via `_external_names_from_value()` and participate in the `ThreadedComposed` live-pool routing table like any other step. The plain `Composed` fallback in `to_morphism()` is only triggered for coupled Scans (`n_states > 1`) whose `input_names` remain empty.
+**Scan in the live pool.** Both uncoupled and coupled `Scan` entries participate in the `ThreadedComposed` live-pool routing table. Uncoupled entries (`n_states == 1`) populate `input_names` via `_external_names_from_value()`. Coupled entries (`n_states > 1`) are assembled by `_finalize_iter_group` with a synthetic `__coupled_<names>` LHS and included in `_entries` alongside other morphisms.
 
 #### Parallel product from dependency analysis
 
-Not yet implemented. A `TensorProgram`'s dependency DAG encodes parallelism implicitly: two equations with no directed path between them are independent and could be composed as `ProductOfMorphisms` rather than sequentially. The full program decomposes into alternating sequential steps and parallel blocks by finding **fork-join pairs** in the DAG — a fork where one tensor feeds multiple independent chains, a join where those chains reconverge. Between fork and join, the chains become the arguments of a `ProductOfMorphisms`; finding these pairs is a standard dominators/post-dominators analysis on the DAG.
+A `TensorProgram`'s dependency DAG encodes parallelism implicitly: two equations with no directed path between them are independent and could be composed as `ProductOfMorphisms` rather than sequentially. The full program decomposes into alternating sequential steps and parallel blocks by finding **fork-join pairs** in the DAG — a fork where one tensor feeds multiple independent chains, a join where those chains reconverge. Between fork and join, the chains become the arguments of a `ProductOfMorphisms`; finding these pairs is a standard dominators/post-dominators analysis on the DAG.
 
 The main complication is shared inputs: parallel branches often read from the same tensor (both attention heads read from the same embedded sequence). Since `ProductOfMorphisms` requires disjoint domain objects, shared inputs must be fanned out via a `Rearrangement` (copy mode) before the parallel block and outputs concatenated via another `Rearrangement` at the join. The UID-based `Axis` representation makes shared-input detection straightforward — the same `Axis` objects appearing in multiple branches are immediately identifiable.
 
@@ -642,7 +641,7 @@ This analysis is the inverse of tensor logic's conventional head-index trick, wh
 
 #### Symbolic Shape Inference
 
-Implemented. Tensor logic equations carry no size information. The DSL addresses this through **explicit axis annotation** and **eager size propagation**: `nat_axis('v', 50257)` and `real_axis('d', 512)` attach `Integer(n)` directly to the `_size` field of each axis at construction time, and tensor declarations carry this information positionally:
+Tensor logic equations carry no size information. The DSL addresses this through **explicit axis annotation** and **eager size propagation**: `nat_axis('v', 50257)` and `real_axis('d', 512)` attach `Integer(n)` directly to the `_size` field of each axis at construction time, and tensor declarations carry this information positionally:
 
 ```python
 tl.W_in.tensor(real_axis('d_ff', 2048), real_axis('d', 512))
@@ -658,31 +657,25 @@ Declaration axes are separate objects from the equation-level axes (always creat
 
 #### Tensor kind declarations
 
-The three-way distinction between contraction, selection, and predicate tensors is implemented in the Python DSL via tensor declarations. Each tensor is declared with a kind and a positional shape before it appears in equations:
+Each tensor is declared with a kind and a positional shape before it appears in equations:
 
 ```python
 tl.W_in.tensor(real_axis('d_ff', 2048), real_axis('d', 512))   # ℝ: sum over shared indices
-tl.E.selection(nat_axis('v', 50257), real_axis('d', 512))       # ℕ → ℝ: lookup by token ID
 tl.Mask.predicate(real_axis('q'), real_axis('x'))               # 𝔹: existential over shared indices
+tl.Wq.linear(out_axes=(h, k), in_axes=(d,))                    # ℝ → ℝ: learned weight
 ```
 
-Kind and shape together record what the tensor *is* independently of how it appears in any particular equation. This is the Python realisation of the arrow-notation design target — `.tensor()` for `ℝ → ℝ` weights, `.selection()` for `ℕ → ℝ` embedding tables, `.predicate()` for `(ℕ,ℕ) → 𝔹` relations — with size either concrete (`Integer(n)`) or left symbolic (`FreeNumeric`).
+Kind and shape together record what the tensor *is* independently of how it appears in any equation, with size either concrete (`Integer(n)`) or left symbolic (`FreeNumeric`). At indexing time, declarations enforce arity. The kind distinction is carried through `bc_signature()` via the `array_datatypes` argument: PREDICATE tensor names are mapped to `bc.Bool()`, so the resulting `Weave` objects carry the correct datatype for downstream code generation.
 
-At indexing time, declarations enforce arity and promote axis types: SELECTION tensors promote indices at positions declared as `NatAxis` to `NatAxis`. PREDICATE and TENSOR declarations carry shape and size metadata only, with no axis promotion. The type distinction survives through `bc_signature()` and `Context`-mediated unification and is visible in `TensorEquation.rhs` axis types.
+| Declaration | Semantics | pyncd datatype |
+| --- | --- | --- |
+| `.tensor(...)` | contraction — sum over shared indices | `Reals` |
+| `.predicate(...)` | predicate — Bool-typed, existential over shared indices | `Bool` |
+| `.linear(out_axes, in_axes)` | learned weight — compiles to `ops.Linear` | `Reals` |
 
-The three kinds map to the following equation-level notation and pyncd datatypes:
+**Embedding lookup.** pyncd encodes embedding lookups via `ops.Embedding.template(vocab_size)`, whose input weave has `Natural(vocab_size)` datatype. There is no `.selection()` declaration in the DSL; the distinction between a discrete token index (ℕ) and a summable weight (ℝ) is expressed at the operator level rather than at the declaration level. The design for a first-class DSL embedding equation is recorded in [dsl_embedding_lookup_extension.md](../docs/dsl_embedding_lookup_extension.md).
 
-| Declaration | Equation syntax | Python mechanism | Semantics | pyncd datatype | Status |
-| --- | --- | --- | --- | --- | --- |
-| `.tensor(...)` | `T[i, j]` | `__getitem__` | contraction — sum over shared indices | `Reals` | implemented |
-| `.predicate(...)` | `T[x, y]` | `__getitem__` | predicate — Bool-typed, existential over shared indices | `Bool` | implemented (axis promotion deferred) |
-| `.selection(...)` | `T[d]` with NatAxis slot | `__getitem__` | selection — lookup row by token ID | `Natural(max_value=n)` | implemented |
-
-All three kinds use `__getitem__` (`[]`) on `TensorProxy`. The declaration records the kind, and the DSL cross-validates usage at indexing time: arity is checked against the declared shape, and SELECTION tensors promote `NatAxis`-declared slots. The kind distinction is carried through `bc_signature()` via the `array_datatypes` argument: PREDICATE tensor names are mapped to `bc.Bool()`, and SELECTION tensor names to `bc.Natural(...)`, so the resulting `Weave` objects carry the correct datatype for downstream code generation.
-
-**Selection (embedding lookup).** The core distinction for selection is that tensor logic's contraction `Σ_i A[i,...] B[i,...]` *sums* over `i`, whereas a lookup *selects* one row — a token index is a pointer into a table, not a summable weight. The `.selection()` declaration captures this at the type level: positional slots declared as `NatAxis` are promoted at indexing time, flagging the vocabulary dimension as ℕ rather than ℝ. The lookup equation itself is deferred: pyncd already encodes it correctly via `ops.Embedding.template(vocab_size)`, whose input weave has `Natural(vocab_size)` as its datatype and empty shape, encoding the vocabulary axis as a type rather than a shape axis. Extending the DSL to express this as a first-class equation requires no pyncd changes; the full scope of issues is recorded in [dsl_embedding_lookup_extension.md](../docs/dsl_embedding_lookup_extension.md).
-
-**Predicate tensors.** The semiring distinction — Boolean `(𝔹, ∨, ∧)` vs arithmetic `(ℝ, +, ×)` — is partially implemented. `.predicate()` marks a tensor's datatype as `Bool` in `_array_datatypes()`, causing `bc_signature()` to emit `Weave(Bool(), ...)` for that tensor's input weave. However, contracted indices over predicate tensors are not yet distinguished from arithmetic summation — the `Einops` operator carries no `semiring` field. Realising the full semiring distinction requires adding a `semiring` field to `Einops`, updating contraction semantics for `Bool` inputs (∨ instead of +, ∧ instead of ×), and adding `Bool` rendering support in tsncd. The full design is recorded in [bool_semiring_extension.md](../docs/bool_semiring_extension.md).
+**Predicate tensors.** `.predicate()` marks a tensor's datatype as `Bool` in `_array_datatypes()`, causing `bc_signature()` to emit `Weave(Bool(), ...)` for that tensor's input weave. Contracted indices over predicate tensors are not yet distinguished from arithmetic summation — the `Einops` operator carries no `semiring` field. Realising the full Boolean semiring distinction requires adding a `semiring` field to `Einops`, updating contraction semantics for `Bool` inputs (∨ instead of +, ∧ instead of ×), and adding `Bool` rendering support in tsncd. The full design is in [bool_semiring_extension.md](../docs/bool_semiring_extension.md).
 
 ---
 
@@ -727,11 +720,20 @@ class ScanAffine:
 
 @dataclass(frozen=True)
 class Scan(Term):
-    step: object                      # step-body morphism: (H_state, *non_state_inputs) → H_next, l stripped
-    base: object                      # base-case morphism: initial-condition inputs → H_0
-    N: nm.Numeric                     # nm.Integer; N._value is the step count
-    axis: RawAxis                     # recurrence axis l
-    affine: ScanAffine | None = None  # affine decomposition for associative_scan, or None
+    step: object                           # uncoupled: (H_state, *non_state_inputs) → H_next
+                                           # coupled: tuple of per-state step morphisms
+    base: object                           # uncoupled: initial-condition inputs → H_0
+                                           # coupled: tuple of per-state base morphisms
+    N: nm.Numeric                          # nm.Integer; N._value is the step count
+    axis: RawAxis                          # recurrence axis l
+    affine: ScanAffine | None = None       # affine decomposition for associative_scan (uncoupled only)
+    n_states: int = 1                      # number of coupled states; 1 = uncoupled
+    step_state_deps: tuple[tuple[int, ...], ...] = ()
+                                           # coupled only: which canonical state indices each
+                                           # step morphism reads, in morphism-domain order
+    step_x_l_positions: tuple[int, ...] = ()
+                                           # uncoupled only: axis position of l in each per-step
+                                           # input as declared; runtime moves it to last before slicing
 ```
 
 `Scan` is a `Term` (frozen dataclass, not a `Morphism` subclass), but it satisfies the ProdCategory axioms and is a valid construction rule in the Br grammar. Its domain is all caller inputs (base-case inputs followed by per-step sequence inputs) and its codomain is the full state history of shape `(*state, N+1)` — scanl semantics.
@@ -742,7 +744,7 @@ class Scan(Term):
 
 `TL` stores iterative equations in `_pending_iter` (keyed by tensor name) rather than in `_entries`. `_finalize_iter()` is called lazily by `to_morphism()` and runs the following steps for each iterative tensor:
 
-1. **Coupled recurrence detection**: if two tensors share the same iteration axis uid, `NotImplementedError` is raised (not yet implemented).
+1. **Coupled recurrence grouping**: tensors sharing the same iteration axis UID are grouped and dispatched to `_finalize_iter_group`, which emits a single `Scan(n_states=k)` entry with a synthetic `__coupled_<names>` LHS name. Each state's step and base morphisms are built independently via `_build_step_morph`, with `step_state_deps` recording which canonical state indices each step morphism reads.
 2. **Check 4.1**: `l._size` must be `nm.Integer` (concrete size). Enforced at `.iteration_axis()` time; checked again in `_finalize_iter()`.
 3. **Check 4.2**: base case literal must be `0` (matches the iteration lower bound).
 4. **Check 4.4**: no `l+1` on the RHS (causality violation).
@@ -779,13 +781,13 @@ The affine property enables the parallel associative scan: the combine law `(A�
 def _run_loop(self, H, step_xs):
     outputs = [H]
     for l_idx in range(self.N):
-        sliced = tuple(x[..., l_idx] for x in step_xs)  # l-last convention
-        H = step_module(H, *sliced)
+        sliced = tuple(x[..., l_idx] for x in step_xs)       # l-last convention
+        H = to_tuple(self.step_module(H, *sliced))[0]         # unwrap tuple outputs
         outputs.append(H)
     return torch.stack(outputs, dim=-1)   # (*state, N+1)
 ```
 
-`_run_loop` is wrapped with `torch._dynamo.disable` to prevent `torch.compile` from unrolling the loop.
+`_run_loop` is wrapped with `torch._dynamo.disable` to prevent `torch.compile` from unrolling the loop. Per-step inputs whose recurrence axis `l` is not in the last position are moved to last by `forward()` before `_run_loop` is called, using the `step_x_l_positions` field on the `Scan` term.
 
 **Associative scan path** (when `Scan.affine is not None`):
 All N copies of `A_l` and `b_l` are computed in one batched vmap pass (converting l-last to l-first layout), prefix-composed via `torch._higher_order_ops.associative_scan` with `combine_mode='generic'` (required for CPU tensors), then applied to `H0` to produce the full state sequence.
@@ -804,7 +806,7 @@ Domingos (2025) uses `*t` to annotate a virtual (iterated) index on the LHS of a
 
 Both approaches express the same mathematical object — a sequence `(H_0, H_1, …, H_N)` defined by a recurrence — but the pyncd form is more amenable to static validation and compiler analysis before any tensor is allocated.
 
-Coupled recurrences (two tensors both declared with `.iteration_axis(l)`) are detected and raise `NotImplementedError`; the routing and step-body extraction for this case are not yet implemented.
+Coupled recurrences (two or more tensors declared with `.iteration_axis(l)` sharing the same axis) are supported: `_finalize_iter_group` emits a single `Scan(n_states=k)` and `ConstructedScan` applies Jacobi-style updates, returning a tuple of `(*state_k, N+1)` tensors in canonical order. A known limitation is that downstream equations consuming only a subset of the coupled outputs may not route correctly in all configurations.
 
 ## 7. Summary
 
@@ -812,11 +814,11 @@ Tensor Logic (Domingos 2025) provides a compact notation for individual operator
 
 The integration boundary is clean: `TensorProgram.to_morphism()` produces a morphism in `BroadcastedCategory`; above that level, `ProductOfMorphisms`, type-level datatypes, symbolic shape propagation, and `Block` structure are the caller's responsibility — categorical structures that tensor logic deliberately omits.
 
-Beyond this core integration, §5.6 describes the Python DSL layer implemented on top of `TensorProgram` and the remaining gaps. The `TL` registry builds `Broadcasted` morphisms eagerly as equations are assigned, using a single shared `Context` for axis unification across all assignments. Per-entry `input_names` tuples record the domain tensor names; `to_morphism()` uses these to build the live-pool routing table and returns `ThreadedComposed`, falling back to `Composed` only for coupled Scan entries. The `+` operator produces additive expressions (`SumExpr`) compiled to `Composed(ProductOfMorphisms(terms), AdditionOp Broadcasted)`. Tensor declarations (`.tensor()`, `.selection()`, `.predicate()`) record kind and positional shape, promoting axis subtypes (`NatAxis`) and enforcing arity at indexing time. `softmax(expr, where=pred)` and `normalize(expr, where=pred)` produce `MaskedSoftMax` and `MaskedNormalize` operators respectively; `_split_nonlinearity()` routes these via `_compute_mask_alignment()` to the appropriate masked compiled operator. `to_morphism()` includes a norm-axis-invariant additive term pre-pass (`softmax(f+c) = softmax(f)`) and a dead-code-elimination pass before building the routing table. Shape-based axis matching in `composition()` allows morphisms from separate `TL()` instances to compose correctly via `@`.
+Beyond this core integration, §5.6 describes the Python DSL layer implemented on top of `TensorProgram` and the remaining gaps. The `TL` registry builds `Broadcasted` morphisms eagerly as equations are assigned, using a single shared `Context` for axis unification across all assignments. Per-entry `input_names` tuples record the domain tensor names; `to_morphism()` uses these to build the live-pool routing table and returns `ThreadedComposed`. The `+` operator produces additive expressions (`SumExpr`) compiled to `Composed(ProductOfMorphisms(terms), AdditionOp Broadcasted)`. Tensor declarations (`.tensor()`, `.predicate()`, `.linear()`) record kind and positional shape, enforcing arity at indexing time. `softmax(expr, where=pred)` and `normalize(expr, where=pred)` produce `MaskedSoftMax` and `MaskedNormalize` operators respectively; `_split_nonlinearity()` routes these via `_compute_mask_alignment()` to the appropriate masked compiled operator. `to_morphism()` includes a norm-axis-invariant additive term pre-pass (`softmax(f+c) = softmax(f)`) and a dead-code-elimination pass before building the routing table. Shape-based axis matching in `composition()` allows morphisms from separate `TL()` instances to compose correctly via `@`.
 
 §6 describes how the DSL extends to iterative (recurrent) tensor equations via `.iteration_axis()`. A `Scan` term — a new construction rule alongside `Block` in the pyncd grammar — represents the recurrence and is compiled to a sequential PyTorch loop with an optional `associative_scan` fast path for affine recurrences. The `TL` registry defers assembly of scan morphisms until `to_morphism()`, where `_finalize_iter()` runs consistency checks and constructs the `Scan` term.
 
-What remains: extracting parallel product structure from the program's dependency DAG; extending the DSL to express embedding lookups as first-class equations (deferred, design recorded separately); realising the full Boolean semiring distinction at the `Datatype` level; and implementing coupled recurrences (multiple tensors sharing the same iteration axis).
+Open items: extracting parallel product structure from the program's dependency DAG; expressing embedding lookups as first-class DSL equations (design recorded in [dsl_embedding_lookup_extension.md](../docs/dsl_embedding_lookup_extension.md)); realising the full Boolean semiring distinction at the `Datatype` level (design in [bool_semiring_extension.md](../docs/bool_semiring_extension.md)); and verifying correct routing for downstream equations that consume only a subset of coupled scan outputs.
 
 ---
 

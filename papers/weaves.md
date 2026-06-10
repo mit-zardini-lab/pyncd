@@ -1,391 +1,146 @@
 # Weaves in pyncd
 
-This note explains how **weaves** work in pyncd: what they mean categorically,
-how they are represented in code, how they are built from tensor equations and
-signatures, and how the compiler uses them.
-
-The short version is:
-
-> A weave is the per-tensor record of which axes belong to the base operation
-> and which axes belong to the broadcast loop.
-
-This is the mechanism that lets pyncd separate *what an operation computes on
-one tile* from *how the operation is tiled, broadcast, and indexed over a larger
-tensor*.
+A **weave** is the per-tensor record of which axes belong to the base
+operation and which belong to the broadcast loop. It is the mechanism that
+separates *what an operation computes on one tile* from *how that tile is
+broadcast over a larger tensor*.
 
 ---
 
 ## Contents
 
-1. [The Core Idea](#the-core-idea)
-2. [Arrays, Weaves, and Broadcasted Morphisms](#arrays-weaves-and-broadcasted-morphisms)
-3. [TILED vs Concrete Axes](#tiled-vs-concrete-axes)
-4. [Degree and Reindexings](#degree-and-reindexings)
-5. [How Weaves Reconstruct Array Shapes](#how-weaves-reconstruct-array-shapes)
-6. [Worked Example: Matrix Multiply](#worked-example-matrix-multiply)
-7. [How TensorLogic Builds Weaves](#how-tensorlogic-builds-weaves)
-8. [How String Signatures Build Weaves](#how-string-signatures-build-weaves)
-9. [Lift and Batch Axes](#lift-and-batch-axes)
-10. [Compilation](#compilation)
-11. [Datatypes and Iverson Predicates](#datatypes-and-iverson-predicates)
-12. [Mental Model](#mental-model)
+1. [Data Structures](#1-data-structures)
+2. [TILED vs Concrete Axes](#2-tiled-vs-concrete-axes)
+3. [Degree and Reindexings](#3-degree-and-reindexings)
+4. [Key Methods](#4-key-methods)
+5. [Worked Example: Matrix Multiply](#5-worked-example-matrix-multiply)
+6. [Building Weaves](#6-building-weaves)
+7. [Compilation](#7-compilation)
+8. [Datatypes and Iverson Predicates](#8-datatypes-and-iverson-predicates)
 
 ---
 
-## The Core Idea
-
-The paper describes broadcasting as a categorical way to run a base operation
-independently over a loop domain called the **degree**:
-
-```text
-P = broadcast / tiled / loop shape
-```
-
-Here `P` is an object of the axis-stride category **St**: an ordered product of
-axes. If `P = (b, s)`, then `b` and `s` are axes, for example a batch axis and a
-sequence axis. The broadcast loop has one coordinate for each pair of index
-values `(b_idx, s_idx)` drawn from those two axes.
-
-For each input tensor, a weave records two choices for every axis position:
-
-- **target axes** are seen directly by the base operation;
-- **tiling axes** are supplied by the outer broadcast loop.
-
-If an array has ordered shape
-
-```text
-S = (S_0, S_1, ..., S_{n-1})
-```
-
-then the index `i` in `w_i` means "the `i`-th axis position of this array
-shape", with `0 <= i < n`.
-
-The paper presents a weave as a Boolean family:
-
-```text
-w_i = 1  means S_i is a target axis
-w_i = 0  means S_i is a tiling axis
-```
-
-In pyncd, this Boolean family is not stored as a separate tuple of `0` and `1`
-values. Instead, the classification is stored directly in `Weave._shape`.
-Each slot of `Weave._shape` is either:
-
-```python
-Axis              # target axis
-WeaveMode.TILED  # tiling axis
-```
-
-For example, suppose a tensor has shape:
-
-```text
-S = (b, h, k)
-```
-
-where `b`, `h`, and `k` are axes. In the paper notation, the weave
-
-```text
-w = (0, 1, 1)
-```
-
-means:
-
-```text
-b is a tiling axis
-h is a target axis
-k is a target axis
-```
-
-pyncd represents the same weave as:
-
-```python
-Weave(Reals(), (WeaveMode.TILED, h, k))
-```
-
-This call has two positional arguments:
-
-- `Reals()` is the weave's datatype: the tensor stores real-valued entries.
-- `(WeaveMode.TILED, h, k)` is the weave's `_shape` tuple: one entry for each
-  axis position of the tensor shape `S = (b, h, k)`.
-
-The entries of the `_shape` tuple line up with the original shape positions:
-
-```text
-original shape S:      (b,                h, k)
-pyncd weave _shape:    (WeaveMode.TILED,  h, k)
-```
-
-The first `_shape` entry is `WeaveMode.TILED` because the original first axis
-`b` is filled by the broadcast degree. The second and third `_shape` entries are
-the concrete axes `h` and `k` because those axes are seen by the base operation.
-
-The relevant implementation is in
-[`data_structure/BroadcastedCategory.py`](../data_structure/BroadcastedCategory.py).
-
----
-
-## Arrays, Weaves, and Broadcasted Morphisms
-
-An `Array` is a fully shaped object in the broadcasted category **Br**:
-
-```python
-@dataclass(frozen=True)
-class Array[B: Datatype, A: Axis](Term):
-    datatype: B
-    _shape: tuple[A]
-    iverson_expr: str | None = None
-```
-
-In this type annotation, `B` is the datatype parameter, such as `Reals()` or
-`Bool()`, and `A` is the axis type parameter, usually `RawAxis` in this
-codebase.
-
-An `Array` says:
-
-```text
-values of datatype B indexed by a shape
-```
-
-For example:
-
-```text
-Array(Reals(), (b, s, d))
-```
-
-represents a real-valued tensor with shape `(b, s, d)`, where `b`, `s`, and `d`
-are axis objects. A typical reading is batch axis `b`, sequence axis `s`, and
-feature axis `d`.
-
-A `Weave` is not quite a full array shape. It is a shape pattern with some slots
-left to be filled by the broadcast degree:
+## 1. Data Structures
 
 ```python
 class WeaveMode(Enum):
     TILED = 'TILED'
 
 @dataclass(frozen=True)
+class Array[B: Datatype, A: Axis](Term):
+    datatype: B
+    _shape:   tuple[A, ...]
+    iverson_expr: str | None = None
+
+@dataclass(frozen=True)
 class Weave[B: Datatype, A: Axis](Term):
     datatype: B
-    _shape: tuple[A | WeaveMode] = ()
+    _shape:   tuple[A | WeaveMode, ...] = ()
     iverson_expr: str | None = None
-```
 
-So:
-
-```text
-Weave(Reals(), (TILED, TILED, d))
-```
-
-means:
-
-```text
-The first two axes are supplied by the broadcast loop.
-The axis d is seen by the base operation.
-```
-
-A `Broadcasted` morphism packages an operator with its weaves and reindexings:
-
-```python
 @dataclass(frozen=True)
 class Broadcasted[B: Datatype, A: Axis, O: Operator](Morphism[Array[B, A]]):
-    operator: O
-    input_weaves: tuple[Weave[B, A]]
-    output_weaves: tuple[Weave[B, A]]
-    reindexings: tuple[StrideCategory[A]]
+    operator:      O
+    input_weaves:  tuple[Weave[B, A], ...]
+    output_weaves: tuple[Weave[B, A], ...]
+    reindexings:   tuple[StrideCategory[A], ...]
 ```
 
-The four fields correspond to Definition 13 in the paper:
+**`Array`** is a fully-shaped object in **Br**: a typed tensor with concrete
+axes only. **`Weave`** is a shape *template*: each position is either a
+concrete `Axis` (seen directly by the base operation) or `WeaveMode.TILED`
+(a placeholder filled at runtime from the broadcast degree). `Array` and
+`Weave` share the same `datatype` and `iverson_expr` fields — `Weave` is
+`Array` with some axes left open.
+
+**`Broadcasted`** packages an operator with its weaves and reindexings:
 
 | Field | Meaning |
 | --- | --- |
-| `operator` | The base computation, e.g. `Einops`, `Linear`, `SoftMax`, `TensorEquation`. |
-| `input_weaves` | One weave per input tensor. |
-| `output_weaves` | One weave per output tensor. |
-| `reindexings` | One stride morphism per input, telling that input how to read from the shared degree. |
+| `operator` | Base computation: `TensorEquation`, `Linear`, `SoftMax`, etc. |
+| `input_weaves` | One weave per input; encodes which axes are local and which are broadcast. |
+| `output_weaves` | One weave per output; typically all-TILED (output shape = full degree). |
+| `reindexings` | One `Rearrangement` per input; maps the shared degree to the subset this input uses. |
 
 ---
 
-## TILED vs Concrete Axes
+## 2. TILED vs Concrete Axes
 
-Each slot of a weave has one of two meanings. A **slot** is one position in the
-ordered tuple `Weave._shape`; for example, `(TILED, h, q, k)` has four slots.
+Each position in `Weave._shape` encodes one axis of the tensor:
 
-### Concrete `Axis`
+- **Concrete `Axis`** — a *target axis*. The base operation sees it directly;
+  depending on the operator it may be contracted (summed), passed through, or
+  produced as a local output.
+- **`WeaveMode.TILED`** — a *tiling axis*. Filled at runtime by the broadcast
+  loop; the base operation does not see it directly.
 
-A concrete `Axis` is a **target axis**. The base operation sees this axis
-directly. Depending on the operator, it may be:
+For a batch-head-feature tensor `(b, h, k)` where `b` is the broadcast axis:
 
-- contracted over, as in the `k` axis of matrix multiplication;
-- passed through as a free local axis;
-- produced as a local output axis.
-
-For example:
-
-```text
-Weave(Reals(), (h, q, k))
+```python
+Weave(Reals(), (WeaveMode.TILED, h, k))
+#              └── b supplied by degree    └── local to operator
 ```
 
-says that the axes `h`, `q`, and `k` are all local to the base operator.
-
-### `WeaveMode.TILED`
-
-`TILED` marks a **tiling axis**. The base operation does not see this axis
-directly; it is filled by the broadcast degree at runtime.
-
-For example:
-
-```text
-Weave(Reals(), (TILED, h, q, k))
-```
-
-says:
-
-```text
-The first axis is a loop/broadcast axis.
-The h, q, and k axes are local target axes.
-```
-
-In an attention score computation,
-
-```text
-S[b, h, q, x] = sum_k Q[b, h, q, k] K[h, x, k]
-```
-
-the axes are:
-
-- `b`: batch;
-- `h`: attention head;
-- `q`: query position;
-- `x`: key/value position;
-- `k`: head feature dimension, contracted by `sum_k`.
-
-The `Q` weave might be:
-
-```text
-(TILED, h, q, k)
-```
-
-when `b` is the broadcast degree. At each `b`, the base operation sees a local
-slice:
-
-```text
-Q[b, :, :, :]
-```
-
-The `K` input might have weave:
-
-```text
-(h, x, k)
-```
-
-meaning `K` is reused for every batch coordinate.
+The TILED/concrete split exactly encodes the paper's Boolean family `w_i ∈
+{0, 1}` (§2.2 of the categorical framework), but stores it inline rather than
+as a separate tuple.
 
 ---
 
-## Degree and Reindexings
+## 3. Degree and Reindexings
 
-The **degree** is the shared loop shape of a `Broadcasted` morphism.
-
-In code:
+The **degree** `P` is the shared loop domain of all reindexings — the set of
+index tuples over which the broadcast loops. It is derived as the common
+domain of all reindexings:
 
 ```python
 def degree(self) -> ProdObject[A]:
-    return iallequals(
-        morphism.dom()
-        for morphism in self.reindexings
-    )
+    return iallequals(morphism.dom() for morphism in self.reindexings)
 ```
 
-All input reindexings must have the same domain. That common domain is the
-degree:
-
-```text
-eta_i : P -> Q_i
-```
-
-where:
-
-- `P` is the shared degree;
-- `i` ranges over input positions, so `i = 0` means the first input tensor,
-  `i = 1` means the second, and so on;
-- `Q_i` is the tiling shape of input `i`, i.e. the shape obtained by keeping
-  only the `TILED` slots of input weave `i`;
-- `eta_i` is the reindexing for input `i`;
-- `p` is one concrete coordinate of the degree `P`;
-- `eta_i(p)` tells input `i` which tiled coordinate in `Q_i` to read at loop
-  coordinate `p`.
-
-This is how pyncd represents broadcasting, reuse, projections, diagonal slices,
-and affine indexing.
-
-In this table, `eta` is a generic reindexing map; concrete inputs usually have
-names such as `eta_W` or `eta_X`.
+Each reindexing `η_i : P → Q_i` maps the shared degree to the tiling shape
+of input `i` (the subset of degree axes that input actually uses). The weave
+says *where* the TILED holes are; the reindexing says *what coordinate fills
+each hole*.
 
 | Case | Meaning |
 | --- | --- |
-| `eta = id` | Input is indexed by the same degree coordinate. |
-| `eta = ()` | Input has no tiled axes and is reused everywhere. |
-| projection | Input reads only some axes from a larger degree. For example, from degree `(i, j)`, an input tensor `U[i]` reads only the `i` coordinate. |
-| duplication | One degree axis fills multiple input positions. For example, with degree coordinate `p`, an input can read `X[p, p, j]`. |
-| affine map | Input reads coordinates like `s * p + w`, where `s` is a fixed stride, `p` is a loop coordinate, and `w` is a filter/window coordinate. This is used by convolution/index arithmetic. |
+| `η = id` | Input uses all degree axes in order. |
+| `η = ()` | Input has no TILED axes — reused at every degree coordinate. |
+| Projection | Input reads a strict subset, e.g. only `i` from degree `(i, j)`. |
+| Duplication | One degree axis fills multiple TILED positions (diagonal slice). |
+| Affine map | `StrideMorphism` with strides, e.g. for convolution or index arithmetic. |
 
-The weave says *where* the tiling holes are. The reindexing says *what goes in*
-those holes.
+In practice, reindexings are `Rearrangement` objects (integer-mapping
+projections) for pure einsums, and full `StrideMorphism` objects only when
+affine index arithmetic is involved.
 
 ---
 
-## How Weaves Reconstruct Array Shapes
+## 4. Key Methods
 
-The key methods on `Weave` are:
+All four methods walk `Weave._shape` and handle each slot by type.
+
+### `target() → Array[B, A]`
+
+Strips TILED slots, returning the shape visible to the base operator:
 
 ```python
-def target(self) -> Array[B, A]:
-    ...
-
-def imprint(self, tiling_imprint: Iterable[T]) -> tuple[A | T]:
-    ...
-
-def imprint_axes(self, tiling_imprint: Iterable[T], axes_imprint: Iterable[T]) -> tuple[T]:
-    ...
-
-def imprint_to_degree(self, other: Iterable[A]) -> Array[B, A]:
-    ...
-```
-
-Here `T` is an arbitrary placeholder type used by the method: the same weave
-logic works whether the imprint items are axes, compiler tags such as `y0`, or
-integer vmap locations.
-
-They all use the same idea: walk over `Weave._shape`; keep concrete axes, and
-replace `TILED` slots with items from an external tiling sequence.
-
-### `target()`
-
-`target()` strips out `TILED` slots:
-
-```text
 Weave(Reals(), (TILED, h, q, k)).target()
-  = Array(Reals(), (h, q, k))
+  → Array(Reals(), (h, q, k))
 ```
 
-Here `h`, `q`, and `k` are concrete axes, while `TILED` is the single tiling
-slot removed by `target()`.
+### `imprint_to_degree(other) → Array[B, A]`
 
-This is the shape visible to the base operator.
+Fills TILED slots from `other` in order, leaving concrete axes in place.
+Returns a fully-concrete `Array`:
 
-### `imprint_to_degree()`
-
-`imprint_to_degree()` fills `TILED` slots with concrete axes:
-
-```text
+```python
 Weave(Reals(), (TILED, k)).imprint_to_degree((i,))
-  = Array(Reals(), (i, k))
+  → Array(Reals(), (i, k))
 ```
 
-Here `i` is the axis supplied for the one `TILED` slot, and `k` is the concrete
-target axis already stored in the weave.
-
-`Broadcasted.dom()` uses this method with each input reindexing's codomain:
+Used by `dom()` and `cod()`:
 
 ```python
 def dom(self):
@@ -393,12 +148,7 @@ def dom(self):
         weave.imprint_to_degree(reindexing.cod())
         for weave, reindexing in zip(self.input_weaves, self.reindexings)
     )
-```
 
-`Broadcasted.cod()` is similar, but output weaves are imprinted with the full
-degree:
-
-```python
 def cod(self):
     return ProdObject.from_iter(
         weave.imprint_to_degree(self.degree())
@@ -406,60 +156,49 @@ def cod(self):
     )
 ```
 
+`dom()` fills each input weave with the *subset* of degree axes its
+reindexing selects. `cod()` fills each output weave with the *full* degree.
+
+### `imprint(tiling_imprint) → tuple[A | T]`
+
+Fills only TILED slots; concrete axes are kept as-is. Returns a mixed
+tuple. Used when partial filling is needed.
+
+### `imprint_axes(tiling_imprint, axes_imprint) → tuple[T]`
+
+Dual-source fill: TILED slots come from `tiling_imprint`, concrete axes come
+from `axes_imprint`. Returns a uniformly-typed tuple. Used by the compiler to
+substitute degree tags for TILED slots and contraction tags for concrete axes
+simultaneously.
+
 ---
 
-## Worked Example: Matrix Multiply
-
-Consider:
+## 5. Worked Example: Matrix Multiply
 
 ```text
 Y[i, j] = W[i, k] * X[k, j]
 ```
 
-Here:
-
-- `i` and `j` occur on the left-hand side (LHS), so they are retained/output
-  axes.
-- `k` occurs only on the right-hand side (RHS), so it is contracted.
-- `W`, `X`, and `Y` are tensor names; `W[i, k]` means the entry of tensor `W`
-  indexed by axes `i` and `k`.
-
-The degree is:
+`i` and `j` appear on the LHS → retained → degree axes.
+`k` appears only on the RHS → contracted → concrete target axis.
 
 ```text
-P = (i, j)
+degree = (i, j)
 ```
 
-The input and output weaves are:
-
-| Tensor | Full shape | Weave | Meaning |
+| Tensor | Full shape | Weave `_shape` | Notes |
 | --- | --- | --- | --- |
-| `W[i, k]` | `(i, k)` | `(TILED, k)` | `i` comes from the degree; `k` is local/contracted. |
-| `X[k, j]` | `(k, j)` | `(k, TILED)` | `k` is local/contracted; `j` comes from the degree. |
-| `Y[i, j]` | `(i, j)` | `(TILED, TILED)` | output shape is exactly the degree. |
+| `W[i, k]` | `(i, k)` | `(TILED, k)` | `i` from degree; `k` contracted |
+| `X[k, j]` | `(k, j)` | `(k, TILED)` | `k` contracted; `j` from degree |
+| `Y[i, j]` | `(i, j)` | `(TILED, TILED)` | output = full degree |
 
-The reindexings are projections out of `(i, j)`:
-
-```text
-eta_W(i, j) = i
-eta_X(i, j) = j
-```
-
-Here `eta_W` is the reindexing for the `W` input and `eta_X` is the reindexing
-for the `X` input. The argument `(i, j)` denotes one coordinate of the degree
-`P = (i, j)`.
-
-At each output coordinate `(i, j)`, the base operation sees:
+Reindexings are projections out of `(i, j)`:
 
 ```text
-W[i, k]
-X[k, j]
+η_W(i, j) = (i,)    η_X(i, j) = (j,)
 ```
 
-and contracts over `k`.
-
-This shape is asserted directly in
-[`tests/test_tensor_logic.py`](../tests/test_tensor_logic.py):
+Verified by the test suite:
 
 ```python
 assert br.input_weaves[0]._shape == (WeaveMode.TILED, k)
@@ -469,19 +208,19 @@ assert all(p is WeaveMode.TILED for p in br.output_weaves[0]._shape)
 
 ---
 
-## How TensorLogic Builds Weaves
+## 6. Building Weaves
 
-The TensorLogic path is implemented in
-[`data_structure/TensorLogic.py`](../data_structure/TensorLogic.py), especially
-`TensorEquation.bc_signature()`.
+### TensorLogic path (primary)
 
-TensorLogic uses **axis UID identity**:
+`TensorEquation.bc_signature()` in `data_structure/TensorLogic.py` derives
+weaves from UID identity:
 
-- passing the same `Axis` object in multiple positions means the same index;
-- an axis whose UID appears on the LHS is retained;
-- an axis whose UID appears only on the RHS is contracted.
+- An axis whose UID is in `lhs_indices` → **retained** → `WeaveMode.TILED` in
+  the input weave
+- An axis whose UID is absent from `lhs_indices` → **contracted** → concrete
+  `Axis` in the input weave
 
-The central translation is:
+The central translation:
 
 ```python
 tuple(
@@ -490,225 +229,84 @@ tuple(
 )
 ```
 
-That is:
-
-```text
-RHS axis appears on LHS     -> TILED
-RHS axis absent from LHS    -> concrete Axis
-```
-
-In the code snippet, `ax` is one axis found in an RHS factor, and
-`retained_uid_to_pos` maps each retained/LHS axis UID to its position in the
-degree.
-
-The output weave is all `TILED`:
+The output weave is all-TILED (the output shape equals the retained degree):
 
 ```python
-output_weave = Weave(
-    out_dt,
-    tuple(WeaveMode.TILED for _ in degree),
-)
+output_weave = Weave(out_dt, tuple(WeaveMode.TILED for _ in degree))
 ```
 
-because the output shape is exactly the retained degree.
+### String signature path (Einops operators)
 
-For:
+`construction_helpers/einops.py` provides `signature_to_buckets()` and
+`bucketed_to_broadcast()`. These parse an einops-style string
+(`"i k, k j -> i j"`) and produce the same `(input_weaves, output_weaves,
+reindexings)` triple, using negative indices for retained axes (→ TILED) and
+non-negative indices for contracted axes (→ concrete). The two paths converge
+on the same `Broadcasted` structure.
 
-```python
-tl.Y[i, j] = tl.W[i, k] * tl.X[k, j]
-```
+### Batch lifting
 
-TensorLogic produces:
-
-```text
-degree        = (i, j)
-input_weaves  = ((TILED, k), (k, TILED))
-output_weaves = ((TILED, TILED),)
-```
-
-Here `tl` is a `TL` builder, and `i`, `j`, and `k` are `Axis` objects.
-
----
-
-## How String Signatures Build Weaves
-
-The older string-signature path is used by operators such as `Einops`.
-
-The path is:
-
-```text
-Operators.Einops.template()
-  -> construction_helpers.einops.signature_to_buckets()
-  -> construction_helpers.einops.bucketed_to_broadcast()
-```
-
-In `bucketed_to_broadcast()`, positions are classified using integer buckets:
-
-```python
-axes[index] if 0 <= index else WeaveMode.TILED
-```
-
-The convention is:
-
-- negative indices represent output/degree axes and become `TILED`;
-- non-negative indices represent absorbed/contracted axes and remain concrete.
-
-Here `index` is an integer label assigned to one symbolic axis name in the
-signature parser, and `axes` maps those integer labels to concrete `RawAxis`
-objects.
-
-So the string route and TensorLogic route converge on the same structure:
-
-```python
-Broadcasted(
-    operator=...,
-    input_weaves=...,
-    output_weaves=...,
-    reindexings=...,
-)
-```
-
----
-
-## Lift and Batch Axes
-
-Batch lifting extends an operation over new axes without changing what the base
-operation computes at a single coordinate.
-
-The implementation is in
-[`construction_helpers/lift.py`](../construction_helpers/lift.py):
+`construction_helpers/lift.py:broadcasted_stride_lift()` extends an existing
+`Broadcasted` over new batch axes by prepending TILED slots:
 
 ```python
 input_weaves = tuple(
-    Weave(
-        weave.datatype,
-        (WeaveMode.TILED,) * len(lift_by_morphism.cod()) + weave._shape
-    )
+    Weave(weave.datatype,
+          (WeaveMode.TILED,) * len(lift_by_morphism.cod()) + weave._shape)
     for weave in base.input_weaves
 )
 ```
 
-The same happens for output weaves.
-
-So lifting a local operation over a batch shape prepends `TILED` slots:
-
-```text
-original weave:   (d_in)
-lift over (b, s): (TILED, TILED, d_in)
-```
-
-Here `d_in` is a local feature/input axis, while `b` and `s` are the new batch
-or sequence axes supplied by the lift.
-
-This exactly matches the paper's batch-lift law:
-
-```text
-[f, P] ; [Y, p] = [X, p] ; f
-```
-
-Here:
-
-- `f : X -> Y` is the original, unlifted morphism;
-- `X` is the domain object of `f`;
-- `Y` is the codomain object of `f`;
-- `P` is the shape being lifted over;
-- `p` is one coordinate of `P`;
-- `[X, p]` and `[Y, p]` are slice/index morphisms selecting the `p`-th slice.
-
-Slicing after the lifted operation is the same as slicing first and then running
-the original operation. In other words, the lifted operation has no interaction
-between different coordinates of `P`.
+This realises the paper's batch-lift law: slicing after the lifted operation
+is the same as slicing first and then running the original.
 
 ---
 
-## Compilation
+## 7. Compilation
 
-The compiler reads weaves to generate tensor code.
+`generate_tensor_equation_signature()` in `torch_compile/torch_compile.py`
+converts weave structure to an `einops.einsum` string:
 
-For TensorLogic equations, `generate_tensor_equation_signature()` in
-[`torch_compile/torch_compile.py`](../torch_compile/torch_compile.py) builds an
-`einops.einsum` signature from the weave structure.
+- TILED slots → degree tags `y0, y1, …`
+- Concrete axes → contraction tags `x0, x1, …`, assigned by UID so the same
+  axis in two weaves gets the same tag (causing einsum contraction)
 
-The rule is:
-
-- `TILED` slots become degree tags like `y0`, `y1`, ...
-- concrete axes become local/contraction tags like `x0`, `x1`, ...
-- shared concrete axis UIDs get the same tag, causing einsum contraction.
-
-The names `y0`, `y1`, ... are compiler-generated labels for degree axes; the
-names `x0`, `x1`, ... are compiler-generated labels for concrete target axes
-that appear in input weaves. They are not user tensor names.
-
-The key loop is:
+The key loop assigns contraction tags by scanning concrete slots:
 
 ```python
 for weave in target.input_weaves:
     for slot in weave._shape:
         if not isinstance(slot, WeaveMode):
-            uid = slot.uid
-            if uid not in contracted_tag:
-                contracted_tag[uid] = f'x{tag_counter}'
+            if slot.uid not in contracted_tag:
+                contracted_tag[slot.uid] = f'x{tag_counter}'
                 tag_counter += 1
 ```
 
-Here `target` is the `Broadcasted` morphism being compiled, `weave` ranges over
-its input weaves, `slot` ranges over one position in `weave._shape`, `uid` is the
-identity of a concrete axis, and `contracted_tag` maps axis UIDs to einsum tag
-strings.
-
-Then each input segment is formed by:
-
-```python
-weave.imprint_axes(
-    degree_tags_for_this_input,
-    contracted_tags_for_concrete_axes,
-)
-```
-
-For matrix multiply, this produces the usual einsum shape:
+Each input segment is then formed with `weave.imprint_axes(degree_tags,
+contracted_tags)`, producing the full einops string. For matrix multiply:
 
 ```text
 ... y0 x0, ... x0 y1 -> ... y0 y1
 ```
 
-where:
-
-- `y0` is `i`;
-- `y1` is `j`;
-- `x0` is `k`;
-- `...` is the einops ellipsis, used for any extra leading batch dimensions not
-  named explicitly by pyncd.
-
-For simpler broadcastable operators, [`torch_compile/bcast.py`](../torch_compile/bcast.py)
-uses the same weave information to determine `torch.vmap` locations and semantic
-broadcasting reshapes.
+For simpler broadcastable operators, `torch_compile/bcast.py` uses the same
+weave structure to select between `torch.vmap`, semantic reshape, or a direct
+`dim=` argument.
 
 ---
 
-## Datatypes and Iverson Predicates
+## 8. Datatypes and Iverson Predicates
 
-A weave also carries a datatype:
-
-```python
-Weave(Reals(), ...)
-Weave(Bool(), ...)
-Weave(Natural(...), ...)
-```
-
-This is independent of the target/tiling classification. The same `_shape`
-pattern can carry real-valued data, boolean masks, or natural-valued selections.
-
-TensorLogic uses this for predicates and Iverson brackets.
-
-An inline predicate such as:
+A weave's `datatype` field is independent of its TILED/concrete structure:
 
 ```python
-q <= x
+Weave(Reals(), ...)    # real-valued tensor
+Weave(Bool(), ...)     # binary predicate
+Weave(Natural(n), ...) # discrete token indices
 ```
 
-where `q` and `x` are axes, becomes an `IversonBinOp` in the TensorLogic AST.
-During `bc_signature()`, an unsized predicate factor becomes a Bool-typed input
-weave:
+Inline Iverson predicates (`q <= x`) become Bool-typed input weaves during
+`bc_signature()`:
 
 ```python
 Weave(
@@ -719,53 +317,17 @@ Weave(
 )
 ```
 
-In this snippet, `factor` is the Iverson predicate factor, such as the AST for
-`q <= x`; `_factor_axes(factor)` lists the axes mentioned by that predicate; and
-`iverson_expr` stores a display string such as `"q <= x"`.
+The `iverson_expr` string (e.g. `"q <= x"`) is carried for display by tsncd.
 
-Sized Iverson factors are auto-materialized as constant buffers at compile time
-and omitted from the morphism's domain. Unsized Iversons remain Bool input
-weaves, so the caller must supply the mask tensor.
+**Sized predicates** (all axes carry concrete `Integer` sizes) are
+auto-materialised as constant `nn.Module` buffers at compile time and removed
+from the morphism's domain. **Unsized predicates** remain as Bool input weaves
+— the caller must supply the mask tensor at runtime.
 
-Downstream code reads `weave.datatype` per weave. For example,
-`ConstructedTensorEquation` checks the output weave datatype:
+The output weave's datatype drives the Heaviside demotion in
+`ConstructedTensorEquation`:
 
 ```python
 self.demote = isinstance(target.output_weaves[0].datatype, Bool)
+# forward(): if self.demote: return (result > 0).to(result.dtype)
 ```
-
-When the output is Bool, the real-valued contraction result is thresholded with
-`H(r) = (r > 0)`, where `r` is the numeric contraction result.
-
----
-
-## Mental Model
-
-Read a weave slot-by-slot:
-
-```text
-Concrete Axis  = this dimension belongs to the base operation.
-TILED          = this dimension belongs to the broadcast loop.
-Reindexing     = how the shared loop coordinate fills this input's TILED slots.
-Degree         = the common loop space shared by all inputs and outputs.
-```
-
-A `Broadcasted` morphism is therefore:
-
-```text
-base operator
-+ input/output weave patterns
-+ one reindexing per input
-= a full tensor operation
-```
-
-This gives pyncd a compact representation that is simultaneously:
-
-- categorical, because it is a morphism in **Br**;
-- executable, because the compiler can derive `einsum`, `vmap`, or reshape code;
-- compositional, because `dom()` and `cod()` recover full array types;
-- visualizable, because each wire bundle knows its datatype and axis structure.
-
-The weave is the bridge between tensor notation and tiled execution. It says how
-a large tensor operation decomposes into small local operations while preserving
-enough structure for composition, alignment, rendering, and compilation.

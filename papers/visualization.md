@@ -3,8 +3,7 @@
 This document gives a non-technical overview of how `tsncd` (the TypeScript
 companion to `pyncd`) converts a categorical diagram into an interactive SVG
 display. It is aimed at readers who know the mathematics but are not
-TypeScript programmers. A separate section at the end describes the changes
-made to support the Bool semiring.
+TypeScript programmers.
 
 ---
 
@@ -150,11 +149,14 @@ Built-in operator boxes include:
 
 | Operator | Box | Visual |
 |---|---|---|
+| `TensorEquation` | `TensorEquationBox` | `∃` (Bool output) or `Σ` (Reals output) |
 | `Einops` | `EinopsBox` | Straight box + arc cups over shared axes |
 | `Linear` | `LinearBox` | Notched parallelogram with operator name |
 | `Embedding` | `EmbeddingBox` | Same shape as Linear |
 | `SoftMax` | `SoftMaxBox` | Triangle/ramp shape |
 | `Elementwise` | `ElementwiseBox` | Small box with arrow-tip decorations |
+| `ReLU` | `ElementwiseBox` | Same as Elementwise |
+| `Identity` | `IdentityBox` | Minimal pass-through marker |
 | `Normalize` | `NormalizeBox` | Circular box with oscillating line |
 | `WeightedTriangularLower` | `WeightedTriangularLowerBox` | Rectangle with lower-triangle fill |
 | `AdditionOp` | `AdditionOpBox` | Box with `+` annotation |
@@ -185,12 +187,23 @@ a single one.
 - **`ComposedBox`** renders a `Composed` term as a left-to-right sequence of
   `BroadcastedBox` elements with `ComposedGap` connectors between them.
   The connector draws the wires between adjacent boxes using the anchor link
-  graph.
+  graph. `ThreadedComposed` is a subclass of `Composed` and uses the same
+  `ComposedBox` — the live-pool routing table is a data-level concern that
+  does not affect rendering.
 
 - **`BlockBox`** renders a `Block` term — a repeated morphism — with
   repetition brackets drawn at the top and bottom, and an optional title.
 
-- **`ProductBox`** renders a `Product` (stacked objects) vertically.
+- **`ScanBox`** renders a `Scan` term. It extends `BlockBox` (reusing the
+  teal backdrop, title, and brackets) and adds a red feedback arc (the
+  carry) to mark the state wire looping back from step output to step input.
+  The bracket annotation includes the step count N and the recurrence axis
+  label. See [iteration.md §7](iteration.md#7-diagrammatic-notation-a-string-diagram-realization-of-the-scanbox)
+  for the full rendering specification.
+
+- **`ProductBox`** renders a `ProductOfMorphisms` (stacked objects) vertically.
+
+- **`RearrangementBox`** renders a `Rearrangement` morphism (axis permutations).
 
 The top-level entry point is `CategoryRenderer.display_category()`, which
 inspects the term type and dispatches to the appropriate box constructor.
@@ -216,21 +229,20 @@ arrow beside the first wire of the bundle.
 
 ---
 
-## 8. Bool Semiring Changes
+## 8. Bool Semiring Support
 
-The following changes were made to `tsncd` to support the Bool semiring
-extension. They are localized and additive — no existing display code was
-modified.
+The Bool semiring is fully supported in `tsncd`. The relevant code is
+localised to four files and does not modify the base layout machinery.
 
 ### 8.1 `Bool` datatype (`BroadcastedCategory.ts`)
 
-A new `Bool extends Datatype` class was added. Its `to_latex()` method
-returns `\mathbb{B}`, the standard mathematical symbol for a Boolean set.
-`Bool` is exported from `Category.ts` alongside `Reals` and `Natural`.
+`Bool extends Datatype` is a registered `Term` class whose `to_latex()`
+returns `\mathbb{B}`. It is exported from `Category.ts` alongside `Reals`
+and `Natural`.
 
 ### 8.2 `iverson_expr` on Weave and Array (`BroadcastedCategory.ts`)
 
-`Weave` and `Array` each gained an optional `iverson_expr: string | null`
+`Weave` and `Array` each carry an optional `iverson_expr: string | null`
 field (last constructor parameter, defaulting to `null`). When a weave
 carries a predicate computed from an Iverson bracket expression, Python
 serializes the expression string here. The `target()` and
@@ -239,7 +251,7 @@ categorical operations.
 
 ### 8.3 Amber/dotted wires and `𝔹` anchor (`BroadcastedCategoryRenderer.ts`)
 
-`ArrayMeridian` was extended to detect `Bool`-typed weaves and apply:
+`ArrayMeridian` detects `Bool`-typed weaves and applies:
 
 - **Amber colour** (`#f59e0b`) on all wire anchors of the bundle
 - **Dotted stroke** (`stroke-dasharray: '2,6'`) to mark binary-valued data
@@ -248,15 +260,15 @@ categorical operations.
   the axis name as the wire label on the first anchor — making the predicate
   immediately readable in the diagram
 
-`DatatypeAnchor` gained an `extra_curve_attributes` parameter so the Bool
-branch can pass `{stroke: '#f59e0b'}` independently of the Natural branch's
+`DatatypeAnchor` accepts an `extra_curve_attributes` parameter so the Bool
+branch passes `{stroke: '#f59e0b'}` independently of the Natural branch's
 lime styling.
 
-### 8.4 Iverson expression tree stubs (`TensorLogic.ts`)
+### 8.4 Iverson expression tree terms (`TensorLogic.ts`)
 
-Python serializes `TensorEquation` operators that may contain Iverson
-expression subtrees in their `rhs` field. To allow `to_term()` to
-deserialize these without throwing, four Term subclasses were registered:
+Python serializes `TensorEquation` operators with Iverson expression subtrees
+in their `rhs` field. The following `Term` subclasses are registered so
+deserialization succeeds:
 
 - **`TensorRef`**: a reference to a named tensor by axis list
 - **`IversonConst`**: a numeric constant inside an Iverson bracket
@@ -265,29 +277,25 @@ deserialize these without throwing, four Term subclasses were registered:
 - **`IversonUnaryOp`**: a unary operation (negation, absolute value) inside
   an Iverson bracket
 
-These are stubs: the display code does not interpret the expression tree
-content. The stubs exist only so deserialization does not crash.
-
-The `TensorEquation` operator class itself was also registered here. Its
+These are deserialization stubs: the display code does not interpret the
+expression tree content. `TensorEquation` is also registered here; its
 constructor field order mirrors the Python dataclass inheritance order —
 `name` (inherited from `Operator`), then `lhs_name`, `lhs_indices`, `rhs`,
 `operator` — so positional deserialization produces the correct object.
 
 ### 8.5 `TensorEquationBox` (`additionalOperationBoxes.ts`)
 
-A new `OperationBox` subclass was registered for `TensorEquation` operators:
+`TensorEquationBox` is registered for `TensorEquation` operators:
 
-- **Bool output** (`output_weaves[0].datatype instanceof Bool`): displays the
-  quantifier symbol **∃** (there exists). This reflects the semantics: a
-  Bool-output TensorEquation tests whether there exists an assignment to the
-  contracted axes that satisfies the predicate.
-- **Reals output**: displays the summation symbol **Σ**. This matches the
-  standard einsum/contraction interpretation.
+- **Bool output** (`output_weaves[0].datatype instanceof Bool`): displays **∃**
+  (there exists) — the Bool-output TensorEquation tests whether any contracted
+  assignment satisfies the predicate, matching the Heaviside demotion in
+  Python's `ConstructedTensorEquation`.
+- **Reals output**: displays **Σ**, matching the standard einsum/contraction
+  interpretation.
 
 The symbol is rendered as a centred LaTeX annotation inside a `40×30`
-rectangle box. The choice mirrors the `demote` flag in Python's
-`ConstructedTensorEquation`, which applies a Heaviside projection when the
-output datatype is `Bool`.
+rectangle box.
 
 ---
 
@@ -318,13 +326,17 @@ run before any JSON is processed.
 
 | Concern | Where it lives |
 |---|---|
-| Data structure: axes, weaves, operators | `data_structure/*.ts` |
+| Base term types: Bool, Reals, Natural, Weave, Broadcasted | `data_structure/BroadcastedCategory.ts` |
+| Composition types: Composed, Block, Scan, ThreadedComposed | `data_structure/ProductCategory.ts` |
+| Operator definitions: Einops, Linear, SoftMax, etc. | `data_structure/Operators.ts` |
+| TensorEquation, Iverson expression terms | `data_structure/TensorLogic.ts` |
 | Term serialization and registry | `Term.ts`, `@register_term` |
 | Abstract drawing commands | `DrawHandler.ts` |
 | Element tree and two-pass layout | `RenderHandler.ts` (DiagramElement) |
-| Wire bundles and linking | `CategoryRenderer.ts` (Meridian, Anchor) |
+| Wire bundles and anchor linking | `CategoryRenderer.ts` (Meridian, Anchor) |
+| Composition/block/scan box dispatch | `CategoryRenderer.ts` (display_category) |
 | Operator-to-box dispatch | `BroadcastedCategoryRenderer.ts` (opsRegistry) |
-| Built-in operator boxes | `additionalOperationBoxes.ts` |
-| Bool wires and `𝔹` anchor | `BroadcastedCategoryRenderer.ts` (ArrayMeridian) |
-| Bool/Iverson expression stubs | `TensorLogic.ts` |
-| `∃`/`Σ` TensorEquation box | `additionalOperationBoxes.ts` (TensorEquationBox) |
+| Datatype wire rendering (Bool/Natural) | `BroadcastedCategoryRenderer.ts` (ArrayMeridian) |
+| Built-in operator boxes + TensorEquationBox | `additionalOperationBoxes.ts` |
+| Multi-line diagram layout | `Multiline.ts` (MultilineComposedBox) |
+| Browser render target | `HTMLRenderHandler.ts`, `HTMLDrawHandler.ts` |
