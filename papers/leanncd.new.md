@@ -333,3 +333,44 @@ theorem weave_unique [DGradedColoredPROP D C] {X Y} (g : hom X Y) :
 A `Weave g` records the (Broadcast-gen) factorization of `g`: a degree-trivial base op `f`, a degree `P ∈ D`, a reindexing `ρ` (assembled from `act(𝟙, −)` and the coherence isos), and a proof that `g = [f, P] ; ρ`. Per wire, the shape `sh(color) ∈ Ob D` is a list of sub-colors that the factorization partitions into **target** sub-colors (acted on directly by `f`) and **tiling** sub-colors (supplied by the degree `P` through `ρ`); the permutation relating the canonical "targets-first" order to the wire's actual sub-color order is theory.md's `Ω_w`, recovered from the symmetry `σ`. This is **precisely the cartesian-lift datum** of the grading fibration `C → D` ([graded_prop.md §3.3](graded_prop.md#33-weaves-as-cartesian-lift-data)): a weave is the choice of how a morphism's wires sit over their `D`-shapes, with the tiling part pulled back along the degree. `-- Python: Weave._shape records the per-wire TILED/target partition`
 
 `weave_unique` (Proposition 8.2) makes `Weave g` a `Subsingleton` — at most one weave, up to the canonical coherence isos. This is what turns `Weave` into a **datum, not a choice**: the factorization is forced, not selected. The proof draws on both the `elemental` field of `[ColoredPROP C]` (points separate morphisms, so the degree `P` and the target/tiling partition are determined) and `broadcast_gen` (a factorization exists at all). Without `elemental`, Eq. 3 would still hold by functoriality but the `(f, P, ρ)` factorization would not be unique.
+
+## 6. Mixins: Scan, Route, Symmetry, Para
+
+The core `DGradedColoredPROP D C` of [§4](#4-the-core-dgradedcoloredprop-d-c) carries the lift, the actegory coherences, and the weave factorization — and nothing more. Capabilities beyond that bare grading are added as **composable mixins**: a `Scan`, a `Route`, an equivariance constraint, a `Para` refinement. Each is its own typeclass; an instantiation declares only the mixins it actually uses and pays only for their fields and obligations. This is exactly what keeps the proven core un-edited as the framework grows: a new capability is a new class layered on `DGradedColoredPROP`, never a field added to it, so the [§9](#9-the-propositions-as-generic-theorems) theorems stated over the core continue to hold unchanged at every instantiation. The four mixins of this family are `TemporalGraded` (Scan, given in full below), the `RouteStructure` and `SymmetryGraded` stubs, and `ParaAlgebra` (forward-referenced to [§7](#7-grothendieck-split-and-composition-as-pushout), since it layers on the `Algebra` rather than on the graded PROP).
+
+### 6.1 `TemporalGraded` — Scan
+
+```lean
+class TemporalGraded (D C : Type) [ColoredPROP D] [ColoredPROP C]
+    extends DGradedColoredPROP D C where
+  L          : D                    -- temporal object (Δ₊ / ℕ-graded); prefix inclusions ιₘ
+  restrict   : ∀ m, …               -- directed action act(−, ιₘ); NO point-evaluation ev_q
+  iterate    : …                    -- finite iteration of a parametric step endofunctor (Def 3.4)
+  trace      : …                    -- scanl state history H ⊗ L_{N+1} (Def 3.5)
+  lift_fold_dist : …                -- act(Scan,P) ≅ Scan(act(step,P)) for P orthogonal to L
+```
+
+`TemporalGraded` internalizes the four additions of [graded_prop.md §3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class) that turn `Scan` from a bare generator into a definition. `L` is the **temporal object** of Definition 3.3 — an `Ob D` carrying the augmented-simplex / `(ℕ,+,0)` length grading, with prefix inclusions `ιₘ : [0..m] ↪ [0..N]`. `restrict` is the **directed action**: restriction natural transformations `act(−, ιₘ) : (− ⊛ [0..N]) ⇒ (− ⊛ [0..m])` along the `ιₘ`, satisfying the unit and composition laws of an action. `iterate` is the **finite iteration** of Definition 3.4 — for a parametric step endofunctor (the per-step inputs ride as parameters) and a length `N`, the `N`-fold iterate and its catamorphism `cata(step)` exist (for fixed `N` this is plain `N`-fold composition; no fixpoint, no natural-numbers object, until unbounded length is wanted). `trace` is the **state history** of Definition 3.5 — codomain `H ⊗ L_{N+1}` (scanl), with the coherence that truncating the trace along `ιₘ` agrees with running the `m`-fold. `lift_fold_dist` is the **lift–fold distributivity** law: for an ordinary degree `P` orthogonal to `L`, `act(Scan, P) ≅ Scan(act(step, P))`.
+
+With these fields in hand, **`Scan := cata(step)` is a definition** over the temporal grading, not a generator posited by hand. Two consequences follow rather than being assumed. First, the **prefix-restriction law is a corollary** (Proposition 8.7): theory.md's law that `Scan_N` restricted to the first `m` steps equals `Scan_m` falls out of the catamorphism universal property `cata(step) ∘ in = step ∘ F(cata(step))` and its uniqueness — it need not be a separate axiom. Second, **`Scan` batches** along any axis `P` orthogonal to `L` (Proposition 8.8): `lift_fold_dist` is exactly what makes `act(Scan, P) ≅ Scan(act(step, P))`, so a batched recurrence is one fold run independently per batch coordinate, and `Scan` participates in the `vmap`/batch strategies like any other morphism. `-- Python: Scan in TensorDSL.py`
+
+`TemporalGraded` uses `extends DGradedColoredPROP` — genuine inheritance, not a signed-empty stub — because `Scan` needs the **whole core**: the lift `act`, the actegory coherences, and the weave factorization are all load-bearing. `cata(step)` is built from `iterate` over `act`; `trace` is typed by the lift; and `lift_fold_dist` is a statement *about* `act`, so it cannot even be phrased without the actegory. The stubs of [§6.2](#62-route-and-symmetry-stubs) also `extends DGradedColoredPROP`, but their bodies are deferred — they declare their parameters and leave the fields signed-empty (`…`), because the machinery they need is not yet formalized.
+
+The key obstruction that forces `Scan` out of the weave story lives in the `restrict` field: the directed action carries restrictions along the prefix inclusions `ιₘ`, but **no point-evaluation `ev_q`** for a single point `q : I → L`. That absence is precisely the Proposition 8.6(i) obstruction — `Scan`'s lift couples positions (the output at `ℓ` depends on positions `< ℓ`), so `ev_q` fails to be natural (Eq. 3 fails along `L`), and `Scan` lies only in the image of the directed sub-action indexed by the `ιₘ`, never by points. It is *not* a weave along `L`; Proposition 8.7 is its positive home, and Proposition 8.8 confirms the obstruction is only along `L` and never along orthogonal axes.
+
+### 6.2 Route and Symmetry stubs
+
+```lean
+class RouteStructure (D C) [ColoredPROP D] [ColoredPROP C]
+    extends DGradedColoredPROP D C where … -- STUB: data-dependent coproduct injection, gate as Para param
+class SymmetryGraded (D C : Type) (T : Monad D) [ColoredPROP D] [ColoredPROP C]
+    extends DGradedColoredPROP D C where … -- STUB: equivariance via EM-category of T; gated (equiv_unif A3)
+```
+
+`RouteStructure` is the second species of the Proposition 8.6 obstruction — Proposition 8.6(ii). Here the reindexing **depends on input values**, so it is not a fixed `D`-morphism at all: there is no single `η` to lift, hence no weave. The generator is a data-dependent coproduct injection whose routing map is carried as a `Para` parameter (the gate). The motivating example is sparse / top-`k` mixture-of-experts ([future_ideas.md §6.4](future_ideas.md#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles)), where the expert each item reads is `argmax`-selected at runtime.
+
+`SymmetryGraded` is Proposition 8.4's equivariance, encoded via the **Eilenberg–Moore category** of a symmetry monad `T` on `D` (hence the extra parameter `T : Monad D`). It is **gated** on that EM-machinery ([equivariance_unification.md](equivariance_unification.md)): equivariance is reachable for finite groups, but the graded-PROP-dependent parts of the encoding wait on this formalization being in place.
+
+Both are **signed stubs**: the class is declared with its parameters and its `extends DGradedColoredPROP`, but the fields are deferred (`…`) — the data is named, the bodies are future work.
+
+`ParaAlgebra` (the `Para` refinement mixin on `construct()`) is *not* introduced here. It is presented in [§7](#7-grothendieck-split-and-composition-as-pushout) alongside the `Algebra` class, because it layers on the algebra — refining `Para(C) → Para(V)` as a 2-functor, with weight tying as passes-as-2-cells — rather than on the graded PROP. It is listed in this section's title only because it belongs to the same mixin family.
