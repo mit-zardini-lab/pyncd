@@ -21,7 +21,7 @@ The intent is **formalizability, not formalization**: definitions are given as L
 
 ## 1. Orientation: one structure, one seam
 
-The prior design predated [graded_prop.md](graded_prop.md): it formalised `St` and `Br` as two independent PROP instances and divided everything into a "Layer 1 — Mathematical Encoding" and a "Layer 2 — Representation" (UIDs, `Context`, names). That split was an artifact of not yet having the vocabulary `graded_prop.md` now supplies. The reframing dissolves it. The scattered constructions are recognised as **one structure** — a `D`-graded colored PROP — and the two things the old "representation layer" was carrying turn out to be ordinary categorical data: symbolic sizes are the **fiber of the Grothendieck construction** `∫Dat`, and axis identity/alignment is the **pushout/coequalizer** of composition. Neither is a separate representation layer; both live inside the single development. There is **one** development, parametric on an index PROP `D` and an operation PROP `C`, and "prove the propositions once, inherit them everywhere" becomes, in Lean, parametricity over a typeclass.
+The prior design predated [graded_prop.md](graded_prop.md): it formalised `St` and `Br` as two independent PROP instances and divided everything into a "Layer 1 — Mathematical Encoding" and a "Layer 2 — Representation" (UIDs, `Context`, names). That split was an artifact of not yet having the vocabulary `graded_prop.md` now supplies. This reframing dissolves it. The scattered constructions are recognised as **one structure** — a `D`-graded colored PROP — and the two things the old "representation layer" was carrying turn out to be ordinary categorical data: symbolic sizes are the **fiber of the Grothendieck construction** `∫Dat`, and axis identity/alignment is the **pushout/coequalizer** of composition. Neither is a separate representation layer; both live inside the single development. There is **one** development, parametric on an index PROP `D` and an operation PROP `C`, and "prove the propositions once, inherit them everywhere" becomes, in Lean, parametricity over a typeclass.
 
 The encoding is therefore a layered tower of typeclasses, each parameterised by the classes below it:
 
@@ -42,7 +42,7 @@ The single seam that remains is **not** the old "is this mathematics?" boundary 
 
 ## 2. The base: `ColoredPROP`
 
-Categories are encoded, following [Holtzen (2025)](https://sholtzen.dev/articles/leancat-1.html), as a Lean 4 typeclass parameterised by an object type `ob : Type`. This is the categorical skeleton on which everything else rests; it is carried over from the current design unchanged.
+Categories are encoded, following [Holtzen (2025)](https://sholtzen.dev/articles/leancat-1.html), as a Lean 4 typeclass parameterised by an object type `ob : Type`. This is the categorical skeleton on which everything else rests; it is carried over from the prior design unchanged.
 
 ```lean
 class SmallCategory (ob : Type) : Type 1 where
@@ -64,7 +64,7 @@ Both **St** and **Br** are *colored PROPs* ([graded_prop.md §2](graded_prop.md)
 
 ```lean
 class ColoredPROP (ob : Type) extends SmallCategory ob where
-  gen       : Type
+  gen       : Type          -- O, the color set; ob = List gen = O* (the free monoid on O)
   toList    : ob → List gen
   ofList    : List gen → ob
   tensor    : ob → ob → ob := fun a b => ofList (toList a ++ toList b)
