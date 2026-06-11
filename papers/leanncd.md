@@ -483,20 +483,26 @@ The framing is the whole point. **The pushout/coequalizer is the spec; union-fin
 
 ### 7.5 Algebras and `construct()`
 
-The algebra `F` (graded_prop.md Def 7.2 / [§7](graded_prop.md#7-algebras-construct-and-the-para-refinement)) is the strong symmetric monoidal, `D`-equivariant functor `C → V` into a target actegory — the categorical content of `ConstructedModule.construct()`. It is the last layer of the tower, and the clearest instance of the doc's recurring shape: a typeclass parameterised by the classes below it. The target `V` is itself a right `D`-actegory; the algebra is parametric on both the source graded PROP `C` and that target `V`:
+The algebra `F` (graded_prop.md Def 7.2 / [§7](graded_prop.md#7-algebras-construct-and-the-para-refinement)) is the strong symmetric monoidal, `D`-equivariant functor `C → V` into a target actegory — the categorical content of `ConstructedModule.construct()`. It is the last layer of the tower, and the clearest instance of the doc's recurring shape: a typeclass parameterised by the classes below it. The target `V` is itself a right `D`-actegory parameterised by a value semiring `R` (graded_prop.md Def 7.1); the algebra is parametric on both the source graded PROP `C`, the target `V`, and `R`:
 
 ```lean
-class TargetActegory (D V : Type) [ColoredPROP D] where
-  actV : (V ×ᶜ Dᵒᵖ) ⥤ V                              -- P acts by appending dimensions (PyTorch tensors)
-  …                                                   -- same υ/α/δ coherences as §4, now in V
+class TargetActegory (D V : Type) [ColoredPROP D] (R : CommSemiring) where
+  actV : (V ×ᶜ Dᵒᵖ) ⥤ V              -- P acts by appending R-valued dimensions
+  …                                   -- same υ/α/δ coherences as §4, now in V; ⊗_V uses R
 
-structure Algebra (D C V : Type) [DGradedColoredPROP D C] [TargetActegory D V] where
+-- Default instance: R = ℝ, the standard (×, +) semiring (multiply, then sum over contracted indices).
+-- Declare a different instance only when a non-standard contraction arithmetic is needed.
+instance : TargetActegory St (Mat ℝ) ℝ where
+  actV := …   -- appends ℝ-typed dimensions; composition = matrix multiply over ℝ
+
+structure Algebra (D C V : Type) [DGradedColoredPROP D C] {R : CommSemiring} [TargetActegory D V R] where
   F        : C ⥤ V                                    -- strong symmetric monoidal (Mathlib MonoidalFunctor)
   equivar  : ∀ X P, F.obj (act (X,P)) ≅ actV (F.obj X, P)   -- D-equivariance
   coh      : …                                        -- commutes with υ, α, δ; preserves ev_p
--- a morphism of algebras is a MonoidalNatTrans; weight tying collapses parameters via Δ.
+-- R is inferred from the TargetActegory instance; defaults to ℝ.
+-- A morphism of algebras is a MonoidalNatTrans; weight tying collapses parameters via Δ.
 
-class ParaAlgebra (D C V : Type) [DGradedColoredPROP D C] [TargetActegory D V]
+class ParaAlgebra (D C V : Type) [DGradedColoredPROP D C] {R : CommSemiring} [TargetActegory D V R]
     extends Algebra D C V where … -- STUB: Para(C) → Para(V) 2-functor; passes-as-2-cells, weight tying
 ```
 

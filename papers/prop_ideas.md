@@ -643,7 +643,11 @@ theorem: every true equation in Boolean linear algebra is derivable from two gra
 presented Hopf structures. This is directly relevant to the Bool semiring morphisms in
 `BroadcastedCategory` — the graphical calculus for masked attention, reachability, and
 transitive closure might be an instance of IH_Bool. Worth investigating whether the
-existing Bool semiring operations close under IH axioms.
+existing Bool semiring operations close under IH axioms. The formal mechanism for
+instantiating Bool contraction in the framework is the value-semiring parameter of
+`TargetActegory` ([graded_prop.md Def 7.1](graded_prop.md#7-algebras-construct-and-the-para-refinement)):
+declaring `TargetActegory St (Mat Bool) Bool` with `R = (Bool, ∧, ∨)` requires no changes
+to `Br` or the graded-PROP structure.
 
 ### 4. Free Algebras and Architecture Initialization
 
