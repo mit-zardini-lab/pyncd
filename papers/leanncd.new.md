@@ -550,7 +550,7 @@ and mentions nothing beyond `act`, `δ`/`δ0`/`υ`/`α`, `sh`, and the named `Pr
 | **8.3** Grothendieck splitting | `C ≅ ∫Dat` | `CategoryTheory.Grothendieck` on `Dat` | `Iso.refl` if `C` is built as `∫Dat`; otherwise one constructed equivalence |
 | **8.4** Equivariance | `F` is `T`-equivariant `↔` `F` lifts to the EM-category of the symmetry monad `T` (morphism of `T`-algebras) | EM-category / `Monad.Algebra`; gated on `SymmetryGraded` (the `T : Monad D` parameter of [§6.2](#62-route-and-symmetry-stubs)) | body deferred — finite-`G` is reachable now, the graded-PROP-dependent parts wait; see [equivariance_unification.md](equivariance_unification.md) |
 | **8.5** Composition associativity | composition in `Inst(C♯)` is associative and unital | `CategoryTheory.Limits.pushout` + the pasting lemma | free (strictified by canonical representatives, so the pasting is definitional) |
-| **8.6** Two obstruction species | a morphism failing to admit a weave does so as `Scan` (species i, coupled but data-independent) or `Route` (species ii, data-dependent); the litmus is whether the reindexing is a fixed, point-natural `D`-morphism | the classification is `D`-uniform — phrased entirely over `act` and Eq. 3, no `D`-specific input | free |
+| **8.6** Two obstruction species | a morphism failing to admit a weave does so as `Scan` (species i, coupled but data-independent) or `Route` (species ii, data-dependent); the litmus is whether the reindexing is a fixed, point-natural `D`-morphism | the litmus is `D`-uniform — phrased entirely over `act` and Eq. 3, no `D`-specific input | abstract litmus free; positive identification of species (i) as `Scan` needs `TemporalGraded` (its `L`), as 8.7–8.8 |
 | **8.7** `Scan` as a catamorphism | `Scan := cata(step)`; the prefix-restriction law is a corollary of the catamorphism universal property | `TemporalGraded` (the `iterate`/`trace` fields of [§6.1](#61-temporalgraded--scan)) | free given `TemporalGraded`; explains the affine fast path (step algebra factors through a **monoid** → parallel prefix in `O(log N)`) |
 | **8.8** `Scan` batches | `act(Scan, P) ≅ Scan(act(step, P))` for `P` orthogonal to `L` | `lift_fold_dist` ([§6.1](#61-temporalgraded--scan)) | free given `TemporalGraded` |
 
@@ -600,12 +600,12 @@ The framework grows by **adding instances and mixins**, never by editing the pro
 | Extension | Lean addition | Kind |
 | --- | --- | --- |
 | `D = Br` mixture-of-experts | `instance : DGradedColoredPROP Br CMod` ([graded_prop.md §9.2](graded_prop.md#92-the-speculative-third-level-d--br)) — models as wires, `⊛` tiles a base computation over a family of models | **new instance** |
-| swap-`D`: graph / incidence cat. | `instance : DGradedColoredPROP Graph C` — gather-along-edge reindexing; GNNs, meshes ([graded_prop.md §9.3](graded_prop.md#93-the-horizontal-axis-swapping-d)) | **new instance** |
+| swap-`D`: graph / incidence cat. | `instance : DGradedColoredPROP Graph C` — gather-along-edge reindexing; GNNs, meshes (fixed graph = weave; per-sample graph = `Route`) ([graded_prop.md §9.3](graded_prop.md#93-the-horizontal-axis-swapping-d)) | **new instance** |
 | swap-`D`: group `BG` / `Rep(G)` | `instance : DGradedColoredPROP (Rep G) C` — group-translation reindexing; equivariant & steerable nets | **new instance** |
 | swap-`D`: Markov cat. `Stoch` | `instance : DGradedColoredPROP Stoch C` — Markov-kernel reindexing; sampling, VAE, SMC | **new instance** |
 | swap-`D`: metric / enriched cat. | `instance : DGradedColoredPROP Metric C` — distance-kernel reindexing; continuous conv, neural fields | **new instance** |
-| swap-`D`: partition lattice | `instance : DGradedColoredPROP Partition C` — assignment-map reindexing; pooling, clustering, slots | **new instance** |
-| swap-`D`: resource monoid | `instance : DGradedColoredPROP Resource C` — store-vs-recompute reindexing; checkpointing / scheduling | **new instance** |
+| swap-`D`: partition lattice | `instance : DGradedColoredPROP Partition C` — assignment-map reindexing; pooling, clustering, slots (fixed = weave; learned = `Route`) | **new instance** |
+| swap-`D`: resource monoid | `instance : DGradedColoredPROP Resource C` — store-vs-recompute reindexing; checkpointing / scheduling ([future_ideas.md §8](future_ideas.md#8-prioritized-implementation-roadmap) item 4.5) | **new instance** |
 | data-dependent routing | `class RouteStructure` ([§6.2](#62-route-and-symmetry-stubs)) — Prop 8.6(ii), the gate as a `Para` parameter | **new mixin** |
 | equivariance | `class SymmetryGraded` ([§6.2](#62-route-and-symmetry-stubs)) — Prop 8.4 via the EM-category of `T : Monad D`, gated | **new mixin** |
 | weight tying / passes | `class ParaAlgebra` ([§7.5](#75-algebras-and-construct)) — `Para(C) → Para(V)` 2-functor, passes-as-2-cells | **new mixin** |
