@@ -117,7 +117,9 @@ class Reindex(fd.Term):
     the read coordinate ``const_p + Σ coeff·out_axes[k]``.  Realises a non-iteration
     affine index read — shift/stride/dilation/convolution/diagonal — as an St affine
     reindexing.  ``out_axes`` are the fan-out axes; their sizes give the output shape.
+    ``in_axes`` are the storage axes of the original tensor, used for display.
     """
+    in_axes: fd.Prod[sc.RawAxis]
     out_axes: fd.Prod[sc.RawAxis]
     rows: fd.Prod  # tuple[tuple[int, tuple[tuple[int, int], ...]], ...]
 
@@ -641,7 +643,10 @@ class TL:
         self._slice_counter = n + 1
         base = f.name.body if isinstance(f.name.body, str) else 'T'
         fresh = fd.DynamicName(f'{base}__g{n}')
-        reindex = Reindex(out_axes=fan_axes, rows=tuple(rows))
+        key = f.name.body if isinstance(f.name.body, str) else None
+        decl = self._declarations.get(key) if key else None
+        in_axes = decl.shape if decl is not None else ()
+        reindex = Reindex(in_axes=in_axes, out_axes=fan_axes, rows=tuple(rows))
         self._entries.append((fresh, reindex, fan_axes, (f.name,)))
         self._name_to_axes[fresh] = fan_axes
         return IndexedTensor(fresh, fan_axes)
