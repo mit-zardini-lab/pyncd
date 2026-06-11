@@ -59,11 +59,11 @@ Each layer is a class parameterized by the classes below it. `D` (index PROP) an
 ColoredPROP O                                    -- lightweight base; St, Br instances
    ⇣ adapter (the seam)  →  Mathlib MonoidalCategory / SymmetricCategory
 DGradedColoredPROP D C   [ColoredPROP D] [ColoredPROP C]   -- core: sh, act, δ, υ, α, axioms
-   ├ TemporalGraded   D C   (extends)   -- Scan, Def 3.3–3.5
+   ├ TemporalGraded   D C   (mixin, full)   -- Scan, Def 3.3–3.5
    ├ RouteStructure   D C   (mixin, STUB)     -- Route, Prop 8.6(ii)      [future_ideas]
    └ SymmetryGraded   D C T (mixin, STUB)     -- equivariance monad, Prop 8.4 [gated; equiv_unif A3]
 Algebra D C V   [DGradedColoredPROP D C] [TargetActegory D V]   -- construct()
-   └ ParaAlgebra ...        (mixin, STUB)      -- weight tying, pass-as-2-cell  [prop_ideas §7]
+   └ ParaAlgebra ...        (mixin, STUB)      -- weight tying, pass-as-2-cell  [prop_ideas: Para Refinement]
 ```
 
 ### 3.1 Base — `ColoredPROP`
@@ -96,7 +96,7 @@ A single stated adapter turning a `ColoredPROP O` into a Mathlib strict symmetri
 
 ```lean
 class DGradedColoredPROP (D C : Type) [ColoredPROP D] [ColoredPROP C] where
-  sh    : ColoredPROP.gen (ob := C) → C        -- shape map on colors; extends to sh* (monoid hom)
+  sh    : ColoredPROP.gen (ob := C) → D        -- shape map: each C-color's underlying D-shape; extends to sh* (monoid hom)
   act   : (C ×ᶜ Dᵒᵖ) ⥤ C                        -- lift action (Mathlib functor, via seam)
   δ     : ∀ X Y P, act.obj (tensor X Y, P) ≅ tensor (act.obj (X,P)) (act.obj (Y,P))
   δ0    : ∀ P, act.obj (unit, P) ≅ unit
