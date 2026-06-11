@@ -532,3 +532,85 @@ The tables below collect the systematic Lean ↔ Python correspondence, **organi
 | `DynamicName` | `DynamicName` | display only — see [§12](#12-appendix-out-of-scope), out of scope |
 
 The single coherent message of the table: every row that the old design would have filed under "Layer 2 — Representation" (`Numeric`/`FreeNumeric`, `Context`/`EqClass`, `TermM`, `TermTraversable`, `DynamicName`) is now placed by its categorical role — fiber datum, coequalizer implementation, fresh-name counter, traversal, or display — on one side or the other of the proposition/computation seam. There is no representation layer; there is one tower with one seam.
+
+## 9. The propositions as generic theorems
+
+Every proposition of [graded_prop.md §8](graded_prop.md#8-propositions-the-synthesis-organizes) is a statement about the **core class fields and axioms only**. Each begins with the same generic preamble:
+
+```lean
+variable {D C : Type} [ColoredPROP D] [ColoredPROP C] [DGradedColoredPROP D C]
+```
+
+and mentions nothing beyond `act`, `δ`/`δ0`/`υ`/`α`, `sh`, and the named `Prop`-fields (`sh_act`, `act_unit_assoc`, `dist_coh`, `broadcast_gen`, plus the base `elemental`). Because the only hypotheses are class members, each proposition is **proved once, at the graded-PROP level, and inherited at every instance** — the `DGradedColoredPROP St Br` of [§10](#10-instantiation-and-future-extensions), the `DGradedColoredPROP Br CMod` MoE level, a future `Graph→C`, and the swapped-`D` rows all receive it with no per-domain proof. This is the Lean form of [graded_prop.md](graded_prop.md)'s central promise, and it *is* parametricity over a typeclass: a `theorem` whose only free assumption is `[DGradedColoredPROP D C]` applies verbatim wherever that instance resolves.
+
+| Proposition | Lean statement (sketch) | Mathlib machinery | Per-instance cost |
+| --- | --- | --- | --- |
+| **8.1** Lift functoriality / distribution | `[f ; g, P] = [f, P] ; [g, P]` and `[f ⊗ g, P] = [f, P] ⊗ [g, P]` | `act` is a `Functor` (so `Functor.map_comp`) + the `δ` distributivity iso | free |
+| **8.2** Weave uniqueness | `Subsingleton (Weave g)` | `elemental` (base) + `broadcast_gen` — elements separate, so `P` and the target/tiling partition are determined | free |
+| **8.3** Grothendieck splitting | `C ≅ ∫Dat` | `CategoryTheory.Grothendieck` on `Dat` | `Iso.refl` if `C` is built as `∫Dat`; otherwise one constructed equivalence |
+| **8.4** Equivariance | `F` is `T`-equivariant `↔` `F` lifts to the EM-category of the symmetry monad `T` (morphism of `T`-algebras) | EM-category / `Monad.Algebra`; gated on `SymmetryGraded` (the `T : Monad D` parameter of [§6.2](#62-route-and-symmetry-stubs)) | body deferred — finite-`G` is reachable now, the graded-PROP-dependent parts wait; see [equivariance_unification.md](equivariance_unification.md) |
+| **8.5** Composition associativity | composition in `Inst(C♯)` is associative and unital | `CategoryTheory.Limits.pushout` + the pasting lemma | free (strictified by canonical representatives, so the pasting is definitional) |
+| **8.6** Two obstruction species | a morphism failing to admit a weave does so as `Scan` (species i, coupled but data-independent) or `Route` (species ii, data-dependent); the litmus is whether the reindexing is a fixed, point-natural `D`-morphism | the classification is `D`-uniform — phrased entirely over `act` and Eq. 3, no `D`-specific input | free |
+| **8.7** `Scan` as a catamorphism | `Scan := cata(step)`; the prefix-restriction law is a corollary of the catamorphism universal property | `TemporalGraded` (the `iterate`/`trace` fields of [§6.1](#61-temporalgraded--scan)) | free given `TemporalGraded`; explains the affine fast path (step algebra factors through a **monoid** → parallel prefix in `O(log N)`) |
+| **8.8** `Scan` batches | `act(Scan, P) ≅ Scan(act(step, P))` for `P` orthogonal to `L` | `lift_fold_dist` ([§6.1](#61-temporalgraded--scan)) | free given `TemporalGraded` |
+
+The inheritance is about the **theorems**, not the instance obligations. When a new `instance : DGradedColoredPROP D C` is declared, the propositions above transfer to it for free — but the instance must still **discharge the coherence `Prop`-fields** of the core: the actegory triangle and pentagon (`act_unit_assoc`), the distributivity coherences (`dist_coh`), and `sh_act`/`broadcast_gen`/`elemental`. "Inherit everywhere" names the proven propositions riding on those fields; it does not waive the obligation to *supply* the fields. Each new domain pays that fixed, finite coherence cost once; everything built on top of the core is then free.
+
+## 10. Instantiation and future extensions
+
+### 10.1 `D = St`, `C = Br` — the flagship instance
+
+Today's instantiation is `D = St`, `C = Br`: an index PROP of axis lengths (colors = `Numeric` sizes, morphisms = stride matrices) grading an operation PROP of broadcasted arrays. The instance header supplies the core fields; the named `Prop`-fields are discharged by the laws established in [§2](#2-the-base-coloredprop)–[§4](#4-the-core-dgradedcoloredprop-d-c).
+
+```lean
+instance : DGradedColoredPROP St Br where
+  sh    := fun a => a.shape        -- the array's shape: sh([a, A]) = A
+  act   := …                       -- batch lift + reindexing (theory.md Lift Operations)
+  δ     := …                       -- [X ⊗ Y, P] ≅ [X,P] ⊗ [Y,P]   (batch lift distributes)
+  δ0    := …                       -- [I, P] ≅ I
+  υ     := …                       -- [X, I_St] ≅ X   (grading by the unit shape is trivial)
+  α     := …                       -- [[X,P],Q] ≅ [X, Q ⊗ P]
+  sh_act         := …              -- (Sh-⊛): sh*([X,P]) = sh*(X) ⊗ P
+  act_unit_assoc := …              -- actegory triangle + pentagon, by St affine-stride algebra
+  dist_coh       := …              -- δ/δ0 naturality + interchange, from the batch-lift defn
+  broadcast_gen  := …              -- every Br morphism is a broadcasted operation (Def 13)
+  elemental      := …              -- Br is elemental (base ColoredPROP field)
+```
+
+| Core field | pyncd realization |
+| --- | --- |
+| `sh` | `sh([a, A]) = A` — the array's shape ([theory.md §Objects in Br](theory.md#objects-in-br)) |
+| `act` | the batch lift `[f, P]` + object/morphism reindexing + broadcasted-stride lift ([theory.md §Lift Operations](theory.md#lift-operations)) |
+| `δ` | `[X ⊗ Y, P] = [X,P] ⊗ [Y,P]` ([theory.md §Batch Lift](theory.md#batch-lift-f-p-def-11)) |
+| `δ0` | `[I, P] ≅ I` — lifting the monoidal unit is trivial |
+| `υ` | `[X, I_St] ≅ X` — grading by the unit (empty) shape is the identity reindexing |
+| `α` | `[[X,P],Q] ≅ [X, Q ⊗ P]` — nested lifts compose the batch shapes |
+| `sh_act` | `(Sh-⊛)`: a lifted array's shape is the base shape tensored with the batch shape `P` |
+| `act_unit_assoc` | actegory triangle/pentagon, discharged by `St`'s affine-stride matrix algebra (`Matrix.mul_assoc` + `ring`) |
+| `dist_coh` | `δ`/`δ0` naturality and interchange with `υ`/`α`/swap, from the batch-lift definition |
+| `broadcast_gen` | `(Broadcast-gen)`: every `Br` morphism is a broadcasted operation ([theory.md §Broadcasting](theory.md#broadcasting)) |
+| `elemental` | `Br` is elemental ([theory.md §Elemental Categories](theory.md#elemental-categories)) — the base `ColoredPROP` field |
+
+Every row is a definitional unfolding of the core with `D := St`, `C := Br`. With the instance in place, all of [§9](#9-the-propositions-as-generic-theorems) holds for `Br` with no `Br`-specific proof.
+
+### 10.2 The additive-extension menu
+
+The framework grows by **adding instances and mixins**, never by editing the proven core. Each direction below is one or the other.
+
+| Extension | Lean addition | Kind |
+| --- | --- | --- |
+| `D = Br` mixture-of-experts | `instance : DGradedColoredPROP Br CMod` ([graded_prop.md §9.2](graded_prop.md#92-the-speculative-third-level-d--br)) — models as wires, `⊛` tiles a base computation over a family of models | **new instance** |
+| swap-`D`: graph / incidence cat. | `instance : DGradedColoredPROP Graph C` — gather-along-edge reindexing; GNNs, meshes ([graded_prop.md §9.3](graded_prop.md#93-the-horizontal-axis-swapping-d)) | **new instance** |
+| swap-`D`: group `BG` / `Rep(G)` | `instance : DGradedColoredPROP (Rep G) C` — group-translation reindexing; equivariant & steerable nets | **new instance** |
+| swap-`D`: Markov cat. `Stoch` | `instance : DGradedColoredPROP Stoch C` — Markov-kernel reindexing; sampling, VAE, SMC | **new instance** |
+| swap-`D`: metric / enriched cat. | `instance : DGradedColoredPROP Metric C` — distance-kernel reindexing; continuous conv, neural fields | **new instance** |
+| swap-`D`: partition lattice | `instance : DGradedColoredPROP Partition C` — assignment-map reindexing; pooling, clustering, slots | **new instance** |
+| swap-`D`: resource monoid | `instance : DGradedColoredPROP Resource C` — store-vs-recompute reindexing; checkpointing / scheduling | **new instance** |
+| data-dependent routing | `class RouteStructure` ([§6.2](#62-route-and-symmetry-stubs)) — Prop 8.6(ii), the gate as a `Para` parameter | **new mixin** |
+| equivariance | `class SymmetryGraded` ([§6.2](#62-route-and-symmetry-stubs)) — Prop 8.4 via the EM-category of `T : Monad D`, gated | **new mixin** |
+| weight tying / passes | `class ParaAlgebra` ([§7.5](#75-algebras-and-construct)) — `Para(C) → Para(V)` 2-functor, passes-as-2-cells | **new mixin** |
+| unbounded recurrence | corecursion / coalgebra refinement of `TemporalGraded` — the `cata`/`ana` companion | **new mixin** |
+
+No row is a core edit: a new domain is a new `instance` (it supplies the core fields and discharges the coherence obligations of [§9](#9-the-propositions-as-generic-theorems)), and a new capability is a new mixin layered on top (`extends DGradedColoredPROP`, or `extends Algebra` for `ParaAlgebra`). The classification of [graded_prop.md §8.6](graded_prop.md#8-propositions-the-synthesis-organizes) is `D`-uniform, so every swap-`D` row inherits the same weave-vs-`Scan`-vs-`Route` decision procedure.
+
+The MoE level deserves a specific word, because it is the one place the same category `Br` appears twice. The vertical stack `D = Br` reuses **all** of [§9](#9-the-propositions-as-generic-theorems) with zero new proof, and this is not a coincidence — it is forced by the instance-resolution discipline. `Br`-as-graded — the `DGradedColoredPROP St Br` instance of [§10.1](#101-d--st-c--br--the-flagship-instance) — occupies the **`C` position** of `DGradedColoredPROP`. `Br`-as-index — the `[ColoredPROP Br]` argument of `instance : DGradedColoredPROP Br CMod` — occupies the **`D` position**. The two are different parameter slots of the class, so the two roles of `Br` never collide in instance search: declaring `DGradedColoredPROP Br CMod` does not overlap or shadow `DGradedColoredPROP St Br`. Because the §9 theorems are generic in both `D` and `C`, they fire for `DGradedColoredPROP Br CMod` the instant it resolves, exactly as they fire for `DGradedColoredPROP St Br` — the MoE level is new data, not new mathematics.
