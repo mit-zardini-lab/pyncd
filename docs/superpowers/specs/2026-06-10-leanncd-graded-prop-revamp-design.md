@@ -59,7 +59,7 @@ Each layer is a class parameterized by the classes below it. `D` (index PROP) an
 ColoredPROP O                                    -- lightweight base; St, Br instances
    ⇣ adapter (the seam)  →  Mathlib MonoidalCategory / SymmetricCategory
 DGradedColoredPROP D C   [ColoredPROP D] [ColoredPROP C]   -- core: sh, act, δ, υ, α, axioms
-   ├ TemporalGraded   D C   (extends)   -- Scan, Def 3.3–3.5
+   ├ TemporalGraded   D C   (mixin, full)   -- Scan, Def 3.3–3.5
    ├ RouteStructure   D C   (mixin, STUB)     -- Route, Prop 8.6(ii)      [future_ideas]
    └ SymmetryGraded   D C T (mixin, STUB)     -- equivariance monad, Prop 8.4 [gated; equiv_unif A3]
 Algebra D C V   [DGradedColoredPROP D C] [TargetActegory D V]   -- construct()
