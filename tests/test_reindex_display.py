@@ -19,4 +19,5 @@ def test_reindex_has_in_axes():
     reindex = morph.content[0]
     assert isinstance(reindex, Reindex)
     assert len(reindex.in_axes) == 3          # xi, yi, ch
+    assert {ax.uid for ax in reindex.in_axes} == {xi.uid, yi.uid, ch.uid}
     assert len(reindex.out_axes) == 5         # x, dx, y, dy, ch
