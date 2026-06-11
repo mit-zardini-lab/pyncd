@@ -1,57 +1,48 @@
-# Lean 4 Encoding of the NCD Category Framework
+# Lean 4 Encoding of the `D`-Graded Colored PROP Framework
 
-This document describes a Lean 4 formalisation of the categorical framework introduced in *Weaves, Wires, and Morphisms* (Abbott & Zardini, 2026). The goal is to show how the core structures — the product category framework, the axis-stride category **St**, and the array-broadcasted category **Br** — can be expressed as inhabitants of a small typeclass hierarchy built around two definitions: `SmallCategory` and `PROP`.
+This document describes a Lean 4 formalisation of the NCD categorical framework as a **single structure** — the `D`-graded colored PROP of [graded_prop.md](graded_prop.md) — rather than as two independent categories. `St` and `Br` are one instantiation (`D = St`, `C = Br`); the model level (`D = Br`) and the swapped-`D` rows are others. The encoding is a layered tower of typeclasses parameterised by other typeclasses, so the propositions of [graded_prop.md §8](graded_prop.md#8-propositions-the-synthesis-organizes) are stated once, generically, and inherited at every instantiation.
+
+The intent is **formalizability, not formalization**: definitions are given as Lean `class`/`structure` data plus named `Prop`-field laws, in the shape a Lean development transcribes directly. No proofs are written — signatures and proof obligations only.
 
 ## Contents
 
-1. [Two-layer architecture](#two-layer-architecture)
-2. [Layer 1 — Mathematical Encoding](#layer-1--mathematical-encoding)
-   - [1. SmallCategory](#1-smallcategory)
-   - [2. PROP](#2-prop)
-   - [3. Numeric](#3-numeric)
-   - [4. St — Semantic Category via Stride Matrices](#4-st--semantic-category-via-stride-matrices)
-   - [5. Br — Free Category over Broadcasted Base Morphisms](#5-br--free-category-over-broadcasted-base-morphisms)
-   - [6. Design Contrast](#6-design-contrast)
-   - [7. The St → Br Embedding](#7-the-st--br-embedding)
-   - [8. Correspondence with the Python Implementation](#8-correspondence-with-the-python-implementation)
-   - [9. Paper Definitions in Lean](#9-paper-definitions-in-lean)
-3. [Layer 2 — Representation](#layer-2--representation)
-   - [1. `DynamicName`](#1-dynamicname)
-   - [2. `UID` and the `TermM` monad](#2-uid-and-the-termm-monad)
-   - [3. `WithUID` — the generic decoration](#3-withuid--the-generic-decoration)
-   - [4. `TermTraversable` — replacing `deep_reconstruct`](#4-termtraversable--replacing-deep_reconstruct)
-   - [5. `Context` — pure functional union-find](#5-context--pure-functional-union-find)
-   - [6. Correspondence with the Python Term System](#6-correspondence-with-the-python-term-system)
-   - [7. What Layer 2 leaves unchanged](#7-what-layer-2-leaves-unchanged)
-4. [Summary](#summary)
+1. [Orientation: one structure, one seam](#1-orientation-one-structure-one-seam)
+2. [The base: `ColoredPROP`](#2-the-base-coloredprop)
+3. [The seam adapter into Mathlib](#3-the-seam-adapter-into-mathlib)
+4. [The core: `DGradedColoredPROP D C`](#4-the-core-dgradedcoloredprop-d-c)
+5. [Weaves as cartesian-lift data](#5-weaves-as-cartesian-lift-data)
+6. [Mixins: Scan, Route, Symmetry, Para](#6-mixins-scan-route-symmetry-para)
+7. [Grothendieck split and composition as pushout](#7-grothendieck-split-and-composition-as-pushout)
+8. [Acsets and Python interop](#8-acsets-and-python-interop)
+9. [The propositions as generic theorems](#9-the-propositions-as-generic-theorems)
+10. [Instantiation and future extensions](#10-instantiation-and-future-extensions)
+11. [Lean formalization notes](#11-lean-formalization-notes)
+12. [Appendix: out of scope](#12-appendix-out-of-scope)
 
----
+## 1. Orientation: one structure, one seam
 
-## Two-layer architecture
+The current state of the design predates [graded_prop.md](graded_prop.md): it formalised `St` and `Br` as two independent PROP instances and divided everything into a "Layer 1 — Mathematical Encoding" and a "Layer 2 — Representation" (UIDs, `Context`, names). That split was an artifact of not yet having the vocabulary `graded_prop.md` now supplies. The reframing dissolves it. The scattered constructions are recognised as **one structure** — a `D`-graded colored PROP — and the two things the old "representation layer" was carrying turn out to be ordinary categorical data: symbolic sizes are the **fiber of the Grothendieck construction** `∫Dat`, and axis identity/alignment is the **pushout/coequalizer** of composition. Neither is a separate representation layer; both live inside the single development. There is **one** development, parametric on an index PROP `D` and an operation PROP `C`, and "prove the propositions once, inherit them everywhere" becomes, in Lean, plain parametricity over a typeclass.
 
-The formalisation separates into two independent layers that address different concerns. Understanding this separation is the key to reading everything that follows.
+The encoding is therefore a layered tower of typeclasses, each parameterised by the classes below it:
 
-**Layer 1 — Mathematical Encoding** formalises the categorical structure: what objects and morphisms *are*, what laws they satisfy, and how they compose. Its types — `Axis`, `StMat`, `BrBase`, `BrMorph` — are pure mathematical objects. They carry no display information, no unique identity beyond structural equality, and no notion of "these two axes are the same symbolic variable". Layer 1 can be used as-is for formal proof.
+```
+ColoredPROP O                                    -- lightweight base; St, Br instances
+   ⇣ adapter (the seam)  →  Mathlib MonoidalCategory / SymmetricCategory
+DGradedColoredPROP D C   [ColoredPROP D] [ColoredPROP C]   -- core: sh, act, δ, υ, α, axioms
+   ├ TemporalGraded   D C   (extends)   -- Scan, Def 3.3–3.5
+   ├ RouteStructure   D C   (mixin, STUB)     -- Route, Prop 8.6(ii)      [future_ideas]
+   └ SymmetryGraded   D C T (mixin, STUB)     -- equivariance monad, Prop 8.4 [gated; equiv_unif A3]
+Algebra D C V   [DGradedColoredPROP D C] [TargetActegory D V]   -- construct()
+   └ ParaAlgebra ...        (mixin, STUB)      -- weight tying, pass-as-2-cell  [prop_ideas: Para Refinement]
+```
 
-**Layer 2 — Representation** adds three things on top of Layer 1 without touching any mathematical content:
+The base `ColoredPROP` carries the lightweight definitions and the `St`/`Br` instances; the core `DGradedColoredPROP D C` adds the grading data and laws; capabilities (`Scan`, `Route`, symmetry, `Para`) are composable mixins, and `Algebra` is the `construct()` functor into a target actegory. An instantiation pays only for the layers it declares, and the proven core is never edited — new domains are new instances, new capabilities are new mixins.
 
-1. **Naming.** A `DynamicName` can be attached to any Layer 1 value for LaTeX rendering and diagram display. It is purely aesthetic.
+The single seam that remains is **not** the old "is this mathematics?" boundary but a thinner, differently-drawn one — the **proposition/computation** seam: **does Lean *prove* this or *compute* this?** This is the seam [graded_prop.md](graded_prop.md) itself draws. [§6](graded_prop.md#6-composition-as-pushout) is "a correctness/specification lens, not a composition algorithm": the pushout *explains and certifies* what `Context` does, it does not replace it — so the coequalizer is the *specification* and union-find plus a fresh-name counter is the *implementation*. [§7](graded_prop.md#7-algebras-construct-and-the-para-refinement) keeps the lightweight `Para` encoding and tells us to **note the gap explicitly rather than pay for a bicategory only the specification uses**. Read as the organizing principle of this document: the propositional core (PROP/actegory laws, `∫Dat`, pushout-as-colimit, equivariance, weave uniqueness) is stated over UID-free types and proved; the executable realization (fresh-UID counter, union-find, acset tables / CSV) sits on the other side of the seam, realizing the specification without being proved against it line by line. The seam adapter of §3 is exactly this boundary turned into a definition.
 
-2. **Identity.** A `UID` makes a Layer 1 value uniquely identifiable. Two `Axis` values that are structurally different records but carry the same UID are the *same symbolic axis* — they are degrees of freedom that have been equated. This is the mechanism behind `FreeNumeric` and unnamed `RawAxis` values in pyncd.
+## 2. The base: `ColoredPROP`
 
-3. **Alignment.** A `Context` (a union-find over UIDs) records which UIDs have been equated and provides a substitution that replaces every member of an equivalence class with a single canonical representative. This is what happens during `@` composition when two morphisms share axes.
-
-The relationship between the layers is a wrapping, not an extension. Every Layer 1 type `α` gains a Layer 2 decorated counterpart `WithUID α` that bundles a `UData` (UID + optional name) with the Layer 1 value. The mathematical content — the PROP laws, the `StMat` arithmetic, the `BrMorph` list structure — is entirely in the `.val` field and is never altered by Layer 2 operations.
-
-The Python implementation conflates these layers via inheritance (`Axis` extends `UTerm` which extends `Term`). Lean 4 keeps them separate by composition, which makes the boundary explicit and keeps Layer 1 independently verifiable.
-
----
-
-## Layer 1 — Mathematical Encoding
-
-### 1. SmallCategory
-
-Following [Holtzen (2025)](https://sholtzen.dev/articles/leancat-1.html), categories are encoded as a Lean 4 typeclass parameterised by an object type `ob : Type`.
+Categories are encoded, following [Holtzen (2025)](https://sholtzen.dev/articles/leancat-1.html), as a Lean 4 typeclass parameterised by an object type `ob : Type`. This is the categorical skeleton on which everything else rests; it is carried over from the current design unchanged.
 
 ```lean
 class SmallCategory (ob : Type) : Type 1 where
@@ -67,59 +58,35 @@ infixl:65 " ⟶ " => SmallCategory.hom
 notation:65 a " ∘ " b => SmallCategory.comp b a
 ```
 
-Three design points are worth noting.
+Objects are themselves Lean types, so the monoidal product on objects can be definitional list concatenation; morphisms carry enough structure that the category laws fall to ring axioms (`St`) or list induction (`Br`) with no quotient; and the laws `id_comp`/`comp_id`/`assoc` are propositional equalities discharged by tactics. `-- Python: no typeclass — categories emerge implicitly from the @ operator / Composed wrapper.`
 
-**Objects as types.** The object type `ob` is an element of Lean's `Type`, so it can itself be a Lean program — a list, a record, an inductive. Both **St** and **Br** exploit this: their objects are `List`-based structures, so the monoidal product on objects is definitionally list concatenation.
-
-**Morphisms as semantic types.** For **St**, morphisms will be stride matrices; for **Br**, morphisms will be a free-list construction. In both cases the morphism type carries enough structure that the category laws are either immediate from ring axioms (St) or from list induction (Br), with no quotient required.
-
-**Laws are propositions.** `id_comp`, `comp_id`, and `assoc` are propositional equalities to be discharged by tactics. For Br all three reduce to `rfl` or one-step induction.
-
-**Python counterpart.** Python has no typeclass encoding for `SmallCategory`. Categories emerge implicitly from the `@` operator and `Composed` wrapper; the laws `id_comp`, `comp_id`, and `assoc` are never stated or enforced in the Python codebase.
-
----
-
-### 2. PROP
-
-Both **St** and **Br** are *product categories*: their objects are finite products of lone objects, and the monoidal product is tuple concatenation (theory.md §3). This places them in a more specific structure than a general monoidal category — they are **PROPs** (PRoduct and Permutation categories): strict symmetric monoidal categories in which every object is a tensor power of a generator.
+Both **St** and **Br** are *colored PROPs* ([graded_prop.md §2](graded_prop.md), Definition 2.1): symmetric strict monoidal categories whose object monoid is the free monoid `O*` over a set of colors, with `⊗` = list concatenation and `I` = the empty list. The base class carries exactly this structure, **with one addition over the current doc**: the elemental separation axiom `elemental` (the `(Elem)` axiom of [graded_prop.md §2](graded_prop.md)).
 
 ```lean
-class PROP (ob : Type) extends SmallCategory ob where
-  /-- The generating lone-object type (= L in the paper). -/
-  gen    : Type
-  /-- Objects are lists of generators. -/
-  toList : ob → List gen
-  ofList : List gen → ob
-  /-- Monoidal product = list concatenation. -/
-  tensor : ob → ob → ob := fun a b => ofList (toList a ++ toList b)
-  unit   : ob            := ofList []
-  /-- Strictness: associator and unitors are definitional equalities. -/
-  tensor_assoc  : ∀ a b c : ob, tensor (tensor a b) c = tensor a (tensor b c)
-  tensor_unit_l : ∀ a : ob, tensor unit a = a
-  tensor_unit_r : ∀ a : ob, tensor a unit = a
-  /-- Symmetric structure: swap is always a morphism. -/
-  swap : ∀ a b : ob, hom (tensor a b) (tensor b a)
-  /-- Tensoring morphisms (bifunctoriality). -/
-  tensorHom : ∀ {a b c d : ob}, hom a b → hom c d → hom (tensor a c) (tensor b d)
+class ColoredPROP (ob : Type) extends SmallCategory ob where
+  gen       : Type
+  toList    : ob → List gen
+  ofList    : List gen → ob
+  tensor    : ob → ob → ob := fun a b => ofList (toList a ++ toList b)
+  unit      : ob := ofList []
+  tensor_assoc  : ∀ a b c, tensor (tensor a b) c = tensor a (tensor b c)
+  tensor_unit_l : ∀ a, tensor unit a = a
+  tensor_unit_r : ∀ a, tensor a unit = a
+  swap      : ∀ a b, hom (tensor a b) (tensor b a)
+  tensorHom : ∀ {a b c d}, hom a b → hom c d → hom (tensor a c) (tensor b d)
+  elemental : ∀ {X Y} (f g : hom X Y),
+                (∀ x : hom unit X, comp x f = comp x g) → f = g   -- (Elem)
 ```
 
-For both **St** and **Br**, `ob = List gen`, so `toList = id` and `ofList = id`. The three strictness laws reduce to `List.append_assoc`, `List.nil_append`, and `List.append_nil`, all dischargeable by `simp`. The `swap` morphism is a `Rearrangement` that interleaves or separates the two sub-lists.
+For both **St** and **Br**, `ob = List gen`, so `toList = id` and `ofList = id`, and the three strictness laws `tensor_assoc`/`tensor_unit_l`/`tensor_unit_r` reduce to `List.append_assoc`, `List.nil_append`, and `List.append_nil` respectively — all dischargeable by `simp [List.append_assoc/nil_append/append_nil]`. The `swap` morphism is a rearrangement that interleaves or separates the two sub-lists, and `tensorHom` is the parallel product.
 
-The PROP typeclass earns its keep in three ways.
+The **new** field is `elemental`: writing `El(X) := hom unit X` for the *points* (global elements) of `X`, it states that points separate parallel morphisms — `(∀ x : hom unit X, x ; f = x ; g) → f = g`. Equivalently the family `{(x ; −)}_{x ∈ El(X)}` is jointly injective. This is a single `Prop`-valued field, and it is the genuine extra content the current doc lacks: it is precisely what makes the cartesian-lift datum of a morphism **unique** — see weave uniqueness (forward-ref [§5](#5-weaves-as-cartesian-lift-data), Prop 8.2). Without it, Eq. 3 (point-naturality) holds by functoriality but a weave's `(f, P, ρ)` factorisation would not be forced.
 
-1. **Generic rearrangements.** Any list permutation induces a morphism in any PROP. Proved once, it applies to both **St** and **Br**.
+The `ColoredPROP` typeclass earns its keep in three ways, as before: generic rearrangements (any list permutation induces a morphism in any colored PROP, proved once), the `St → Br` relationship (the `reindexings` of a `BrBase` are a family of **St** morphisms inside a **Br** morphism — the data of a monoidal functor `St → Br`), and the interchange law `(f ; g) ⊗ (h ; k) = (f ⊗ h) ; (g ⊗ k)`, derivable once from `tensorHom` and `assoc`. `-- Python: no class corresponds to ColoredPROP — the monoidal structure is a paper-level concept (ProdObject[L] wrapping tuple[L,...]).`
 
-2. **The St → Br relationship.** The `reindexings` field inside a `Broadcasted` root morphism is exactly a family of **St** morphisms living inside a **Br** morphism. This is the data of a lax monoidal functor `St → Br`, expressible generically once both are PROP instances.
+### 2.1 `Numeric`
 
-3. **Interchange.** The law $(f  ;  g) \otimes (h  ;  k) = (f \otimes h)  ;  (g \otimes k)$ holds in any PROP and can be proved once from `tensorHom` and `assoc`.
-
-**Python counterpart.** No Python class corresponds to `PROP`. The shared monoidal structure is a paper-level concept: objects of both **St** and **Br** are `ProdObject[L]` terms (wrapping `tuple[L, ...]`) and the tensor product is implicitly tuple concatenation, but the strictness laws (`tensor_assoc`, `tensor_unit_l`, `tensor_unit_r`) and the `swap` morphism have no Python witness.
-
----
-
-### 3. Numeric
-
-Both **St** and **Br** rely on symbolic dimension expressions — axis sizes and stride coefficients are not concrete natural numbers but terms in a free commutative semiring. The right type for this is Mathlib's `MvPolynomial String ℕ` — multivariate polynomials over $\mathbb{N}$ with `String`-named indeterminates — which is already a `CommSemiring` by Mathlib's instance, requires no additional proof work, and covers the Python `Numeric` term hierarchy (`Integer`, `FreeNumeric`, `Addition`, `Multiplication`, `Power`) uniformly:
+Both **St** and **Br** rely on symbolic dimension expressions — axis sizes and stride coefficients are terms in a free commutative semiring. The right type is Mathlib's `MvPolynomial String ℕ`, already a `CommSemiring` and `DecidableEq` with no extra proof work, covering the Python `Numeric` hierarchy (`Integer`, `FreeNumeric`, `Addition`, `Multiplication`, `Power`) uniformly.
 
 ```lean
 abbrev Numeric := MvPolynomial String ℕ
@@ -128,42 +95,32 @@ abbrev Numeric := MvPolynomial String ℕ
 -- addition, multiplication ↦ ring operations
 -- instance : CommSemiring Numeric           -- free from Mathlib
 -- instance : DecidableEq Numeric            -- free from Mathlib
+-- Python: Numeric (Integer / FreeNumeric / Addition / Multiplication / Power)
 ```
 
-This is the minimal type that makes `StMat`'s category laws provable: it is the free commutative semiring on a `String`-indexed set of generators, which is exactly the algebraic structure that symbolic axis sizes inhabit. The `ring` tactic works immediately over any `CommSemiring`, so all three `StMat` laws discharge without any further setup.
+This is the minimal type making `StMat`'s laws provable: the free commutative semiring on a `String`-indexed generator set, exactly the algebra symbolic axis sizes inhabit. The `ring` tactic works immediately over any `CommSemiring`, so all three `StMat` laws discharge without setup. `MvPolynomial.X s` plays the role of a `FreeNumeric` — a name carrying no interpretation until indeterminates are substituted.
 
-Symbolic dimension variables correspond to the `FreeNumeric` UTerm in pyncd: a `FreeNumeric` is a unique, uninterpreted size that gets unified with a concrete value once an axis is configured. In Lean, `MvPolynomial.X s` plays the same role — `s` is a name, and the polynomial carries no interpretation until it is evaluated by substituting concrete values for the indeterminates.
+### 2.2 `St` — stride matrices
 
----
-
-### 4. St — Semantic Category via Stride Matrices
-
-**St** instantiates PROP with `gen = Axis`. Its objects are shapes (lists of axes) and its morphisms are affine coordinate transforms, stored as stride matrices over `Numeric`.
-
-#### Objects
+**St** instantiates `ColoredPROP` with `gen = Axis`. Its objects are shapes (lists of axes); its morphisms are affine coordinate transforms stored as stride matrices over `Numeric`.
 
 ```lean
 structure Axis where
   name : Option String
   size : Numeric      -- symbolic; filled in at configuration time
+-- Python: Axis (abstract UTerm, backed by RawAxis; UID dropped — that is Layer-2)
 
 abbrev StObj := List Axis  -- a shape = an ordered list of axes
+-- Python: ProdObject[Axis]
 ```
 
-**Python counterparts.** `Axis` corresponds to the abstract `Axis` `UTerm` subclass (backed by `RawAxis`), which additionally carries `uid: UID[Axis]` for alignment — the UID is Layer 2 and is absent from the Lean `Axis` record. `StObj = List Axis` corresponds to `ProdObject[Axis]` (a `Term` wrapping `content: tuple[Axis, ...]`).
-
-#### Morphisms
-
-A morphism `dom → cod` in **St** is a matrix $\Lambda \in \mathbb{N}^{|cod| \times |dom|}$ of `Numeric` coefficients (plus a bias vector). Each row $j$ gives the linear combination of input coordinates that produces output coordinate $j$:
-
-$$\bigl(\Pi_{i} e_i\bigr)  ;  \eta = \Pi_{j}\Bigl(v^\eta_j + \textstyle\sum_{i} \Lambda^\eta_{ji} \cdot e_i\Bigr)$$
-
-Using Mathlib's `Matrix` type for the coefficient block gives the composition law for free:
+A morphism `dom → cod` is a matrix `Λ ∈ ℕ^{|cod|×|dom|}` of `Numeric` coefficients plus a bias vector, with row `j` giving the linear combination of input coordinates producing output coordinate `j`. Using Mathlib's `Matrix` gives the composition law for free:
 
 ```lean
 structure StMat (dom cod : StObj) where
   coeffs : Matrix (Fin cod.length) (Fin dom.length) Numeric
   bias   : Fin cod.length → Numeric
+-- Python: StrideMorphism
 
 def StMat.id (a : StObj) : StMat a a where
   coeffs := 1        -- Matrix.one : Matrix (Fin n) (Fin n) Numeric
@@ -174,14 +131,10 @@ def StMat.comp (f : StMat a b) (g : StMat b c) : StMat a c where
   bias i := Matrix.dotProduct (g.coeffs i) f.bias + g.bias i -- ∑_k g[i,k] * f.bias[k] + g.bias[i]
 ```
 
-`Matrix.mul` from Mathlib is `(A * B) i j = ∑_k A i k * B k j`, matching the standard formula. `Matrix.dotProduct v w = ∑_k v k * w k` handles the bias update.
-
-**Python counterpart.** `StMat` corresponds to `StrideMorphism[A]`. Python bundles codomain axes and coefficient rows as `_cod_stride: Prod[tuple[Axis, Prod[Numeric]]]` rather than separating them into a `Matrix` type with a distinct `bias` vector; bounds are checked at construction via `from_matrix` rather than enforced by `Fin` indices. Composition of two `StrideMorphism`s multiplies their coefficient matrices directly, matching `StMat.comp`.
-
-#### Category instance
+`Matrix.mul` is `(A * B) i j = ∑_k A i k * B k j`; `Matrix.dotProduct v w = ∑_k v k * w k` handles the bias update.
 
 ```lean
-instance St : PROP StObj where
+instance St : ColoredPROP StObj where
   gen    := Axis
   toList := id
   ofList := id
@@ -203,81 +156,75 @@ instance St : PROP StObj where
   tensorHom f g :=                                      -- block-diagonal
     { coeffs := Matrix.fromBlocks f.coeffs 0 0 g.coeffs
       bias   := Fin.append f.bias g.bias }
+  elemental     := …   -- stride matrices are separated by their points (global elements ⊢ each row);
+                       -- a row of Λ is recovered by evaluating at the basis points, so f = g
 ```
 
-All six laws discharge using Mathlib's `Matrix` API: `Matrix.one_mul`, `Matrix.mul_one`, and `Matrix.mul_assoc` handle the coefficient block; `ring` over `CommSemiring Numeric` closes the bias terms. `Matrix.fromBlocks` constructs the block-diagonal for `tensorHom`; `Matrix.reindex` produces the permutation matrix for `swap`.
+All category laws discharge using Mathlib's `Matrix` API (`Matrix.one_mul`/`mul_one`/`mul_assoc` for coefficients, `ring` over `CommSemiring Numeric` for bias); `Matrix.fromBlocks` builds the block-diagonal `tensorHom`; `Matrix.reindex` the permutation `swap`. `elemental` holds because a stride matrix is determined by its action on global elements (points): evaluating against the basis points recovers each coefficient row, so two stride matrices agreeing on all points are equal.
 
----
+### 2.3 `Br` — free category over broadcasted base morphisms
 
-### 5. Br — Free Category over Broadcasted Base Morphisms
-
-**Br** instantiates PROP with `gen = ArrayType`. Because there is no single canonical way to compose two arbitrary broadcasted operations into a third, **Br** morphisms are represented as a free list — the Lean 4 analog of `Composed[Array[B,A], Broadcasted[B,A]]` in pyncd. This makes all three category laws trivial list lemmas, with no `sorry`.
-
-#### Br Objects
+**Br** instantiates `ColoredPROP` with `gen = ArrayType`. Because there is no single canonical way to compose two arbitrary broadcasted operations, **Br** morphisms are a free list — the analog of `Composed[Array[B,A], Broadcasted[B,A]]` — making all category laws trivial list lemmas.
 
 ```lean
 inductive DType
   | reals
   | nat : Numeric → DType           -- Natural(max_value)
+-- Python: Datatype / Reals / Natural
 
 structure ArrayType where
   dtype : DType
   shape : StObj                     -- shape lives in Ob(St)
+-- Python: Array[B, A]
 
 abbrev BrObj := List ArrayType      -- a product of arrays
+-- Python: ProdObject[Array[B,A]]
 ```
 
-**Python counterparts.** `DType` corresponds to `Datatype` / `Reals` / `Natural` (where `Natural` stores `max_value: Numeric`); `ArrayType` corresponds to `Array[B, A]`, parametric over `B: Datatype` and a list of axes `A`; `BrObj = List ArrayType` corresponds to `ProdObject[Array[B,A]]`.
-
-#### Base morphisms — Broadcasted
-
-A single `BrBase` is the root morphism of **Br**, corresponding to `Broadcasted` in pyncd. It bundles one base operation together with its reindexings (from **St**), input weaves, and output weaves.
+A single `BrBase` is the root morphism of **Br**, bundling one base operation with its reindexings (from **St**), input weaves, and output weaves.
 
 ```lean
 inductive WeaveSlot
   | fixed : Axis → WeaveSlot   -- retained axis: the reindexing selects a value for this axis at each degree step
   | tiled : WeaveSlot           -- contracted axis: the base op processes the full extent of this axis
+-- Python: WeaveMode.TILED ↔ .fixed (retained); concrete Axis slot ↔ .tiled (contracted) — convention inverted
 
-abbrev Weave := List WeaveSlot
+abbrev WeaveShape := List WeaveSlot
+-- per-array slot list; distinct from §5's `structure Weave (g)` (the cartesian-lift factorization datum)
+-- Python: Weave[B, A] (the Python type is named Weave; it maps to WeaveShape here)
 
-def Weave.targetAxes (w : Weave) : StObj :=
+def WeaveShape.targetAxes (w : WeaveShape) : StObj :=
   w.filterMap fun | .fixed a => some a | _ => none
 
 structure BrBase (dom cod : BrObj) where
   op           : String
   degree       : StObj                          -- shared loop shape P
-  inputWeaves  : Fin dom.length → Weave
-  outputWeaves : Fin cod.length → Weave
+  inputWeaves  : Fin dom.length → WeaveShape
+  outputWeaves : Fin cod.length → WeaveShape
   -- Each reindexing is a St morphism P → (target axes of that input's weave).
   -- This is the locus where St lives inside Br.
   reindexings  : ∀ i : Fin dom.length,
                    StMat degree (inputWeaves i).targetAxes
+-- Python: Broadcasted[B, A, O]
 ```
 
-The `reindexings` field precisely captures the four cases from the paper: identity, deletion (broadcast), duplication (diagonal), and affine scaling (strided convolution). Each is a different `StMat`.
-
-**Python counterparts.** `WeaveSlot.fixed a` (retained axis) corresponds to `WeaveMode.TILED` in Python's `Weave._shape` — both mark a slot that the outer reindexing loop fills at runtime. `WeaveSlot.tiled` (contracted axis) corresponds to a concrete `Axis` object in `Weave._shape` — both indicate an axis the base op processes in full. The naming is inverted across the boundary: Python `TILED` = Lean `fixed`; Python concrete `Axis` slot = Lean `tiled`. `Weave` corresponds to `Weave[B, A]` (Python additionally stores `datatype: B`, which Lean omits). `BrBase` corresponds to `Broadcasted[B, A, O]` — `op` maps to `operator: O`, `degree` to `Broadcasted.degree()`, `inputWeaves`/`outputWeaves` to `input_weaves`/`output_weaves`, and `reindexings` to `reindexings: Prod[StrideCategory[A]]`.
-
-#### Morphisms — free list
+The `reindexings` field precisely captures the four cases from the paper — identity, deletion (broadcast), duplication (diagonal), affine scaling (strided convolution) — each a different `StMat`.
 
 ```lean
 inductive BrMorph : BrObj → BrObj → Type
   | nil  : (a : BrObj) → BrMorph a a
   | cons : BrBase a b → BrMorph b c → BrMorph a c
+-- Python: nil ↔ identity Rearrangement; cons ↔ Composed[L, M]
 
 def BrMorph.comp : BrMorph a b → BrMorph b c → BrMorph a c
   | .nil _,     g => g
   | .cons f fs, g => .cons f (BrMorph.comp fs g)
 ```
 
-This is exactly the free category on `BrBase`: morphisms are lists of base operations threaded sequentially (with `nil` as the empty identity), and composition is list concatenation.
-
-**Python counterparts.** `BrMorph.nil a` corresponds to an identity `Rearrangement` (permutation = `(0,1,2,...)`); `BrMorph.cons f fs` corresponds to `Composed[L, M]`, which stores `content: tuple[M, ...]` — a flat tuple rather than a linked list. Both representations are syntactic; two structurally distinct expressions can denote equal category-theoretic morphisms.
-
-#### Br Category instance
+This is the free category on `BrBase`: morphisms are lists of base operations threaded sequentially (`nil` the empty identity), composition is list concatenation.
 
 ```lean
-instance Br : PROP BrObj where
+instance Br : ColoredPROP BrObj where
   gen    := ArrayType
   toList := id
   ofList := id
@@ -301,313 +248,190 @@ instance Br : PROP BrObj where
   tensor_unit_r := by simp [List.append_nil]
   swap a b      := .cons ⟨"swap", [], ..., ...⟩ (.nil _)
   tensorHom f g := ...   -- run f and g in parallel via ProductOfMorphisms
+  elemental     := …   -- Br is elemental: see theory.md §Elemental Categories (graded_prop.md (Elem-C))
 ```
 
-No `sorry` appears. The category laws are discharged by `rfl` or one-step structural induction, because list concatenation is already associative and `nil` is already a two-sided unit — definitionally.
+No `sorry` appears: the category laws discharge by `rfl` or one-step structural induction, because list concatenation is associative and `nil` is a two-sided unit definitionally. The `elemental` field is the `(Elem-C)` instance of [graded_prop.md §2](graded_prop.md) — **Br is elemental**, witnessed by the argument in [theory.md §Elemental Categories](theory.md).
 
----
+The two instances embody a complementary split. **St is semantic**: a stride morphism is the *denotation* of a coordinate transform, not a syntax tree, so composition collapses to a single `Matrix.mul` and the laws come from Mathlib's `Matrix` API plus `ring`. **Br is syntactic (free)**: a composed sequence of broadcasted operations is stored as a list with no canonical simplified form, so the laws are free gifts from list algebra; the price is that symbolic reasoning over **Br** pattern-matches the list rather than inspecting one record. This split mirrors the Python implementation: `StrideMorphism`s compose by multiplying coefficient matrices, `Broadcasted`s by wrapping in `Composed([...])`.
 
-### 6. Design Contrast
+## 3. The seam adapter into Mathlib
 
-The two instances exhibit a complementary split.
-
-| | **St** | **Br** |
-| --- | --- | --- |
-| Generator type | `Axis` | `ArrayType` |
-| Root morphism | `StMat` (stride matrix) | `BrBase` (operator + reindexings) |
-| Composition | `Matrix.mul` + `dotProduct` | list concatenation |
-| Category law proofs | Mathlib (`Matrix.mul_assoc`, `ring`) | `rfl` / list induction |
-| St inside Br | — | `reindexings` field of `BrBase` |
-
-**St is semantic.** A stride morphism is the denotation of a coordinate transform, not a syntax tree. Composition collapses immediately to a single `Matrix.mul` call. The laws are proved using Mathlib's `Matrix` API together with `ring` over `CommSemiring Numeric` (supplied by `MvPolynomial String ℕ`).
-
-**Br is syntactic (free).** A composed sequence of broadcasted operations is stored as a list; there is no canonical "simplified form" for an arbitrary composition. The laws are free gifts from list algebra. The price is that symbolic reasoning about Br morphisms requires pattern-matching over the list rather than inspecting a single record.
-
-This split mirrors the Python implementation exactly: `StrideMorphism` instances are composed by directly multiplying their coefficient matrices, while `Broadcasted` instances are composed by wrapping them in `Composed([b1, b2, ...])`.
-
----
-
-### 7. The St → Br Embedding
-
-Because both **St** and **Br** are PROP instances, the relationship between them is expressible as a monoidal functor.
+The base class above is deliberately lightweight, so its `St`/`Br` instances keep the "tensor = list concat, strictness = `rfl`/`simp`" elegance. But the propositions of [§9](#9-the-propositions-as-generic-theorems) want Mathlib — `MonoidalCategory`, `SymmetricCategory`, `Grothendieck`, `Limits.pushout`, monoidal functors. A single stated **adapter** bridges the two, turning any `ColoredPROP O` into a Mathlib strict symmetric monoidal category.
 
 ```lean
-structure MonoidalFunctor (C D : PROP) where
-  obj    : C.ob → D.ob
-  map    : C.hom a b → D.hom (obj a) (obj b)
-  map_id : map (SmallCategory.id a) = SmallCategory.id (obj a)
-  map_comp : map (f ∘ g) = map f ∘ map g
-  -- monoidal coherence
-  map_tensor : map (C.tensorHom f g) = D.tensorHom (map f) (map g)
-  map_unit   : obj C.unit = D.unit
+-- Strictify FreeMonoidalCategory (Discrete O); produced once, used by all §9 theorems.
+instance [ColoredPROP O] : CategoryTheory.MonoidalCategory O := …
+instance [ColoredPROP O] : CategoryTheory.SymmetricCategory O := …
 ```
 
-The embedding sends a **St** morphism $\eta : P \to Q$ to the **Br** morphism consisting of a single `BrBase` with identity operator, one input array (a scalar array indexed by $Q$), one output array (indexed by $P$), and `reindexings = [η]`. This makes explicit that **Br** generalises **St**: every pure index transform is a degenerate broadcasted operation with no actual computation.
+This is the hybrid foundation of the proposition/computation separation: everything **above** the seam — the instances and executable defs (`St`, `Br`, `StMat.comp`, the union-find of [§7](#7-grothendieck-split-and-composition-as-pushout)) — speaks `ColoredPROP`; everything **below** it — the [§9](#9-the-propositions-as-generic-theorems) theorems — speaks Mathlib. The adapter *is* the proposition/computation boundary of [§1](#1-orientation-one-structure-one-seam) made into a definition: it is the one place where "what Lean computes" is handed to "what Lean proves."
 
----
+The adapter is produced **once** and reused by every §9 theorem; per-instance proof obligations recur, but the bridge does not. The strictification strategy is the crux: Mathlib categories are not strict, so the development is carried out over `FreeMonoidalCategory (Discrete O)` and **strictified once**, so that downstream all associators and unitors become `Iso.refl` and the PROP equations (`tensor_assoc`, `tensor_unit_l`, `tensor_unit_r`) hold definitionally rather than up to coherent isomorphism. This is what lets a `ColoredPROP` law stated with `=` line up with a Mathlib `MonoidalCategory` whose coherences are isos.
 
-### 8. Correspondence with the Python Implementation
+## 4. The core: `DGradedColoredPROP D C`
 
-The Lean encoding targets the *mathematical* layer of the framework — what the paper calls $\Gamma$, the set of mathematical entities — while the Python implementation also contains a *representation* layer $G$ (the term system). Understanding where the two layers sit is the key to reading the correspondence table below.
-
-**Layer 1 — mathematical entities (encoded in both Lean and Python)**
-Objects, morphisms, and the categorical structure that relates them. This is what `SmallCategory`, `PROP`, `StMat`, and `BrBase` formalise.
-
-**Layer 2 — representation / term system (Python: `Term`/`UTerm` hierarchy; Lean: Layer 2 of this document)**
-In Python, a grammar of `Term` and `UTerm` subclasses in [data_structure/Term.py](../data_structure/Term.py) provides: frozen dataclass identity, a `TermDirectory` for serialisation, `DynamicName` for LaTeX/diagram rendering, `UID` integers for axis identity tracking, and `Context` / `EqualityClass` (a union-find over UIDs) for the axis alignment that `@` composition triggers. The Lean equivalents are described in Layer 2 below.
-
-#### Correspondence table
-
-| Lean | Python | Notes |
-| --- | --- | --- |
-| `SmallCategory ob` | implicit (no base class) | Python categories are not a typeclass; the laws are not stated |
-| `PROP ob` | `ProductCategory` (paper §3) | No Python class; the shared monoidal structure is a paper-level concept only |
-| `List gen` (objects) | `ProdObject[L]` | Python wraps `tuple[L,...]` in a Term dataclass; Lean uses `List` directly |
-| `Numeric = MvPolynomial String ℕ` | `Numeric` (abstract), `Integer`, `Addition`, `Multiplication`, `Power` | Python has n-ary `Addition`/`Multiplication` and `Power`; Lean aliases the Mathlib type `MvPolynomial String ℕ`, which is the free commutative semiring on `String` generators and already carries all required instances. |
-| `MvPolynomial.X s` | `FreeNumeric` | Python `FreeNumeric` is a `UTerm` carrying a random integer `UID`; Lean uses `MvPolynomial.X s` (a degree-1 monomial). UIDs enable unification via `Context`; Lean uses symbolic names and `Context` separately. |
-| `Axis` | `Axis` (abstract UTerm), `RawAxis` | Python carries `uid: UID[Axis]` for alignment; Lean carries only `name` and `size` |
-| `StObj = List Axis` | `ProdObject[Axis]` | Python: `content: tuple[Axis,...]` inside a Term; Lean: bare list |
-| `StMat (dom cod)` | `StrideMorphism[A]` | See §8.2 below |
-| `DType` | `Datatype`, `Reals`, `Natural` | Near 1:1; Python `Natural` stores `max_value: Numeric` |
-| `ArrayType` | `Array[B, A]` | Python parametric over `B: Datatype` and `A: Axis`; Lean uses a flat record |
-| `BrObj = List ArrayType` | `ProdObject[Array[B,A]]` | Same object-wrapper difference as for St |
-| `WeaveSlot` | `Axis \| WeaveMode.TILED` | Python encodes slots as a union type in `Weave._shape: Prod[A \| WeaveMode]`; Lean uses an inductive. Convention inverted: Python `TILED` = Lean `.fixed` (retained); Python concrete `Axis` slot = Lean `.tiled` (contracted) |
-| `Weave` | `Weave[B, A]` | Python also stores `datatype: B`; Lean's `Weave` is shape-only |
-| `BrBase (dom cod)` | `Broadcasted[B, A, O]` | See §8.3 below |
-| `BrMorph.nil` | identity `Rearrangement` (mapping = `(0,1,2,...)`) | Python identity is a Rearrangement with the identity permutation; Lean `nil` is a single constructor |
-| `BrMorph.cons f fs` | `Composed[L, M]` | Python stores `content: tuple[M, ...]`; Lean uses a linked list |
-| `PROP.tensorHom` | `ProductOfMorphisms[L, M]` | Python stores as a data wrapper (`content: tuple[M,...]`); Lean is a typeclass operation producing a morphism |
-| `PROP.swap` | `Rearrangement` (swap permutation) | Python rearrangements are first-class morphisms; Lean `swap` is a typeclass field |
-| `Block[L,M]` (Python) | *not encoded* | `Block` is display metadata (`title`, `fill_color`, `repetition`); semantically transparent, not part of the mathematical encoding |
-| `Context` / `EqualityClass` | Layer 2 `Context` | UID union-find for axis alignment; described in Layer 2 §5 |
-| `MonoidalFunctor St Br` | implicit in `Broadcasted.reindexings` | Python embeds St inside Br via the `reindexings: Prod[StrideCategory[A]]` field; Lean makes this a first-class functor |
-
-#### StMat vs StrideMorphism
-
-Both represent the same affine coordinate transform $(\Pi_i e_i) ; \eta = \Pi_j(v^\eta_j + \sum_i \Lambda^\eta_{ji} \cdot e_i)$.
-
-| Aspect | Python `StrideMorphism` | Lean `StMat` |
-| --- | --- | --- |
-| Domain | `_dom: Prod[Axis]` — runtime tuple | `dom : StObj` — compile-time index type |
-| Codomain + coefficients | `_cod_stride: Prod[tuple[Axis, Prod[Numeric]]]` — axis and its coefficient row bundled together | `coeffs : Matrix (Fin cod.length) (Fin dom.length) Numeric` and `bias : Fin cod.length → Numeric` — separated; `Matrix` indexing enforces bounds |
-| Matrix bounds | checked at construction / `from_matrix` call | enforced by `Fin` — index-out-of-bounds is a type error |
-| Composition | coefficient matrices multiplied directly (`from_matrix` on the result) | `StMat.comp` uses `Matrix.mul` for coefficients; `cod` of `f` must equal `dom` of `g` at the type level |
-| Law proofs | not stated | `Matrix.mul_assoc` + `ring` over `MvPolynomial String ℕ`; no `sorry` |
-| Name / display | `name: DynamicName \| None` | not encoded (Layer 2) |
-
-Using Mathlib's `Matrix` type rather than a bare function `Fin m → Fin n → Numeric` gives immediate access to the standard library of matrix lemmas. In particular, `Matrix.mul_assoc` directly discharges the associativity obligation for coefficients, and `Matrix.fromBlocks` constructs the block-diagonal for `tensorHom` without manual index arithmetic.
-
-#### BrBase vs Broadcasted
-
-| Aspect | Python `Broadcasted[B,A,O]` | Lean `BrBase (dom cod)` |
-| --- | --- | --- |
-| Operator | `operator: O` (an `Operator` subclass instance) | `op : String` (simplified; Python operators carry signature logic) |
-| Degree | computed by `degree()` as `iallequals(m.dom() for m in reindexings)` at runtime | `degree : StObj` — an explicit field, checked at construction |
-| Input weaves | `input_weaves: Prod[Weave[B,A]]` — length must match `dom.length` at runtime | `inputWeaves : Fin dom.length → Weave` — `Fin`-indexed, length match is a type error |
-| Output weaves | `output_weaves: Prod[Weave[B,A]]` — same | `outputWeaves : Fin cod.length → Weave` — same |
-| Reindexings | `reindexings: Prod[StrideCategory[A]]` — one St morphism per input; `degree()` checks they all share the same domain | `reindexings : ∀ i : Fin dom.length, StMat degree (inputWeaves i).targetAxes` — the domain is `degree`, the codomain must equal the target axes of weave `i`; both enforced by the type |
-
-The most significant difference is in `reindexings`. Python computes `degree` lazily via `iallequals` (which raises if the reindexings disagree), and there is no static guarantee that each reindexing's codomain matches its weave's target axes. Lean encodes both constraints in the type of the field: the `∀ i` quantifier ensures one reindexing per input slot, `degree` fixes the shared domain, and `(inputWeaves i).targetAxes` is the exact required codomain.
-
-#### The five morphism forms
-
-Python's `ProdCategory[L, M]` is a recursive type alias with five forms. Their Lean counterparts are spread across different parts of the encoding.
-
-| Python form | Where it lives in Lean |
-| --- | --- |
-| `M` (root morphism — `StrideMorphism` or `Broadcasted`) | The payload of `BrMorph.cons`; equivalently, `BrBase` for Br and `StMat` for St |
-| `Rearrangement[L]` | A special `StMat` (permutation matrix) in St; a `BrBase` with identity operator in Br; also the `PROP.swap` typeclass field |
-| `Composed[L, M]` | `BrMorph` itself — the linked-list structure *is* the composition chain |
-| `ProductOfMorphisms[L, M]` | `PROP.tensorHom` — a typeclass operation, not a data constructor |
-| `Block[L, M]` | Not encoded — display metadata only |
-
-The most important shift is `Composed`. Python stores composition as a data wrapper (a tuple of morphisms), which means two expressions that are equal as category-theoretic composites — `Composed([f, Composed([g, h])])` and `Composed([f, g, h])` — are structurally distinct Python objects. Lean's free-list `BrMorph` representation has the same property (it is, after all, a syntax tree), but the category laws prove that the two are equal as morphisms — the list structure is not observable from outside the category.
-
----
-
-### 9. Paper Definitions in Lean
-
-This section works through the paper's definition hierarchy (§§3–4 of *Weaves, Wires, and Morphisms*) and records what each mathematical statement becomes in the Lean encoding, and what Lean adds that the paper leaves informal.
-
-#### 9.1 Product categories (paper §3)
-
-The paper defines $\mathbf{Prod}[L, M]$ as a monoidal category whose objects are finite products of lone objects and whose monoidal product is tuple concatenation. The `PROP` typeclass encodes this directly.
-
-| Paper | Lean | How it is captured |
-| --- | --- | --- |
-| Lone-object type $L$ | `PROP.gen : Type` | A typeclass field; filled by `Axis` for St, `ArrayType` for Br |
-| Object $A = \Pi_{i \in I} L_i$ | `a : List gen` | A list of generators; `List.length` gives $\lvert I \rvert$ |
-| Unit object $\mathbf{1} = \Pi_{\emptyset}$ | `[] : List gen` | The empty list, equal to `PROP.unit` |
-| Monoidal product $A \otimes B$ | `a ++ b` | List concatenation; `PROP.tensor a b := ofList (toList a ++ toList b)` |
-| Strict associativity $(A \otimes B) \otimes C = A \otimes (B \otimes C)$ | `PROP.tensor_assoc` | Proved by `simp [List.append_assoc]` |
-| Strict unitality $\mathbf{1} \otimes A = A$ | `PROP.tensor_unit_l` | Proved by `simp` |
-| Root morphism $m \in M$ | `BrBase a b` / `StMat a b` | The concrete payload type; one per category |
-| Sequential composition $f  ;  g$ | `SmallCategory.comp f g` | The `comp` field of the `SmallCategory` typeclass |
-| Parallel product $f \otimes g$ | `PROP.tensorHom f g` | A typeclass operation; for St it builds a block-diagonal matrix |
-| Bifunctoriality $(f  ;  g) \otimes (h  ;  k) = (f \otimes h)  ;  (g \otimes k)$ | Theorem from `tensorHom` + `assoc` | Not a typeclass field — derivable |
-| Rearrangement $[\mu]_{(A_i)} : \Pi_I A_i \to \Pi_J A_{\mu(j)}$ | `PROP.swap` (binary); permutation `StMat` (St) | For St, $[\mu]$ is the matrix with $\Lambda_{ji} = \mathbb{1}[\mu(j) = i]$ and $v = 0$ |
-| Identity morphism $\text{id}_A$ | `SmallCategory.id a` | `BrMorph.nil a` for Br; `StMat.id a` for St |
-| Category axioms (id, assoc) | `id_comp`, `comp_id`, `assoc` | Propositions proved by tactics; `rfl`/induction for Br, `ring` for St |
-
-The paper states "St and Br are product categories" as a claim; Lean makes it a proof obligation. Providing the `PROP` instance forces the author to exhibit the identity, composition, and bifunctoriality witnesses and prove the six equational laws.
-
-#### 9.2 The axis-stride category St (paper Def 8)
-
-Def 8 introduces **St** as a Cartesian product category. Its objects are axes and products of axes; its morphisms are finite affine transforms.
-
-**Objects.** An axis $A$ carries a UID and a size $|A| \in \mathbb{N}$ (itself a symbolic `Numeric`). In Lean, the UID is dropped (it belongs to Layer 2) and an axis is just a name–size pair:
-
-$$A \in \text{Ob}\mathbf{St} \;\longleftrightarrow\; \texttt{a : Axis}$$
-
-A shape $\Pi_{i \in I} A_i$ is $\texttt{List Axis}$, with $|I|$ given by `List.length`.
-
-**Morphisms.** A finite affine transform $\eta : \Pi_{i \in I} A_i \to \Pi_{j \in J} B_j$ is specified by a coefficient matrix $\Lambda^\eta \in \mathbb{N}^{J \times I}$ and a bias $v^\eta \in \mathbb{N}^J$:
-
-$$\bigl(\Pi_i e_i\bigr)  ;  \eta = \Pi_j\Bigl(v^\eta_j + \textstyle\sum_i \Lambda^\eta_{ji} \cdot e_i\Bigr)$$
-
-In Lean this becomes:
-
-| Paper | Lean | Note |
-| --- | --- | --- |
-| $\eta : \Pi_I A_i \to \Pi_J B_j$ | `StMat (dom cod : StObj)` | The dom/cod types index the matrix dimensions |
-| $\Lambda^\eta \in \mathbb{N}^{J \times I}$ | `coeffs : Matrix (Fin cod.length) (Fin dom.length) Numeric` | Mathlib `Matrix`; `Fin` bounds make out-of-range indexing a type error |
-| $v^\eta \in \mathbb{N}^J$ | `bias : Fin cod.length → Numeric` | Kept separate from `coeffs` |
-| $\text{id}_A$ (identity transform) | `StMat.id` with `coeffs = Matrix.one`, `bias = 0` | `Matrix.one` is the identity matrix; `Matrix.one_mul`/`mul_one` discharge the unit laws |
-| $\eta  ;  \theta$ (composition) | `StMat.comp f g` | `coeffs := g.coeffs * f.coeffs` (Matrix.mul); `bias i := dotProduct (g.coeffs i) f.bias + g.bias i` |
-| Associativity of $;$ | `PROP.assoc` proved by `Matrix.mul_assoc` + `ring` | Coefficients: `Matrix.mul_assoc`; bias: distributivity of `dotProduct`, discharged by `ring` |
-
-**What Lean adds.** The paper states the composition formula and asserts associativity. Lean requires a proof: with `Numeric := MvPolynomial String ℕ` and `coeffs : Matrix _ _ Numeric`, associativity of the coefficient block is `Matrix.mul_assoc` from Mathlib (no tactic needed), and the bias identity follows from `ring` over the `CommSemiring Numeric` instance that Mathlib provides for `MvPolynomial`. All three laws discharge without any `sorry`.
-
-#### 9.3 Reindexing and batch lift (paper Defs 10–11)
-
-These two definitions describe how a base operation is lifted to run over a degree shape P (a product of one or more loop axes).
-
-**Def 10 — Reindexing.** A reindexing $[a, \eta] : [a, \text{dom}(\eta)] \to [a, \text{cod}(\eta)]$ applies a stride transform $\eta \in \mathbf{St}$ to the shape of an array $[a, \cdot]$ while leaving the datatype $a$ unchanged. In the Lean encoding this is not a standalone morphism type but a sub-component of `BrBase`: the `reindexings` field provides one `StMat` per input, mapping the shared degree $P$ to the input's tiling axes.
-
-**Def 11 — Batch lift.** A batch lift $[f, P]$ runs base operation $f$ once for each coordinate $p \in P$ (the *degree*). In the Lean encoding $P$ is `BrBase.degree : StObj` and the "running once per coordinate" is expressed structurally: the `reindexings` field supplies, for each input $i$, the stride transform $\eta_i : P \to Q_i$ that selects which slice of input $i$ to read at each loop step $p$.
-
-| Paper | Lean | Note |
-| --- | --- | --- |
-| Degree shape $P$ | `BrBase.degree : StObj` | Explicit field; shared by all reindexings |
-| Reindexing $\eta_i : P \to Q_i$ | `reindexings i : StMat degree (inputWeaves i).targetAxes` | The domain is always `degree`; the codomain is the target axes of weave $i$, computed from `inputWeaves` |
-| "All reindexings share domain $P$" | Enforced by the type of `reindexings` | In Python this is checked at runtime by `iallequals`; in Lean it is a compile-time constraint |
-
-#### 9.4 Weaves (paper Def 12)
-
-A weave classifies each axis of an array as either a *target* (retained) axis — selected by the reindexing at each degree step — or a *tiling* (contracted) axis processed over its full extent by the base op.
-
-| Paper | Lean | Note |
-| --- | --- | --- |
-| $w_i = 1$ (target axis) | `WeaveSlot.fixed a` | Retained axis: the reindexing maps a degree coordinate to this axis at each step |
-| $w_i = 0$ (tiling axis) | `WeaveSlot.tiled` | Contracted axis: a sentinel — no reindexing row targets it; the base op processes its full extent |
-| Weave $(w_i)_{i \in I}$ | `Weave := List WeaveSlot` | One slot per axis of the array |
-| Target axes $A$ (sub-shape selected by reindexing) | `Weave.targetAxes w` | `w.filterMap (·.fixed?)` — extracts all `.fixed` slots |
-| Tiling axes $Q$ (sub-shape processed by base op) | `Fin domain − targetAxes` | Not computed separately; implicit in the `tiled` slots |
-| Unweave permutation $\Omega_w$ | Not encoded | Would be a derived `StMat` permuting target axes to the front; needed for the full $\text{dom}(F)$ formula |
-
-The paper computes $\text{dom}(F)$ for a broadcasted operation $F$ via the unweave permutation $\Omega_{s_i}$, which gathers all target axes before all tiling axes. The Lean encoding does not yet compute `dom` from `inputWeaves`; it accepts `dom` as an index parameter to `BrBase` and relies on the user supplying a consistent value. A complete encoding would add a derived function:
+Everything above is the base on which the actual subject of this document sits. A `D`-graded colored PROP ([graded_prop.md §3.1](graded_prop.md#31-data)) is a colored PROP `C` (the *operations*) together with the data that exhibits it over a second colored PROP `D` (the *index*): a shape map, a lift action, and the distributivity and action-coherence isomorphisms making `C` a right `D`-actegory. The core class collects exactly that data plus the four named laws.
 
 ```lean
-def BrBase.inferDom (b : BrBase dom cod) : BrObj :=
-  List.ofFn fun i =>
-    let w := b.inputWeaves i
-    let tilingAxes := b.reindexings i |>.cod
-    ⟨dom[i].dtype, w.targetAxes ++ tilingAxes⟩
+class DGradedColoredPROP (D C : Type) [ColoredPROP D] [ColoredPROP C] where
+  sh    : ColoredPROP.gen (ob := C) → D        -- shape map: each C-color's underlying D-shape; extends to sh* (monoid hom)
+  act   : (C ×ᶜ Dᵒᵖ) ⥤ C                        -- lift action (Mathlib functor, via seam)
+  δ     : ∀ X Y P, act.obj (tensor X Y, P) ≅ tensor (act.obj (X,P)) (act.obj (Y,P))
+  δ0    : ∀ P, act.obj (unit, P) ≅ unit
+  υ     : ∀ X, act.obj (X, unit_D) ≅ X
+  α     : ∀ X P Q, act.obj (act.obj (X,P), Q) ≅ act.obj (X, tensor Q P)
+  sh_act         : ∀ X P, sh* (act.obj (X,P)) = tensor (sh* X) P     -- (Sh-⊛)
+  act_unit_assoc : …    -- actegory triangle + pentagon (υ, α coherences) → right D-actegory
+  dist_coh       : …    -- δ, δ0 naturality + interchange with υ/α/σ
+  broadcast_gen  : …    -- (Broadcast-gen): every C-morphism = [f,P] ; ρ, f degree-trivial
 ```
 
-and a well-formedness condition `b.inferDom = dom`.
+Each field is a direct transcription of the [graded_prop.md §3.1](graded_prop.md#31-data) data. `sh` is the **shape map** `sh : O_C → Ob D` sending each `C`-color to its underlying `D`-shape (its list of sub-wires); it extends to the monoid homomorphism `sh*` on objects used by the (Sh-⊛) law. `act` is the **lift action** `act : C × Dᵒᵖ ⥤ C` — a Mathlib functor, available because the seam adapter of [§3](#3-the-seam-adapter-into-mathlib) makes `C` and `D` Mathlib categories. Its two specializations are theory.md's lift notation: `[f, P] := act(f, 𝟙_P)` is the **batch lift** of `f` (covariant in `C`), and `[X, η] := act(𝟙_X, η)` is the **reindexing** along `η : P → Q` (contravariant in `D`, since `D` enters opposite). `-- Python: batch lift [f,P]`
 
-#### 9.5 Broadcasted operations (paper Def 13)
+The four isomorphism fields are the **distributivity** and **action-coherence** isos. `δ` and `δ0` make the lift distribute over juxtaposition — `(X ⊗ Y) ⊛ P ≅ (X ⊛ P) ⊗ (Y ⊛ P)` and `I_C ⊛ P ≅ I_C`. `υ` and `α` are the actegory coherence isos — `υ : X ⊛ I_D ≅ X` (lifting by the unit shape is trivial) and `α : (X ⊛ P) ⊛ Q ≅ X ⊛ (Q ⊗ P)` (composing two lifts; the order `Q ⊗ P` is what makes `⊛` a **right** action of `(D, ⊗, I_D)`). Together `υ`/`α` are precisely the unitor and multiplicator exhibiting `C` as a right `D`-actegory.
 
-Def 13 assembles Defs 9–12 into the root morphism of **Br**:
+The four `Prop`-valued fields are the named laws of [graded_prop.md §3.2](graded_prop.md#32-axioms), one field each:
 
-$$F : \Pi_{i \in I}\!\left[a_i,\text{dom}\!\left([\Omega_{s_i}]_{A_i \otimes Q_i}\right)\right] \longrightarrow \Pi_{j \in J}\!\left[b_j,\text{dom}\!\left([\Omega_{t_j}]_{B_j \otimes P}\right)\right]$$
+- `sh_act` is **(Sh-⊛)**: `sh*(X ⊛ P) = sh*(X) ⊗ P` — lifting by `P` appends `P` to the shape.
+- `act_unit_assoc` bundles **(Act-unit / Act-assoc)**: `υ` and `α` satisfy the triangle and pentagon coherences, i.e. `C` is a right `D`-actegory.
+- `dist_coh` bundles **(Dist-nat / Dist-coh)**: `δ`, `δ0` are natural and satisfy the interchange coherence with `υ`, `α`, and the symmetry `σ` — the lift is a strong symmetric monoidal action in the `C`-variable.
+- `broadcast_gen` is **(Broadcast-gen)**: every `C`-morphism factors as `[f, P] ; ρ` with `f` degree-trivial (built without `act` over a non-unit `P`) and `ρ` a reindexing assembled from `act(𝟙, −)` and the coherence isos. This is the generation principle that makes weaves ([§5](#5-weaves-as-cartesian-lift-data)) exist.
 
-| Paper ingredient | Lean field in `BrBase` | Type |
-| --- | --- | --- |
-| Base operator | `op` | `String` (simplified; full encoding would be a type of operator signatures) |
-| Index set $I$ (inputs) | `Fin dom.length` | Implicit in `dom : BrObj` |
-| Index set $J$ (outputs) | `Fin cod.length` | Implicit in `cod : BrObj` |
-| Datatypes $a_i$ | `dom[i].dtype` | `DType` |
-| Degree $P$ | `degree` | `StObj` |
-| Input weaves $(s_i)_{i \in I}$ | `inputWeaves` | `Fin dom.length → Weave` |
-| Output weaves $(t_j)_{j \in J}$ | `outputWeaves` | `Fin cod.length → Weave` |
-| Reindexings $(\eta_i)_{i \in I}$ | `reindexings` | `∀ i, StMat degree (inputWeaves i).targetAxes` |
-| Full domain type $[a_i, \text{dom}(\Omega_{s_i})]$ | `dom[i]` | `ArrayType` — encoding assumes it is supplied consistently with the weave |
+Note that **(Act-functor)** of [graded_prop.md §3.2](graded_prop.md#32-axioms) (`act` respects identities and composition in both variables, so `[f ; g, P] = [f, P] ; [g, P]`) and **(Sh-⊗)** (`sh*` is a monoid homomorphism) are not separate fields: the first is the `Functor` laws already carried by `act`, the second is built into the definition of `sh*` from `sh`. And **(Elem-C)** is not here either — it is the `elemental` field of `ColoredPROP` ([§2](#2-the-base-coloredprop)), inherited from the instance `[ColoredPROP C]`.
 
-#### 9.6 What Lean formalises that the paper leaves informal
+`D` and `C` are **explicit class parameters**, not `outParam`s. This is deliberate: with both free, Lean's instance search needs them pinned for `[DGradedColoredPROP D C]` to resolve predictably (and so that `Br`-as-graded and `Br`-as-index occupy distinct instance positions without collision). The instance-resolution discipline this implies is taken up in [§11](#11-lean-formalization-notes).
 
-| Paper claim | Status in Lean |
-| --- | --- |
-| "St is a (product) category" | **Proved**: `instance St : PROP StObj` with all six laws discharged |
-| "Br is a (product) category" | **Proved**: `instance Br : PROP BrObj` with all six laws discharged |
-| Bifunctoriality of $\otimes$ | **Derivable** from `PROP.tensorHom` and `assoc` |
-| Matrix bounds for $\Lambda^\eta$ | **Enforced by type**: `Matrix (Fin cod.length) (Fin dom.length) Numeric` |
-| All reindexings share domain $P$ | **Enforced by type**: `∀ i, StMat degree ...` fixes `degree` as the domain |
-| Reindexing codomain matches weave | **Enforced by type**: `(inputWeaves i).targetAxes` is the required codomain |
-| $\text{dom}(F)$ is consistent with weaves | **Not yet enforced**: requires `inferDom` plus a well-formedness proof |
-| Composition of `StMat` is associative | **Proved**: `Matrix.mul_assoc` (coefficients) + `ring` (bias) |
-| Composition of `BrMorph` is associative | **Proved** by list induction; holds definitionally |
-| `Numeric` forms a commutative semiring | **Provided by Mathlib**: `Numeric := MvPolynomial String ℕ` |
+### 4.1 Derived: `ev_p` and Eq. 3
 
-All obligations in the framework are discharged. `CommSemiring Numeric` is provided by the alias `Numeric := MvPolynomial String ℕ`, the free commutative semiring on `String`-named generators, which already carries the required instance in Mathlib. With this in place:
-
-- The coefficient block of `StMat.comp` is `Matrix.mul`, and `StMat.assoc` for coefficients is `Matrix.mul_assoc` — a Mathlib theorem, not a tactic proof.
-- The bias terms in `StMat.assoc` reduce to a `ring` goal over `CommSemiring Numeric`; `ring` closes it immediately.
-- `BrMorph` laws remain structural (list induction, `rfl`) and require no arithmetic at all.
-
-The only remaining informal item is `dom(F)` consistency — the well-formedness condition that the supplied `dom : BrObj` agrees with what the weaves and reindexings imply. This is a structural property of `BrBase` construction rather than an arithmetic one, and is left as a future addition (see §9.4 for the `inferDom` sketch).
-
----
-
-## Layer 2 — Representation
-
-### 1. `DynamicName`
-
-`DynamicName` is a structured name for display purposes. It translates directly from Python as a recursive inductive:
+Theory.md's batch-lift defining property (Eq. 3) is **not** an axiom of the core class — it falls out of `act` being a functor. For a point `p : I_D → P` in `D`, the *slice at `p`* is a derived natural transformation, and its naturality square is Eq. 3.
 
 ```lean
-structure DynamicNameSettings where
-  bold     : Bool := false
-  overline : Bool := false
-  absolute : Bool := false   -- renders as |name|
-
-inductive DynamicName where
-  | mk : (body     : Option String)
-       → (subscript : Option DynamicName)
-       → (settings  : Option DynamicNameSettings)
-       → DynamicName
-
-def DynamicName.toLaTeX : DynamicName → String
-  | .mk none _ _          => ""
-  | .mk (some b) none s   => applySettings s b
-  | .mk (some b) (some sub) s =>
-      applySettings s b ++ "_{"
-        ++ (sub.lineage.map (fun d => d.toLaTeX) |>.intercalate "") ++ "}"
-
-def DynamicName.lineage : DynamicName → List DynamicName
-  | .mk none _ _            => []
-  | .mk _ none _  as d      => [d]
-  | .mk _ (some sub) _ as d => d :: sub.lineage
+def ev_p [DGradedColoredPROP D C] (p : hom unit_D P) : (act ⊛ P) ⟶ Id := act.map ⟨𝟙, p⟩ ≫ υ
+-- Eq. 3:  [f,P] ≫ (Y ⊛ p) = (X ⊛ p) ≫ f   -- naturality of ev_p, from Functor.map_comp
 ```
 
-Python's `DynamicName.from_str "h_i"` convention (underscore splits body from subscript) becomes a smart constructor:
+`ev_p` is a `def`, not a field: it is `act.map ⟨𝟙, p⟩` post-composed with the unitor `υ`, a natural transformation `(− ⊛ P) ⇒ (− ⊛ I_D) ≅ Id_C`. Because `act` is a functor, each `ev_p` is *automatically* natural — its naturality square at `f : X → Y` is exactly **(Eq. 3)** `[f, P] ; (Y ⊛ p) = (X ⊛ p) ; f`, discharged by `Functor.map_comp`. So Eq. 3 is **built in** by functoriality of `act`, not posited ([graded_prop.md §3.2](graded_prop.md#32-axioms)). The genuine content lives elsewhere: it is `elemental` (the points `ev_p` jointly separate morphisms) that pins down the weave of [§5](#5-weaves-as-cartesian-lift-data) — Eq. 3 alone holds for free and does not force the factorization.
+
+## 5. Weaves as cartesian-lift data
+
+The (Broadcast-gen) law says every `C`-morphism factors as `[f, P] ; ρ`. A **weave** is a witness of that factorization for a particular morphism — and, as [graded_prop.md §3.3](graded_prop.md#33-weaves-as-cartesian-lift-data) shows, it is precisely the cartesian-lift datum of the grading fibration `C → D`.
+
+> **Naming.** `WeaveShape` ([§2](#2-the-base-coloredprop)) is the *per-array slot list* (`List WeaveSlot`, the shape of one wire). The `Weave g` below is a *different* concept: the cartesian-lift factorization witness for a whole morphism `g`. The Python type named `Weave` maps to the former; this `structure Weave` is the latter.
 
 ```lean
-def DynamicName.ofStr (s : String) : DynamicName :=
-  match s.splitOn "_" with
-  | []     => .mk none none none
-  | [b]    => .mk (some b) none none
-  | b :: rest => .mk (some b) (some (DynamicName.ofStr (rest.intercalate "_"))) none
+structure Weave [DGradedColoredPROP D C] {X Y : C} (g : hom X Y) where
+  f       : hom X' Y'    -- base op (degree-trivial)
+  P       : D
+  ρ       : …            -- reindexing assembled from act(id,−) + coherence isos
+  factors : g = [f, P] ≫ ρ
+
+theorem weave_unique [DGradedColoredPROP D C] {X Y} (g : hom X Y) :
+    Subsingleton (Weave g)         -- Prop 8.2, from elemental + broadcast_gen
 ```
 
-**Python counterpart.** `DynamicName` is a near 1:1 translation of the Python class of the same name. `DynamicNameSettings` directly translates `bold`, `overline`, and `absolute`. `DynamicName.ofStr` corresponds to `DynamicName.from_str` (both split on `_` to build subscript chains). See §6 for the full correspondence table.
+A `Weave g` records the (Broadcast-gen) factorization of `g`: a degree-trivial base op `f`, a degree `P ∈ D`, a reindexing `ρ` (assembled from `act(𝟙, −)` and the coherence isos), and a proof that `g = [f, P] ; ρ`. Per wire, the shape `sh(color) ∈ Ob D` is a list of sub-colors that the factorization partitions into **target** sub-colors (acted on directly by `f`) and **tiling** sub-colors (supplied by the degree `P` through `ρ`); the permutation relating the canonical "targets-first" order to the wire's actual sub-color order is theory.md's `Ω_w`, recovered from the symmetry `σ`. This is **precisely the cartesian-lift datum** of the grading fibration `C → D` ([graded_prop.md §3.3](graded_prop.md#33-weaves-as-cartesian-lift-data)): a weave is the choice of how a morphism's wires sit over their `D`-shapes, with the tiling part pulled back along the degree. `-- Python: Weave._shape records the per-wire TILED/target partition`
 
----
+`weave_unique` (Proposition 8.2) makes `Weave g` a `Subsingleton` — at most one weave, up to the canonical coherence isos. This is what turns `Weave` into a **datum, not a choice**: the factorization is forced, not selected. The proof draws on both the `elemental` field of `[ColoredPROP C]` (points separate morphisms, so the degree `P` and the target/tiling partition are determined) and `broadcast_gen` (a factorization exists at all). Without `elemental`, Eq. 3 would still hold by functoriality but the `(f, P, ρ)` factorization would not be unique.
 
-### 2. `UID` and the `TermM` monad
+## 6. Mixins: Scan, Route, Symmetry, Para
 
-In Python, UIDs are random integers generated as a construction side-effect (`random.randint`). Lean 4 is pure; fresh generation requires threading state explicitly. The representation monad is a simple counter:
+The core `DGradedColoredPROP D C` of [§4](#4-the-core-dgradedcoloredprop-d-c) carries the lift, the actegory coherences, and the weave factorization — and nothing more. Capabilities beyond that bare grading are added as **composable mixins**: a `Scan`, a `Route`, an equivariance constraint, a `Para` refinement. Each is its own typeclass; an instantiation declares only the mixins it actually uses and pays only for their fields and obligations. This is exactly what keeps the proven core un-edited as the framework grows: a new capability is a new class layered on `DGradedColoredPROP`, never a field added to it, so the [§9](#9-the-propositions-as-generic-theorems) theorems stated over the core continue to hold unchanged at every instantiation. The four mixins of this family are `TemporalGraded` (Scan, given in full below), the `RouteStructure` and `SymmetryGraded` stubs, and `ParaAlgebra` (forward-referenced to [§7](#7-grothendieck-split-and-composition-as-pushout), since it layers on the `Algebra` rather than on the graded PROP).
+
+### 6.1 `TemporalGraded` — Scan
+
+```lean
+class TemporalGraded (D C : Type) [ColoredPROP D] [ColoredPROP C]
+    extends DGradedColoredPROP D C where
+  L          : D                    -- temporal object (Δ₊ / ℕ-graded); prefix inclusions ιₘ
+  restrict   : ∀ m, …               -- directed action act(−, ιₘ); NO point-evaluation ev_q
+  iterate    : …                    -- finite iteration of a parametric step endofunctor (Def 3.4)
+  trace      : …                    -- scanl state history H ⊗ L_{N+1} (Def 3.5)
+  lift_fold_dist : …                -- act(Scan,P) ≅ Scan(act(step,P)) for P orthogonal to L
+```
+
+`TemporalGraded` internalizes the four additions of [graded_prop.md §3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class) that turn `Scan` from a bare generator into a definition. `L` is the **temporal object** of Definition 3.3 — an `Ob D` carrying the augmented-simplex / `(ℕ,+,0)` length grading, with prefix inclusions `ιₘ : [0..m] ↪ [0..N]`. `restrict` is the **directed action**: restriction natural transformations `act(−, ιₘ) : (− ⊛ [0..N]) ⇒ (− ⊛ [0..m])` along the `ιₘ`, satisfying the unit and composition laws of an action. `iterate` is the **finite iteration** of Definition 3.4 — for a parametric step endofunctor (the per-step inputs ride as parameters) and a length `N`, the `N`-fold iterate and its catamorphism `cata(step)` exist (for fixed `N` this is plain `N`-fold composition; no fixpoint, no natural-numbers object, until unbounded length is wanted). `trace` is the **state history** of Definition 3.5 — codomain `H ⊗ L_{N+1}` (scanl), with the coherence that truncating the trace along `ιₘ` agrees with running the `m`-fold. `lift_fold_dist` is the **lift–fold distributivity** law: for an ordinary degree `P` orthogonal to `L`, `act(Scan, P) ≅ Scan(act(step, P))`.
+
+With these fields in hand, **`Scan := cata(step)` is a definition** over the temporal grading, not a generator posited by hand. Two consequences follow rather than being assumed. First, the **prefix-restriction law is a corollary** (Proposition 8.7): theory.md's law that `Scan_N` restricted to the first `m` steps equals `Scan_m` falls out of the catamorphism universal property `cata(step) ∘ in = step ∘ F(cata(step))` and its uniqueness — it need not be a separate axiom. Second, **`Scan` batches** along any axis `P` orthogonal to `L` (Proposition 8.8): `lift_fold_dist` is exactly what makes `act(Scan, P) ≅ Scan(act(step, P))`, so a batched recurrence is one fold run independently per batch coordinate, and `Scan` participates in the `vmap`/batch strategies like any other morphism. `-- Python: Scan in TensorDSL.py`
+
+`TemporalGraded` uses `extends DGradedColoredPROP` — genuine inheritance, not a signed-empty stub — because `Scan` needs the **whole core**: the lift `act`, the actegory coherences, and the weave factorization are all load-bearing. `cata(step)` is built from `iterate` over `act`; `trace` is typed by the lift; and `lift_fold_dist` is a statement *about* `act`, so it cannot even be phrased without the actegory. The stubs of [§6.2](#62-route-and-symmetry-stubs) also `extends DGradedColoredPROP`, but their bodies are deferred — they declare their parameters and leave the fields signed-empty (`…`), because the machinery they need is not yet formalized.
+
+The key obstruction that forces `Scan` out of the weave story lives in the `restrict` field: the directed action carries restrictions along the prefix inclusions `ιₘ`, but **no point-evaluation `ev_q`** for a single point `q : I → L`. That absence is precisely the Proposition 8.6(i) obstruction — `Scan`'s lift couples positions (the output at `ℓ` depends on positions `< ℓ`), so `ev_q` fails to be natural (Eq. 3 fails along `L`), and `Scan` lies only in the image of the directed sub-action indexed by the `ιₘ`, never by points. It is *not* a weave along `L`; Proposition 8.7 is its positive home, and Proposition 8.8 confirms the obstruction is only along `L` and never along orthogonal axes.
+
+### 6.2 Route and Symmetry stubs
+
+```lean
+class RouteStructure (D C) [ColoredPROP D] [ColoredPROP C]
+    extends DGradedColoredPROP D C where … -- STUB: data-dependent coproduct injection, gate as Para param
+class SymmetryGraded (D C : Type) (T : Monad D) [ColoredPROP D] [ColoredPROP C]
+    extends DGradedColoredPROP D C where … -- STUB: equivariance via EM-category of T; gated (equiv_unif A3)
+```
+
+`RouteStructure` is the second species of the Proposition 8.6 obstruction — Proposition 8.6(ii). Here the reindexing **depends on input values**, so it is not a fixed `D`-morphism at all: there is no single `η` to lift, hence no weave. The generator is a data-dependent coproduct injection whose routing map is carried as a `Para` parameter (the gate). The motivating example is sparse / top-`k` mixture-of-experts ([future_ideas.md §6.4](future_ideas.md#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles)), where the expert each item reads is `argmax`-selected at runtime.
+
+`SymmetryGraded` is Proposition 8.4's equivariance, encoded via the **Eilenberg–Moore category** of a symmetry monad `T` on `D` (hence the extra parameter `T : Monad D`). It is **gated** on that EM-machinery ([equivariance_unification.md](equivariance_unification.md)): equivariance is reachable for finite groups, but the graded-PROP-dependent parts of the encoding wait on this formalization being in place.
+
+Both are **signed stubs**: the class is declared with its parameters and its `extends DGradedColoredPROP`, but the fields are deferred (`…`) — the data is named, the bodies are future work.
+
+`ParaAlgebra` (the `Para` refinement mixin on `construct()`) is *not* introduced here. It is presented in [§7](#7-grothendieck-split-and-composition-as-pushout) alongside the `Algebra` class, because it layers on the algebra — refining `Para(C) → Para(V)` as a 2-functor, with weight tying as passes-as-2-cells — rather than on the graded PROP. It is listed in this section's title only because it belongs to the same mixin family.
+
+## 7. Grothendieck split and composition as pushout
+
+Two of the constructions the current design parked in its "representation layer" — symbolic axis *sizes* and axis *identity/alignment* — are, on the graded-PROP reading, ordinary categorical data. Sizes are the **fiber of a Grothendieck construction**; alignment is a **pushout/coequalizer**. This section states both, and then makes the proposition/computation seam of [§1](#1-orientation-one-structure-one-seam) concrete: the categorical objects are the *specification*, and the executable structures carried forward from the old "Layer 2" (a fresh-UID counter, a union-find `Context`) are the *implementation* that realizes it. There is no separate representation layer; the old Layer 2 is dissolved into this single development.
+
+### 7.1 The structure/data split as `∫Dat`
+
+Strip the numeric content from the `D`-colors and one is left with the **structural index PROP** `D♯` (colors are formal size-symbols, morphisms are symbolic reindexings); `C♯` is then `D♯`-graded ([graded_prop.md §5](graded_prop.md#5-the-structuredata-split-as-a-grothendieck-construction)). A **data functor** `Dat : C♯ → Set` sends each structural object to its set of admissible size-assignments, acting *trivially on morphisms* — data is unconstrained by connectivity ([acset.md §The Grothendieck Construction](acset.md#the-grothendieck-construction)). The **Grothendieck construction** `∫Dat` has objects `(c, d)` with `c ∈ C♯` and `d ∈ Dat(c)`, and morphisms the `C♯`-morphisms with no compatibility condition on data, and
+
+> **`C ≅ ∫Dat`**
+
+recovers the fully-sized graded PROP (graded_prop.md Prop 8.3).
+
+```lean
+-- Dat valued in (discrete categories of) size-assignments over the semiring `Numeric`.
+def Dat [ColoredPROP C] : Cˢʰᵃʳᵖ ⥤ Type := …   -- the data functor; trivial on morphisms (graded_prop.md Def 5.1)
+def Dat' [ColoredPROP C] : Cˢʰᵃʳᵖ ⥤ CategoryTheory.Cat := …   -- as a functor into Cat
+-- C ≅ Grothendieck Dat'      -- CategoryTheory.Grothendieck of the data functor
+example : C ≅ CategoryTheory.Grothendieck Dat' := … -- `Iso.refl`-level when C is *built* as ∫Dat
+```
+
+Mathlib supplies `CategoryTheory.Grothendieck` for the Grothendieck construction of a functor into `Cat`; with `Dat` valued in discrete categories of size-assignments, `∫Dat` is a direct instance. The iso `C ≅ ∫Dat` is a per-instantiation theorem in general, but it is **definitional — `Iso.refl` — if `C` is *built* as `∫Dat`**, which is the recommended posture: define the sized PROP as the integral, and the splitting is true by construction rather than by proof.
+
+### 7.2 `FreeNumeric` is the fiber, not a layer
+
+The `Numeric := MvPolynomial String ℕ` of [§2.1](#21-numeric) is precisely the data the fiber `Dat(c)` ranges over. A symbolic axis size is a term in the free commutative semiring on `String`-named generators; a `FreeNumeric` — the Python `UTerm` that names an as-yet-unknown size — is a single generator `MvPolynomial.X s`, carrying no interpretation until indeterminates are substituted.
+
+```lean
+abbrev Numeric := MvPolynomial String ℕ
+-- MvPolynomial.X s  -- a FreeNumeric: a symbolic axis size, the fiber datum Dat(c)
+-- a size-assignment d ∈ Dat(c) picks a Numeric for each structural axis-symbol of c
+```
+
+The point of stating this here is the **dissolution**: in the old design `FreeNumeric`, symbolic sizes, and `Numeric` lived in "Layer 2 — Representation," as if they were non-mathematical bookkeeping. They are not. They are the **`Dat(c)` fiber data** of the Grothendieck construction of [§7.1](#71-the-structuredata-split-as-dat) — as categorical as the structural skeleton `C♯` itself. There is no representation layer to carry them; they are part of the single graded-PROP development, living in the fiber over `C♯`.
+
+### 7.3 Composition as pushout
+
+Autoalignment (`@`, `Context`) builds a composite from separately-constructed pieces by gluing them along a shared boundary. This is **not** the primitive composition of morphisms in `C`; it is the composition of *open systems* — structured cospans of acset presentations, each carrying explicit input/output interfaces ([graded_prop.md §6](graded_prop.md#6-composition-as-pushout)). It has two stages, and **only the second is a colimit**.
+
+**Stage 1 — interface discovery (heuristic, *not* categorical).** Decide *which* boundary colors of `cod(f)` and `dom(g)` are identified — construct the span `B → inst f`, `B → inst g`. pyncd does this by positional pairing plus shape-based `(name, size)` matching, inserting identities and prepending rearrangements to reconcile arity and order. This step is a **choice**: it is correct exactly when the `(name, size)` signature determines the axis, and a wrong choice silently over- or under-glues. **Nothing here is a pushout** — it is the construction of the span the pushout will act on. The interesting, failure-prone part of composition — where composition actually *fails*, where the design decision lives — is here, *outside* the colimit.
+
+**Stage 2 — gluing (the pushout).** Given the span, the composite is the **pushout** that identifies the matched boundary colors `B` (the cup), computed componentwise over the schema. On the `Axis` component it is a **coequalizer of UIDs** — exactly what `Context` union-find computes; the **canonical class representative is the universal cocone vertex**. Because pyncd chooses canonical representatives, the pushout is taken on the nose, which strictifies cospan composition so that `;` is *strictly* associative.
+
+```lean
+-- Inst(C♯) is a finitely-cocomplete copresheaf category; Stage 2 is a Mathlib colimit:
+-- CategoryTheory.Limits.pushout (span legs B → inst f, B → inst g)
+-- Stage 1 (span construction) is NOT part of it and is implemented separately.
+-- Associativity of `;` is the pasting lemma for pushouts, strictified by the
+-- canonical-representative choice — no bespoke proof over `Context` is needed (Prop 8.5).
+```
+
+The failure mode lives in the *attributes*, not the structure: the pushout requires the size/datatype data on glued axes to **unify**, and "no consistent attribute assignment" is precisely "the pushout does not exist." `Context` handles the `Axis`-component coequalizer; the size-consistency check is the remainder of the pushout. So [§6 of graded_prop.md](graded_prop.md#6-composition-as-pushout) is a *correctness/specification lens, not a composition algorithm*: the pushout explains and certifies what `Context` does; it does not replace it.
+
+### 7.4 The seam, concrete: union-find realizes the coequalizer
+
+This is where the proposition/computation seam of [§1](#1-orientation-one-structure-one-seam) becomes tangible. The coequalizer of [§7.3](#73-composition-as-pushout) is the **specification**; the executable structures carried forward from the old "Layer 2" are the **implementation**. They meet at the seam, and neither replaces the other.
+
+**Fresh-UID counter — `TermM`.** Constructing a new symbolic axis mints a fresh identity. Python does this with `random.randint` as a construction side-effect; Lean 4 is pure, so the fresh-name counter is threaded explicitly as a state monad. This is the *executable* side — it computes identities; it proves nothing.
 
 ```lean
 abbrev UID := ℕ
@@ -616,116 +440,28 @@ structure UData where
   uid  : UID
   name : Option DynamicName
 
-abbrev TermM := StateM ℕ
+abbrev TermM := StateM ℕ            -- the fresh-UID counter monad
 
 def freshUData : TermM UData := do
-  let n ← get
-  set (n + 1)
-  return ⟨n, none⟩
-
-def UData.stamp (d : UData) (name : DynamicName) : UData :=
-  { d with name := some name }
+  let n ← get; set (n + 1); return ⟨n, none⟩
+-- Constructing a new axis / FreeNumeric runs in TermM; pure code (composition, proofs) does not.
+-- A counter, not random ints: term construction becomes reproducible and testable.
+-- UIDs carry no semantic content — only equality/inequality of two UIDs matters.
 ```
 
-Any code that constructs a new symbolic axis or free numeric variable runs in `TermM`. Code that only *uses* existing values (composition, evaluation, proof) is pure and stays in `TermM`-free context. This makes the boundary between "constructing new degrees of freedom" and "reasoning about existing ones" syntactically visible in the types.
-
-The choice of a counter rather than random integers makes term construction reproducible and testable. UIDs carry no semantic content — only the equality or inequality of two UIDs matters, not their absolute values.
-
----
-
-### 3. `WithUID` — the generic decoration
-
-Python uses inheritance to attach identity to Layer 1 types. Lean 4 uses a generic wrapper:
+**Union-find — `Context` / `EqClass`.** The `Axis`-component coequalizer is *computed* as a pure-functional union-find. An `EqClass` is one equivalence class — a `Finset` of UIDs together with its canonical representative; a `Context` is a disjoint list of them. `Context.merge` unions a new class with any overlapping existing ones (Python's `Context.append_bucket`); `Context.apply` substitutes every UID by its class representative throughout a term. The **canonical representative is the member with the largest UID** — and *this is the universal cocone vertex* of the Stage-2 pushout: choosing it on the nose is what strictifies composition.
 
 ```lean
-structure WithUID (α : Type*) where
-  data : UData
-  val  : α       -- the Layer 1 value, unchanged
-
-instance : Functor WithUID where
-  map f w := { w with val := f w.val }
-
-def WithUID.stamp (name : DynamicName) (w : WithUID α) : WithUID α :=
-  { w with data := w.data.stamp name }
-```
-
-Concrete decorated types are aliases:
-
-```lean
-abbrev UAxis        := WithUID Axis
-abbrev UFreeNumeric := WithUID Numeric
-```
-
-**Python counterparts.** `UAxis := WithUID Axis` corresponds to `Axis` (which extends `UTerm` via inheritance — the Python `Axis` *is* a `UTerm`, whereas `UAxis` *wraps* an `Axis` in a separate struct); `UFreeNumeric := WithUID Numeric` corresponds to `FreeNumeric` (a `UTerm` subclass carrying no fields beyond `uid`).
-
-Construction always runs in `TermM`:
-
-```lean
-def UAxis.fresh (size : Numeric) : TermM UAxis := do
-  return ⟨← freshUData, ⟨none, size⟩⟩
-
-def UAxis.named (name : String) (size : Numeric) : TermM UAxis := do
-  let d ← freshUData
-  return ⟨d.stamp (DynamicName.ofStr name), ⟨some name, size⟩⟩
-```
-
-The Layer 1 `Axis` record is never modified. Proofs about `StMat` laws, for instance, refer only to `Axis` values and are oblivious to `UData`.
-
----
-
-### 4. `TermTraversable` — replacing `deep_reconstruct`
-
-Python's `deep_reconstruct` traverses any `Term` tree by inspecting `__dataclass_fields__` at runtime. Lean 4 has no runtime reflection; each type that contains decorated subterms needs an explicit traversal instance.
-
-```lean
-/-- Map a function over all UData fields reachable from a value. -/
-class TermTraversable (T : Type*) where
-  traverseUID : (UData → UData) → T → T
-```
-
-Instances for the decorated Layer 1 types:
-
-```lean
-instance : TermTraversable UAxis where
-  traverseUID f a := { a with data := f a.data }
-
-instance : TermTraversable (List UAxis) where
-  traverseUID f axes := axes.map (TermTraversable.traverseUID f)
-
-instance : TermTraversable (WithUID Numeric) where
-  traverseUID f n := { n with data := f n.data }
-```
-
-For compound types that contain decorated subterms at multiple sites:
-
-```lean
-instance : TermTraversable (BrBase dom cod) where
-  traverseUID f b := { b with
-    degree      := TermTraversable.traverseUID f b.degree
-    inputWeaves := fun i => TermTraversable.traverseUID f (b.inputWeaves i) }
-```
-
-The verbosity compared to Python's one-liner is the cost; the gain is that the Lean compiler checks exhaustiveness — a new decorated field added to `BrBase` causes a compile error in this instance until the traversal is updated.
-
----
-
-### 5. `Context` — pure functional union-find
-
-Python's `Context` is a mutable list of `EqualityClass`es. The Lean 4 version is a pure functional structure. Since axis alignment is the primary use case, and all aligned values share type `UAxis`, a per-type context is sufficient in practice:
-
-```lean
-/-- A single equivalence class: a set of UIDs with one canonical decorated value. -/
+/-- One equivalence class: a set of UIDs with one canonical representative. -/
 structure EqClass (α : Type*) where
   bucket    : Finset UID
-  canonical : WithUID α   -- representative chosen by largest UID, as in Python
+  canonical : WithUID α            -- representative chosen by largest UID = cocone vertex
 
 /-- A context is a disjoint list of equality classes. -/
 structure Context (α : Type*) where
   classes : List (EqClass α)
 
-def Context.empty : Context α := ⟨[]⟩
-
-/-- Merge a new class into the context, unioning with any overlapping classes. -/
+/-- Merge a new class in, unioning with any overlapping classes (= Context.append_bucket). -/
 def Context.merge (ctx : Context α) (cls : EqClass α) : Context α :=
   let overlapping := ctx.classes.filter (fun c => ¬ c.bucket.Disjoint cls.bucket)
   let merged : EqClass α := overlapping.foldl
@@ -735,7 +471,7 @@ def Context.merge (ctx : Context α) (cls : EqClass α) : Context α :=
     cls
   ⟨merged :: ctx.classes.filter (fun c => c.bucket.Disjoint cls.bucket)⟩
 
-/-- Substitute all members of every class with their canonical representative. -/
+/-- Substitute every UID in each class by its canonical representative throughout a term. -/
 def Context.apply [TermTraversable α] (ctx : Context α) (target : α) : α :=
   ctx.classes.foldl (fun t cls =>
     TermTraversable.traverseUID
@@ -743,95 +479,164 @@ def Context.apply [TermTraversable α] (ctx : Context α) (target : α) : α :=
     target
 ```
 
-`Context.merge` corresponds to Python's `Context.append_bucket`. `Context.apply` has the same name in Python and the same semantics: substitute every UID in each class with its canonical representative throughout a term tree. The canonical representative is the member with the largest UID, matching Python's `max(..., key=lambda uterm: uterm.uid)`.
+The framing is the whole point. **The pushout/coequalizer is the spec; union-find plus the fresh-name counter is the implementation; they meet at the seam.** The Stage-2 colimit *certifies* the gluing — associativity (the pasting lemma), the precise error semantics ("no cocone" = alignment failure, "inconsistent attributes" = size mismatch), the canonical representative as cocone vertex — while `Context` *computes* it in near-linear time. A Lean development proves the coequalizer is what it claims; it does not re-derive `Context` line-by-line, and pyncd would never invoke a generic colimit solver. The substitution machinery `Context.apply` rides on a `TermTraversable` typeclass — the Lean stand-in for Python's reflective `deep_reconstruct`, one explicit traversal instance per decorated type — but that, the `WithUID` decoration, and `DynamicName` are display/identity bookkeeping on the executable side, never propositional content.
 
----
+### 7.5 Algebras and `construct()`
 
-### 6. Correspondence with the Python Term System
+The algebra `F` (graded_prop.md Def 7.2 / [§7](graded_prop.md#7-algebras-construct-and-the-para-refinement)) is the strong symmetric monoidal, `D`-equivariant functor `C → V` into a target actegory — the categorical content of `ConstructedModule.construct()`. Its full class (`Algebra D C V` with the `F`/`equivar`/`coh` fields, the `TargetActegory`, and the `ParaAlgebra` refinement) belongs to the propositions/instantiation development; here it is named only so the §8 correspondence table has a home for it, and because the trained model is a *section of the Para fibration over `∫Dat`* — tying the algebra back to the Grothendieck split of [§7.1](#71-the-structuredata-split-as-dat).
 
-#### Overall table
+## 8. Acsets and Python interop
 
-| Lean | Python | Notes |
-| --- | --- | --- |
-| `WithUID α` | `UTerm` (via inheritance) | Python attaches identity by subclassing `UTerm`; Lean wraps the Layer 1 value in a generic struct |
-| `UData` | `UID[T]` | Python's `UID` bundles type, integer id, and optional name; Lean's `UData` bundles a counter id and an optional `DynamicName` — the type is carried by `WithUID`'s type parameter `α` |
-| `UID = ℕ` | `UID._id : int` (random) | Python generates UIDs via `random.randint`; Lean uses a monotone counter in `TermM`. Both satisfy the only requirement: two UIDs are equal iff they identify the same symbolic entity. |
-| `TermM = StateM ℕ` | implicit side-effect at construction | Python mutates a global random source; Lean threads a counter through a state monad. Construction of new degrees of freedom is syntactically marked in Lean by the `TermM` return type. |
-| `DynamicName` | `DynamicName` | Near 1:1. Both are recursive structures with `body`, `subscript`, and display settings. |
-| `DynamicNameSettings` | `DynamicNameSettings` | Direct translation: `bold`, `overline`, `absolute`. |
-| `DynamicName.ofStr` | `DynamicName.from_str` | Python splits on `_` to build subscript chains; Lean `ofStr` does the same. |
-| `WithUID.stamp` / `UData.stamp` | `DynamicName.capture` | Python's `capture` reconstructs the target with a new UID `_name`; Lean's `stamp` updates `UData.name` in place on the wrapper. |
-| `TermTraversable` typeclass | `deep_reconstruct` | Python traverses any `Term` tree via `__dataclass_fields__` reflection; Lean requires an explicit instance per type. See §6.2. |
-| `EqClass α` | `EqualityClass[T]` | Both hold a set of UIDs and a canonical representative. Python picks the representative by `max(uid)`. Lean does the same. |
-| `Context α` | `Context` | Both are collections of disjoint equality classes. Python stores a heterogeneous list; Lean is per-type. See §6.3. |
-| `Context.merge` | `Context.append_bucket` | Both merge a new class into the collection, unioning with any overlapping existing classes. |
-| `Context.apply` | `Context.apply` | Both substitute every member of each class with its canonical representative throughout a term tree. |
-| `UAxis := WithUID Axis` | `Axis` (extends `UTerm`) | In Python, `Axis` *is* a UTerm; in Lean, `UAxis` *wraps* an `Axis`. The Layer 1 `Axis` record is untouched. |
-| `UFreeNumeric := WithUID Numeric` | `FreeNumeric` | Python `FreeNumeric` is a `UTerm` subclass with no fields beyond `uid`; Lean `UFreeNumeric` wraps a `Numeric.var` value. |
-| — | `Term` base class | No Lean equivalent. Python's `Term` provides `reconstruct`, `keys`, `dict`, and `TermDirectory` registration. Lean has no need for runtime introspection; `TermTraversable` covers the traversal use case, and typeclass resolution covers dispatch. |
-| — | `TermDirectory` | No Lean equivalent. Python maintains a global `{classname: Type}` dict for serialisation. Lean would use typeclass resolution for any serialisation layer. |
+### 8.1 `SBrInstance` as a finite presentation of an `∫Dat`-morphism
 
-#### UID and UTerm: inheritance vs composition
+An acset instance is a **finite presentation of a single `∫Dat`-morphism**: its `C♯`-part is the connectivity, its `Dat`-part the sizes, coefficients, and datatypes ([graded_prop.md §5](graded_prop.md#5-the-structuredata-split-as-a-grothendieck-construction)). For `Br` the schema is `S_Br` and the instance is `SBrInstance`; the schema, the five entity types (`Axis`, `Equation`, `Array`, `ArrayAxis`, `Sample`), the C-set/attribute split, and the worked encoding are developed in [acset.md](acset.md) — referenced here, not re-derived. What matters for the Lean encoding is the relationship to [§7](#7-grothendieck-split-and-composition-as-pushout): an `SBrInstance` exported via `write_sbr`/`read_sbr` *is* a functor `G : S_Br → Set` — one point of the `S_Br`-instance category, i.e. one `∫Dat`-morphism — and its CSV tables are the C-set/attribute halves of that morphism written separately.
 
-As noted in §3, Python attaches identity via **inheritance** (`Axis` extends `UTerm` extends `Term`) while Lean uses **composition** (`UAxis = WithUID Axis`). The consequence for proof: a Lean lemma over `Axis` cannot accidentally mention `UData`; the compiler enforces the separation. In Python, `uid` is silently present on every `Axis` and simply ignored during mathematical reasoning.
-
-The more subtle difference is **UID generation**. Python generates UIDs as random integers at construction — a side-effect invisible in the type. Two calls to `RawAxis()` produce distinct objects regardless of their fields. Lean makes this explicit: constructing a `UAxis` requires running in `TermM`, and the counter value at that point determines the UID. Two values from different `TermM` runs are incomparable until their UIDs are explicitly unified via `Context`.
-
-#### `deep_reconstruct` vs `TermTraversable`
-
-Python's `deep_reconstruct(target, func)` applies `func` to every subterm of `target` by inspecting `target.__dataclass_fields__` at runtime. It works uniformly across all `Term` subclasses with no per-type code.
-
-Lean has no runtime reflection. `TermTraversable` is an explicit typeclass:
+The `SBrInstance`'s four tables become a Lean `structure` whose fields are finite lists, mirroring acset.md's [Lean encoding section](acset.md#from-sbrinstance-to-a-diagram-in-br-a-lean-encoding):
 
 ```lean
-class TermTraversable (T : Type*) where
-  traverseUID : (UData → UData) → T → T
+structure SBrInstance where
+  equations  : List EquationRow                 -- one row per Equation
+  arrays     : List ArrayRow                    -- Array rows: slot, is_input, datatype_tag, op_predicate, …
+  array_axes : List ArrayAxisRow                -- ArrayAxis rows: is_target, position (the Weave._shape interleaving)
+  samples    : List SampleRow                   -- Sample rows: (src, tgt, coeff, offset) — the affine reindexing
+  axis_sizes : List (UID × Numeric)             -- the Dat-part: each axis-UID's symbolic size
 ```
 
-Each type that contains `UData` fields must provide an instance listing exactly which fields to traverse. This is verbose — Python's one-liner becomes one instance per type — but the Lean compiler checks exhaustiveness. If a new `UData`-bearing field is added to `BrBase`, the existing `TermTraversable (BrBase dom cod)` instance fails to compile until it is updated. Python's `deep_reconstruct` would silently traverse the new field without any notification.
+acset.md interprets this `G` as a strict monoidal functor `D : J → Br` from a finite index category `J` (objects = the program's arrays, morphisms = its equations) into the `Br` of [§2.3](#23-br--free-category-over-broadcasted-base-morphisms), using two Mathlib shortcuts that are exactly this document's choices: **`MvPolynomial String ℕ` for `Numeric`** (so `ring` discharges the `StMat` laws — the `Dat`-fiber type of [§7.2](#72-freenumeric-is-the-fiber-not-a-layer)) and **`Matrix` for `StMat.coeffs`** (for the matrix lemmas). `J` is the *free strict monoidal category* on the equation quiver — Mathlib's `FreeMonoidalCategory` strictified — so specifying `D` on generators determines it uniquely; the functor laws are a consequence. The `axis_sizes` table populates the `Dat(c)` fiber; the `equations`/`arrays`/`array_axes`/`samples` connectivity is the `C♯`-morphism. This `D : J → Br` is the finite, written-down witness of one object/morphism of the `Grothendieck Dat'` instance of [§7.1](#71-the-structuredata-split-as-dat).
 
-The two approaches reflect a general tradeoff between generic programming via reflection (Python, concise but unverified) and generic programming via typeclasses (Lean, explicit but compiler-checked).
+### 8.2 The seam made tangible
 
-#### `Context`: mutable list vs pure functional
+The acset tables and their CSV serialization are the **executable realization** of the `∫Dat` *specification* — the same proposition/computation seam as [§7](#7-grothendieck-split-and-composition-as-pushout), now in fully concrete form. `write_sbr`/`read_sbr` write the two halves of an `∫Dat`-morphism to separate tables — connectivity (the C-set part: `equations`, `arrays`, `array_axes`, `samples`) and data (the attribute part: `axis_sizes`, coefficients, datatypes) — which is precisely the Grothendieck split serialized. The same `Axis` UIDs appear in the term world's `Weave` objects and in the acset's `ArrayAxis` rows, so any `Context`-mediated unification (the [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) coequalizer computation) is reflected in both views without a round-trip. The categorical object `∫Dat` is what a Lean development *proves about*; the acset tables and CSV are what pyncd *computes and stores*. They meet at the seam.
 
-Python's `Context` is a mutable object. `append_bucket` modifies `self.equality_classes` in place by merging overlapping classes. Callers share a single `Context` instance and observe each other's mutations.
+### 8.3 Consolidated Python correspondence
 
-Lean's `Context α` is an immutable record. `Context.merge` returns a new `Context` with the merged class; the original is unchanged. This means axis alignment during composition must be threaded explicitly — the `Context` produced by one step is passed as an argument to the next, rather than being accumulated in a shared mutable store.
+The tables below collect the systematic Lean ↔ Python correspondence, **organized by the new tower** — base, core, mixins, the Grothendieck/pushout seam, the acset realization — rather than by the dissolved Layer 1 / Layer 2 split. Inline one-line pointers in earlier sections (e.g. `act` ↔ batch lift, `BrBase` ↔ `Broadcasted`) are the local view; this is the systematic one.
 
-The practical consequence is that Lean composition returning an aligned result has type `StObj → StObj → TermM (BrMorph a b × Context UAxis)` rather than mutating a global context. This is more verbose but makes the data flow explicit and allows multiple independent alignments to coexist without interference.
+| Lean (new tower) | Python | Notes |
+| --- | --- | --- |
+| `SmallCategory` / `ColoredPROP` | implicit / `ProductCategory` | category and monoidal laws are unstated in Python; paper-level only |
+| `ColoredPROP.elemental` | — | new `(Elem)` field; no Python witness |
+| `List gen` (objects) | `ProdObject[L]` | Python wraps `tuple[L,…]` in a Term; Lean uses `List` directly |
+| `StMat` | `StrideMorphism` | stride *matrix* (`Matrix … Numeric` + bias) vs bundled stride record |
+| `BrBase` | `Broadcasted` | base op + reindexings; `Fin`-indexed weaves vs runtime tuples |
+| `BrMorph` | `Composed` | free list of `BrBase` vs `content: tuple[M,…]` |
+| `ProductOfMorphisms` ↔ `tensorHom` | `ProductOfMorphisms[L, M]` | `ColoredPROP.tensorHom` (a morphism) vs a data wrapper |
+| `DGradedColoredPROP.act` | batch lift `[f,P]` | the lift action; `[f,P] = act(f, 𝟙_P)`, `[X,η] = act(𝟙_X, η)` |
+| `WeaveShape` / `structure Weave` | `Weave._shape` | per-array shape (`WeaveShape`); §5's `structure Weave` = the cartesian-lift factorization witness |
+| `∫Dat` instance (`Grothendieck Dat'`) | `SBrInstance` | finite presentation of one `∫Dat`-morphism |
+| `Numeric` = `MvPolynomial String ℕ` | `Numeric` / `FreeNumeric` | the `Dat(c)` fiber; `MvPolynomial.X s` ↔ a `FreeNumeric` generator |
+| `Context` / `EqClass` | `Context` / `EqualityClass` | union-find = the *implementation* of the coequalizer ([§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer)) |
+| `TermM` = `StateM ℕ` | random-int UID side-effect | the fresh-name counter; Lean threads state, Python mutates a global source |
+| `TermTraversable` | `deep_reconstruct` | per-type traversal instance vs `__dataclass_fields__` reflection |
+| `Algebra.F` | `ConstructedModule.construct()` | the algebra functor `C → V` (full class in the §7.5 / propositions development) |
+| `DynamicName` | `DynamicName` | display only — see [§12](#12-appendix-out-of-scope), out of scope |
 
----
+The single coherent message of the table: every row that the old design would have filed under "Layer 2 — Representation" (`Numeric`/`FreeNumeric`, `Context`/`EqClass`, `TermM`, `TermTraversable`, `DynamicName`) is now placed by its categorical role — fiber datum, coequalizer implementation, fresh-name counter, traversal, or display — on one side or the other of the proposition/computation seam. There is no representation layer; there is one tower with one seam.
 
-### 7. What Layer 2 leaves unchanged
+## 9. The propositions as generic theorems
 
-The point of the wrapping architecture is that Layer 1 stays untouched. The following table shows which obligations belong to which layer:
+Every proposition of [graded_prop.md §8](graded_prop.md#8-propositions-the-synthesis-organizes) is a statement about the **core class fields and axioms only**. Each begins with the same generic preamble:
 
-| Concern | Layer |
+```lean
+variable {D C : Type} [ColoredPROP D] [ColoredPROP C] [DGradedColoredPROP D C]
+```
+
+and mentions nothing beyond `act`, `δ`/`δ0`/`υ`/`α`, `sh`, and the named `Prop`-fields (`sh_act`, `act_unit_assoc`, `dist_coh`, `broadcast_gen`, plus the base `elemental`). Because the only hypotheses are class members, each proposition is **proved once, at the graded-PROP level, and inherited at every instance** — the `DGradedColoredPROP St Br` of [§10](#10-instantiation-and-future-extensions), the `DGradedColoredPROP Br CMod` MoE level, a future `Graph→C`, and the swapped-`D` rows all receive it with no per-domain proof. This is the Lean form of [graded_prop.md](graded_prop.md)'s central promise, and it *is* parametricity over a typeclass: a `theorem` whose only free assumption is `[DGradedColoredPROP D C]` applies verbatim wherever that instance resolves.
+
+| Proposition | Lean statement (sketch) | Mathlib machinery | Per-instance cost |
+| --- | --- | --- | --- |
+| **8.1** Lift functoriality / distribution | `[f ; g, P] = [f, P] ; [g, P]` and `[f ⊗ g, P] = [f, P] ⊗ [g, P]` | `act` is a `Functor` (so `Functor.map_comp`) + the `δ` distributivity iso | free |
+| **8.2** Weave uniqueness | `Subsingleton (Weave g)` | `elemental` (base) + `broadcast_gen` — elements separate, so `P` and the target/tiling partition are determined | free |
+| **8.3** Grothendieck splitting | `C ≅ ∫Dat` | `CategoryTheory.Grothendieck` on `Dat` | `Iso.refl` if `C` is built as `∫Dat`; otherwise one constructed equivalence |
+| **8.4** Equivariance | `F` is `T`-equivariant `↔` `F` lifts to the EM-category of the symmetry monad `T` (morphism of `T`-algebras) | EM-category / `Monad.Algebra`; gated on `SymmetryGraded` (the `T : Monad D` parameter of [§6.2](#62-route-and-symmetry-stubs)) | body deferred — finite-`G` is reachable now, the graded-PROP-dependent parts wait; see [equivariance_unification.md](equivariance_unification.md) |
+| **8.5** Composition associativity | composition in `Inst(C♯)` is associative and unital | `CategoryTheory.Limits.pushout` + the pasting lemma | free (strictified by canonical representatives, so the pasting is definitional) |
+| **8.6** Two obstruction species | a morphism failing to admit a weave does so as `Scan` (species i, coupled but data-independent) or `Route` (species ii, data-dependent); the litmus is whether the reindexing is a fixed, point-natural `D`-morphism | the litmus is `D`-uniform — phrased entirely over `act` and Eq. 3, no `D`-specific input | abstract litmus free; positive identification of species (i) as `Scan` needs `TemporalGraded` (its `L`), as 8.7–8.8 |
+| **8.7** `Scan` as a catamorphism | `Scan := cata(step)`; the prefix-restriction law is a corollary of the catamorphism universal property | `TemporalGraded` (the `iterate`/`trace` fields of [§6.1](#61-temporalgraded--scan)) | free given `TemporalGraded`; explains the affine fast path (step algebra factors through a **monoid** → parallel prefix in `O(log N)`) |
+| **8.8** `Scan` batches | `act(Scan, P) ≅ Scan(act(step, P))` for `P` orthogonal to `L` | `lift_fold_dist` ([§6.1](#61-temporalgraded--scan)) | free given `TemporalGraded` |
+
+The inheritance is about the **theorems**, not the instance obligations. When a new `instance : DGradedColoredPROP D C` is declared, the propositions above transfer to it for free — but the instance must still **discharge the coherence `Prop`-fields** of the core: the actegory triangle and pentagon (`act_unit_assoc`), the distributivity coherences (`dist_coh`), and `sh_act`/`broadcast_gen`/`elemental`. "Inherit everywhere" names the proven propositions riding on those fields; it does not waive the obligation to *supply* the fields. Each new domain pays that fixed, finite coherence cost once; everything built on top of the core is then free.
+
+## 10. Instantiation and future extensions
+
+### 10.1 `D = St`, `C = Br` — the flagship instance
+
+Today's instantiation is `D = St`, `C = Br`: an index PROP of axis lengths (colors = `Numeric` sizes, morphisms = stride matrices) grading an operation PROP of broadcasted arrays. The instance header supplies the core fields; the named `Prop`-fields are discharged by the laws established in [§2](#2-the-base-coloredprop)–[§4](#4-the-core-dgradedcoloredprop-d-c).
+
+```lean
+instance : DGradedColoredPROP St Br where
+  sh    := fun a => a.shape        -- the array's shape: sh([a, A]) = A
+  act   := …                       -- batch lift + reindexing (theory.md Lift Operations)
+  δ     := …                       -- [X ⊗ Y, P] ≅ [X,P] ⊗ [Y,P]   (batch lift distributes)
+  δ0    := …                       -- [I, P] ≅ I
+  υ     := …                       -- [X, I_St] ≅ X   (grading by the unit shape is trivial)
+  α     := …                       -- [[X,P],Q] ≅ [X, Q ⊗ P]
+  sh_act         := …              -- (Sh-⊛): sh*([X,P]) = sh*(X) ⊗ P
+  act_unit_assoc := …              -- actegory triangle + pentagon, by St affine-stride algebra
+  dist_coh       := …              -- δ/δ0 naturality + interchange, from the batch-lift defn
+  broadcast_gen  := …              -- every Br morphism is a broadcasted operation (Def 13)
+  elemental      := …              -- Br is elemental (base ColoredPROP field)
+```
+
+| Core field | pyncd realization |
 | --- | --- |
-| PROP laws, category axioms | Layer 1 — proved once, referenced by Layer 2 |
-| `StMat` composition and `ring` obligations | Layer 1 |
-| `BrMorph` list-induction laws | Layer 1 |
-| UID generation, freshness | Layer 2 — `TermM` monad |
-| Naming and LaTeX rendering | Layer 2 — `DynamicName` |
-| Axis alignment after composition | Layer 2 — `Context.apply` |
-| Decorated construction (`UAxis.fresh`) | Layer 2 — runs in `TermM` |
-| Term traversal for substitution | Layer 2 — `TermTraversable` instances |
+| `sh` | `sh([a, A]) = A` — the array's shape ([theory.md §Objects in Br](theory.md#objects-in-br)) |
+| `act` | the batch lift `[f, P]` + object/morphism reindexing + broadcasted-stride lift ([theory.md §Lift Operations](theory.md#lift-operations)) |
+| `δ` | `[X ⊗ Y, P] = [X,P] ⊗ [Y,P]` ([theory.md §Batch Lift](theory.md#batch-lift-f-p-def-11)) |
+| `δ0` | `[I, P] ≅ I` — lifting the monoidal unit is trivial |
+| `υ` | `[X, I_St] ≅ X` — grading by the unit (empty) shape is the identity reindexing |
+| `α` | `[[X,P],Q] ≅ [X, Q ⊗ P]` — nested lifts compose the batch shapes |
+| `sh_act` | `(Sh-⊛)`: a lifted array's shape is the base shape tensored with the batch shape `P` |
+| `act_unit_assoc` | actegory triangle/pentagon, discharged by `St`'s affine-stride matrix algebra (`Matrix.mul_assoc` + `ring`) |
+| `dist_coh` | `δ`/`δ0` naturality and interchange with `υ`/`α`/swap, from the batch-lift definition |
+| `broadcast_gen` | `(Broadcast-gen)`: every `Br` morphism is a broadcasted operation ([theory.md §Broadcasting](theory.md#broadcasting)) |
+| `elemental` | `Br` is elemental ([theory.md §Elemental Categories](theory.md#elemental-categories)) — the base `ColoredPROP` field |
 
-A proof that "stride matrix composition is associative" (`StMat.assoc`) lives entirely in Layer 1 and refers to `Axis` values, not `UAxis` values. A program that "computes the output shape after aligning two morphisms" lives in Layer 2 and calls `Context.apply`. Neither layer needs to look inside the other.
+Every row is a definitional unfolding of the core with `D := St`, `C := Br`. With the instance in place, all of [§9](#9-the-propositions-as-generic-theorems) holds for `Br` with no `Br`-specific proof.
 
----
+### 10.2 The additive-extension menu
 
-## Summary
+The framework grows by **adding instances and mixins**, never by editing the proven core. Each direction below is one or the other.
 
-The full typeclass hierarchy for the NCD framework in Lean 4 is:
+| Extension | Lean addition | Kind |
+| --- | --- | --- |
+| `D = Br` mixture-of-experts | `instance : DGradedColoredPROP Br CMod` ([graded_prop.md §9.2](graded_prop.md#92-the-speculative-third-level-d--br)) — models as wires, `⊛` tiles a base computation over a family of models | **new instance** |
+| swap-`D`: graph / incidence cat. | `instance : DGradedColoredPROP Graph C` — gather-along-edge reindexing; GNNs, meshes (fixed graph = weave; per-sample graph = `Route`) ([graded_prop.md §9.3](graded_prop.md#93-the-horizontal-axis-swapping-d)) | **new instance** |
+| swap-`D`: group `BG` / `Rep(G)` | `instance : DGradedColoredPROP (Rep G) C` — group-translation reindexing; equivariant & steerable nets | **new instance** |
+| swap-`D`: Markov cat. `Stoch` | `instance : DGradedColoredPROP Stoch C` — Markov-kernel reindexing; sampling, VAE, SMC | **new instance** |
+| swap-`D`: metric / enriched cat. | `instance : DGradedColoredPROP Metric C` — distance-kernel reindexing; continuous conv, neural fields | **new instance** |
+| swap-`D`: partition lattice | `instance : DGradedColoredPROP Partition C` — assignment-map reindexing; pooling, clustering, slots (fixed = weave; learned = `Route`) | **new instance** |
+| swap-`D`: resource monoid | `instance : DGradedColoredPROP Resource C` — store-vs-recompute reindexing; checkpointing / scheduling ([future_ideas.md §8](future_ideas.md#8-prioritized-implementation-roadmap) item 4.5) | **new instance** |
+| data-dependent routing | `class RouteStructure` ([§6.2](#62-route-and-symmetry-stubs)) — Prop 8.6(ii), the gate as a `Para` parameter | **new mixin** |
+| equivariance | `class SymmetryGraded` ([§6.2](#62-route-and-symmetry-stubs)) — Prop 8.4 via the EM-category of `T : Monad D`, gated | **new mixin** |
+| weight tying / passes | `class ParaAlgebra` ([§7.5](#75-algebras-and-construct)) — `Para(C) → Para(V)` 2-functor, passes-as-2-cells | **new mixin** |
+| unbounded recurrence | corecursion / coalgebra refinement of `TemporalGraded` — the `cata`/`ana` companion | **new mixin** |
 
-```text
-SmallCategory ob
-    └── PROP ob
-            ├── instance St  : PROP StObj    (gen = Axis,      hom = StMat)
-            └── instance Br  : PROP BrObj    (gen = ArrayType, hom = BrMorph)
-```
+No row is a core edit: a new domain is a new `instance` (it supplies the core fields and discharges the coherence obligations of [§9](#9-the-propositions-as-generic-theorems)), and a new capability is a new mixin layered on top (`extends DGradedColoredPROP`, or `extends Algebra` for `ParaAlgebra`). The classification of [graded_prop.md §8.6](graded_prop.md#8-propositions-the-synthesis-organizes) is `D`-uniform, so every swap-`D` row inherits the same weave-vs-`Scan`-vs-`Route` decision procedure.
 
-`SmallCategory` provides the categorical skeleton. `PROP` adds the strict symmetric monoidal structure that both **St** and **Br** share — list-concatenation as tensor product, swap morphisms, and bifunctoriality of `tensorHom`. The two concrete instances diverge: **St** uses Mathlib's `Matrix` type for coefficients and `MvPolynomial String ℕ` for scalars, so its laws are proved via `Matrix.mul_assoc` and `ring` with no `sorry`; **Br** uses the free-list construction whose laws are structural (`rfl`, list induction). The `reindexings` field in `BrBase` is the precise locus at which **St** lives inside **Br**, and the `MonoidalFunctor St Br` makes that embedding first-class.
+The MoE level deserves a specific word, because it is the one place the same category `Br` appears twice. The vertical stack `D = Br` reuses **all** of [§9](#9-the-propositions-as-generic-theorems) with zero new proof, and this is not a coincidence — it is forced by the instance-resolution discipline. `Br`-as-graded — the `DGradedColoredPROP St Br` instance of [§10.1](#101-d--st-c--br--the-flagship-instance) — occupies the **`C` position** of `DGradedColoredPROP`. `Br`-as-index — the `[ColoredPROP Br]` argument of `instance : DGradedColoredPROP Br CMod` — occupies the **`D` position**. The two are different parameter slots of the class, so the two roles of `Br` never collide in instance search: declaring `DGradedColoredPROP Br CMod` does not overlap or shadow `DGradedColoredPROP St Br`. Because the §9 theorems are generic in both `D` and `C`, they fire for `DGradedColoredPROP Br CMod` the instant it resolves, exactly as they fire for `DGradedColoredPROP St Br` — the MoE level is new data, not new mathematics.
 
-Layer 2 sits on top of this hierarchy without modifying it, adding `WithUID` decoration, `DynamicName` rendering, and `Context`-based alignment. The boundary between the layers is enforced by type: Layer 1 types (`Axis`, `StMat`, `BrBase`) carry no `UData`; Layer 2 types (`UAxis`, `Context`) carry no category laws.
+## 11. Lean formalization notes
+
+The strategy of [graded_prop.md §10](graded_prop.md#10-lean-formalization-notes) reads as a Mathlib shopping list, and most of the tower lands on existing `CategoryTheory.*` machinery. The base colored PROP and the seam adapter ([§2](#2-the-base-coloredprop)–[§3](#3-the-seam-adapter-into-mathlib)) are `CategoryTheory.MonoidalCategory` / `SymmetricCategory` over `FreeMonoidalCategory (Discrete O)`. The Grothendieck split of [§7.1](#71-the-structuredata-split-as-dat) is `CategoryTheory.Grothendieck` applied to the data functor `Dat'`. The composition-as-pushout of [§6](#6-mixins-scan-route-symmetry-para)/[§7.3](#73-composition-as-pushout) and the associativity of [§8.5](#9-the-propositions-as-generic-theorems) are `CategoryTheory.Limits.pushout` plus the pasting lemma. The `Algebra` functor `F : C ⥤ V` and its morphisms are `MonoidalFunctor` / `MonoidalNatTrans`. The gated equivariance of [§6.2](#62-route-and-symmetry-stubs)/[§8.4](#9-the-propositions-as-generic-theorems) is `CategoryTheory.Action` / `Rep` / `Monad.Algebra` (the Eilenberg–Moore category of the symmetry monad). And the architecture relations `R` quotienting `C♯` ([§7](#7-grothendieck-split-and-composition-as-pushout)) are `CategoryTheory.Quotient`. The `D`-actegory coherence bundle of the core — the triangle/pentagon and the distributivity isos — is the one piece Mathlib carries only partially (`Action` covers a monoid acting, not a full monoidal-category actegory), so it is hand-rolled as functor-plus-natural-iso algebra; it is routine, not deep.
+
+Beyond the coverage map, several honest notes shape any transcription:
+
+- **Strictification strategy.** Develop the whole tower over `FreeMonoidalCategory (Discrete O)` and **strictify once**, so that downstream all associators and unitors are `Iso.refl` and the PROP equations (`tensor_assoc`, `tensor_unit_l`, `tensor_unit_r`) hold *definitionally* rather than up to coherent isomorphism. This is what lets a `ColoredPROP` law stated with `=` line up with a Mathlib `MonoidalCategory` whose coherences are isos, and it is applied at the seam adapter of [§3](#3-the-seam-adapter-into-mathlib).
+
+- **Strictness is the real friction.** This strictification is the *single* genuine difficulty in the formalization. Mathlib's categories are not strict, so without the one-time strictification every PROP equation would have to be threaded through associator/unitor coherence by hand. The mitigation above contains the cost to one place; nothing else in the development fights the type theory.
+
+- **Inheritance is for theorems, not obligations.** The [§9](#9-the-propositions-as-generic-theorems) theorems transfer to every instance for free, because their only hypothesis is `[DGradedColoredPROP D C]`. But each new `instance` must still **discharge the coherence `Prop`-fields** of the core — the actegory triangle and pentagon (`act_unit_assoc`), the distributivity coherences (`dist_coh`), and `sh_act`/`broadcast_gen`. "Prove once, inherit everywhere" names the proven propositions; it does not waive the per-instance obligation to *supply* the coherence fields.
+
+- **Instance-resolution discipline.** `D` and `C` are **explicit** class parameters, not `outParam`s. With both free, Lean's instance search needs them pinned, so `[DGradedColoredPROP D C]` resolves predictably and `Br`-as-graded (the `C` slot) never collides with `Br`-as-index (the `D` slot) in search — the non-collision relied on by the MoE level of [§10.2](#102-the-additive-extension-menu).
+
+- **Mixins, not a tall tower.** Scan, Route, Symmetry, and Para are kept as composable mixin classes layered on the core ([§6](#6-mixins-scan-route-symmetry-para)), rather than as one deep `extends` chain. A tall tower would invite typeclass *diamonds* (a capability reachable by two `extends` paths) and degrade instance-search performance; independent mixins let each instantiation pay only for the capabilities it declares.
+
+- **The Para 2-category gap.** The `Para(V)` encoding is kept **lightweight and 1-categorical**: a parameterized 1-cell is `Σ (P : V), (P ⊗ A ⟶ B)`, and the "2-cells" (reparameterizations, weight tying) are carried as an explicit reparameterization *relation* rather than as genuine 2-morphisms of a bicategory. The gap to a full `Para` bicategory is **noted, not paid for** — a bicimplementation would be machinery only the specification uses ([graded_prop.md §7](graded_prop.md#7-algebras-construct-and-the-para-refinement)).
+
+- **Equivariance is gated.** Proposition 8.4's body depends on the `SymmetryGraded` mixin and the Eilenberg–Moore-category machinery for the symmetry monad `T`. The finite-group case is reachable with present Mathlib (`Action`/`Rep`), but the graded-PROP-dependent parts of the encoding wait on this very formalization being in place; the proposition is *stated* now and its proof *gated* ([equivariance_unification.md](equivariance_unification.md)).
+
+## 12. Appendix: out of scope
+
+Two families of structure are deliberately **not encoded**, because they carry no propositional or computational content the framework reasons about. The first is **`DynamicName` and its LaTeX rendering** — the human-readable, mathematically-typeset names attached to axes and arrays. The second is the **`Block` display metadata** — the layout and presentation bookkeeping the visualizer consumes. Both are *semantically transparent*: erasing them changes no morphism, no shape, no composite, and no proof. They ride on the executable side of the seam as identity/display decoration (the `WithUID` decoration of [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) carries the optional `DynamicName`), and they are left exactly where the current document already leaves `Block` — outside the encoding, mentioned but never formalized.
+
+This matches the document's overall stance, restated once here: it writes **no proved Lean**. Every `class`, `structure`, `def`, and `theorem` above is a *signature* with named `Prop`-field laws and named proof obligations; the elisions (`…`) in bodies are intentional, marking exactly the obligations a future Lean development would discharge. The deliverable is **formalizability, not formalization** — the shape into which the propositions of [graded_prop.md §8](graded_prop.md#8-propositions-the-synthesis-organizes) transcribe directly, not the discharged proofs themselves.
