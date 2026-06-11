@@ -2,6 +2,7 @@ import data_structure.Category as cat
 import data_structure.Numeric as nm
 import data_structure.Term as fd
 import display.Box as Box
+from data_structure.TensorDSL import Reindex
 import utilities.utilities as util
 import term_utilities.term_utilities as tutil
 import utilities.justification as js
@@ -229,6 +230,37 @@ def rearrangement[B: cat.Datatype, A: cat.Axis](
     )
     return Box.Horizontal((left_labels, right_labels))
 
+
+def _row_label(row: tuple, out_axes: tuple) -> str:
+    """Format one Reindex row as an affine expression, e.g. 'x+dx' or '2·xo+px'."""
+    const, coeffs = row
+    terms = []
+    if const:
+        terms.append(str(const))
+    for k, c in coeffs:
+        ax = out_axes[k]
+        name = ax.uid._name.to_bodies() if ax.uid._name is not None else f'a{k}'
+        terms.append(name if c == 1 else f'{c}·{name}')
+    return '+'.join(terms) if terms else '0'
+
+
+def reindex(target: Reindex) -> Box.Box:
+    """Render a Reindex as a labelled hexagon: in_axes — ⟨expr∣ — out_axes."""
+    label = '⟨' + ', '.join(
+        _row_label(row, target.out_axes) for row in target.rows
+    ) + '∣'
+    left_labels = separated_product(
+        Box.Horizontal((display_axis(axis), Box.Fill('─', 2, 1)))
+        for axis in target.in_axes
+    )
+    middle = Box.TextBox(label)
+    right_labels = separated_product(
+        Box.Horizontal((Box.Fill('─', 2, 1), display_axis(axis)))
+        for axis in target.out_axes
+    )
+    return Box.Horizontal((left_labels, middle, right_labels))
+
+
 def display_block[B: cat.Datatype, A: cat.Axis](
     target: cat.Block[
         cat.Array[B, A],
@@ -276,3 +308,5 @@ def display_category[B: cat.Datatype, A: cat.Axis](
             return display_block(target)
         case cat.Rearrangement():
             return rearrangement(target)
+        case _ if isinstance(target, Reindex):
+            return reindex(target)
