@@ -21,7 +21,7 @@ The intent is **formalizability, not formalization**: definitions are given as L
 
 ## 1. Orientation: one structure, one seam
 
-The NCD categorical structures are **one structure** — a `D`-graded colored PROP — and this document encodes that structure as a layered tower of Lean typeclasses. Symbolic sizes are the **fiber of the Grothendieck construction** `∫Dat`; axis identity and alignment are the **pushout/coequalizer** of composition. Both are categorical data, part of the single development. There is **one** development, parametric on an index PROP `D` and an operation PROP `C`, and "prove the propositions once, inherit them everywhere" is, in Lean, plain parametricity over a typeclass.
+The current state of the design predates [graded_prop.md](graded_prop.md): it formalised `St` and `Br` as two independent PROP instances and divided everything into a "Layer 1 — Mathematical Encoding" and a "Layer 2 — Representation" (UIDs, `Context`, names). That split was an artifact of not yet having the vocabulary `graded_prop.md` now supplies. The reframing dissolves it. The scattered constructions are recognised as **one structure** — a `D`-graded colored PROP — and the two things the old "representation layer" was carrying turn out to be ordinary categorical data: symbolic sizes are the **fiber of the Grothendieck construction** `∫Dat`, and axis identity/alignment is the **pushout/coequalizer** of composition. Neither is a separate representation layer; both live inside the single development. There is **one** development, parametric on an index PROP `D` and an operation PROP `C`, and "prove the propositions once, inherit them everywhere" becomes, in Lean, plain parametricity over a typeclass.
 
 The encoding is therefore a layered tower of typeclasses, each parameterised by the classes below it:
 
@@ -38,11 +38,11 @@ Algebra D C V   [DGradedColoredPROP D C] [TargetActegory D V]   -- construct()
 
 The base `ColoredPROP` carries the lightweight definitions and the `St`/`Br` instances; the core `DGradedColoredPROP D C` adds the grading data and laws; capabilities (`Scan`, `Route`, symmetry, `Para`) are composable mixins, and `Algebra` is the `construct()` functor into a target actegory. An instantiation pays only for the layers it declares, and the proven core is never edited — new domains are new instances, new capabilities are new mixins.
 
-The **proposition/computation** seam runs through the entire development: **does Lean *prove* this or *compute* this?** This is the seam [graded_prop.md](graded_prop.md) itself draws. [§6](graded_prop.md#6-composition-as-pushout) is "a correctness/specification lens, not a composition algorithm": the pushout *explains and certifies* what `Context` does, it does not replace it — so the coequalizer is the *specification* and union-find plus a fresh-name counter is the *implementation*. [§7](graded_prop.md#7-algebras-construct-and-the-para-refinement) keeps the lightweight `Para` encoding and tells us to **note the gap explicitly rather than pay for a bicategory only the specification uses**. Read as the organizing principle of this document: the propositional core (PROP/actegory laws, `∫Dat`, pushout-as-colimit, equivariance, weave uniqueness) is stated over UID-free types and proved; the executable realization (fresh-UID counter, union-find, acset tables / CSV) sits on the other side of the seam, realizing the specification without being proved against it line by line. The seam adapter of §3 is exactly this boundary turned into a definition.
+The single seam that remains is **not** the old "is this mathematics?" boundary but a thinner, differently-drawn one — the **proposition/computation** seam: **does Lean *prove* this or *compute* this?** This is the seam [graded_prop.md](graded_prop.md) itself draws. [§6](graded_prop.md#6-composition-as-pushout) is "a correctness/specification lens, not a composition algorithm": the pushout *explains and certifies* what `Context` does, it does not replace it — so the coequalizer is the *specification* and union-find plus a fresh-name counter is the *implementation*. [§7](graded_prop.md#7-algebras-construct-and-the-para-refinement) keeps the lightweight `Para` encoding and tells us to **note the gap explicitly rather than pay for a bicategory only the specification uses**. Read as the organizing principle of this document: the propositional core (PROP/actegory laws, `∫Dat`, pushout-as-colimit, equivariance, weave uniqueness) is stated over UID-free types and proved; the executable realization (fresh-UID counter, union-find, acset tables / CSV) sits on the other side of the seam, realizing the specification without being proved against it line by line. The seam adapter of §3 is exactly this boundary turned into a definition.
 
 ## 2. The base: `ColoredPROP`
 
-Categories are encoded, following [Holtzen (2025)](https://sholtzen.dev/articles/leancat-1.html), as a Lean 4 typeclass parameterised by an object type `ob : Type`.
+Categories are encoded, following [Holtzen (2025)](https://sholtzen.dev/articles/leancat-1.html), as a Lean 4 typeclass parameterised by an object type `ob : Type`. This is the categorical skeleton on which everything else rests; it is carried over from the current design unchanged.
 
 ```lean
 class SmallCategory (ob : Type) : Type 1 where
@@ -60,7 +60,7 @@ notation:65 a " ∘ " b => SmallCategory.comp b a
 
 Objects are themselves Lean types, so the monoidal product on objects can be definitional list concatenation; morphisms carry enough structure that the category laws fall to ring axioms (`St`) or list induction (`Br`) with no quotient; and the laws `id_comp`/`comp_id`/`assoc` are propositional equalities discharged by tactics. `-- Python: no typeclass — categories emerge implicitly from the @ operator / Composed wrapper.`
 
-Both **St** and **Br** are *colored PROPs* ([graded_prop.md §2](graded_prop.md), Definition 2.1): symmetric strict monoidal categories whose object monoid is the free monoid `O*` over a set of colors, with `⊗` = list concatenation and `I` = the empty list. The base class carries exactly this structure, together with the elemental separation axiom `elemental` (the `(Elem)` axiom of [graded_prop.md §2](graded_prop.md)).
+Both **St** and **Br** are *colored PROPs* ([graded_prop.md §2](graded_prop.md), Definition 2.1): symmetric strict monoidal categories whose object monoid is the free monoid `O*` over a set of colors, with `⊗` = list concatenation and `I` = the empty list. The base class carries exactly this structure, **with one addition over the current doc**: the elemental separation axiom `elemental` (the `(Elem)` axiom of [graded_prop.md §2](graded_prop.md)).
 
 ```lean
 class ColoredPROP (ob : Type) extends SmallCategory ob where
@@ -80,7 +80,7 @@ class ColoredPROP (ob : Type) extends SmallCategory ob where
 
 For both **St** and **Br**, `ob = List gen`, so `toList = id` and `ofList = id`, and the three strictness laws `tensor_assoc`/`tensor_unit_l`/`tensor_unit_r` reduce to `List.append_assoc`, `List.nil_append`, and `List.append_nil` respectively — all dischargeable by `simp [List.append_assoc/nil_append/append_nil]`. The `swap` morphism is a rearrangement that interleaves or separates the two sub-lists, and `tensorHom` is the parallel product.
 
-The `elemental` field: writing `El(X) := hom unit X` for the *points* (global elements) of `X`, it states that points separate parallel morphisms — `(∀ x : hom unit X, x ; f = x ; g) → f = g`. Equivalently the family `{(x ; −)}_{x ∈ El(X)}` is jointly injective. This is a single `Prop`-valued field; it is precisely what makes the cartesian-lift datum of a morphism **unique** — see weave uniqueness (forward-ref [§5](#5-weaves-as-cartesian-lift-data), Prop 8.2). Without it, Eq. 3 (point-naturality) holds by functoriality but a weave's `(f, P, ρ)` factorisation would not be forced.
+The **new** field is `elemental`: writing `El(X) := hom unit X` for the *points* (global elements) of `X`, it states that points separate parallel morphisms — `(∀ x : hom unit X, x ; f = x ; g) → f = g`. Equivalently the family `{(x ; −)}_{x ∈ El(X)}` is jointly injective. This is a single `Prop`-valued field, and it is the genuine extra content the current doc lacks: it is precisely what makes the cartesian-lift datum of a morphism **unique** — see weave uniqueness (forward-ref [§5](#5-weaves-as-cartesian-lift-data), Prop 8.2). Without it, Eq. 3 (point-naturality) holds by functoriality but a weave's `(f, P, ρ)` factorisation would not be forced.
 
 The `ColoredPROP` typeclass earns its keep in three ways, as before: generic rearrangements (any list permutation induces a morphism in any colored PROP, proved once), the `St → Br` relationship (the `reindexings` of a `BrBase` are a family of **St** morphisms inside a **Br** morphism — the data of a monoidal functor `St → Br`), and the interchange law `(f ; g) ⊗ (h ; k) = (f ⊗ h) ; (g ⊗ k)`, derivable once from `tensorHom` and `assoc`. `-- Python: no class corresponds to ColoredPROP — the monoidal structure is a paper-level concept (ProdObject[L] wrapping tuple[L,...]).`
 
@@ -108,7 +108,7 @@ This is the minimal type making `StMat`'s laws provable: the free commutative se
 structure Axis where
   name : Option String
   size : Numeric      -- symbolic; filled in at configuration time
--- Python: Axis (abstract UTerm, backed by RawAxis)
+-- Python: Axis (abstract UTerm, backed by RawAxis; UID dropped — that is Layer-2)
 
 abbrev StObj := List Axis  -- a shape = an ordered list of axes
 -- Python: ProdObject[Axis]
@@ -377,7 +377,7 @@ Both are **signed stubs**: the class is declared with its parameters and its `ex
 
 ## 7. Grothendieck split and composition as pushout
 
-Symbolic axis sizes are the **fiber of a Grothendieck construction**; axis identity/alignment is a **pushout/coequalizer**. This section states both, and makes the proposition/computation seam of [§1](#1-orientation-one-structure-one-seam) concrete: the categorical objects are the *specification*, and the executable structures (`TermM`, `Context`) are the *implementation* that realizes it.
+Two of the constructions the current design parked in its "representation layer" — symbolic axis *sizes* and axis *identity/alignment* — are, on the graded-PROP reading, ordinary categorical data. Sizes are the **fiber of a Grothendieck construction**; alignment is a **pushout/coequalizer**. This section states both, and then makes the proposition/computation seam of [§1](#1-orientation-one-structure-one-seam) concrete: the categorical objects are the *specification*, and the executable structures carried forward from the old "Layer 2" (a fresh-UID counter, a union-find `Context`) are the *implementation* that realizes it. There is no separate representation layer; the old Layer 2 is dissolved into this single development.
 
 ### 7.1 The structure/data split as `∫Dat`
 
@@ -407,7 +407,7 @@ abbrev Numeric := MvPolynomial String ℕ
 -- a size-assignment d ∈ Dat(c) picks a Numeric for each structural axis-symbol of c
 ```
 
-`FreeNumeric` and symbolic sizes generally are the **`Dat(c)` fiber data** of the Grothendieck construction of [§7.1](#71-the-structuredata-split-as-dat) — as categorical as the structural skeleton `C♯` itself, living in the fiber over `C♯`.
+The point of stating this here is the **dissolution**: in the old design `FreeNumeric`, symbolic sizes, and `Numeric` lived in "Layer 2 — Representation," as if they were non-mathematical bookkeeping. They are not. They are the **`Dat(c)` fiber data** of the Grothendieck construction of [§7.1](#71-the-structuredata-split-as-dat) — as categorical as the structural skeleton `C♯` itself. There is no representation layer to carry them; they are part of the single graded-PROP development, living in the fiber over `C♯`.
 
 ### 7.3 Composition as pushout
 
@@ -429,7 +429,7 @@ The failure mode lives in the *attributes*, not the structure: the pushout requi
 
 ### 7.4 The seam, concrete: union-find realizes the coequalizer
 
-The coequalizer of [§7.3](#73-composition-as-pushout) is the **specification**; the executable structures below are the **implementation**. They meet at the proposition/computation seam.
+This is where the proposition/computation seam of [§1](#1-orientation-one-structure-one-seam) becomes tangible. The coequalizer of [§7.3](#73-composition-as-pushout) is the **specification**; the executable structures carried forward from the old "Layer 2" are the **implementation**. They meet at the seam, and neither replaces the other.
 
 **Fresh-UID counter — `TermM`.** Constructing a new symbolic axis mints a fresh identity. Python does this with `random.randint` as a construction side-effect; Lean 4 is pure, so the fresh-name counter is threaded explicitly as a state monad. This is the *executable* side — it computes identities; it proves nothing.
 
@@ -527,7 +527,7 @@ The acset tables and their CSV serialization are the **executable realization** 
 
 ### 8.3 Consolidated Python correspondence
 
-The tables below collect the systematic Lean ↔ Python correspondence, organized by the tower — base, core, mixins, the Grothendieck/pushout seam, the acset realization. Inline one-line pointers in earlier sections (e.g. `act` ↔ batch lift, `BrBase` ↔ `Broadcasted`) are the local view; this is the systematic one.
+The tables below collect the systematic Lean ↔ Python correspondence, **organized by the new tower** — base, core, mixins, the Grothendieck/pushout seam, the acset realization — rather than by the dissolved Layer 1 / Layer 2 split. Inline one-line pointers in earlier sections (e.g. `act` ↔ batch lift, `BrBase` ↔ `Broadcasted`) are the local view; this is the systematic one.
 
 | Lean (new tower) | Python | Notes |
 | --- | --- | --- |
@@ -548,7 +548,7 @@ The tables below collect the systematic Lean ↔ Python correspondence, organize
 | `Algebra.F` | `ConstructedModule.construct()` | the algebra functor `C → V` (full class in the §7.5 / propositions development) |
 | `DynamicName` | `DynamicName` | display only — see [§12](#12-appendix-out-of-scope), out of scope |
 
-Each row's placement follows its categorical role: fiber datum, coequalizer implementation, fresh-name counter, traversal, or display — on one side or the other of the proposition/computation seam.
+The single coherent message of the table: every row that the old design would have filed under "Layer 2 — Representation" (`Numeric`/`FreeNumeric`, `Context`/`EqClass`, `TermM`, `TermTraversable`, `DynamicName`) is now placed by its categorical role — fiber datum, coequalizer implementation, fresh-name counter, traversal, or display — on one side or the other of the proposition/computation seam. There is no representation layer; there is one tower with one seam.
 
 ## 9. The propositions as generic theorems
 
@@ -654,6 +654,6 @@ Beyond the coverage map, several honest notes shape any transcription:
 
 ## 12. Appendix: out of scope
 
-Two families of structure are deliberately **not encoded**, because they carry no propositional or computational content the framework reasons about. The first is **`DynamicName` and its LaTeX rendering** — the human-readable, mathematically-typeset names attached to axes and arrays. The second is the **`Block` display metadata** — the layout and presentation bookkeeping the visualizer consumes. Both are *semantically transparent*: erasing them changes no morphism, no shape, no composite, and no proof. They ride on the executable side of the seam as identity/display decoration (the `WithUID` decoration of [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) carries the optional `DynamicName`) — outside the encoding, mentioned but never formalized.
+Two families of structure are deliberately **not encoded**, because they carry no propositional or computational content the framework reasons about. The first is **`DynamicName` and its LaTeX rendering** — the human-readable, mathematically-typeset names attached to axes and arrays. The second is the **`Block` display metadata** — the layout and presentation bookkeeping the visualizer consumes. Both are *semantically transparent*: erasing them changes no morphism, no shape, no composite, and no proof. They ride on the executable side of the seam as identity/display decoration (the `WithUID` decoration of [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) carries the optional `DynamicName`), and they are left exactly where the current document already leaves `Block` — outside the encoding, mentioned but never formalized.
 
 This matches the document's overall stance, restated once here: it writes **no proved Lean**. Every `class`, `structure`, `def`, and `theorem` above is a *signature* with named `Prop`-field laws and named proof obligations; the elisions (`…`) in bodies are intentional, marking exactly the obligations a future Lean development would discharge. The deliverable is **formalizability, not formalization** — the shape into which the propositions of [graded_prop.md §8](graded_prop.md#8-propositions-the-synthesis-organizes) transcribe directly, not the discharged proofs themselves.

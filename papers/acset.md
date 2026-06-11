@@ -33,7 +33,9 @@ Their central construction is the **acset**: a schema category $\mathcal{S}$ sep
 8. [Advantages of the acset Structure/Data Decomposition](#advantages-of-the-acset-structuredata-decomposition)
    - [Practical and Implementation Advantages](#practical-and-implementation-advantages)
    - [Theoretical Advantages](#theoretical-advantages)
-9. [From SBrInstance to a Diagram in Br: A Lean Encoding](#from-sbrinstance-to-a-diagram-in-br-a-lean-encoding)
+9. [Structural Gaps and Lean Interop Notes](#structural-gaps-and-lean-interop-notes)
+   - [Open gap: `Reindex`/`Scatter` not yet wired into `convert.py`](#open-gap-reindexscatter-not-yet-wired-into-convertpy)
+10. [From SBrInstance to a Diagram in Br: A Lean Encoding](#from-sbrinstance-to-a-diagram-in-br-a-lean-encoding)
    - [Setting](#setting)
    - [Two Lean library shortcuts](#two-lean-library-shortcuts)
    - [The Index Category J](#the-index-category-j)
@@ -108,7 +110,7 @@ The zero entry $\Lambda_{01} = 0$ is absent — support is sparse by default. Do
 
 $\mathcal{S}_{Br}$ shares the `Axis`-centred reindexing structure of $\mathcal{S}_{St}$ but replaces `Entry` with `Sample` and adds two new entity types — `Array` and `ArrayAxis` — to carry the full reindexing structure of a `Broadcasted` morphism.
 
-In $\mathcal{S}_{St}$, the analogous entity type is called `Entry` because each row is a nonzero entry of a coefficient matrix. In $\mathcal{S}_{Br}$, the same structure plays a different role: each row specifies one axis-component of how a particular input array is **sampled** at each step of the degree loop. The triple (`src`, `tgt`, `coeff`) says "for array $X$, the index into axis `tgt` equals `coeff` times the degree index along axis `src`" — it is a sampling rule, not a matrix entry in the abstract algebraic sense. The name `Sample` reflects this: each row is one component of the sampling pattern that determines which slice of an input the base operation sees at each loop iteration.
+In $\mathcal{S}_{St}$, the analogous entity type is called `Entry` because each row is a nonzero entry of a coefficient matrix. In $\mathcal{S}_{Br}$, the same structure plays a different role: each row specifies one axis-component of how a particular input array is **sampled** at each step of the degree loop. The quadruple (`src`, `tgt`, `coeff`, `offset`) says "for array $X$, the index into axis `tgt` equals `offset + coeff` times the degree index along axis `src`" — it is a sampling rule encoding an affine reindexing, not a matrix entry in the abstract algebraic sense. `offset` is zero for all TensorEquation-derived instances; it is non-zero for `Reindex`/`Scatter`-derived instances (affine gather/scatter with shifts or strides). The name `Sample` reflects this: each row is one component of the sampling pattern that determines which slice of an input the base operation sees at each loop iteration.
 
 $$\texttt{Equation} \xleftarrow{\texttt{equation}} \texttt{Array} \xrightarrow{\texttt{norm\_axis}} \texttt{Axis}$$
 
@@ -116,13 +118,15 @@ $$\texttt{Sample} \underset{\texttt{tgt}}{\overset{\texttt{src}}{\rightrightarro
 
 $$\texttt{Sample} \xrightarrow{\texttt{reindexing\_slot}} \texttt{Array}$$
 
-$$\texttt{Equation} \xrightarrow{\texttt{lhs\_name}} \texttt{String} \qquad \texttt{Sample} \xrightarrow{\texttt{coeff}} \mathbb{N} \qquad \texttt{Axis} \xrightarrow{\texttt{size}} \mathbb{N}_{>0} \qquad \texttt{ArrayAxis} \xrightarrow{\texttt{is\_target}} \mathbb{B} \qquad \texttt{ArrayAxis} \xrightarrow{\texttt{position}} \mathbb{N}$$
+$$\texttt{Equation} \xrightarrow{\texttt{lhs\_name}} \texttt{String} \qquad \texttt{Sample} \xrightarrow{\texttt{coeff}} \mathbb{N} \qquad \texttt{Sample} \xrightarrow{\texttt{offset}} \mathbb{Z} \qquad \texttt{Axis} \xrightarrow{\texttt{size}} \mathbb{N}_{>0} \qquad \texttt{ArrayAxis} \xrightarrow{\texttt{is\_target}} \mathbb{B} \qquad \texttt{ArrayAxis} \xrightarrow{\texttt{position}} \mathbb{N}$$
 
 $$\texttt{Array} \xrightarrow{\texttt{is\_input}} \mathbb{B} \qquad \texttt{Array} \xrightarrow{\texttt{datatype\_tag}} \texttt{DataTag} \qquad \texttt{Array} \xrightarrow{\texttt{max\_value}} \mathbb{N} \qquad \texttt{Array} \xrightarrow{\texttt{operator\_tag}} \texttt{OpTag}$$
 
 $$\texttt{Array} \xrightarrow{\texttt{bias}} \mathbb{B} \qquad \texttt{Array} \xrightarrow{\texttt{elementwise\_fn}} \texttt{String} \qquad \texttt{Array} \xrightarrow{\texttt{slot}} \mathbb{N} \qquad \texttt{Array} \xrightarrow{\texttt{name}} \texttt{String}$$
 
-Five entity types, six attribute types ($\mathbb{N}$, $\mathbb{N}_{>0}$, $\mathbb{B}$, $\texttt{OpTag}$, $\texttt{DataTag}$, $\texttt{String}$), twenty maps. `max_value` is a partial map defined only for `Natural`-typed arrays. `operator_tag`, `norm_axis`, `bias`, and `elementwise_fn` are partial maps defined only for output arrays (`is_input = False`); `norm_axis` is further restricted to operators in $\{\texttt{SoftMax}, \texttt{MaskedSoftMax}, \texttt{Normalize}, \texttt{MaskedNormalize}\}$; `bias` is restricted to `Linear` output arrays; `elementwise_fn` is restricted to `Elementwise` output arrays. `lhs_name` is partial — may be `None` for anonymous equations.
+$$\texttt{Array} \xrightarrow{\texttt{op\_predicate}} \texttt{String} \qquad \texttt{Array} \xrightarrow{\texttt{wire\_label}} \texttt{String}$$
+
+Five entity types, six attribute types ($\mathbb{N}$, $\mathbb{N}_{>0}$, $\mathbb{Z}$, $\mathbb{B}$, $\texttt{OpTag}$, $\texttt{DataTag}$, $\texttt{String}$), twenty-three maps. `max_value` is a partial map defined only for `Natural`-typed arrays. `operator_tag`, `norm_axis`, `bias`, and `elementwise_fn` are partial maps defined only for output arrays (`is_input = False`); `norm_axis` is further restricted to operators in $\{\texttt{SoftMax}, \texttt{MaskedSoftMax}, \texttt{Normalize}, \texttt{MaskedNormalize}\}$; `bias` is restricted to `Linear` output arrays; `elementwise_fn` is restricted to `Elementwise` output arrays. `op_predicate` is partial — defined only for output arrays with `MASKED_SOFTMAX` or `MASKED_NORMALIZE` operator_tag; holds the serialized Iverson predicate string governing the mask (e.g. `"(x <= q)"`). `wire_label` is partial — defined only for `BOOL`-typed input arrays that arise from rhs Iverson factors (bare predicates, `name = None`); holds the predicate the wire represents. `lhs_name` is partial — may be `None` for anonymous equations.
 
 `norm_axis` is necessary even though the source representation (a `TensorEquation`) marks the normalisation axis via the `NormAxis` subtype of `RawAxis` in `lhs_indices`. Once converted to an instance, all axes in `lhs_indices` appear as `ArrayAxis` rows with `is_target = False` — degree axes and the norm axis are indistinguishable without the explicit pointer. `norm_axis` is what preserves this distinction in the standalone instance.
 
@@ -131,7 +135,8 @@ Five entity types, six attribute types ($\mathbb{N}$, $\mathbb{N}_{>0}$, $\mathb
 | Attribute | Type | What it captures |
 | --- | --- | --- |
 | `size` | `Axis → ℕ_{>0}` | axis size |
-| `coeff` | `Sample → ℕ` | reindexing coefficient |
+| `coeff` | `Sample → ℕ` | reindexing coefficient; the multiplier $c$ in the affine rule `tgt_index = offset + coeff * src_index` |
+| `offset` | `Sample → ℤ` | affine offset $b$ in the rule `tgt_index = offset + coeff * src_index`; zero for all `TensorEquation`-derived instances; non-zero for `Reindex`/`Scatter`-derived instances |
 | `is_target` | `ArrayAxis → Bool` | For input arrays: True = axis consumed by the base operation (contracted for sum operations, normalized for SoftMax/MaskedSoftMax/Normalize); False = degree axis supplied by the outer loop. For output arrays: always False — every axis in `lhs_indices` is a degree axis produced by the outer loop; the normalization dimension is identified separately by `norm_axis` on `Array` |
 | `position` | `ArrayAxis → ℕ` | 0-indexed dimension position within the array's physical layout; encodes the axis interleaving of `Weave._shape` |
 | `is_input` | `Array → Bool` | input array (True) or output array (False) |
@@ -140,8 +145,10 @@ Five entity types, six attribute types ($\mathbb{N}$, $\mathbb{N}_{>0}$, $\mathb
 | `operator_tag` | `Array → OpTag` | base operation type; partial — defined only for output arrays (`is_input = False`) |
 | `bias` | `Array → Bool` | whether `Linear` applies a bias term; partial — defined only for `Linear` output arrays |
 | `elementwise_fn` | `Array → String` | name of the pointwise function; partial — defined only for `Elementwise` output arrays |
+| `op_predicate` | `Array → String` | serialized Iverson predicate for the mask; partial — defined only for output arrays with `MASKED_SOFTMAX` or `MASKED_NORMALIZE` operator_tag (e.g. `"(x <= q)"`); consumed by `BrBase.op` in Lean |
+| `wire_label` | `Array → String` | serialized predicate that the input wire represents; partial — defined only for `BOOL`-typed input arrays arising from rhs Iverson factors (`name = None`); consumed by the wire's `Bool` color in the Lean colored PROP |
 | `slot` | `Array → ℕ` | 0-indexed argument position within an equation: 0 for the output array, 1..N for input arrays in rhs order; primary key for `Array` within its equation, unambiguous under self-joins |
-| `name` | `Array → String` | tensor name; metadata carried alongside `slot` for display and traceability; partial — may be `None` for anonymous arrays |
+| `name` | `Array → String` | tensor name; metadata carried alongside `slot` for display and traceability; partial — may be `None` for anonymous arrays (including rhs Iverson factors, whose name is always `None`) |
 | `lhs_name` | `Equation → String` | output tensor name for the equation; metadata only; partial — may be `None` for anonymous equations |
 
 The **C-set part** (structure) consists of:
@@ -416,14 +423,15 @@ These fields map to the four tables of `SBrInstance`: `arrays: list[ArrayRow]`, 
 | Retained axis $i \in$ `lhs_indices` appearing in input $X$ at slot $p$ | `Sample` row: `equation_idx` from above, `src` $= i$, `tgt` $= i$, `coeff` $= 1$, `reindexing_slot` $= p$ |
 | `operator` field (`None` or `Identity()`) | `IDENTITY` for `operator_tag` on the output `Array` row |
 | `operator = SoftMax()` with empty `where_predicate` | `SOFTMAX` for `operator_tag`; `norm_axis` FK set to the `NormAxis` axis |
-| `operator = SoftMax(where_predicate=...)` | `MASKED_SOFTMAX` for `operator_tag`; `norm_axis` FK set; Iverson predicate serialised into `iverson_expr` on the output `Array` row |
+| `operator = SoftMax(where_predicate=...)` | `MASKED_SOFTMAX` for `operator_tag`; `norm_axis` FK set; Iverson predicate serialised into `op_predicate` on the output `Array` row |
 | `operator = Normalize()` with empty `where_predicate` | `NORMALIZE` for `operator_tag`; `norm_axis` FK set to the `NormAxis` axis |
-| `operator = Normalize(where_predicate=...)` | `MASKED_NORMALIZE` for `operator_tag`; `norm_axis` FK set; Iverson predicate serialised into `iverson_expr` on the output `Array` row |
+| `operator = Normalize(where_predicate=...)` | `MASKED_NORMALIZE` for `operator_tag`; `norm_axis` FK set; Iverson predicate serialised into `op_predicate` on the output `Array` row |
 | `operator.bias` (when `Linear`) | `bias` attribute on the output `Array` row |
 | `operator.operator` (when `Elementwise`) | `elementwise_fn` attribute on the output `Array` row |
 | Array datatype (from `array_datatypes` parameter) | `datatype_tag` attribute on the `Array` row |
 | `Natural.max_value` (when datatype is `Natural`) | `max_value` attribute on the `Array` row |
-| Bool datatype (predicate array) | `datatype_tag = BOOL`; `max_value` left absent |
+| `Bool` datatype (`datatype_tag = BOOL`) | `max_value` left absent; if the `Array` row is a named input tensor both `op_predicate` and `wire_label` are absent; if it is an rhs Iverson factor `wire_label` holds the predicate string |
+| Rhs Iverson factor (not a `TensorRef` — bare predicate rather than named tensor) | One `Array` row: `name = None`, `is_input = True`, `datatype_tag = BOOL`, `wire_label = _serialize_iverson(factor)`; its `ArrayAxis` rows and `SampleRow`s are populated the same way as for named input arrays |
 | Every axis in `lhs_indices` and every axis in `rhs` | Entry in `axis_sizes: dict[UID, Numeric]` |
 
 **Example: $Y[i,j] = W[i,k]\, X[k,j]$.** The degree is $(i, j)$ — the retained indices. The contracted axis $k$ appears in both $W$ and $X$ but not in the output. $W$ is indexed by degree axis $i$; $X$ by degree axis $j$.
@@ -520,13 +528,13 @@ $W$ contributes degree axis $i$ (Sample $s_0$); $X$ contributes degree axis $j$ 
 
 $H$ appears as output in equation 0 (`equation_idx=0`, `slot=0`) and as input in equation 1 (`equation_idx=1`, `slot=2`): these are distinct `Array` rows despite sharing the name $H$. Axis $d_{ff}$ is retained in equation 0 (a tiling axis there, `is_target=False`) but contracted in equation 1 (summed over, `is_target=True`) — the same UID serving different roles across equations is expected and requires no renaming. The `axis_sizes` dict holds all three UIDs exactly once, shared across both equations.
 
-**Strided convolutions.** For non-einsum reindexings (strided convolution, diagonal slice), `coeff` $\neq 1$ in the `Sample` rows, as illustrated by the stride-2 convolution example in the Br section. No schema extension is needed; `Sample.coeff` already captures arbitrary integer strides.
+**Strided convolutions.** For non-einsum reindexings (strided convolution, diagonal slice), `coeff` $\neq 1$ in the `Sample` rows, as illustrated by the stride-2 convolution example in the Br section. For affine arithmetic with a constant offset (e.g. `X[2i+1]`), `Sample.offset` carries the bias $b$ while `coeff` carries the stride $c$. All TensorEquation-derived instances have `offset = 0` and `coeff = 1`; strided and shifted reindexings set these fields accordingly.
 
 ### The operator_tag Attribute
 
 The `TensorEquation.operator` field — which distinguishes an `Identity` reindexing from a `SoftMax`, `MaskedSoftMax`, `Elementwise`, `Linear`, or `Embedding` — maps to the `operator_tag` attribute on output `Array` rows (part of $\mathcal{S}_{Br}$ as defined above). By convention, `operator = None` (the default in `TensorEquation`) is treated identically to `Identity()`: both map to `OpTag.IDENTITY`, meaning pure reindexing with no base computation. `operator_tag` is undefined for input arrays.
 
-`SoftMax` maps to `SOFTMAX`; `SoftMax(where_predicate=(...))` maps to `MASKED_SOFTMAX`. `Normalize` maps to `NORMALIZE`; `Normalize(where_predicate=(...))` maps to `MASKED_NORMALIZE`. The `norm_axis` FK is populated for all four. The Iverson predicate from `where_predicate` is serialized via `_serialize_iverson` into the `iverson_expr` field of the output `Array` row — e.g. `"(x <= q)"` — and round-trips through `arrays.csv` for both masked variants. `mask_alignments` is not stored; it is recomputable from `_compute_mask_alignment(predicate, lhs_axes)` at reconstruction time.
+`SoftMax` maps to `SOFTMAX`; `SoftMax(where_predicate=(...))` maps to `MASKED_SOFTMAX`. `Normalize` maps to `NORMALIZE`; `Normalize(where_predicate=(...))` maps to `MASKED_NORMALIZE`. The `norm_axis` FK is populated for all four. The Iverson predicate from `where_predicate` is serialized via `_serialize_iverson` into the `op_predicate` field of the output `Array` row — e.g. `"(x <= q)"` — and round-trips through `arrays.csv` for both masked variants. `mask_alignments` is not stored; it is recomputable from `_compute_mask_alignment(predicate, lhs_axes)` at reconstruction time.
 
 | `OpTag` | Pyncd class | Role |
 | --- | --- | --- |
@@ -567,22 +575,22 @@ inst = read_sbr(Path('out/my_program'))   # reconstructs from those files
 | --- | --- |
 | `axis_sizes.csv` | `axis_uid`, `size` |
 | `equations.csv` | `equation_idx`, `lhs_name` |
-| `arrays.csv` | `equation_idx`, `slot`, `name`, `is_input`, `operator_tag`, `norm_axis`, `datatype_tag`, `max_value`, `bias`, `elementwise_fn` |
+| `arrays.csv` | `equation_idx`, `slot`, `name`, `is_input`, `operator_tag`, `norm_axis`, `datatype_tag`, `max_value`, `bias`, `elementwise_fn`, `op_predicate`, `wire_label` |
 | `array_axes.csv` | `equation_idx`, `array_slot`, `axis_uid`, `is_target`, `position` |
-| `samples.csv` | `equation_idx`, `reindexing_slot`, `src_uid`, `tgt_uid`, `coeff` |
+| `samples.csv` | `equation_idx`, `reindexing_slot`, `src_uid`, `tgt_uid`, `coeff`, `offset` |
 
 **Encoding decisions.**
 
-- *UIDs* are written as `TypeName:integer_id` (e.g. `NormAxis:1038335474`). The type tag preserves the axis subclass (`RawAxis`, `NormAxis`, `NatAxis`, `PredAxis`) so that downstream consumers can distinguish, for example, a normalization axis from a plain axis without inspecting the `norm_axis` foreign key. Files written by older versions of the library omit the tag; the reader falls back to `RawAxis` for untagged entries.
+- *UIDs* are written as `TypeName:integer_id` (e.g. `NormAxis:1038335474`). The type tag preserves the axis subclass (`RawAxis`, `NormAxis`, `NatAxis`) so that downstream consumers can distinguish, for example, a normalization axis from a plain axis without inspecting the `norm_axis` foreign key.
 - *Numerics* are written as a plain integer for `Integer` values and as `?integer_id` for `FreeNumeric` variables.
 - *Booleans* use `true`/`false` for required fields (`is_input`, `is_target`) and `true`/`false`/`` (empty) for optional fields (`bias`).
 - *Names* (`lhs_name`, array `name`) use `_` as the subscript separator, matching `DynamicName.from_str`. Display metadata (`DynamicName.settings`: bold, overline, absolute) is not preserved — names serve as labels for Lean interop and display rendering is not needed.
 
 **Known limitations.**
 
-- `MaskedSoftMax` and `MaskedNormalize` Iverson predicates are serialized using the `iverson_expr` field on `Array` rows (shared with BOOL input array rows). `_operator_fields` in `convert.py` calls `_serialize_iverson` on the `where_predicate` and stores the result — e.g. `"(x <= q)"` — in `iverson_expr` on the output array row. `mask_alignments` (the compile-time permutation) is not stored; it is derivable from `_compute_mask_alignment(predicate, lhs_axes)` at reconstruction time. The `iverson_expr` field and its csv read/write were already in place from the BOOL-input-array path; no schema extension was needed for either masked operator.
+- `MaskedSoftMax` and `MaskedNormalize` Iverson predicates are serialized into the `op_predicate` field on the output `Array` row. `_operator_fields` in `convert.py` calls `_serialize_iverson` on the `where_predicate` and stores the result — e.g. `"(x <= q)"` — there. Rhs Iverson factors (bare predicates in the rhs, not named tensors) store their predicate in `wire_label` on the input `Array` row. `mask_alignments` (the compile-time permutation) is not stored; it is derivable from `_compute_mask_alignment(predicate, lhs_axes)` at reconstruction time.
 
-- `FreeNumeric` sizes created by `RawAxis.named()` carry a display name on their `uid._name`. Only `uid._id` is serialized, so the display name is lost. As a consequence, `original_size == deserialized_size` returns `False` for such sizes: `FreeNumeric.__eq__` hashes `uid` including `_name`, and the reconstructed uid has `_name=None`. Internal consistency within a round-tripped instance is unaffected — all reconstructed UIDs are mutually consistent — but cross-instance comparison with the original fails. The correct fix is to base `FreeNumeric.numeric_hash()` on `uid._id` alone, which is a change to `data_structure/Numeric.py` deferred for now.
+- `FreeNumeric` sizes created by `RawAxis.named()` carry a display name on `uid._name`. Only `uid._id` is serialized; the display name is not. `FreeNumeric.numeric_hash()` hashes `uid._id` only, so round-tripped instances compare equal to their originals despite the lost display name.
 - Compound `Numeric` expressions (`Addition`, `Multiplication`, `Power`) cannot be serialized. These do not appear in acset instances produced by `convert.py`: axis sizes are always `Integer` or `FreeNumeric`, and all coefficients are `Integer`.
 
 ### The Dual-View Pipeline
@@ -632,6 +640,8 @@ Two constructs sit above `TensorProgram.to_morphism()` and have no acset counter
 
 Both constructs sit above the tensor logic boundary cleanly. The term world handles them; the acset schema does not need to.
 
+**Affine index arithmetic (`Reindex` / `Scatter`).** Two further term-world constructs are currently outside the acset path: `Reindex` (affine gather: `X[i+j]`, `X[2i+1]`, strided/dilated reads) and `Scatter` (affine write: `Y[2i] = …`, padded outputs). Unlike `ProductOfMorphisms` and `Block`, these are *not* out of scope for the acset schema by design — they are affine reindexings in **St** and belong in the data layer. The reason they are absent is a schema gap rather than a categorical boundary: `SampleRow` currently carries `(src, tgt, coeff)` but no offset. Extending it with a `bias: ℤ` field would make `SBrInstance` sufficient for the full affine index arithmetic (see §Structural Gaps below).
+
 ---
 
 ## Advantages of the acset Structure/Data Decomposition
@@ -680,6 +690,14 @@ Each practical advantage below is followed by an italicized note assessing wheth
 **Natural transformations are the correct morphism concept between same-schema instances.** When instances are copresheaves, the correct notion of map between two instances of the same schema is a natural transformation: a family of functions, one per entity type, commuting with all schema maps. This is more discriminating than term equality and more general than pointwise numeric equality. It is the notion under which composition, Kan extensions, and the adjoint triple are all well-behaved. Any weaker notion of morphism would break at least one of these properties. Maps between instances of *different* schemas — such as $\Phi_a : \mathcal{S}_{St}\text{-Inst} \to \mathcal{S}_{Br}\text{-Inst}$ — are functors between functor categories rather than natural transformations; the two cases are complementary, not contradictory.
 
 **Connection to dependent type theory and formal verification.** The structure/data split is the categorical expression of the distinction between a type context (structural skeleton: which variables exist and how they relate) and a term (data assignment: values inhabiting those types). Schema morphisms are context morphisms (substitutions). This vocabulary maps directly onto Lean 4, where the type-theoretic and category-theoretic frameworks coincide. Proving properties of **St** and **Br** in Lean becomes a matter of instantiating general results about copresheaves and Kan extensions — the same framework used to establish `pullback_comp` — rather than developing bespoke proof strategies per construction.
+
+---
+
+## Structural Gaps and Lean Interop Notes
+
+### Open gap: `Reindex`/`Scatter` not yet wired into `convert.py`
+
+`SampleRow.offset` exists in the schema and serializes correctly, but `from_tensor_equation` / `from_tensor_program` in `convert.py` still generates `offset=Integer(0)` unconditionally. `Reindex` and `Scatter` term-world constructs (affine gather/scatter from the TensorDSL) are therefore not yet folded into the acset path — they remain exclusively in the term world. The schema is ready; the conversion logic needs extending.
 
 ---
 
@@ -906,10 +924,14 @@ def reconstructReindexing (inst : SBrInstance) (eqIdx slot : Nat)
           ∧ s.tgt_uid == fixed[j].uid     -- input axis  → Q_i row j
           ∧ s.src_uid == degree[k].uid)   -- degree axis → P column k
         |>.map (·.coeff.toNumeric) |>.getD 0
-    bias := fun _ => 0 }
+    bias := fun j =>
+        inst.samples.find? (fun s =>
+            s.equation_idx    == eqIdx    ∧ s.reindexing_slot == slot
+          ∧ s.tgt_uid == fixed[j].uid)
+        |>.map (·.offset.toNumeric) |>.getD 0 }
 ```
 
-When `coeff` is always 1 and `src_uid == tgt_uid`, `reconstructReindexing` reduces to `reconstructProjection`.
+When `coeff` is always 1, `src_uid == tgt_uid`, and `offset` is always 0 (the TensorEquation path), `reconstructReindexing` reduces to `reconstructProjection`.
 
 **Python counterpart.** Each call to `reconstructProjection` / `reconstructReindexing` produces one `StMat`, corresponding to one element of `Broadcasted.reindexings: Prod[StrideCategory[A]]` — the tuple of `StrideMorphism` objects (one per input array) stored inside a `Broadcasted` morphism.
 
