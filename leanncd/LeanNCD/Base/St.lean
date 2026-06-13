@@ -49,4 +49,27 @@ theorem StMat.comp_assoc {a b c d : StObj} (f : StMat a b) (g : StMat b c) (h : 
       Finset.sum_add_distrib, Finset.sum_mul, mul_assoc]
     rw [add_assoc, Finset.sum_comm]
 
+noncomputable instance St : ColoredPROP StObj where
+  gen    := Axis
+  toList := id
+  ofList := id
+  hom    := StMat
+  id     := StMat.id
+  comp   := StMat.comp
+  id_comp := StMat.id_comp
+  comp_id := StMat.comp_id
+  assoc   := StMat.comp_assoc
+  tensor_assoc  := by intro a b c; simp [List.append_assoc]
+  tensor_unit_l := by intro a; simp
+  tensor_unit_r := by intro a; simp [List.append_nil]
+  tensorHom {a b c d} f g :=                            -- block-diagonal product
+    let eC : Fin (a ++ c).length ≃ Fin a.length ⊕ Fin c.length :=
+      (finCongr (List.length_append (as := a) (bs := c))).trans finSumFinEquiv.symm
+    let eB : Fin (b ++ d).length ≃ Fin b.length ⊕ Fin d.length :=
+      (finCongr (List.length_append (as := b) (bs := d))).trans finSumFinEquiv.symm
+    { coeffs := Matrix.reindex eB.symm eC.symm (Matrix.fromBlocks f.coeffs 0 0 g.coeffs)
+      bias   := fun i => Sum.elim f.bias g.bias (eB i) }
+  swap := sorry        -- SIGNATURE (Milestone B+): permutation matrix, zero bias (§2.2)
+  elemental := sorry   -- SIGNATURE (Milestone B+): stride matrices separated by their points (§2.2)
+
 end LeanNCD

@@ -16,4 +16,7 @@ example : (StMat.id [a0]).bias = (fun _ => 0) := rfl
 #print axioms StMat.comp_id
 #print axioms StMat.comp_assoc
 
+-- TEST: St resolves as a ColoredPROP instance.
+noncomputable example : ColoredPROP StObj := inferInstance
+
 end LeanNCD
