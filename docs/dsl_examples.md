@@ -580,3 +580,193 @@ ConstructedThreadedComposed(
 #  ('chain.2.chain.0.module.weights.weight',   ( 64, 10))]  # W_out
 # W (shape 3×64×64) is an external input — not tracked as a module parameter
 ```
+
+---
+
+## Example 5 — Index Arithmetic: 2D Convolution and Strided Sum Pooling
+
+A two-stage CNN building block: a 2D convolution with a centred W×W filter over a
+pre-padded image, followed by P×P sum pooling at stride S. Both stages use affine
+index expressions — `x+dx` (shift) and `S·x+px` (dilation + shift) — compiled as
+**St reindexings** (axis-stride morphisms) composed around the einsum core.
+
+| Axis | Concrete size | Meaning |
+| ---- | ------------ | ------- |
+| `x`, `y` | H = 6 | output spatial position (Features) |
+| `xi`, `yi` | H+W−1 = 8 | padded image spatial axes |
+| `dx`, `dy` | W = 3 | filter spatial offsets (contracted) |
+| `ch` | C = 2 | input channels (contracted) |
+| `px`, `py` | P = 2 | pool window offsets (contracted) |
+| `xo`, `yo` | ⌊(H−P)/S⌋+1 = 3 | pool output spatial position |
+
+### 1. Mathematical description
+
+**Convolution** — filter centred at output position (x,y), image pre-padded by
+W//2 zeros on all sides:
+
+$$
+\text{Features}[x,y] = \mathrm{relu}\!\left(
+  \text{Filter}[dx,dy,ch]\;
+  \text{Image}[x+dx,\,y+dy,\,ch]
+\right)
+$$
+
+With padding W//2 on each side, the filter centre (`dx=dy=W//2`) reads the original
+image pixel at (x,y); all (x,y) ∈ [0,H−1]² are valid without boundary guards. The
+image axis has declared size H+W−1, and the gather `x+dx` spans exactly [0, H+W−2].
+
+**Sum pooling** — P×P window at stride S:
+
+$$
+\text{Pooled}[x,y] = \text{Features}[S\cdot x + px,\;\; S\cdot y + py]
+$$
+
+`dx`, `dy`, `ch` are absent from the LHS of the first equation and are therefore
+contracted; `px`, `py` are absent from the second and are likewise contracted — the
+standard tensor-logic implicit-summation convention. Both index expressions are affine
+maps in **St** — the DSL compiles each as a `Reindex` (an St morphism, the tsncd
+hexagon) composed around the einsum core.
+
+Output size of Pooled: ⌊(H−P)/S⌋+1 in each spatial dimension.
+
+### 2. PyRel
+
+Index arithmetic appears directly in relation patterns (`Image(x+dx, y+dy, ch, vi)`),
+following the convention of [tensor_logic_in_pyrel.md § 5](../papers/tensor_logic_in_pyrel.md).
+Shared indices unify; `.per(...)` names the free output axes.
+
+```python
+from relationalai.semantics import Model, Float, Integer, where
+from relationalai.semantics.std.aggregates import sum
+from relationalai.semantics.std.math import relu
+
+model = Model("conv_pool")
+
+Filter   = model.Relationship(f"{Integer:dx} {Integer:dy} {Integer:ch} {Float:val}")
+Image    = model.Relationship(f"{Integer:xi} {Integer:yi} {Integer:ch} {Float:val}")  # pre-padded
+Features = model.Concept("features")
+Pooled   = model.Concept("pooled")
+
+dx, dy, ch, x, y     = Integer.ref(), Integer.ref(), Integer.ref(), Integer.ref(), Integer.ref()
+px, py, xo, yo        = Integer.ref(), Integer.ref(), Integer.ref(), Integer.ref()
+vf, vi, vfeat         = Float.ref(), Float.ref(), Float.ref()
+
+S = 2   # stride (integer constant)
+
+# Convolution — centred W×W filter, index arithmetic in the Image pattern
+where(Filter(dx, dy, ch, vf), Image(x+dx, y+dy, ch, vi)).define(
+    Features.new(x=x, y=y, val=relu(sum(vf*vi).per(x, y)))
+)
+
+# Sum pooling — P×P window at stride S
+where(Features(S*xo+px, S*yo+py, vfeat)).define(
+    Pooled.new(x=xo, y=yo, val=sum(vfeat).per(xo, yo))
+)
+```
+
+### 3. TL DSL
+
+```python
+import torch
+from data_structure.TensorDSL import TL, real_axis, relu
+from torch_compile.torch_compile import ConstructedModule
+
+H, W, C, P, S = 6, 3, 2, 2, 2
+H_pad = H + W - 1         # 8: padded spatial size  (pad = W//2 = 1 each side)
+H_out = (H - P) // S + 1  # 3: pool output size
+
+x   = real_axis('x',   H)
+y   = real_axis('y',   H)
+dx  = real_axis('dx',  W)
+dy  = real_axis('dy',  W)
+ch  = real_axis('ch',  C)
+xi  = real_axis('xi',  H_pad)
+yi  = real_axis('yi',  H_pad)
+px  = real_axis('px',  P)
+py  = real_axis('py',  P)
+xo  = real_axis('xo',  H_out)
+yo  = real_axis('yo',  H_out)
+
+tl = TL()
+tl.Filter.tensor(dx, dy, ch)
+tl.Image.tensor(xi, yi, ch)          # pre-padded: (H+W-1) × (H+W-1) × C
+tl.Features.tensor(x, y)
+
+tl.Features[x, y] = relu(tl.Filter[dx, dy, ch] * tl.Image[x+dx, y+dy, ch])
+tl.Pooled[xo, yo] = tl.Features[S*xo+px, S*yo+py]
+
+morph  = tl.to_morphism()
+module = ConstructedModule.construct(morph)
+
+img  = torch.randn(H_pad, H_pad, C)   # pre-padded image, shape (8, 8, 2)
+filt = torch.randn(W, W, C)           # filter, shape (3, 3, 2)
+
+out  = module(filt, img)
+out  = out[0] if isinstance(out, tuple) else out
+assert out.shape == (H_out, H_out)    # (3, 3)
+```
+
+The affine bounds are verified at construction time (`_check_gather_bounds`):
+
+- `x+dx ∈ [0, H+W−2] = [0, 7]` fits within `xi` (size 8) ✓
+- `S·xo+px ∈ [0, S·(H_out−1)+(P−1)] = [0, 5]` fits within `x` (size 6) ✓
+
+### 4. Visualization
+
+The string diagram has two consecutive reindexing stages.
+
+**Stage 1 — convolution.** Image arrives on wires `xi(8)`, `yi(8)`, `ch(2)`. A
+**reindexing hexagon** `⟨x+dx, y+dy, ch∣` (St affine morphism) gathers a W×W×C
+neighbourhood for each output position, expanding the wires to
+`(x(6), y(6), dx(3), dy(3), ch(2))`. Filter arrives on `(dx(3), dy(3), ch(2))`.
+A **`Σ`** box contracts over `dx, dy, ch`, yielding `(x(6), y(6))`. A
+**`▶relu▶`** box applies the pointwise nonlinearity → `Features`.
+
+**Stage 2 — pooling.** Features arrives on `(x(6), y(6))`. A **reindexing hexagon**
+`⟨S·x+px, S·y+py∣` gathers a P×P strided window per output position, expanding to
+`(xo(3), yo(3), px(2), py(2))`. A **`Σ`** box sums over `px, py` →
+`Pooled(xo(3), yo(3))`.
+
+Both hexagons are the tsncd notation for St morphisms (weaves paper, Fig. 3);
+the reindexing is composed *around* the einsum core rather than folded into it.
+
+### 5. Generated PyTorch
+
+The two equations compile to a `ConstructedThreadedComposed` of two stages. Each
+stage is a `ConstructedReindex` feeding a `ConstructedTensorEquation`; the relu is
+folded into the first stage as a `Lambda`:
+
+```text
+ConstructedThreadedComposed(
+  (chain): ModuleList(
+    (0): ConstructedComposed(
+      (chain): Sequential(
+        (0): ConstructedReindex()        # Image[x+dx, y+dy, ch] → (x,y,dx,dy,ch) window
+        (1): ConstructedTensorEquation() # Filter ⊗ Image_win → Features, sum dx,dy,ch
+        (2): Lambda(ReLU(...))
+      )
+    )
+    (1): ConstructedComposed(
+      (chain): Sequential(
+        (0): ConstructedReindex()        # Features[S·xo+px, S·yo+py] → (xo,yo,px,py) window
+        (1): ConstructedTensorEquation() # sum px,py → Pooled
+      )
+    )
+  )
+)
+```
+
+The `einops.einsum` signature for the convolution stage contracts `dx, dy, ch`; the
+pool stage sums the window axes `px, py`:
+
+```python
+module.chain[0].chain[1].signature
+# '... x0 x1 x2, ... x3 x4 x0 x1 x2 -> ... x3 x4'
+# i.e.  dx  dy  ch,   x   y  dx  dy  ch ->  x   y
+
+module.chain[1].chain[1].signature
+# '... x0 x1 x2 x3 -> ... x0 x1'
+# i.e.  xo  yo  px  py ->  xo  yo
+```
+
+The module has no learned parameters — Filter and Image are caller inputs.
