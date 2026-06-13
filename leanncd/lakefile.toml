@@ -1,5 +1,5 @@
 name = "leanncd"
-defaultTargets = ["LeanNCD"]
+defaultTargets = ["LeanNCD", "Tests"]
 
 [[require]]
 name = "mathlib"
@@ -8,3 +8,12 @@ rev = "v4.30.0"
 
 [[lean_lib]]
 name = "LeanNCD"
+
+# Test suite under test/ (srcDir). `globs` builds each test module directly, so
+# `lake build` (Tests is a default target) elaborates them — firing every #guard /
+# example-by-rfl / #print axioms check and failing the build on regression.
+# (LSpec to be adopted at Milestone D/E for the executable layer; see the roadmap.)
+[[lean_lib]]
+name = "Tests"
+srcDir = "test"
+globs = ["Base.NumericTest", "Base.StTest", "Base.BrTest"]
