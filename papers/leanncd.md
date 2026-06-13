@@ -845,7 +845,9 @@ inductive BoolExpr
   | and  : BoolExpr → BoolExpr → BoolExpr
   | or   : BoolExpr → BoolExpr → BoolExpr
   | not  : BoolExpr → BoolExpr
-  | iabs : PredArith → BoolExpr                         -- integer absolute value
+  | iabs : PredArith → BoolExpr                         -- integer absolute value; placed here
+                                                        -- because bare |e| only appears inside
+                                                        -- predicates (e.g. |x - y| ≤ n)
   | ieq  : PredArith → PredArith → BoolExpr
   -- Note: '(' bool_expr ')' is surface grouping
 ```
@@ -940,7 +942,7 @@ syntax ident                 : tl_idx_expr
 syntax num                   : tl_idx_expr
 syntax num "*" ident         : tl_idx_expr
 syntax ident "+" num         : tl_idx_expr
-syntax ident "-" num         : tl_idx_expr
+syntax ident "-" num         : tl_idx_expr  -- look-back (n < 0)
 syntax num "*" ident "+" num : tl_idx_expr
 syntax "(" tl_idx_expr ")"   : tl_idx_expr
 
@@ -992,7 +994,7 @@ syntax ident "+" num         : tl_lhs_slot
 syntax num "*" ident "+" num : tl_lhs_slot
 
 -- Layer 6
-syntax (tl_decl <|> tl_stmt)* : tl_program
+syntax (tl_decl <|> tl_stmt)* : tl_program  -- accepts interleaved decls/stmts; compiler validates decl* stmt+ ordering
 ```
 
 **Elaboration function signatures (one per syntax category):**
@@ -1042,7 +1044,7 @@ TLProgram
 ```
 
 | Phase | What it does | Key Lean idiom |
-|---|---|---|
+| --- | --- | --- |
 | **assignUIDs** | Traverses `decls` and `stmts`; mints a fresh UID for each `AxisSpec` via `freshUData` ([§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer)). | `StateT UID TermM` |
 | **resolveDecls** | Builds `DeclEnv : HashMap String Decl`. Validates: `linear` weight appears in exactly one product factor; every declared name has a consistent shape across stmts. `linear ... bias:=true` emits a bias-add stmt. Marks each name as external (declared) or internal (produced by a stmt) — drives routing. Predicate-typed names are recorded here so the routing phase can emit ∃/∧ contraction rather than Σ. | `WriterT (DList Stmt) Id` for bias stmts; pure `DeclEnv` output |
 | **unifyAxes** | Collects `(uid_a, uid_b)` pairs from positional matching of axis occurrences across stmts; computes transitive closure; normalizes all UIDs. **Pure function** — the full program is known statically, so no incremental update loop is needed (contrast Python's eager `Context.append_iter`). | `HashMap UID UID`; pure |
@@ -1057,7 +1059,7 @@ The result is a `ThreadedComposed` morphism in `Br` — a finite presentation of
 **Python correspondence:**
 
 | Lean DSL | Python DSL | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `tensor Name : shape` | `tl.Name.tensor(*axes)` | shape declaration |
 | `predicate Name : shape` | `tl.Name.predicate(*axes)` | Bool-typed |
 | `linear Name : in → out [bias]` | `tl.Name.linear(out_axes=…, in_axes=…, bias=…)` | weight declaration |
