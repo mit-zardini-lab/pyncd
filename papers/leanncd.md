@@ -55,8 +55,11 @@ class SmallCategory (ob : Type) : Type 1 where
   assoc   : ∀ {W X Y Z} (f : hom W X) (g : hom X Y) (h : hom Y Z),
               comp (comp f g) h = comp f (comp g h)
 
-infixl:65 " ⟶ " => SmallCategory.hom
-notation:65 a " ∘ " b => SmallCategory.comp b a
+-- Scoped to avoid conflict with CategoryTheory's ⟶ and Function.comp.
+-- Open `ColoredPROPNotations` in files that use these; files importing Mathlib
+-- use CategoryTheory's ⟶ directly via the §3 seam adapter.
+scoped[ColoredPROPNotations] infixl:65 " ⟶ " => SmallCategory.hom
+scoped[ColoredPROPNotations] notation:65 a " ∘ " b => SmallCategory.comp b a
 ```
 
 Objects are themselves Lean types, so the monoidal product on objects can be definitional list concatenation; morphisms carry enough structure that the category laws fall to ring axioms (`St`) or list induction (`Br`) with no quotient; and the laws `id_comp`/`comp_id`/`assoc` are propositional equalities discharged by tactics. `-- Python: no typeclass — categories emerge implicitly from the @ operator / Composed wrapper.`
@@ -247,8 +250,23 @@ instance Br : ColoredPROP BrObj where
   tensor_assoc  := by simp [List.append_assoc]
   tensor_unit_l := by simp
   tensor_unit_r := by simp [List.append_nil]
-  swap a b      := .cons ⟨"swap", [], ..., ...⟩ (.nil _)
-  tensorHom f g := ...   -- run f and g in parallel via ProductOfMorphisms
+  swap a b      := .cons ⟨"swap",
+      [],                                                            -- degree: no loop shape
+      fun i => ((a ++ b).get i).shape.map (fun _ => .tiled),        -- all input axes tiled
+      fun j => ((b ++ a).get j).shape.map (fun _ => .tiled),        -- all output axes tiled
+      fun _ => ⟨Matrix.empty, Fin.elim0⟩⟩                          -- StMat [] []: trivial reindexing
+    (.nil _)
+  -- Routing (input i → output π(i)) is determined by dom/cod types and realized by
+  -- the Algebra F : C → V; BrBase records the weave shape, not the routing map.
+  tensorHom f g :=
+    -- Sequential encoding of parallel composition: extend f to act on (a ++ c) → (b ++ c)
+    -- by passing c-arrays unchanged, then extend g on (b ++ c) → (b ++ d) similarly.
+    BrMorph.comp (BrMorph.extendRight f c) (BrMorph.extendLeft g b)
+  -- def BrMorph.extendRight (f : BrMorph a b) (c : BrObj) : BrMorph (a ++ c) (b ++ c)
+  --   := augment each BrBase step of f with identity pass-throughs for the c-arrays
+  -- def BrMorph.extendLeft (g : BrMorph c d) (b : BrObj) : BrMorph (b ++ c) (b ++ d)
+  --   := symmetric; b-arrays unchanged
+  -- Python: ProductOfMorphisms[L, M]
   elemental     := …   -- Br is elemental: see theory.md §Elemental Categories (graded_prop.md (Elem-C))
 ```
 
@@ -261,9 +279,22 @@ The two instances embody a complementary split. **St is semantic**: a stride mor
 The base class above is deliberately lightweight, so its `St`/`Br` instances keep the "tensor = list concat, strictness = `rfl`/`simp`" elegance. But the propositions of [§9](#9-the-propositions-as-generic-theorems) want Mathlib — `MonoidalCategory`, `SymmetricCategory`, `Grothendieck`, `Limits.pushout`, monoidal functors. A single stated **adapter** bridges the two, turning any `ColoredPROP O` into a Mathlib strict symmetric monoidal category.
 
 ```lean
--- Strictify FreeMonoidalCategory (Discrete O); produced once, used by all §9 theorems.
-instance [ColoredPROP O] : CategoryTheory.MonoidalCategory O := …
-instance [ColoredPROP O] : CategoryTheory.SymmetricCategory O := …
+-- Strictification strategy (the single genuine difficulty — §11):
+--   1. Form FreeMonoidalCategory (Discrete O) — Mathlib's free strict monoidal category.
+--   2. The ColoredPROP.tensor = List.append and unit = [] make O itself a strictification:
+--      define the equivalence E : FreeMonoidalCategory (Discrete O) ≌ (O, List.append, [])
+--      via the unique strict functor sending each generator to its Discrete-injection.
+--   3. Transfer the MonoidalCategory and SymmetricCategory structures along E.inverse.
+-- Result: downstream, all associators and unitors are Iso.refl (definitional strictness)
+-- and PROP equations hold by rfl/simp rather than coherence threading.
+instance [ColoredPROP O] : CategoryTheory.MonoidalCategory O :=
+  -- transferred along FreeMonoidalCategory.strictify equivalence
+  CategoryTheory.MonoidalCategory.ofEquivalence (freeMonoidalEquiv O)
+instance [ColoredPROP O] : CategoryTheory.SymmetricCategory O :=
+  -- swap field of ColoredPROP gives the braiding; symmetry is then automatic
+  { braiding := fun a b => { hom := ColoredPROP.swap a b, inv := ColoredPROP.swap b a, … }
+    … }
+-- freeMonoidalEquiv : FreeMonoidalCategory (Discrete O) ≌ O  (definition obligation)
 ```
 
 This is the hybrid foundation of the proposition/computation separation: everything **above** the seam — the instances and executable defs (`St`, `Br`, `StMat.comp`, the union-find of [§7](#7-grothendieck-split-and-composition-as-pushout)) — speaks `ColoredPROP`; everything **below** it — the [§9](#9-the-propositions-as-generic-theorems) theorems — speaks Mathlib. The adapter *is* the proposition/computation boundary of [§1](#1-orientation-one-structure-one-seam) made into a definition: it is the one place where "what Lean computes" is handed to "what Lean proves."
@@ -275,6 +306,13 @@ The adapter is produced **once** and reused by every §9 theorem; per-instance p
 Everything above is the base on which the actual subject of this document sits. A `D`-graded colored PROP ([graded_prop.md §3.1](graded_prop.md#31-data)) is a colored PROP `C` (the *operations*) together with the data that exhibits it over a second colored PROP `D` (the *index*): a shape map, a lift action, and the distributivity and action-coherence isomorphisms making `C` a right `D`-actegory. The core class collects exactly that data plus the four named laws.
 
 ```lean
+/-- Extension of the shape map `sh : gen_C → D` to a monoid homomorphism on objects `C → D`.
+    This is the `sh*` used in the (Sh-⊛) law; it satisfies (Sh-⊗): `sh*(X ⊗ Y) = sh*(X) ⊗ sh*(Y)`. -/
+def sh_star {C D : Type} [ColoredPROP D] [ColoredPROP C]
+    (sh : ColoredPROP.gen (ob := C) → D) (X : C) : D :=
+  (X.toList.map sh).foldr ColoredPROP.tensor ColoredPROP.unit
+-- instance : Fintype sh_star (follows from Fintype on the color set)
+
 class DGradedColoredPROP (D C : Type) [ColoredPROP D] [ColoredPROP C] where
   sh    : ColoredPROP.gen (ob := C) → D        -- shape map: each C-color's underlying D-shape; extends to sh* (monoid hom)
   act   : (C ×ᶜ Dᵒᵖ) ⥤ C                        -- lift action (Mathlib functor, via seam)
@@ -282,10 +320,18 @@ class DGradedColoredPROP (D C : Type) [ColoredPROP D] [ColoredPROP C] where
   δ0    : ∀ P, act.obj (unit, P) ≅ unit
   υ     : ∀ X, act.obj (X, unit_D) ≅ X
   α     : ∀ X P Q, act.obj (act.obj (X,P), Q) ≅ act.obj (X, tensor Q P)
-  sh_act         : ∀ X P, sh* (act.obj (X,P)) = tensor (sh* X) P     -- (Sh-⊛)
-  act_unit_assoc : …    -- actegory triangle + pentagon (υ, α coherences) → right D-actegory
-  dist_coh       : …    -- δ, δ0 naturality + interchange with υ/α/σ
-  broadcast_gen  : …    -- (Broadcast-gen): every C-morphism = [f,P] ; ρ, f degree-trivial
+  sh_act : ∀ X P, sh_star sh (act.obj (X,P)) = tensor (sh_star sh X) P   -- (Sh-⊛)
+  act_unit_assoc :                                                          -- right D-actegory
+    (∀ X, υ X ≫ (υ X).symm = 𝟙 _) ∧                                      --   triangle (υ coherence)
+    (∀ X P Q, (α X P Q).hom ≫ act.map ⟨𝟙, (tensor Q P).symm⟩ = …)       --   pentagon (α coherence)
+  dist_coh :                                                                -- δ, δ0 naturality + interchange
+    (∀ {X Y} (f : hom X Y) P, (δ X Y P).hom ≫ tensor (act.map ⟨f,𝟙⟩) (act.map ⟨f,𝟙⟩) = act.map ⟨tensorHom f f, 𝟙⟩ ≫ (δ X Y P).hom) ∧
+    (∀ P, (δ0 P).hom ≫ 𝟙 unit = act.map ⟨𝟙, 𝟙⟩ ≫ (δ0 P).hom)           --   δ0 naturality
+  broadcast_gen :                                                            -- (Broadcast-gen)
+    ∀ {X Y : C} (g : hom X Y),
+      ∃ (X' Y' : C) (f : hom X' Y') (P : D) (ρ : hom (act.obj (Y', P)) Y),
+        g = comp (act.map ⟨f, 𝟙⟩) ρ ∧
+        ∀ Q (h : hom unit_D Q), act.map ⟨f, h⟩ = act.map ⟨f, 𝟙⟩  -- f is degree-trivial
 ```
 
 Each field is a direct transcription of the [graded_prop.md §3.1](graded_prop.md#31-data) data. `sh` is the **shape map** `sh : O_C → Ob D` sending each `C`-color to its underlying `D`-shape (its list of sub-wires); it extends to the monoid homomorphism `sh*` on objects used by the (Sh-⊛) law. `act` is the **lift action** `act : C × Dᵒᵖ ⥤ C` — a Mathlib functor, available because the seam adapter of [§3](#3-the-seam-adapter-into-mathlib) makes `C` and `D` Mathlib categories. Its two specializations are theory.md's lift notation: `[f, P] := act(f, 𝟙_P)` is the **batch lift** of `f` (covariant in `C`), and `[X, η] := act(𝟙_X, η)` is the **reindexing** along `η : P → Q` (contravariant in `D`, since `D` enters opposite). `-- Python: batch lift [f,P]`
@@ -324,7 +370,9 @@ The (Broadcast-gen) law says every `C`-morphism factors as `[f, P] ; ρ`. A **we
 structure Weave [DGradedColoredPROP D C] {X Y : C} (g : hom X Y) where
   f       : hom X' Y'    -- base op (degree-trivial)
   P       : D
-  ρ       : …            -- reindexing assembled from act(id,−) + coherence isos
+  ρ       : hom (act.obj (Y', P)) Y   -- reindexing: act(𝟙_{Y'}, η) composed with coherence isos,
+                                       -- where η : P → (degree fitting X→Y over Y'); assembled
+                                       -- from [Y', −] and the α/υ isos of DGradedColoredPROP
   factors : g = [f, P] ≫ ρ
 
 theorem weave_unique [DGradedColoredPROP D C] {X Y} (g : hom X Y) :
@@ -344,11 +392,25 @@ The core `DGradedColoredPROP D C` of [§4](#4-the-core-dgradedcoloredprop-d-c) c
 ```lean
 class TemporalGraded (D C : Type) [ColoredPROP D] [ColoredPROP C]
     extends DGradedColoredPROP D C where
-  L          : D                    -- temporal object (Δ₊ / ℕ-graded); prefix inclusions ιₘ
-  restrict   : ∀ m, …               -- directed action act(−, ιₘ); NO point-evaluation ev_q
-  iterate    : …                    -- finite iteration of a parametric step endofunctor (Def 3.4)
-  trace      : …                    -- scanl state history H ⊗ L_{N+1} (Def 3.5)
-  lift_fold_dist : …                -- act(Scan,P) ≅ Scan(act(step,P)) for P orthogonal to L
+  L          : D                    -- temporal object; ℕ-graded, carrying prefix inclusions ιₘ
+  iota       : ∀ m : ℕ, hom unit_D L   -- ιₘ : I_D → L; the m-th prefix inclusion
+  iota_unit  : iota 0 = 𝟙 unit_D      -- ι₀ is the unit (0-length prefix)
+  iota_mono  : ∀ m n, m ≤ n → comp (iota m) (𝟙 L) = iota n  -- inclusions are compatible
+  -- directed action: restriction natural transformations along ιₘ
+  restrict   : ∀ (m : ℕ) (X : C),
+                 hom (act.obj (X, L)) (act.obj (X, iota m))
+                 -- act(X, ιₘ) : X ⊛ L → X ⊛ [0..m]; contravariant in D-slot
+  -- finite N-fold iteration of a step endomorphism
+  iterate    : ∀ (N : ℕ) (X : C) (step : hom X X),
+                 hom X (act.obj (X, iota N))
+                 -- N-fold composition of step, with output indexed by [0..N]; cata(step)
+  -- state history: codomain H ⊗ L_{N+1} (scanl); truncating along ιₘ agrees with iterate m
+  trace      : ∀ (N : ℕ) (X : C) (step : hom X X),
+                 hom X (act.obj (X, tensor L (iota (N + 1))))
+                 -- act(X, L ⊗ [0..N+1]) records the full state history
+  lift_fold_dist : ∀ (N : ℕ) (X : C) (step : hom X X) (P : D),
+                     act.obj (act.obj (X, iota N), P) ≅ act.obj (X, iota N)
+                     -- act(Scan, P) ≅ Scan(act(step, P)) for P orthogonal to L
 ```
 
 `TemporalGraded` internalizes the four additions of [graded_prop.md §3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class) that turn `Scan` from a bare generator into a definition. `L` is the **temporal object** of Definition 3.3 — an `Ob D` carrying the augmented-simplex / `(ℕ,+,0)` length grading, with prefix inclusions `ιₘ : [0..m] ↪ [0..N]`. `restrict` is the **directed action**: restriction natural transformations `act(−, ιₘ) : (− ⊛ [0..N]) ⇒ (− ⊛ [0..m])` along the `ιₘ`, satisfying the unit and composition laws of an action. `iterate` is the **finite iteration** of Definition 3.4 — for a parametric step endofunctor (the per-step inputs ride as parameters) and a length `N`, the `N`-fold iterate and its catamorphism `cata(step)` exist (for fixed `N` this is plain `N`-fold composition; no fixpoint, no natural-numbers object, until unbounded length is wanted). `trace` is the **state history** of Definition 3.5 — codomain `H ⊗ L_{N+1}` (scanl), with the coherence that truncating the trace along `ιₘ` agrees with running the `m`-fold. `lift_fold_dist` is the **lift–fold distributivity** law: for an ordinary degree `P` orthogonal to `L`, `act(Scan, P) ≅ Scan(act(step, P))`.
@@ -389,12 +451,26 @@ Strip the numeric content from the `D`-colors and one is left with the **structu
 recovers the fully-sized graded PROP (graded_prop.md Prop 8.3).
 
 ```lean
--- Dat valued in (discrete categories of) size-assignments over the semiring `Numeric`.
--- `C♯` is the structural index PROP; it is written `Cˢʰᵃʳᵖ` only where a Lean identifier is needed.
-def Dat [ColoredPROP C] : C♯ ⥤ Type := …   -- the data functor; trivial on morphisms (graded_prop.md Def 5.1)
-def Dat' [ColoredPROP C] : C♯ ⥤ CategoryTheory.Cat := …   -- as a functor into Cat
--- C ≅ Grothendieck Dat'      -- CategoryTheory.Grothendieck of the data functor
-example : C ≅ CategoryTheory.Grothendieck Dat' := … -- `Iso.refl`-level when C is *built* as ∫Dat
+-- C♯ is the structural index PROP: same connectivity as C, but all Numeric size fields erased.
+-- Concretely, `C♯` is built by replacing every `Axis.size : Numeric` with `Unit` throughout
+-- `C`'s color type, leaving the shape (list-of-wires) structure intact.
+-- The quotient construction: two C-morphisms are C♯-equivalent iff they agree on connectivity
+-- (weave shapes, op names, routing) and differ only on Numeric attributes.
+abbrev Cˢʰᵃʳᵖ (C : Type) [ColoredPROP C] : Type :=
+  CategoryTheory.Quotient (structuralCongruence C)
+  -- where structuralCongruence relates morphisms agreeing on connectivity, differing on sizes
+-- `C♯` is the informal notation; `Cˢʰᵃʳᵖ C` is the Lean identifier.
+
+-- The data functor: sends each C♯-object to its set of valid size-assignments.
+def Dat [ColoredPROP C] : Cˢʰᵃʳᵖ C ⥤ Type :=
+  { obj := fun c => { d : C // Quotient.mk _ d = c }  -- size-assignments over the structural skeleton
+    map := fun _ => id                                  -- trivial on morphisms (graded_prop.md Def 5.1)
+    … }
+def Dat' [ColoredPROP C] : Cˢʰᵃʳᵖ C ⥤ CategoryTheory.Cat :=
+  Dat (C := C) ⋙ CategoryTheory.discreteCat  -- discrete category on each fiber set
+-- Recommended: build C directly as CategoryTheory.Grothendieck Dat', making the iso definitional:
+example [ColoredPROP C] : C ≅ CategoryTheory.Grothendieck (Dat' (C := C)) := Iso.refl _
+-- ^ holds when C is *defined* as ∫Dat; is a non-trivial iso otherwise.
 ```
 
 Mathlib supplies `CategoryTheory.Grothendieck` for the Grothendieck construction of a functor into `Cat`; with `Dat` valued in discrete categories of size-assignments, `∫Dat` is a direct instance. The iso `C ≅ ∫Dat` is a per-instantiation theorem in general, but it is **definitional — `Iso.refl` — if `C` is *built* as `∫Dat`**, which is the recommended posture: define the sized PROP as the integral, and the splitting is true by construction rather than by proof.
@@ -458,6 +534,30 @@ def freshUData : FreshM UData := do
 **Union-find — `Context` / `EqClass`.** The `Axis`-component coequalizer is *computed* as a pure-functional union-find. An `EqClass` is one equivalence class — a `Finset` of UIDs together with its canonical representative; a `Context` is a disjoint list of them. `Context.merge` unions a new class with any overlapping existing ones (Python's `Context.append_bucket`); `Context.apply` substitutes every UID by its class representative throughout a term. The **canonical representative is the member with the largest UID** — and *this is the universal cocone vertex* of the Stage-2 pushout: choosing it on the nose is what strictifies composition.
 
 ```lean
+/-- Decoration pairing a value with its UID — the canonical representative of an EqClass. -/
+structure WithUID (α : Type*) where
+  data : α
+  uid  : UID    -- the UID of this representative; same as data.uid if α carries a uid field
+-- For α = UData, data.uid = uid definitionally; for other α, uid is stored separately.
+
+/-- Errors that FreshM compilation can throw. -/
+inductive CompileError
+  | shapeMismatch    : String → String → CompileError   -- expected shape, actual shape
+  | missingBaseCase  : String → CompileError             -- tensor name missing iterAt stmt
+  | causalityViolation : String → CompileError           -- l+1 appears on RHS for iteration axis l
+  | overlappingScatter : String → CompileError           -- non-injective scatter without reduce sum
+  | linearWeightAmbiguous : String → CompileError        -- linear weight in ≠1 product factors
+  | undeclaredName   : String → CompileError             -- name used but not declared
+  deriving Repr
+
+/-- Typeclass for types whose UID references can be traversed and substituted.
+    The Lean stand-in for Python's `deep_reconstruct` — one explicit instance per decorated type.
+    Laws: traverseUID id = id, traverseUID (f ∘ g) = traverseUID f ∘ traverseUID g. -/
+class TermTraversable (α : Type*) where
+  traverseUID : (UData → UData) → α → α
+-- Required instances (at minimum): AxisSpec, IdxExpr, PredArith, BoolExpr, Stmt,
+--   BrBase, ThreadedComposed. Derive mechanically by structural recursion on each type.
+
 /-- One equivalence class: a set of UIDs with one canonical representative. -/
 structure EqClass (α : Type*) where
   bucket    : Finset UID
@@ -469,13 +569,14 @@ structure Context (α : Type*) where
 
 /-- Merge a new class in, unioning with any overlapping classes (= Context.append_bucket). -/
 def Context.merge (ctx : Context α) (cls : EqClass α) : Context α :=
-  let overlapping := ctx.classes.filter (fun c => ¬ c.bucket.Disjoint cls.bucket)
+  let overlapping := ctx.classes.filter (fun c => ¬ Disjoint c.bucket cls.bucket)
   let merged : EqClass α := overlapping.foldl
     (fun acc c => ⟨acc.bucket ∪ c.bucket,
                    if acc.canonical.data.uid ≥ c.canonical.data.uid
                    then acc.canonical else c.canonical⟩)
     cls
-  ⟨merged :: ctx.classes.filter (fun c => c.bucket.Disjoint cls.bucket)⟩
+  ⟨merged :: ctx.classes.filter (fun c => Disjoint c.bucket cls.bucket)⟩
+-- instance : DecidableEq UID := inferInstance  -- free from abbrev UID := ℕ
 
 /-- Substitute every UID in each class by its canonical representative throughout a term. -/
 def Context.apply [TermTraversable α] (ctx : Context α) (target : α) : α :=
@@ -498,10 +599,21 @@ class TargetActegory (D V : Type) [ColoredPROP D] (R : CommSemiring) where
 
 -- Default instance: R = ℝ, the standard (×, +) semiring (multiply, then sum over contracted indices).
 -- Declare a different instance only when a non-standard contraction arithmetic is needed.
+/-- The default target actegory: finite-dimensional real vector spaces, encoded as
+    Mathlib's `FdMod ℝ` (finite-dimensional modules over ℝ). Each `Br`-object (list of
+    ArrayTypes) maps to the tensor product of the corresponding finite-dimensional spaces. -/
+abbrev Mat (R : Type*) [CommRing R] := FdMod R
+-- FdMod R : the category of finite-dimensional R-modules (Mathlib.LinearAlgebra.FdMod).
+-- Alternatively: Matrix (Fin m) (Fin n) R for fixed dimensions m n, if full FdMod is heavy.
+-- For the default instance, R = ℝ and composition = matrix multiply over ℝ.
+
 instance : TargetActegory St (Mat ℝ) ℝ where
   actV := …   -- appends ℝ-typed dimensions; composition = matrix multiply over ℝ
 
-structure Algebra (D C V : Type) [DGradedColoredPROP D C] {R : CommSemiring} [TargetActegory D V R] where
+/-- The algebra functor F : C → V, a strong symmetric monoidal D-equivariant functor.
+    Declared as a `class` (not `structure`) so that `ParaAlgebra` can extend it via
+    typeclass inheritance, and so that `construct()` can be invoked via instance search. -/
+class Algebra (D C V : Type) [DGradedColoredPROP D C] {R : CommSemiring} [TargetActegory D V R] where
   F        : C ⥤ V                                    -- strong symmetric monoidal (Mathlib MonoidalFunctor)
   equivar  : ∀ X P, F.obj (act (X,P)) ≅ actV (F.obj X, P)   -- D-equivariance
   coh      : …                                        -- commutes with υ, α, δ; preserves ev_p
@@ -510,6 +622,8 @@ structure Algebra (D C V : Type) [DGradedColoredPROP D C] {R : CommSemiring} [Ta
 
 class ParaAlgebra (D C V : Type) [DGradedColoredPROP D C] {R : CommSemiring} [TargetActegory D V R]
     extends Algebra D C V where … -- STUB: Para(C) → Para(V) 2-functor; passes-as-2-cells, weight tying
+-- Note: Algebra is now `class` so that `extends` works cleanly; if Algebra is used
+-- purely as data (not synthesized), callers use `[Algebra D C V]` in signatures.
 ```
 
 The full development of these — the `equivar`/`coh` obligations, the `Para` refinement, weight tying as a reparameterization 2-cell — lives in the propositions and instantiation sections ([§9](#9-the-propositions-as-generic-theorems), [§10](#10-instantiation-and-future-extensions)) and the lightweight-`Para` note of [§11](#11-lean-formalization-notes); the trained model is a *section of the Para fibration over `∫Dat`*, tying the algebra back to the Grothendieck split of [§7.1](#71-the-structuredata-split-as-dat). `-- Python: ConstructedModule.construct()`
@@ -529,6 +643,10 @@ structure SBrInstance where
   array_axes : List ArrayAxisRow                -- ArrayAxis rows: is_target, position (the Weave._shape interleaving)
   samples    : List SampleRow                   -- Sample rows: (src, tgt, coeff, offset) — the affine reindexing
   axis_sizes : List (UID × Numeric)             -- the Dat-part: each axis-UID's symbolic size
+-- EquationRow, ArrayRow, ArrayAxisRow, SampleRow are defined in acset.md
+-- (§"From SBrInstance to a Diagram in Br — a Lean Encoding"); see that document
+-- for the full field lists. SBrInstance is partially specified here; the row types
+-- complete the definition.
 ```
 
 acset.md interprets this `G` as a strict monoidal functor `D : J → Br` from a finite index category `J` (objects = the program's arrays, morphisms = its equations) into the `Br` of [§2.3](#23-br--free-category-over-broadcasted-base-morphisms), using two Mathlib shortcuts that are exactly this document's choices: **`MvPolynomial String ℕ` for `Numeric`** (so `ring` discharges the `StMat` laws — the `Dat`-fiber type of [§7.2](#72-freenumeric-is-the-fiber-not-a-layer)) and **`Matrix` for `StMat.coeffs`** (for the matrix lemmas). `J` is the *free strict monoidal category* on the equation quiver — Mathlib's `FreeMonoidalCategory` strictified — so specifying `D` on generators determines it uniquely; the functor laws are a consequence. The `axis_sizes` table populates the `Dat(c)` fiber; the `equations`/`arrays`/`array_axes`/`samples` connectivity is the `C♯`-morphism. This `D : J → Br` is the finite, written-down witness of one object/morphism of the `Grothendieck Dat'` instance of [§7.1](#71-the-structuredata-split-as-dat).
@@ -675,10 +793,11 @@ Compilation is a two-stage process. **Stage 1** (`MetaM`): `elabTLProgram` parse
 
 ```lean
 elab "tl!{" p:tl_program "}" : term => do
-  let prog ← elabTLProgram p                       -- Stage 1: Syntax → TLProgram  (MetaM)
-  let (tc, _) ← ofExcept (TLProgram.compile prog   -- Stage 2: FreshM ThreadedComposed, run at
-                            |>.run 0)               --   elaboration time; counter starts at 0
-  return toExpr tc                                  -- embed ThreadedComposed as a term constant
+  let prog ← elabTLProgram p                            -- Stage 1: MetaM TLProgram value
+  match TLProgram.compile prog |>.run 0 with            -- Stage 2: run FreshM at elaboration time
+  | .ok tc _ => return toExpr tc                        -- embed ThreadedComposed as term constant
+  | .error e _ => throwError s!"tl!{{...}}: {repr e}"  -- surface CompileError to Lean's elaborator
+-- toExpr requires: deriving Lean.ToExpr on ThreadedComposed and all nested types (see §12.2)
 ```
 
 ### 12.1 BNF grammar
@@ -912,11 +1031,17 @@ inductive Stmt
 structure TLProgram where
   decls : List Decl
   stmts : List Stmt
+-- Deriving strategy for the tl!{} macro (requires Lean.ToExpr on all DSL types):
+-- deriving Lean.ToExpr, Repr for: AxisKind, AxisSpec, Decl, IdxExpr, PredArith,
+--   RelOp, BoolExpr, Nonlin, Factor, ProdTerm, SumExpr, RHSExpr, LHSSlot,
+--   ScatterOpts, Stmt, TLProgram
+-- For ThreadedComposed and Wire: explicit instances (nested BrBase/StMat/etc. need ToExpr too).
+-- MvPolynomial.toExpr: implement via coeff enumeration or ring normal form.
 ```
 
 ### 12.3 Concrete syntax and elaboration
 
-Following the IMP language pattern of the Lean 4 metaprogramming book (ch. 8): one `declare_syntax_cat` per BNF layer, `syntax` rules transcribing each production, and a `partial def elabXxx : Syntax → MetaM Expr` function per category. `partial` is required because Lean's termination checker cannot verify that syntax consumption decreases; each function uses `mkAppM ``Constructor #[…]` to build a typed `Expr` and `throwUnsupportedSyntax` on mismatch.
+Following the IMP language pattern of the Lean 4 metaprogramming book (ch. 8): one `declare_syntax_cat` per BNF layer, `syntax` rules transcribing each production, and a `partial def elabXxx : Syntax → TermElabM Expr` function per category. `TermElabM` (= `Lean.Elab.Term.TermElabM`) is the monad for the `elab` elaborator; `MetaM` is a sub-monad reachable via `liftMetaM`. `partial` is required because Lean's termination checker cannot verify that syntax consumption decreases; each function uses `mkAppM ``Constructor #[…]` to build a typed `Expr` and `throwUnsupportedSyntax` on mismatch.
 
 **Syntax categories:**
 
@@ -1023,28 +1148,36 @@ syntax num "*" ident "+" num : tl_lhs_slot
 
 -- Layer 6
 syntax (tl_decl <|> tl_stmt)* : tl_program  -- accepts interleaved decls/stmts; compiler validates decl* stmt+ ordering
+
+-- Note: Stmt.recurMorphism has no syntax rule yet (surface form TBD).
+-- The escape hatch is accessible programmatically but not via tl!{} surface syntax.
+-- A provisional form: syntax ident "." "recur" "(" ident "," term ")" : tl_stmt
+-- would allow: `Name.recur(l, morphism)` where morphism : ThreadedComposed.
 ```
 
 **Elaboration function signatures (one per syntax category):**
 
 ```lean
-partial def elabTLSize      : Syntax → MetaM Expr   -- → Numeric (§2.1)
-partial def elabTLAxisKind  : Syntax → MetaM Expr   -- → AxisKind
-partial def elabTLAxisSpec  : Syntax → MetaM Expr   -- → AxisSpec  (uid := 0; assigned in Stage 2)
-partial def elabTLShape     : Syntax → MetaM Expr   -- → List AxisSpec
-partial def elabTLDecl      : Syntax → MetaM Expr   -- → Decl
-partial def elabTLIdxExpr   : Syntax → MetaM Expr   -- → IdxExpr
-partial def elabTLPredTerm  : Syntax → MetaM Expr   -- → PredArith
-partial def elabTLRelOp     : Syntax → MetaM Expr   -- → RelOp
-partial def elabTLBoolExpr  : Syntax → MetaM Expr   -- → BoolExpr
-partial def elabTLNonlin    : Syntax → MetaM Expr   -- → Nonlin
-partial def elabTLFactor    : Syntax → MetaM Expr   -- → Factor
-partial def elabTLProdTerm  : Syntax → MetaM Expr   -- → ProdTerm
-partial def elabTLSumExpr   : Syntax → MetaM Expr   -- → SumExpr
-partial def elabTLRHS       : Syntax → MetaM Expr   -- → RHSExpr
-partial def elabTLLHSSlot   : Syntax → MetaM Expr   -- → LHSSlot
-partial def elabTLStmt      : Syntax → MetaM Expr   -- → Stmt
-partial def elabTLProgram   : Syntax → MetaM Expr   -- → TLProgram
+partial def elabTLSize      : Syntax → TermElabM Expr   -- → Numeric (§2.1)
+partial def elabTLAxisKind  : Syntax → TermElabM Expr   -- → AxisKind
+partial def elabTLAxisSpec  : Syntax → TermElabM Expr   -- → AxisSpec  (uid := 0; assigned in Stage 2)
+partial def elabTLShape     : Syntax → TermElabM Expr   -- → List AxisSpec
+partial def elabTLDecl      : Syntax → TermElabM Expr   -- → Decl
+partial def elabTLIdxExpr   : Syntax → TermElabM Expr   -- → IdxExpr
+partial def elabTLPredTerm  : Syntax → TermElabM Expr   -- → PredArith
+partial def elabTLRelOp     : Syntax → TermElabM Expr   -- → RelOp
+partial def elabTLBoolExpr  : Syntax → TermElabM Expr   -- → BoolExpr
+partial def elabTLNonlin    : Syntax → TermElabM Expr   -- → Nonlin
+partial def elabTLFactor    : Syntax → TermElabM Expr   -- → Factor
+partial def elabTLProdTerm  : Syntax → TermElabM Expr   -- → ProdTerm
+partial def elabTLSumExpr   : Syntax → TermElabM Expr   -- → SumExpr
+partial def elabTLRHS       : Syntax → TermElabM Expr   -- → RHSExpr
+partial def elabTLLHSSlot   : Syntax → TermElabM Expr   -- → LHSSlot
+partial def elabTLStmt      : Syntax → TermElabM Expr   -- → Stmt
+partial def elabTLProgram   : Syntax → MetaM TLProgram  -- → TLProgram value (not Expr; see FIX 15)
+-- Returns a concrete TLProgram value (not an Expr); the elaborator interprets Syntax nodes
+-- by structural recursion rather than building Lean Expr terms. This avoids the need for
+-- kernel reduction to extract a TLProgram from an Expr at Stage 2.
 ```
 
 The elaborator is pure syntax-walking with no side effects: UID minting and axis unification happen in Stage 2, not Stage 1.
@@ -1052,11 +1185,82 @@ The elaborator is pure syntax-walking with no side effects: UID minting and axis
 ### 12.4 Semantic compilation
 
 ```lean
+/-- Named alias for the declaration environment built by resolveDecls. -/
+abbrev DeclEnv := Std.HashMap String Decl   -- requires BEq String, Hashable String (both in core)
+
+/-- A statement after finalizeScans has grouped iterAt/iterNext pairs into Scan nodes.
+    Replaces bare Stmt.assign/scatter with explicit Scan steps. -/
+inductive ScanStmt
+  | plain  : Stmt → ScanStmt                                  -- non-recursive statement
+  | scan   : String → AxisSpec → List Stmt → List Stmt → ScanStmt
+             -- (tensor name, iteration axis, base stmts, recurrence stmts)
+  | scanPre : String → AxisSpec → ThreadedComposed → ScanStmt
+             -- Stmt.recurMorphism case: step morphism provided directly
+
+/-- Typed intermediate representations for the 8-phase pipeline.
+    Each type carries the invariant guaranteed by its producing phase. -/
+structure LabeledProgram where
+  decls : List Decl
+  stmts : List Stmt    -- every AxisSpec.uid is a fresh non-zero UID (assignUIDs invariant)
+
+structure ResolvedProgram where
+  decls    : List Decl
+  stmts    : List Stmt
+  env      : DeclEnv                    -- resolved declaration map
+  extNames : Finset String              -- externally declared (input) tensor names
+  extraStmts : Array Stmt               -- bias-add stmts emitted for linear...bias:=true
+
+structure CanonicalProgram where
+  decls    : List Decl
+  stmts    : List Stmt
+  env      : DeclEnv
+  extNames : Finset String
+  ctx      : Context AxisSpec           -- canonical axis equivalence classes (unifyAxes result)
+
+structure LoweredProgram where
+  decls    : List Decl
+  stmts    : List Stmt                  -- no const/affine IdxExprs in reads (replaced by intermediates)
+  env      : DeclEnv
+  extNames : Finset String
+  ctx      : Context AxisSpec
+  auxStmts : Array Stmt                 -- Slice/Reindex/Scatter intermediates emitted by lowerArith
+
+structure ScanProgram where
+  decls    : List Decl
+  stmts    : List ScanStmt             -- iterAt/iterNext grouped into ScanStmt.scan nodes
+  env      : DeclEnv
+  extNames : Finset String
+  ctx      : Context AxisSpec
+
+structure LinearProgram where
+  decls    : List Decl
+  stmts    : List ScanStmt             -- no nonlinearity in RHSExpr.nonlin (split into BrBase ops)
+  env      : DeclEnv
+  extNames : Finset String
+  ctx      : Context AxisSpec
+
+structure ScheduledProgram where
+  decls    : List Decl
+  stmts    : List ScanStmt             -- live stmts in reverse-topological order (BFS from output)
+  env      : DeclEnv
+  extNames : Finset String
+  ctx      : Context AxisSpec
+
+/-- A wire in the DAG: identifies a specific output slot of a specific step (or the external inputs). -/
+structure Wire where
+  step : ℕ         -- index into steps; n_external = "external input" sentinel
+  slot : ℕ         -- output slot index within that step
+
 /-- A routed DAG of Br base morphisms: the term-world presentation of one Br morphism. -/
 structure ThreadedComposed where
   steps      : List BrBase     -- the lowered operations, each a Br base morphism (§2.3)
-  routing    : …               -- wiring: which step output feeds which step input
+  /-- For each step and each input slot, which Wire feeds it.
+      `routing i j` = the Wire connected to the j-th input slot of steps[i]. -/
+  routing    : Fin steps.length → ℕ → Wire
   n_external : ℕ               -- number of external inputs (declared tensors / weights)
+-- deriving Lean.ToExpr  -- required for the tl!{} macro; also derive for Wire, BrBase,
+--   WeaveShape, WeaveSlot, StMat, ArrayType, DType, Axis, Numeric (= MvPolynomial String ℕ).
+-- Note: deriving ToExpr for MvPolynomial may require a custom instance.
 -- A ThreadedComposed PRESENTS one `BrMorph` (§2.3): composing and tensoring `steps` along
 -- `routing` collapses to a single morphism of `Br`. It is the term-world twin of the acset
 -- `SBrInstance` (§8.1) — the acset extraction (Python `from_tensor_program`) turns one into
