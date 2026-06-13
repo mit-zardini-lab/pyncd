@@ -41,4 +41,20 @@ def BrMorph.comp {a b c : BrObj} : BrMorph a b → BrMorph b c → BrMorph a c
   | .nil _,     g => g
   | .cons f fs, g => .cons f (BrMorph.comp fs g)
 
+@[simp] theorem BrMorph.nil_comp {a b : BrObj} (g : BrMorph a b) :
+    BrMorph.comp (.nil a) g = g := rfl
+
+theorem BrMorph.comp_nil {a b : BrObj} (f : BrMorph a b) :
+    BrMorph.comp f (.nil b) = f := by
+  induction f with
+  | nil _ => rfl
+  | cons _ _ ih => simp [BrMorph.comp, ih]
+
+theorem BrMorph.comp_assoc {a b c d : BrObj}
+    (f : BrMorph a b) (g : BrMorph b c) (h : BrMorph c d) :
+    BrMorph.comp (BrMorph.comp f g) h = BrMorph.comp f (BrMorph.comp g h) := by
+  induction f with
+  | nil _ => rfl
+  | cons _ _ ih => simp [BrMorph.comp, ih]
+
 end LeanNCD

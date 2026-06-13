@@ -13,4 +13,9 @@ example :
 -- TEST: nil is a definitional left identity for composition.
 example {a b : BrObj} (g : BrMorph a b) : BrMorph.comp (.nil a) g = g := rfl
 
+-- TEST: the Br category laws are proved with NO sorry.
+#print axioms BrMorph.nil_comp
+#print axioms BrMorph.comp_nil
+#print axioms BrMorph.comp_assoc
+
 end LeanNCD
