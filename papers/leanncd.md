@@ -108,7 +108,7 @@ abbrev Numeric := MvPolynomial String ℕ
 
 This is the minimal type making `StMat`'s laws provable: the free commutative semiring on a `String`-indexed generator set, exactly the algebra symbolic axis sizes inhabit. The `ring` tactic works immediately over any `CommSemiring`, so all three `StMat` laws discharge without setup. `MvPolynomial.X s` plays the role of a `FreeNumeric` — a name carrying no interpretation until indeterminates are substituted.
 
-Mathlib's `CommSemiring (MvPolynomial …)` instance is **noncomputable** (it factors through `AddMonoidAlgebra`). This has no effect on proofs — `ring` and `simp` work fine over a noncomputable semiring — but any `def` that *builds* a value over `Numeric` using `0`/`1`/`+`/`*` (so `StMat.id`, `StMat.comp`, and the `St` instance of [§2.2](#22-st--stride-matrices)) must be marked `noncomputable`. Term construction is never evaluated at runtime here, so this costs nothing.
+Mathlib's `CommSemiring (MvPolynomial …)` instance is **noncomputable** (it factors through `AddMonoidAlgebra`); so are `MvPolynomial.X`/`.C` and even `DecidableEq` (which resolves through `Classical.propDecidable`). This has no effect on the proof tower — `ring`/`simp` and the [§9](#9-the-propositions-as-generic-theorems) proofs work fine over a noncomputable semiring — but it has two consequences. (i) Any `def` that *builds* a value over `Numeric` (so `StMat.id`, `StMat.comp`, and the `St` instance of [§2.2](#22-st--stride-matrices)) must be marked `noncomputable`. (ii) **Compiled code cannot construct or `decide`-compare `Numeric` values at all** — neither `#eval`, `decide`, nor `native_decide` reduces them. The executable / DSL layer must therefore not construct `Numeric` directly: the tensor-logic DSL ([§12](#12-the-tensor-logic-dsl)) carries sizes in a *computable* `SizeExpr` mirror, interpreted into `Numeric` only on the proof side (see the note in [§12.2](#122-abstract-syntax)).
 
 ### 2.2 `St` — stride matrices
 
@@ -484,6 +484,8 @@ abbrev Numeric := MvPolynomial String ℕ
 ```
 
 Symbolic sizes — `FreeNumeric` and `Numeric` — are the **`Dat(c)` fiber data** of the Grothendieck construction of [§7.1](#71-the-structuredata-split-as-dat), as categorical as the structural skeleton `C♯` itself. They live in the fiber over `C♯`.
+
+`Numeric = MvPolynomial String ℕ` is the **proof-side** fiber representation: it is chosen so the `ring` tactic discharges the `StMat` laws for free, at the price of being noncomputable ([§2.1](#21-numeric)). The **executable** presentations of the fiber — the DSL ([§12](#12-the-tensor-logic-dsl)) and the acset tables ([§8](#8-acsets-and-the-executable-layer)) — cannot use it directly, because compiled code can neither construct nor compare `MvPolynomial` values. They carry a *computable* mirror of the fiber (a `SizeExpr` inductive: variables, literals, `+`, `*`, with `DecidableEq`/`ToExpr`), with an interpretation `SizeExpr → Numeric` crossing to the proof side. This is the proposition/computation seam applied to the fiber datum itself; the mechanism is specified in the Milestone E DSL work.
 
 ### 7.3 Composition as pushout
 
@@ -942,6 +944,18 @@ inductive AxisKind
 -- the axis (fixing the assembled array's `ArrayType.dtype`). `norm` carries no new datatype — it
 -- is a `real` axis marked as the contraction dimension of a normalization nonlinearity, consumed
 -- by `splitNonlins` (§12.4) and realized in the Algebra into the target actegory (§7.5).
+--
+-- NOTE (computability — Milestone E). `Numeric = MvPolynomial String ℕ` is NONCOMPUTABLE
+-- (its `X`/`C`/semiring/`DecidableEq` all resolve through `Classical`; see §2.1). But the
+-- elaborator builds a concrete `TLProgram` *value* (`elabTLProgram` returns a value, not an
+-- `Expr`), and `compile` runs at elaboration time, and the `tl!{}` macro needs `ToExpr` plus
+-- size-equality dedup — none of which compiled metacode can do over `MvPolynomial`. So the DSL
+-- carries sizes (and the integer stride coefficients of §12.2's `IdxExpr`) in a COMPUTABLE
+-- `SizeExpr` (variables, literals, `+`, `*`; `deriving DecidableEq, Repr, Lean.ToExpr`), with
+-- `SizeExpr.toNumeric : SizeExpr → Numeric` used only when crossing to the proof side. Read the
+-- `Numeric` in these AST types as that computable `SizeExpr`. The full design is fixed in the
+-- Milestone E plan (the alternatives — generalizing `StMat` over its coefficient ring, or
+-- carrying sizes as `Expr` — are weighed there).
 
 structure AxisSpec where
   name : String
