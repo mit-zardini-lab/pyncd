@@ -10,4 +10,7 @@ example :
     WeaveShape.targetAxes [WeaveSlot.tiled, WeaveSlot.fixed ax_i, WeaveSlot.tiled] = [ax_i] :=
   rfl
 
+-- TEST: nil is a definitional left identity for composition.
+example {a b : BrObj} (g : BrMorph a b) : BrMorph.comp (.nil a) g = g := rfl
+
 end LeanNCD

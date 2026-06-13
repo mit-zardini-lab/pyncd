@@ -31,4 +31,14 @@ structure BrBase (dom cod : BrObj) where
   outputWeaves : Fin cod.length → WeaveShape
   reindexings  : ∀ i : Fin dom.length, StMat degree (inputWeaves i).targetAxes
 
+/-- The free category on BrBase: morphisms are lists of base operations threaded
+    sequentially; `nil` is the identity, composition is list concatenation. -/
+inductive BrMorph : BrObj → BrObj → Type
+  | nil  : (a : BrObj) → BrMorph a a
+  | cons : BrBase a b → BrMorph b c → BrMorph a c
+
+def BrMorph.comp {a b c : BrObj} : BrMorph a b → BrMorph b c → BrMorph a c
+  | .nil _,     g => g
+  | .cons f fs, g => .cons f (BrMorph.comp fs g)
+
 end LeanNCD
