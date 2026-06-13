@@ -659,6 +659,425 @@ Beyond the coverage map, several honest notes shape any transcription:
 
 - **Equivariance is gated.** Proposition 8.4's body depends on the `SymmetryGraded` mixin and the Eilenberg–Moore-category machinery for the symmetry monad `T`. The finite-group case is reachable with present Mathlib (`Action`/`Rep`), but the graded-PROP-dependent parts of the encoding wait on this very formalization being in place; the proposition is *stated* now and its proof *gated* ([equivariance_unification.md](equivariance_unification.md)).
 
+## 12. The tensor-logic DSL
+
+A Lean 4 DSL embedding for tensor logic, following the syntax-category + elaboration pattern of the Lean 4 metaprogramming book (ch. 8): a BNF grammar defines the surface language; Lean inductive types give the abstract syntax; `declare_syntax_cat`/`syntax` rules connect them to Lean's parser; `elabXxx : Syntax → MetaM Expr` functions walk the syntax tree; and `TLProgram.compile : TLProgram → TermM ThreadedComposed` lowers programs to morphisms in `Br`.
+
+Compilation is a two-stage process. **Stage 1** (`MetaM`): `elabTLProgram` parses concrete syntax into a typed `TLProgram` value. **Stage 2** (`TermM`): `TLProgram.compile` lowers the program to a `ThreadedComposed` morphism, minting fresh UIDs via the counter of [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer). The entry point:
+
+```lean
+elab "tl!{" p:tl_program "}" : term => do
+  let prog ← elabTLProgram p          -- Stage 1: Syntax → TLProgram  (MetaM)
+  mkAppM ``TLProgram.compile #[prog]  -- Stage 2: TLProgram → ThreadedComposed  (TermM)
+```
+
+### 12.1 BNF grammar
+
+Extends Domingos' tensor-logic notation (implicit Σ over contracted axes, Einstein product) with: axis typing (ℝ/ℕ/norm), tensor declarations, Iverson predicates, nonlinearities with optional masks, affine index arithmetic (Slice/Reindex/Scatter), and temporal recursion (Scan).
+
+```
+-- Layer 1: Axis specifications and declarations
+decl        ::= 'tensor'    name ':' shape
+              | 'predicate' name ':' shape
+              | 'linear'    name ':' in_shape '→' out_shape ['bias']
+
+shape       ::= '(' ')'
+              | '(' axis_spec (',' axis_spec)* ')'
+
+axis_spec   ::= name ':' axis_kind
+
+axis_kind   ::= 'ℝ'           -- symbolic-size real axis
+              | 'ℝ[' n ']'    -- concrete-size real axis
+              | 'ℕ'           -- symbolic-size discrete axis
+              | 'ℕ[' n ']'    -- concrete-size discrete axis
+              | 'norm'        -- normalization axis, symbolic
+              | 'norm[' n ']' -- normalization axis, concrete
+
+-- Layer 2: Index expressions (strictly affine; n ∈ ℤ)
+idx_expr    ::= axis_name
+              | n
+              | n '*' axis_name
+              | axis_name '+' n
+              | n '*' axis_name '+' n
+              | '(' idx_expr ')'
+
+-- Layer 2.5: Predicate arithmetic (extends idx_expr with non-affine products)
+-- Only valid inside bool_expr; forbidden in tensor index slots.
+pred_term   ::= idx_expr
+              | 'imul(' pred_term ',' pred_term ')'
+              | '(' pred_term ')'
+
+-- Layer 3: Iverson predicates
+bool_expr   ::= pred_term rel_op pred_term
+              | bool_expr '∧' bool_expr
+              | bool_expr '∨' bool_expr
+              | '¬' bool_expr
+              | '|' pred_term '|'
+              | 'ieq(' pred_term ',' pred_term ')'
+              | '(' bool_expr ')'
+
+rel_op      ::= '<' | '≤' | '=' | '≠' | '>' | '≥'
+
+-- Layer 4: RHS expressions
+rhs         ::= nonlin '(' sum_expr ')'
+              | sum_expr
+
+sum_expr    ::= prod_term ('+' prod_term)*
+
+prod_term   ::= factor ('·' factor)*
+
+factor      ::= name '[' idx_expr (',' idx_expr)* ']'
+              | '[' bool_expr ']'
+
+nonlin      ::= 'relu'
+              | 'softmax'
+              | 'softmax'   '(' 'where' bool_expr ')'
+              | 'normalize'
+              | 'normalize' '(' 'where' bool_expr ')'
+
+-- Layer 5: Statements
+stmt        ::= assign | base_case | recur_step | scatter_write
+
+assign      ::= name '[' axis_name (',' axis_name)* ']' ':=' rhs
+
+-- l+1 and 0 may appear in any slot position; the iteration axis l is identified by the l+1 slot
+base_case   ::= name '[' base_slot_list ']'  ':=' rhs
+recur_step  ::= name '[' recur_slot_list ']' ':=' rhs
+
+base_slot_list  ::= (axis_name ',')* n (',' axis_name)*
+recur_slot_list ::= (axis_name ',')* axis_name '+' '1' (',' axis_name)*
+
+-- Affine LHS: every slot is a (possibly affine) output coordinate
+scatter_write ::= name '[' affine_slot (',' affine_slot)* ']' ':=' rhs
+                    ['fill' n] ['reduce' 'sum']
+
+affine_slot ::= axis_name
+              | n '*' axis_name
+              | axis_name '+' n
+              | n '*' axis_name '+' n
+
+-- Layer 6: Programs
+program     ::= decl* stmt+
+```
+
+**Contracted axes** are implicit: any `axis_name` appearing in a `prod_term` but absent from the LHS is summed over — Domingos' convention, unchanged.
+
+**Coupled scans** require no special syntax: two `recur_step` stmts for different tensor names whose iteration axis (the `axis_name` in `axis_name '+' '1'`) carries the same UID are automatically grouped into a coupled `Scan` (`n_states > 1`) by the semantic compiler.
+
+**Semantic constraints** enforced by the compiler, not the grammar:
+
+- `l+1` on the RHS of a `recur_step` is a causality violation and is rejected, where `l` is that step's iteration axis; look-ahead reads on non-iteration axes are permitted
+- Scatter with overlapping writes requires `reduce sum`
+- A `recur_step` without a matching `base_case` for the same name is an error
+- A `linear`-declared weight must multiply exactly one activation factor
+
+**Five representative examples:**
+
+```
+-- Matmul (Domingos base: k is contracted)
+Y[i,j] := W[i,k] · X[k,j]
+
+-- Causal masked attention (norm axis + Iverson mask)
+tensor A : (q : ℝ, s : norm)
+A[q,s] := softmax(where s ≤ q)(Q[q,d] · K[s,d])
+
+-- Strided convolution (affine Reindex reads)
+Y[i,j] := W[p,r] · X[i+p, s*j+r]
+
+-- Upsample 2× (affine Scatter write)
+tensor Out : (i : ℝ[2*m], j : ℝ[2*n])
+Out[2*i, 2*j] := X[i,j]
+
+-- Coupled scan: G and H share iteration axis l (coupled Scan, n_states=2)
+G[j, 0]   := X[j]
+G[j, l+1] := relu(G[j,l] · W_G[j,k] + H[j,l] · U[j,k])
+H[j, 0]   := Y[j]
+H[j, l+1] := relu(H[j,l] · W_H[j,k] + G[j,l] · V[j,k])
+```
+
+### 12.2 Abstract syntax
+
+Direct formalization of the BNF layers as Lean inductive types. `UID` and `Numeric` from [§2](#2-the-base-coloredprop)/[§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer); `TermM` from [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer).
+
+```lean
+-- Layer 1
+inductive AxisKind
+  | real   : Option Numeric → AxisKind   -- ℝ axis
+  | nat    : Option Numeric → AxisKind   -- ℕ axis
+  | norm   : Option Numeric → AxisKind   -- normalization axis
+
+structure AxisSpec where
+  name : String
+  uid  : UID       -- identity key for Context coequalizer (§7.4); assigned in Stage 2
+  kind : AxisKind
+
+inductive Decl
+  | tensor    : String → List AxisSpec → Decl
+  | predicate : String → List AxisSpec → Decl
+  | linear    : String → (inAxes outAxes : List AxisSpec) → (bias : Bool) → Decl
+```
+
+```lean
+-- Layer 2
+inductive IdxExpr
+  | axis   : AxisSpec → IdxExpr                         -- free or contracted axis
+  | const  : ℤ → IdxExpr                               -- constant coordinate (Slice)
+  | scale  : ℤ → AxisSpec → IdxExpr                    -- n * a
+  | shift  : AxisSpec → ℤ → IdxExpr                    -- a + n  (n < 0 = look-back)
+  | affine : ℤ → List (ℤ × AxisSpec) → IdxExpr         -- n + Σ cᵢ·aᵢ (general Reindex)
+  -- Note: '(' idx_expr ')' is surface grouping; elabTLIdxExpr recurses into the inner expression
+```
+
+```lean
+-- Layer 2.5: Predicate arithmetic (extends IdxExpr with non-affine products)
+inductive PredArith
+  | embed : IdxExpr → PredArith                         -- lift any affine expression
+  | mul   : PredArith → PredArith → PredArith           -- imul; non-affine product
+  -- Note: '(' pred_term ')' is surface grouping
+```
+
+```lean
+-- Layer 3
+inductive RelOp | lt | le | eq | ne | ge | gt
+
+inductive BoolExpr
+  | rel  : RelOp → PredArith → PredArith → BoolExpr
+  | and  : BoolExpr → BoolExpr → BoolExpr
+  | or   : BoolExpr → BoolExpr → BoolExpr
+  | not  : BoolExpr → BoolExpr
+  | iabs : PredArith → BoolExpr                         -- integer absolute value
+  | ieq  : PredArith → PredArith → BoolExpr
+  -- Note: '(' bool_expr ')' is surface grouping
+```
+
+```lean
+-- Layer 4
+inductive Nonlin
+  | identity  : Nonlin
+  | relu      : Nonlin
+  | softmax   : Option BoolExpr → Nonlin
+  | normalize : Option BoolExpr → Nonlin
+
+inductive Factor
+  | read    : String → List IdxExpr → Factor            -- name[e₁,...,eₙ]
+  | iverson : BoolExpr → Factor                         -- [P]
+
+structure ProdTerm where factors : List Factor
+structure SumExpr  where terms   : List ProdTerm
+structure RHSExpr  where body : SumExpr; nonlin : Nonlin
+```
+
+```lean
+-- Layer 5
+inductive LHSSlot
+  | free     : AxisSpec → LHSSlot                       -- ordinary free axis
+  | iterAt   : AxisSpec → ℤ → LHSSlot                  -- l = n  (base case)
+  | iterNext : AxisSpec → LHSSlot                       -- l + 1  (recurrence step)
+  | affine   : IdxExpr → LHSSlot                        -- affine output slot (Scatter)
+
+structure ScatterOpts where
+  fill   : Float := 0.0
+  reduce : Option String := none    -- none = injective required; 'sum' = accumulate
+
+inductive Stmt
+  | assign        : String → List LHSSlot → RHSExpr → Stmt
+  | scatter       : String → List LHSSlot → RHSExpr → ScatterOpts → Stmt
+  | recurMorphism : String → AxisSpec → Expr → Stmt
+  -- escape hatch: String = tensor name, AxisSpec = iteration axis,
+  -- Expr : ThreadedComposed = pre-built step morphism. Syntax TBD.
+
+structure TLProgram where
+  decls : List Decl
+  stmts : List Stmt
+```
+
+### 12.3 Concrete syntax and elaboration
+
+Following the IMP language pattern of the Lean 4 metaprogramming book (ch. 8): one `declare_syntax_cat` per BNF layer, `syntax` rules transcribing each production, and a `partial def elabXxx : Syntax → MetaM Expr` function per category. `partial` is required because Lean's termination checker cannot verify that syntax consumption decreases; each function uses `mkAppM ``Constructor #[…]` to build a typed `Expr` and `throwUnsupportedSyntax` on mismatch.
+
+**Syntax categories:**
+
+```lean
+declare_syntax_cat tl_axis_kind
+declare_syntax_cat tl_axis_spec
+declare_syntax_cat tl_shape
+declare_syntax_cat tl_decl
+declare_syntax_cat tl_idx_expr
+declare_syntax_cat tl_pred_term
+declare_syntax_cat tl_rel_op
+declare_syntax_cat tl_bool_expr
+declare_syntax_cat tl_nonlin
+declare_syntax_cat tl_factor
+declare_syntax_cat tl_prod_term
+declare_syntax_cat tl_sum_expr
+declare_syntax_cat tl_rhs
+declare_syntax_cat tl_lhs_slot
+declare_syntax_cat tl_stmt
+declare_syntax_cat tl_program
+```
+
+**Representative syntax rules (one per BNF layer):**
+
+```lean
+-- Layer 1: axis kinds
+syntax "ℝ"              : tl_axis_kind
+syntax "ℝ[" num "]"     : tl_axis_kind
+syntax "ℕ"              : tl_axis_kind
+syntax "ℕ[" num "]"     : tl_axis_kind
+syntax "norm"           : tl_axis_kind
+syntax "norm[" num "]"  : tl_axis_kind
+
+syntax ident ":" tl_axis_kind : tl_axis_spec
+syntax "(" tl_axis_spec,* ")" : tl_shape
+
+syntax "tensor"    ident ":" tl_shape                      : tl_decl
+syntax "predicate" ident ":" tl_shape                      : tl_decl
+syntax "linear"    ident ":" tl_shape "→" tl_shape         : tl_decl
+syntax "linear"    ident ":" tl_shape "→" tl_shape " bias" : tl_decl
+
+-- Layer 2: index expressions
+syntax ident                 : tl_idx_expr
+syntax num                   : tl_idx_expr
+syntax num "*" ident         : tl_idx_expr
+syntax ident "+" num         : tl_idx_expr
+syntax ident "-" num         : tl_idx_expr
+syntax num "*" ident "+" num : tl_idx_expr
+syntax "(" tl_idx_expr ")"   : tl_idx_expr
+
+-- Layer 2.5: predicate arithmetic
+syntax tl_idx_expr                               : tl_pred_term
+syntax "imul(" tl_pred_term "," tl_pred_term ")" : tl_pred_term
+syntax "(" tl_pred_term ")"                      : tl_pred_term
+
+-- Layer 3: predicates
+syntax tl_pred_term "<"  tl_pred_term             : tl_bool_expr
+syntax tl_pred_term "≤"  tl_pred_term             : tl_bool_expr
+syntax tl_pred_term "="  tl_pred_term             : tl_bool_expr
+syntax tl_pred_term "≠"  tl_pred_term             : tl_bool_expr
+syntax tl_pred_term ">"  tl_pred_term             : tl_bool_expr
+syntax tl_pred_term "≥"  tl_pred_term             : tl_bool_expr
+syntax tl_bool_expr "∧" tl_bool_expr              : tl_bool_expr
+syntax tl_bool_expr "∨" tl_bool_expr              : tl_bool_expr
+syntax "¬" tl_bool_expr                           : tl_bool_expr
+syntax "|" tl_pred_term "|"                        : tl_bool_expr
+syntax "ieq(" tl_pred_term "," tl_pred_term ")"   : tl_bool_expr
+syntax "(" tl_bool_expr ")"                        : tl_bool_expr
+
+-- Layer 4: RHS
+syntax ident "[" tl_idx_expr,* "]"     : tl_factor
+syntax "[" tl_bool_expr "]"            : tl_factor
+
+syntax tl_factor " · " tl_factor       : tl_prod_term
+syntax tl_factor                        : tl_prod_term
+
+syntax tl_prod_term " + " tl_prod_term  : tl_sum_expr
+syntax tl_prod_term                      : tl_sum_expr
+
+syntax "relu"                                    : tl_nonlin
+syntax "softmax"                                 : tl_nonlin
+syntax "softmax"   "(" "where" tl_bool_expr ")"  : tl_nonlin
+syntax "normalize"                               : tl_nonlin
+syntax "normalize" "(" "where" tl_bool_expr ")"  : tl_nonlin
+
+syntax tl_nonlin "(" tl_sum_expr ")"   : tl_rhs
+syntax tl_sum_expr                      : tl_rhs
+
+-- Layer 5: statements
+syntax ident "[" tl_lhs_slot,* "]" ":=" tl_rhs : tl_stmt
+syntax ident                 : tl_lhs_slot
+syntax num                   : tl_lhs_slot
+syntax ident "+1"            : tl_lhs_slot
+syntax num "*" ident         : tl_lhs_slot
+syntax ident "+" num         : tl_lhs_slot
+syntax num "*" ident "+" num : tl_lhs_slot
+
+-- Layer 6
+syntax (tl_decl <|> tl_stmt)* : tl_program
+```
+
+**Elaboration function signatures (one per syntax category):**
+
+```lean
+partial def elabTLAxisKind  : Syntax → MetaM Expr   -- → AxisKind
+partial def elabTLAxisSpec  : Syntax → MetaM Expr   -- → AxisSpec  (uid := 0; assigned in Stage 2)
+partial def elabTLShape     : Syntax → MetaM Expr   -- → List AxisSpec
+partial def elabTLDecl      : Syntax → MetaM Expr   -- → Decl
+partial def elabTLIdxExpr   : Syntax → MetaM Expr   -- → IdxExpr
+partial def elabTLPredTerm  : Syntax → MetaM Expr   -- → PredArith
+partial def elabTLRelOp     : Syntax → MetaM Expr   -- → RelOp
+partial def elabTLBoolExpr  : Syntax → MetaM Expr   -- → BoolExpr
+partial def elabTLNonlin    : Syntax → MetaM Expr   -- → Nonlin
+partial def elabTLFactor    : Syntax → MetaM Expr   -- → Factor
+partial def elabTLProdTerm  : Syntax → MetaM Expr   -- → ProdTerm
+partial def elabTLSumExpr   : Syntax → MetaM Expr   -- → SumExpr
+partial def elabTLRHS       : Syntax → MetaM Expr   -- → RHSExpr
+partial def elabTLLHSSlot   : Syntax → MetaM Expr   -- → LHSSlot
+partial def elabTLStmt      : Syntax → MetaM Expr   -- → Stmt
+partial def elabTLProgram   : Syntax → MetaM Expr   -- → TLProgram
+```
+
+The elaborator is pure syntax-walking with no side effects: UID minting and axis unification happen in Stage 2, not Stage 1.
+
+### 12.4 Semantic compilation
+
+```lean
+/-- Lower a TLProgram to a ThreadedComposed morphism. Runs in TermM to mint
+    fresh UIDs for synthetic intermediates introduced during index-arithmetic
+    lowering and nonlinearity splitting. -/
+def TLProgram.compile : TLProgram → TermM ThreadedComposed
+```
+
+The compilation is a typed pipeline; each phase boundary carries a more constrained type so that Python-comment invariants become enforced by construction:
+
+```
+TLProgram
+  →[assignUIDs]    LabeledProgram        -- every AxisSpec has a fresh UID
+  →[resolveDecls]  ResolvedProgram       -- DeclEnv built; external names identified; bias materialized
+  →[unifyAxes]     CanonicalProgram      -- axis UIDs are canonical (pure)
+  →[lowerArith]    LoweredProgram        -- no const/affine IdxExprs in reads; Scatter fill initialized
+  →[finalizeScans] ScanProgram           -- no bare iterAt/iterNext LHSSlots
+  →[splitNonlins]  LinearProgram         -- no nonlinearity in RHSExpr.nonlin
+  →[schedule]      ScheduledProgram      -- live stmts in reverse-topological order
+  →[route]         ThreadedComposed
+```
+
+| Phase | What it does | Key Lean idiom |
+|---|---|---|
+| **assignUIDs** | Traverses `decls` and `stmts`; mints a fresh UID for each `AxisSpec` via `freshUData` ([§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer)). | `StateT UID TermM` |
+| **resolveDecls** | Builds `DeclEnv : HashMap String Decl`. Validates: `linear` weight appears in exactly one product factor; every declared name has a consistent shape across stmts. `linear ... bias:=true` emits a bias-add stmt. Marks each name as external (declared) or internal (produced by a stmt) — drives routing. Predicate-typed names are recorded here so the routing phase can emit ∃/∧ contraction rather than Σ. | `WriterT (DList Stmt) Id` for bias stmts; pure `DeclEnv` output |
+| **unifyAxes** | Collects `(uid_a, uid_b)` pairs from positional matching of axis occurrences across stmts; computes transitive closure; normalizes all UIDs. **Pure function** — the full program is known statically, so no incremental update loop is needed (contrast Python's eager `Context.append_iter`). | `HashMap UID UID`; pure |
+| **lowerArith** | `IdxExpr.const` reads → fresh `Slice` intermediate; `IdxExpr.affine` reads → fresh `Reindex` intermediate; affine `LHSSlot`s → `Scatter` (injectivity checked; `reduce = some "sum"` required for non-injective maps). Non-zero fill emits a fill-initialization stmt before the scatter. All auxiliary stmts emitted into the writer, not registered into a global. | `WriterT (DList Stmt) (StateT UID Id)` |
+| **finalizeScans** | Groups stmts by name + iteration axis UID; pairs `iterAt`/`iterNext` slots into `Scan` nodes; stmts sharing the same iteration-axis UID across names form a coupled `Scan` (`n_states > 1`). `Stmt.recurMorphism` supplies the step morphism directly, bypassing equation lowering for that scan state. Validates: every `recur_step` has a matching `base_case`; `l+1` absent from RHS for the iteration axis. | Pure `List Stmt → List ScanStmt` |
+| **splitNonlins** | Lifts `relu`/`softmax`/`normalize` out of `RHSExpr.nonlin` into a separate composed step. Masked softmax emits an alignment-permutation step computed from the `where` mask. | `WriterT (DList ScanStmt) Id` |
+| **schedule** | Backward reachability BFS from the output name simultaneously determines liveness (DCE) and produces a valid reverse-topological order. Two passes in Python; one here because the BFS visit order is already a reverse topo order. | Pure `String → List ScanStmt → List ScanStmt` |
+| **route** | Detects contracted axes (present in a `ProdTerm` but absent from the LHS); builds `Broadcasted` morphisms (∃/∧ contraction for predicate-typed outputs per `DeclEnv`, Σ otherwise). Assigns index slots; builds `ThreadedComposed.routing` and `n_external`. Automatic associative-scan detection (syntactic check on recurrence `IdxExpr`) selects `ScanAffine` where applicable. | Pure `List ScanStmt → DeclEnv → Context → ThreadedComposed` |
+
+The result is a `ThreadedComposed` morphism in `Br` — a finite presentation of an `∫Dat`-morphism in the sense of [§8](#8-acsets-and-python-interop).
+
+**Python correspondence:**
+
+| Lean DSL | Python DSL | Notes |
+|---|---|---|
+| `tensor Name : shape` | `tl.Name.tensor(*axes)` | shape declaration |
+| `predicate Name : shape` | `tl.Name.predicate(*axes)` | Bool-typed |
+| `linear Name : in → out [bias]` | `tl.Name.linear(out_axes=…, in_axes=…, bias=…)` | weight declaration |
+| `Name[i,j] := rhs` | `tl.Name[i,j] = rhs` | normal assignment |
+| `Name[0, j] := rhs` | `tl.Name[j, 0] = rhs` | scan base case |
+| `Name[l+1, j] := rhs` | `tl.Name[j, l+1] = rhs` | scan recurrence step |
+| `Name[2*i] := rhs` | `tl.Name[2*i] = rhs` | affine Scatter write |
+| `A[i,k] · B[k,j]` | `tl.A[i,k] * tl.B[k,j]` | Einstein product; k contracted |
+| `A[i] + B[i]` | `tl.A[i] + tl.B[i]` | elementwise sum |
+| `[i < j]` | `i < j` (Iverson via monkey-patch) | Iverson bracket |
+| `relu(…)` | `relu(…)` | ReLU nonlinearity |
+| `softmax(where P)(…)` | `softmax(…, where=P)` | masked softmax |
+| `normalize(where P)(…)` | `normalize(…, where=P)` | masked normalize |
+| `X[n]` | `tl.X[n]` (int index) | Slice — constant read |
+| `X[i + n]` | `tl.X[i + n]` (affine expr) | Reindex — affine read |
+| `Y[n*i] := …` | `tl.Y[n*i] = …` (affine LHS) | Scatter — affine write |
+| `Stmt.recurMorphism name axis morphism` | `tl.name.recur(l, morphism)` | escape hatch; step morphism as a term (syntax TBD) |
+| `elabTLProgram` (Stage 1) | — | `Syntax → MetaM Expr`; no Python analogue |
+| `TLProgram.compile` (Stage 2) | `tl.to_morphism()` | `TLProgram → TermM ThreadedComposed` |
+
 ## 13. Appendix: out of scope
 
 Two families of structure are deliberately **not encoded**, because they carry no propositional or computational content the framework reasons about. The first is **`DynamicName` and its LaTeX rendering** — the human-readable, mathematically-typeset names attached to axes and arrays. The second is the **`Block` display metadata** — the layout and presentation bookkeeping the visualizer consumes. Both are *semantically transparent*: erasing them changes no morphism, no shape, no composite, and no proof. They ride on the executable side of the seam as identity/display decoration (the `WithUID` decoration of [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) carries the optional `DynamicName`), and they are left exactly where the current document already leaves `Block` — outside the encoding, mentioned but never formalized.
