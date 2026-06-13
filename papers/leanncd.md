@@ -532,6 +532,8 @@ acset.md interprets this `G` as a strict monoidal functor `D : J → Br` from a 
 
 The acset tables and their CSV serialization are the **executable realization** of the `∫Dat` *specification* — the same proposition/computation seam as [§7](#7-grothendieck-split-and-composition-as-pushout), now in fully concrete form. `write_sbr`/`read_sbr` write the two halves of an `∫Dat`-morphism to separate tables — connectivity (the C-set part: `equations`, `arrays`, `array_axes`, `samples`) and data (the attribute part: `axis_sizes`, coefficients, datatypes) — which is precisely the Grothendieck split serialized. The same `Axis` UIDs appear in the term world's `Weave` objects and in the acset's `ArrayAxis` rows, so any `Context`-mediated unification (the [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) coequalizer computation) is reflected in both views without a round-trip. The categorical object `∫Dat` is what a Lean development *proves about*; the acset tables and CSV are what pyncd *computes and stores*. They meet at the seam.
 
+There are thus **two ways to populate one `∫Dat`-morphism**, and they are complementary, not rival. The tensor-logic DSL of [§12](#12-the-tensor-logic-dsl) builds one statically, as a `ThreadedComposed` term ([§12.4](#124-semantic-compilation)); `read_sbr` builds one dynamically, from CSV tables exported by the Python acset machinery. `write_sbr : ThreadedComposed → SBrInstance` and its inverse make the two presentations interconvertible, so a morphism authored in the DSL and one read from CSV are the *same* object and either may be checked against the other. Both routes share the [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) UID coequalizer and so agree on axis identity on the nose.
+
 ### 8.3 Consolidated Python correspondence
 
 The tables below collect the systematic Lean ↔ Python correspondence, **organized by the new tower** — base, core, mixins, the Grothendieck/pushout seam, the acset realization — rather than by the dissolved Layer 1 / Layer 2 split. Inline one-line pointers in earlier sections (e.g. `act` ↔ batch lift, `BrBase` ↔ `Broadcasted`) are the local view; this is the systematic one.
@@ -544,6 +546,7 @@ The tables below collect the systematic Lean ↔ Python correspondence, **organi
 | `StMat` | `StrideMorphism` | stride *matrix* (`Matrix … Numeric` + bias) vs bundled stride record |
 | `BrBase` | `Broadcasted` | base op + reindexings; `Fin`-indexed weaves vs runtime tuples |
 | `BrMorph` | `Composed` | free list of `BrBase` vs `content: tuple[M,…]` |
+| `ThreadedComposed` | `ThreadedComposed` | routed presentation of a `BrMorph` ([§12.4](#124-semantic-compilation)); the DSL's output, `write_sbr`-serializable to `SBrInstance` |
 | `ProductOfMorphisms` ↔ `tensorHom` | `ProductOfMorphisms[L, M]` | `ColoredPROP.tensorHom` (a morphism) vs a data wrapper |
 | `DGradedColoredPROP.act` | batch lift `[f,P]` | the lift action; `[f,P] = act(f, 𝟙_P)`, `[X,η] = act(𝟙_X, η)` |
 | `WeaveShape` / `structure Weave` | `Weave._shape` | per-array shape (`WeaveShape`); §5's `structure Weave` = the cartesian-lift factorization witness |
@@ -641,7 +644,7 @@ The MoE level deserves a specific word, because it is the one place the same cat
 
 ## 11. Lean formalization notes
 
-The strategy of [graded_prop.md §10](graded_prop.md#10-lean-formalization-notes) reads as a Mathlib shopping list, and most of the tower lands on existing `CategoryTheory.*` machinery. The base colored PROP and the seam adapter ([§2](#2-the-base-coloredprop)–[§3](#3-the-seam-adapter-into-mathlib)) are `CategoryTheory.MonoidalCategory` / `SymmetricCategory` over `FreeMonoidalCategory (Discrete O)`. The Grothendieck split of [§7.1](#71-the-structuredata-split-as-dat) is `CategoryTheory.Grothendieck` applied to the data functor `Dat'`. The composition-as-pushout of [§6](#6-mixins-scan-route-symmetry-para)/[§7.3](#73-composition-as-pushout) and the associativity of [§8.5](#9-the-propositions-as-generic-theorems) are `CategoryTheory.Limits.pushout` plus the pasting lemma. The `Algebra` functor `F : C ⥤ V` and its morphisms are `MonoidalFunctor` / `MonoidalNatTrans`. The gated equivariance of [§6.2](#62-route-and-symmetry-stubs)/[§8.4](#9-the-propositions-as-generic-theorems) is `CategoryTheory.Action` / `Rep` / `Monad.Algebra` (the Eilenberg–Moore category of the symmetry monad). And the architecture relations `R` quotienting `C♯` ([§7](#7-grothendieck-split-and-composition-as-pushout)) are `CategoryTheory.Quotient`. The `D`-actegory coherence bundle of the core — the triangle/pentagon and the distributivity isos — is the one piece Mathlib carries only partially (`Action` covers a monoid acting, not a full monoidal-category actegory), so it is hand-rolled as functor-plus-natural-iso algebra; it is routine, not deep.
+The strategy of [graded_prop.md §10](graded_prop.md#10-lean-formalization-notes) reads as a Mathlib shopping list, and most of the tower lands on existing `CategoryTheory.*` machinery. The base colored PROP and the seam adapter ([§2](#2-the-base-coloredprop)–[§3](#3-the-seam-adapter-into-mathlib)) are `CategoryTheory.MonoidalCategory` / `SymmetricCategory` over `FreeMonoidalCategory (Discrete O)`. The Grothendieck split of [§7.1](#71-the-structuredata-split-as-dat) is `CategoryTheory.Grothendieck` applied to the data functor `Dat'`. The composition-as-pushout of [§6](#6-mixins-scan-route-symmetry-para)/[§7.3](#73-composition-as-pushout) and the associativity of [Prop 8.5](#9-the-propositions-as-generic-theorems) are `CategoryTheory.Limits.pushout` plus the pasting lemma. The `Algebra` functor `F : C ⥤ V` and its morphisms are `MonoidalFunctor` / `MonoidalNatTrans`. The gated equivariance of [§6.2](#62-route-and-symmetry-stubs)/[§8.4](#9-the-propositions-as-generic-theorems) is `CategoryTheory.Action` / `Rep` / `Monad.Algebra` (the Eilenberg–Moore category of the symmetry monad). And the architecture relations `R` quotienting `C♯` ([§7](#7-grothendieck-split-and-composition-as-pushout)) are `CategoryTheory.Quotient`. The `D`-actegory coherence bundle of the core — the triangle/pentagon and the distributivity isos — is the one piece Mathlib carries only partially (`Action` covers a monoid acting, not a full monoidal-category actegory), so it is hand-rolled as functor-plus-natural-iso algebra; it is routine, not deep.
 
 Beyond the coverage map, several honest notes shape any transcription:
 
@@ -686,12 +689,17 @@ shape       ::= '(' ')'
 
 axis_spec   ::= name ':' axis_kind
 
-axis_kind   ::= 'ℝ'           -- symbolic-size real axis
-              | 'ℝ[' n ']'    -- concrete-size real axis
-              | 'ℕ'           -- symbolic-size discrete axis
-              | 'ℕ[' n ']'    -- concrete-size discrete axis
-              | 'norm'        -- normalization axis, symbolic
-              | 'norm[' n ']' -- normalization axis, concrete
+axis_kind   ::= 'ℝ'    ['[' size ']']   -- real axis;          bracket = size (else symbolic)
+              | 'ℕ'    ['[' size ']']   -- discrete axis
+              | 'norm' ['[' size ']']   -- normalization axis (a ℝ axis flagged for softmax/normalize)
+
+-- A size is a symbolic dimension term: an element of `Numeric` (§2.1 / §7.2).
+-- Omitting the bracket leaves the size a fresh FreeNumeric generator, minted in Stage 2.
+size        ::= n                       -- literal (Numeric constant)
+              | name                    -- symbolic generator (a FreeNumeric, §2.1)
+              | size '*' size
+              | size '+' size
+              | '(' size ')'
 
 -- Layer 2: Index expressions (strictly affine; n ∈ ℤ)
 idx_expr    ::= axis_name
@@ -802,18 +810,23 @@ Direct formalization of the BNF layers as Lean inductive types. `UID` and `Numer
 ```lean
 -- Layer 1
 inductive AxisKind
-  | real   : Option Numeric → AxisKind   -- ℝ axis
-  | nat    : Option Numeric → AxisKind   -- ℕ axis
-  | norm   : Option Numeric → AxisKind   -- normalization axis
+  | real   : Option Numeric → AxisKind   -- ℝ axis; coordinate DType.reals (§2.3)
+  | nat    : Option Numeric → AxisKind   -- ℕ axis; coordinate DType.nat   (§2.3)
+  | norm   : Option Numeric → AxisKind   -- a ℝ axis additionally flagged for softmax/normalize
+-- The `Option Numeric` is the axis SIZE (Axis.size, §2.2): `some s` concrete, `none` a fresh
+-- FreeNumeric minted in Stage 2 (§7.2). The real/nat tag is the §2.3 DType of coordinates along
+-- the axis (fixing the assembled array's `ArrayType.dtype`). `norm` carries no new datatype — it
+-- is a `real` axis marked as the contraction dimension of a normalization nonlinearity, consumed
+-- by `splitNonlins` (§12.4) and realized in the Algebra into the target actegory (§7.5).
 
 structure AxisSpec where
   name : String
-  uid  : UID       -- identity key for Context coequalizer (§7.4); assigned in Stage 2
+  uid  : UID       -- identity key for the Context coequalizer (§7.4); assigned in Stage 2
   kind : AxisKind
 
 inductive Decl
   | tensor    : String → List AxisSpec → Decl
-  | predicate : String → List AxisSpec → Decl
+  | predicate : String → List AxisSpec → Decl   -- Boolean-valued: R = Bool target semiring (§7.5)
   | linear    : String → (inAxes outAxes : List AxisSpec) → (bias : Bool) → Decl
 ```
 
@@ -884,9 +897,10 @@ structure ScatterOpts where
 inductive Stmt
   | assign        : String → List LHSSlot → RHSExpr → Stmt
   | scatter       : String → List LHSSlot → RHSExpr → ScatterOpts → Stmt
-  | recurMorphism : String → AxisSpec → Expr → Stmt
+  | recurMorphism : String → AxisSpec → ThreadedComposed → Stmt
   -- escape hatch: String = tensor name, AxisSpec = iteration axis,
-  -- Expr : ThreadedComposed = pre-built step morphism. Syntax TBD.
+  -- ThreadedComposed = a pre-built step morphism (§12.4). A value, not a metaprogramming
+  -- Expr: it is the same morphism type `compile` produces. Surface syntax TBD.
 
 structure TLProgram where
   decls : List Decl
@@ -900,6 +914,7 @@ Following the IMP language pattern of the Lean 4 metaprogramming book (ch. 8): o
 **Syntax categories:**
 
 ```lean
+declare_syntax_cat tl_size
 declare_syntax_cat tl_axis_kind
 declare_syntax_cat tl_axis_spec
 declare_syntax_cat tl_shape
@@ -921,13 +936,19 @@ declare_syntax_cat tl_program
 **Representative syntax rules (one per BNF layer):**
 
 ```lean
--- Layer 1: axis kinds
-syntax "ℝ"              : tl_axis_kind
-syntax "ℝ[" num "]"     : tl_axis_kind
-syntax "ℕ"              : tl_axis_kind
-syntax "ℕ[" num "]"     : tl_axis_kind
-syntax "norm"           : tl_axis_kind
-syntax "norm[" num "]"  : tl_axis_kind
+-- Layer 1: axis kinds (bracket holds a tl_size term elaborating to Numeric, §2.1)
+syntax num                   : tl_size
+syntax ident                 : tl_size
+syntax tl_size "*" tl_size   : tl_size
+syntax tl_size "+" tl_size   : tl_size
+syntax "(" tl_size ")"       : tl_size
+
+syntax "ℝ"                   : tl_axis_kind
+syntax "ℝ[" tl_size "]"      : tl_axis_kind
+syntax "ℕ"                   : tl_axis_kind
+syntax "ℕ[" tl_size "]"      : tl_axis_kind
+syntax "norm"                : tl_axis_kind
+syntax "norm[" tl_size "]"   : tl_axis_kind
 
 syntax ident ":" tl_axis_kind : tl_axis_spec
 syntax "(" tl_axis_spec,* ")" : tl_shape
@@ -1000,6 +1021,7 @@ syntax (tl_decl <|> tl_stmt)* : tl_program  -- accepts interleaved decls/stmts; 
 **Elaboration function signatures (one per syntax category):**
 
 ```lean
+partial def elabTLSize      : Syntax → MetaM Expr   -- → Numeric (§2.1)
 partial def elabTLAxisKind  : Syntax → MetaM Expr   -- → AxisKind
 partial def elabTLAxisSpec  : Syntax → MetaM Expr   -- → AxisSpec  (uid := 0; assigned in Stage 2)
 partial def elabTLShape     : Syntax → MetaM Expr   -- → List AxisSpec
@@ -1023,6 +1045,17 @@ The elaborator is pure syntax-walking with no side effects: UID minting and axis
 ### 12.4 Semantic compilation
 
 ```lean
+/-- A routed DAG of Br base morphisms: the term-world presentation of one Br morphism. -/
+structure ThreadedComposed where
+  steps      : List BrBase     -- the lowered operations, each a Br base morphism (§2.3)
+  routing    : …               -- wiring: which step output feeds which step input
+  n_external : ℕ               -- number of external inputs (declared tensors / weights)
+-- A ThreadedComposed PRESENTS one `BrMorph` (§2.3): composing and tensoring `steps` along
+-- `routing` collapses to a single morphism of `Br`. It is the term-world twin of the acset
+-- `SBrInstance` (§8.1); `write_sbr : ThreadedComposed → SBrInstance` serializes one into the
+-- other, and `read_sbr` inverts it. So the DSL path (this section) and the CSV path (§8) land
+-- on the very same `∫Dat`-morphism, in two presentations of it.
+
 /-- Lower a TLProgram to a ThreadedComposed morphism. Runs in TermM to mint
     fresh UIDs for synthetic intermediates introduced during index-arithmetic
     lowering and nonlinearity splitting. -/
@@ -1046,15 +1079,15 @@ TLProgram
 | Phase | What it does | Key Lean idiom |
 | --- | --- | --- |
 | **assignUIDs** | Traverses `decls` and `stmts`; mints a fresh UID for each `AxisSpec` via `freshUData` ([§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer)). | `StateT UID TermM` |
-| **resolveDecls** | Builds `DeclEnv : HashMap String Decl`. Validates: `linear` weight appears in exactly one product factor; every declared name has a consistent shape across stmts. `linear ... bias:=true` emits a bias-add stmt. Marks each name as external (declared) or internal (produced by a stmt) — drives routing. Predicate-typed names are recorded here so the routing phase can emit ∃/∧ contraction rather than Σ. | `WriterT (DList Stmt) Id` for bias stmts; pure `DeclEnv` output |
-| **unifyAxes** | Collects `(uid_a, uid_b)` pairs from positional matching of axis occurrences across stmts; computes transitive closure; normalizes all UIDs. **Pure function** — the full program is known statically, so no incremental update loop is needed (contrast Python's eager `Context.append_iter`). | `HashMap UID UID`; pure |
-| **lowerArith** | `IdxExpr.const` reads → fresh `Slice` intermediate; `IdxExpr.affine` reads → fresh `Reindex` intermediate; affine `LHSSlot`s → `Scatter` (injectivity checked; `reduce = some "sum"` required for non-injective maps). Non-zero fill emits a fill-initialization stmt before the scatter. All auxiliary stmts emitted into the writer, not registered into a global. | `WriterT (DList Stmt) (StateT UID Id)` |
-| **finalizeScans** | Groups stmts by name + iteration axis UID; pairs `iterAt`/`iterNext` slots into `Scan` nodes; stmts sharing the same iteration-axis UID across names form a coupled `Scan` (`n_states > 1`). `Stmt.recurMorphism` supplies the step morphism directly, bypassing equation lowering for that scan state. Validates: every `recur_step` has a matching `base_case`; `l+1` absent from RHS for the iteration axis. | Pure `List Stmt → List ScanStmt` |
-| **splitNonlins** | Lifts `relu`/`softmax`/`normalize` out of `RHSExpr.nonlin` into a separate composed step. Masked softmax emits an alignment-permutation step computed from the `where` mask. | `WriterT (DList ScanStmt) Id` |
+| **resolveDecls** | Builds `DeclEnv : HashMap String Decl`. Validates: `linear` weight appears in exactly one product factor; every declared name has a consistent shape across stmts. `linear ... bias:=true` emits a bias-add stmt. Marks each name as external (declared) or internal (produced by a stmt) — drives routing. Predicate-typed names are recorded here so the routing phase can select the Boolean value semiring (`R = Bool`, [§7.5](#75-algebras-and-construct)) instead of `R = ℝ`. | `WriterT (DList Stmt) Id` for bias stmts; pure `DeclEnv` output |
+| **unifyAxes** | The [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) UID coequalizer, computed in batch. Collects the `(uid_a, uid_b)` identifications from axis occurrences sharing a name within program scope (Domingos' name-binding, [§12.1](#121-bnf-grammar)), feeds them to `Context.merge`, and applies the result with `Context.apply`. The canonical representative is the **largest UID** — the universal cocone vertex of [§7.3](#73-composition-as-pushout) — so a DSL-built morphism and a CSV-built one agree on axis identity on the nose. The whole program is known statically, so this runs once rather than incrementally (Python's `Context.append_iter`), but it is the *same* coequalizer with the *same* representative rule. | `Context` / `EqClass` ([§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer)) |
+| **lowerArith** | `IdxExpr.const` reads → fresh `Slice` intermediate; `IdxExpr.affine` reads → fresh `Reindex` intermediate; affine `LHSSlot`s → `Scatter` (injectivity checked; `reduce = some "sum"` required for non-injective maps). Each is a `BrBase` ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) whose `reindexings` field carries the affine map as an `St` stride matrix `StMat` — the locus where `St` lives inside `Br`. Non-zero fill emits a fill-initialization stmt before the scatter. All auxiliary stmts emitted into the writer, not registered into a global. | `WriterT (DList Stmt) (StateT UID Id)` |
+| **finalizeScans** | Groups stmts by name + iteration axis UID; pairs `iterAt`/`iterNext` slots into `Scan` nodes; stmts sharing the same iteration-axis UID across names form a coupled `Scan` (`n_states > 1`). Each `Scan` is the `cata(step)` of the `TemporalGraded` mixin ([§6.1](#61-temporalgraded--scan)) over the iteration axis as temporal object `L`; the prefix-restriction and batching laws it obeys are Props 8.7–8.8. `Stmt.recurMorphism` supplies the step morphism directly, bypassing equation lowering for that scan state. Validates: every `recur_step` has a matching `base_case`; `l+1` absent from RHS for the iteration axis. | Pure `List Stmt → List ScanStmt` |
+| **splitNonlins** | Lifts `relu`/`softmax`/`normalize` out of `RHSExpr.nonlin` into a separate composed step. These are genuinely nonlinear, so they are not reindexings (`StMat` is affine); each becomes a `BrBase` op ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) whose numeric semantics are supplied by the Algebra functor `F : C → V` into the target actegory ([§7.5](#75-algebras-and-construct)). For `softmax`/`normalize` the `norm`-flagged axis ([§12.2](#122-abstract-syntax)) is the contraction dimension; masked variants emit an alignment-permutation step computed from the `where` mask. | `WriterT (DList ScanStmt) Id` |
 | **schedule** | Backward reachability BFS from the output name simultaneously determines liveness (DCE) and produces a valid reverse-topological order. Two passes in Python; one here because the BFS visit order is already a reverse topo order. | Pure `String → List ScanStmt → List ScanStmt` |
-| **route** | Detects contracted axes (present in a `ProdTerm` but absent from the LHS); builds `Broadcasted` morphisms (∃/∧ contraction for predicate-typed outputs per `DeclEnv`, Σ otherwise). Assigns index slots; builds `ThreadedComposed.routing` and `n_external`. Automatic associative-scan detection (syntactic check on recurrence `IdxExpr`) selects `ScanAffine` where applicable. | Pure `List ScanStmt → DeclEnv → Context → ThreadedComposed` |
+| **route** | Detects contracted axes (present in a `ProdTerm` but absent from the LHS) and builds a `BrBase`/`Broadcasted` ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) per stmt. The contraction arithmetic is the target actegory's value semiring `R` ([§7.5](#75-algebras-and-construct)): `R = ℝ` (×, then Σ) for `tensor` outputs, `R = Bool` (∧, then ∃) for `predicate` outputs — the ∃/∧-vs-Σ split is exactly this choice of `R` per `DeclEnv`. Assigns index slots; builds `ThreadedComposed.routing` and `n_external`. Automatic associative-scan detection (syntactic check on the recurrence `IdxExpr`) selects the `ScanAffine` fast path — the case where the step algebra factors through a monoid, i.e. Prop 8.7's `O(log N)` parallel prefix. | Pure `List ScanStmt → DeclEnv → Context → ThreadedComposed` |
 
-The result is a `ThreadedComposed` morphism in `Br` — a finite presentation of an `∫Dat`-morphism in the sense of [§8](#8-acsets-and-python-interop).
+The result is a `ThreadedComposed` (a presentation of a `BrMorph`, [§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) — a finite presentation of an `∫Dat`-morphism, the very thing an `SBrInstance` ([§8.1](#81-sbrinstance-as-a-finite-presentation-of-an-dat-morphism)) presents in tabular form. The DSL path of this section and the CSV path of [§8](#8-acsets-and-python-interop) therefore produce the same categorical object: `write_sbr`/`read_sbr` move between the two presentations without changing the morphism.
 
 **Python correspondence:**
 
