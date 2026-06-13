@@ -57,4 +57,21 @@ theorem BrMorph.comp_assoc {a b c d : BrObj}
   | nil _ => rfl
   | cons _ _ ih => simp [BrMorph.comp, ih]
 
+instance Br : ColoredPROP BrObj where
+  gen    := ArrayType
+  toList := id
+  ofList := id
+  hom    := BrMorph
+  id     := .nil
+  comp   := BrMorph.comp
+  id_comp := BrMorph.nil_comp
+  comp_id := BrMorph.comp_nil
+  assoc   := BrMorph.comp_assoc
+  tensor_assoc  := by intro a b c; simp [List.append_assoc]
+  tensor_unit_l := by intro a; simp
+  tensor_unit_r := by intro a; simp [List.append_nil]
+  swap := sorry       -- SIGNATURE (Milestone B+): interleaving rearrangement morphism (§2.3)
+  tensorHom := sorry  -- SIGNATURE (Milestone B+): ProductOfMorphisms / parallel product (§2.3)
+  elemental := sorry  -- SIGNATURE (Milestone B+): Br is elemental, theory.md argument (§2.3)
+
 end LeanNCD

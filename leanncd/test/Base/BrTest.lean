@@ -18,4 +18,7 @@ example {a b : BrObj} (g : BrMorph a b) : BrMorph.comp (.nil a) g = g := rfl
 #print axioms BrMorph.comp_nil
 #print axioms BrMorph.comp_assoc
 
+-- TEST: Br resolves as a ColoredPROP instance.
+example : ColoredPROP BrObj := inferInstance
+
 end LeanNCD
