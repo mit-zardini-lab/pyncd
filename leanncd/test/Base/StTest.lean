@@ -10,4 +10,10 @@ noncomputable def a0 : Axis := ⟨some "i", MvPolynomial.X "n"⟩
 example : (StMat.id [a0]).coeffs = (1 : Matrix (Fin 1) (Fin 1) Numeric) := rfl
 example : (StMat.id [a0]).bias = (fun _ => 0) := rfl
 
+-- TEST: the St category laws are proved with NO sorry.
+-- `#print axioms` must list only [propext, Classical.choice, Quot.sound] — never sorryAx.
+#print axioms StMat.id_comp
+#print axioms StMat.comp_id
+#print axioms StMat.comp_assoc
+
 end LeanNCD

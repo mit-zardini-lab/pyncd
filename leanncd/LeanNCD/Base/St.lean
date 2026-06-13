@@ -15,6 +15,7 @@ abbrev StObj := List Axis
 /-- A stride morphism `dom → cod`: an affine coordinate transform stored as a coefficient
     matrix over `Numeric` plus a bias vector. Row `j` is the linear combination of input
     coordinates producing output coordinate `j`. -/
+@[ext]
 structure StMat (dom cod : StObj) where
   coeffs : Matrix (Fin cod.length) (Fin dom.length) Numeric
   bias   : Fin cod.length → Numeric
@@ -26,5 +27,26 @@ noncomputable def StMat.id (a : StObj) : StMat a a where
 noncomputable def StMat.comp {a b c : StObj} (f : StMat a b) (g : StMat b c) : StMat a c where
   coeffs := g.coeffs * f.coeffs
   bias i := dotProduct (g.coeffs i) f.bias + g.bias i
+
+theorem StMat.id_comp {a b : StObj} (f : StMat a b) : StMat.comp (StMat.id a) f = f := by
+  apply StMat.ext
+  · simp [StMat.comp, StMat.id, Matrix.mul_one]
+  · funext i
+    simp [StMat.comp, StMat.id]
+
+theorem StMat.comp_id {a b : StObj} (f : StMat a b) : StMat.comp f (StMat.id b) = f := by
+  apply StMat.ext
+  · simp [StMat.comp, StMat.id, Matrix.one_mul]
+  · funext i
+    simp [StMat.comp, StMat.id, Matrix.one_apply, dotProduct]
+
+theorem StMat.comp_assoc {a b c d : StObj} (f : StMat a b) (g : StMat b c) (h : StMat c d) :
+    StMat.comp (StMat.comp f g) h = StMat.comp f (StMat.comp g h) := by
+  apply StMat.ext
+  · simp [StMat.comp, Matrix.mul_assoc]
+  · funext i
+    simp only [StMat.comp, Matrix.mul_apply, dotProduct, Finset.mul_sum, mul_add,
+      Finset.sum_add_distrib, Finset.sum_mul, mul_assoc]
+    rw [add_assoc, Finset.sum_comm]
 
 end LeanNCD
