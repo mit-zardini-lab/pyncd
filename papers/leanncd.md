@@ -17,7 +17,8 @@ The intent is **formalizability, not formalization**: definitions are given as L
 9. [The propositions as generic theorems](#9-the-propositions-as-generic-theorems)
 10. [Instantiation and future extensions](#10-instantiation-and-future-extensions)
 11. [Lean formalization notes](#11-lean-formalization-notes)
-12. [Appendix: out of scope](#12-appendix-out-of-scope)
+12. [The tensor-logic DSL](#12-the-tensor-logic-dsl)
+13. [Appendix: out of scope](#13-appendix-out-of-scope)
 
 ## 1. Orientation: one structure, one seam
 
@@ -552,7 +553,7 @@ The tables below collect the systematic Lean ↔ Python correspondence, **organi
 | `TermM` = `StateM ℕ` | random-int UID side-effect | the fresh-name counter; Lean threads state, Python mutates a global source |
 | `TermTraversable` | `deep_reconstruct` | per-type traversal instance vs `__dataclass_fields__` reflection |
 | `Algebra.F` | `ConstructedModule.construct()` | the algebra functor `C → V` (full class in the §7.5 / propositions development) |
-| `DynamicName` | `DynamicName` | display only — see [§12](#12-appendix-out-of-scope), out of scope |
+| `DynamicName` | `DynamicName` | display only — see [§13](#13-appendix-out-of-scope), out of scope |
 
 The single coherent message of the table: every row that the old design would have filed under "Layer 2 — Representation" (`Numeric`/`FreeNumeric`, `Context`/`EqClass`, `TermM`, `TermTraversable`, `DynamicName`) is now placed by its categorical role — fiber datum, coequalizer implementation, fresh-name counter, traversal, or display — on one side or the other of the proposition/computation seam. There is no representation layer; there is one tower with one seam.
 
@@ -658,7 +659,7 @@ Beyond the coverage map, several honest notes shape any transcription:
 
 - **Equivariance is gated.** Proposition 8.4's body depends on the `SymmetryGraded` mixin and the Eilenberg–Moore-category machinery for the symmetry monad `T`. The finite-group case is reachable with present Mathlib (`Action`/`Rep`), but the graded-PROP-dependent parts of the encoding wait on this very formalization being in place; the proposition is *stated* now and its proof *gated* ([equivariance_unification.md](equivariance_unification.md)).
 
-## 12. Appendix: out of scope
+## 13. Appendix: out of scope
 
 Two families of structure are deliberately **not encoded**, because they carry no propositional or computational content the framework reasons about. The first is **`DynamicName` and its LaTeX rendering** — the human-readable, mathematically-typeset names attached to axes and arrays. The second is the **`Block` display metadata** — the layout and presentation bookkeeping the visualizer consumes. Both are *semantically transparent*: erasing them changes no morphism, no shape, no composite, and no proof. They ride on the executable side of the seam as identity/display decoration (the `WithUID` decoration of [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) carries the optional `DynamicName`), and they are left exactly where the current document already leaves `Block` — outside the encoding, mentioned but never formalized.
 
