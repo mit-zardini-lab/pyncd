@@ -26,7 +26,7 @@ The prior design predated [graded_prop.md](graded_prop.md): it formalised `St` a
 
 The encoding is therefore a layered tower of typeclasses, each parameterised by the classes below it:
 
-```
+```text
 ColoredPROP O                                    -- lightweight base; St, Br instances
    ⇣ adapter (the seam)  →  Mathlib MonoidalCategory / SymmetricCategory
 DGradedColoredPROP D C   [ColoredPROP D] [ColoredPROP C]   -- core: sh, act, δ, υ, α, axioms
@@ -433,7 +433,7 @@ The failure mode lives in the *attributes*, not the structure: the pushout requi
 
 This is where the proposition/computation seam of [§1](#1-orientation-one-structure-one-seam) becomes tangible. The coequalizer of [§7.3](#73-composition-as-pushout) is the **specification**; the executable structures carried forward from the old "Layer 2" are the **implementation**. They meet at the seam, and neither replaces the other.
 
-**Fresh-UID counter — `TermM`.** Constructing a new symbolic axis mints a fresh identity. Python does this with `random.randint` as a construction side-effect; Lean 4 is pure, so the fresh-name counter is threaded explicitly as a state monad. This is the *executable* side — it computes identities; it proves nothing.
+**Fresh-UID counter — `FreshM`.** Constructing a new symbolic axis mints a fresh identity. Python does this with `random.randint` as a construction side-effect; Lean 4 is pure, so the fresh-name counter is threaded explicitly. Compilation can also fail (shape mismatches, missing base cases, illegal contractions), so `FreshM` is `EStateM CompileError ℕ` — Lean core's combined error+state monad (`Init.Control.EStateM`) rather than a bare `StateM ℕ`. This is the *executable* side — it computes identities and validates constraints; it proves nothing.
 
 ```lean
 abbrev UID := ℕ
@@ -442,11 +442,15 @@ structure UData where
   uid  : UID
   name : Option DynamicName
 
-abbrev TermM := StateM ℕ            -- the fresh-UID counter monad
+/-- Combined error + UID-counter monad for DSL compilation.
+    `EStateM ε σ α` (Lean core, Init.Control.EStateM) = `σ → Result ε σ α`.
+    Compilation validates structure (shape mismatches, missing base cases, etc.)
+    and mints fresh UIDs, so both capabilities are needed together. -/
+abbrev FreshM := EStateM CompileError ℕ
 
-def freshUData : TermM UData := do
+def freshUData : FreshM UData := do
   let n ← get; set (n + 1); return ⟨n, none⟩
--- Constructing a new axis / FreeNumeric runs in TermM; pure code (composition, proofs) does not.
+-- Constructing a new axis / FreeNumeric runs in FreshM; pure code (composition, proofs) does not.
 -- A counter, not random ints: term construction becomes reproducible and testable.
 -- UIDs carry no semantic content — only equality/inequality of two UIDs matters.
 ```
@@ -554,12 +558,12 @@ The tables below collect the systematic Lean ↔ Python correspondence, **organi
 | `∫Dat` instance (`Grothendieck Dat'`) | `SBrInstance` | finite presentation of one `∫Dat`-morphism |
 | `Numeric` = `MvPolynomial String ℕ` | `Numeric` / `FreeNumeric` | the `Dat(c)` fiber; `MvPolynomial.X s` ↔ a `FreeNumeric` generator |
 | `Context` / `EqClass` | `Context` / `EqualityClass` | union-find = the *implementation* of the coequalizer ([§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer)) |
-| `TermM` = `StateM ℕ` | random-int UID side-effect | the fresh-name counter; Lean threads state, Python mutates a global source |
+| `FreshM` = `EStateM CompileError ℕ` | random-int UID side-effect | fresh-name counter + validation errors; Lean threads state explicitly, Python mutates a global source and raises exceptions |
 | `TermTraversable` | `deep_reconstruct` | per-type traversal instance vs `__dataclass_fields__` reflection |
 | `Algebra.F` | `ConstructedModule.construct()` | the algebra functor `C → V` (full class in the §7.5 / propositions development) |
 | `DynamicName` | `DynamicName` | display only — see [§13](#13-appendix-out-of-scope), out of scope |
 
-The single coherent message of the table: every row that the old design would have filed under "Layer 2 — Representation" (`Numeric`/`FreeNumeric`, `Context`/`EqClass`, `TermM`, `TermTraversable`, `DynamicName`) is now placed by its categorical role — fiber datum, coequalizer implementation, fresh-name counter, traversal, or display — on one side or the other of the proposition/computation seam. There is no representation layer; there is one tower with one seam.
+The single coherent message of the table: every row that the old design would have filed under "Layer 2 — Representation" (`Numeric`/`FreeNumeric`, `Context`/`EqClass`, `FreshM`, `TermTraversable`, `DynamicName`) is now placed by its categorical role — fiber datum, coequalizer implementation, fresh-name counter, traversal, or display — on one side or the other of the proposition/computation seam. There is no representation layer; there is one tower with one seam.
 
 ## 9. The propositions as generic theorems
 
@@ -665,21 +669,23 @@ Beyond the coverage map, several honest notes shape any transcription:
 
 ## 12. The tensor-logic DSL
 
-A Lean 4 DSL embedding for tensor logic, following the syntax-category + elaboration pattern of the Lean 4 metaprogramming book (ch. 8): a BNF grammar defines the surface language; Lean inductive types give the abstract syntax; `declare_syntax_cat`/`syntax` rules connect them to Lean's parser; `elabXxx : Syntax → MetaM Expr` functions walk the syntax tree; and `TLProgram.compile : TLProgram → TermM ThreadedComposed` lowers programs to morphisms in `Br`.
+A Lean 4 DSL embedding for tensor logic, following the syntax-category + elaboration pattern of the Lean 4 metaprogramming book (ch. 8): a BNF grammar defines the surface language; Lean inductive types give the abstract syntax; `declare_syntax_cat`/`syntax` rules connect them to Lean's parser; `elabXxx : Syntax → MetaM Expr` functions walk the syntax tree; and `TLProgram.compile : TLProgram → FreshM ThreadedComposed` lowers programs to morphisms in `Br`.
 
-Compilation is a two-stage process. **Stage 1** (`MetaM`): `elabTLProgram` parses concrete syntax into a typed `TLProgram` value. **Stage 2** (`TermM`): `TLProgram.compile` lowers the program to a `ThreadedComposed` morphism, minting fresh UIDs via the counter of [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer). The entry point:
+Compilation is a two-stage process. **Stage 1** (`MetaM`): `elabTLProgram` parses concrete syntax into a typed `TLProgram` value. **Stage 2** (`FreshM`): `TLProgram.compile` lowers the program to a `ThreadedComposed` morphism, minting fresh UIDs and validating semantic constraints via the `FreshM` monad of [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer). The entry point runs Stage 2 at elaboration time, embedding the resulting `ThreadedComposed` as a compile-time constant:
 
 ```lean
 elab "tl!{" p:tl_program "}" : term => do
-  let prog ← elabTLProgram p          -- Stage 1: Syntax → TLProgram  (MetaM)
-  mkAppM ``TLProgram.compile #[prog]  -- Stage 2: TLProgram → ThreadedComposed  (TermM)
+  let prog ← elabTLProgram p                       -- Stage 1: Syntax → TLProgram  (MetaM)
+  let (tc, _) ← ofExcept (TLProgram.compile prog   -- Stage 2: FreshM ThreadedComposed, run at
+                            |>.run 0)               --   elaboration time; counter starts at 0
+  return toExpr tc                                  -- embed ThreadedComposed as a term constant
 ```
 
 ### 12.1 BNF grammar
 
 Extends Domingos' tensor-logic notation (implicit Σ over contracted axes, Einstein product) with: axis typing (ℝ/ℕ/norm), tensor declarations, Iverson predicates, nonlinearities with optional masks, affine index arithmetic (Slice/Reindex/Scatter), and temporal recursion (Scan).
 
-```
+```text
 -- Layer 1: Axis specifications and declarations
 decl        ::= 'tensor'    name ':' shape
               | 'predicate' name ':' shape
@@ -710,10 +716,11 @@ idx_expr    ::= axis_name
               | n '*' axis_name '+' n
               | '(' idx_expr ')'
 
--- Layer 2.5: Predicate arithmetic (extends idx_expr with non-affine products)
+-- Layer 2.5: Predicate arithmetic (extends idx_expr with non-affine products and absolute value)
 -- Only valid inside bool_expr; forbidden in tensor index slots.
 pred_term   ::= idx_expr
               | 'imul(' pred_term ',' pred_term ')'
+              | '|' pred_term '|'                   -- integer absolute value (e.g. |i−j| ≤ n)
               | '(' pred_term ')'
 
 -- Layer 3: Iverson predicates
@@ -721,7 +728,6 @@ bool_expr   ::= pred_term rel_op pred_term
               | bool_expr '∧' bool_expr
               | bool_expr '∨' bool_expr
               | '¬' bool_expr
-              | '|' pred_term '|'
               | 'ieq(' pred_term ',' pred_term ')'
               | '(' bool_expr ')'
 
@@ -782,7 +788,7 @@ program     ::= decl* stmt+
 
 **Five representative examples:**
 
-```
+```text
 -- Matmul (Domingos base: k is contracted)
 Y[i,j] := W[i,k] · X[k,j]
 
@@ -806,7 +812,7 @@ H[j, l+1] := relu(H[j,l] · W_H[j,k] + G[j,l] · V[j,k])
 
 ### 12.2 Abstract syntax
 
-Direct formalization of the BNF layers as Lean inductive types. `UID` and `Numeric` from [§2](#2-the-base-coloredprop)/[§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer); `TermM` from [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer).
+Direct formalization of the BNF layers as Lean inductive types. `UID` and `Numeric` (= `MvPolynomial String ℕ`, [§2.1](#21-numeric)) from [§2](#2-the-base-coloredprop)/[§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer); `FreshM` from [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer).
 
 ```lean
 -- Layer 1
@@ -843,10 +849,13 @@ inductive IdxExpr
 ```
 
 ```lean
--- Layer 2.5: Predicate arithmetic (extends IdxExpr with non-affine products)
+-- Layer 2.5: Predicate arithmetic (extends IdxExpr with non-affine products and absolute value)
 inductive PredArith
   | embed : IdxExpr → PredArith                         -- lift any affine expression
   | mul   : PredArith → PredArith → PredArith           -- imul; non-affine product
+  | iabs  : PredArith → PredArith                       -- |e|: integer absolute value
+  -- |e| is an integer VALUE, not a boolean; it appears as an operand in comparisons
+  -- such as `|i − j| ≤ n` = rel(le, iabs(embed(affine i−j)), embed(const n)).
   -- Note: '(' pred_term ')' is surface grouping
 ```
 
@@ -855,15 +864,12 @@ inductive PredArith
 inductive RelOp | lt | le | eq | ne | ge | gt
 
 inductive BoolExpr
-  | rel  : RelOp → PredArith → PredArith → BoolExpr
+  | rel  : RelOp → PredArith → PredArith → BoolExpr    -- both operands are PredArith values
   | and  : BoolExpr → BoolExpr → BoolExpr
   | or   : BoolExpr → BoolExpr → BoolExpr
   | not  : BoolExpr → BoolExpr
-  | iabs : PredArith → BoolExpr                         -- integer absolute value; placed here
-                                                        -- because bare |e| only appears inside
-                                                        -- predicates (e.g. |x - y| ≤ n)
-  | ieq  : PredArith → PredArith → BoolExpr
-  -- Note: '(' bool_expr ')' is surface grouping
+  | ieq  : PredArith → PredArith → BoolExpr            -- modular equality (wrapping int comparison)
+  -- Note: '(' bool_expr ')' is surface grouping; |e| lives in PredArith, not here
 ```
 
 ```lean
@@ -971,6 +977,7 @@ syntax "(" tl_idx_expr ")"   : tl_idx_expr
 -- Layer 2.5: predicate arithmetic
 syntax tl_idx_expr                               : tl_pred_term
 syntax "imul(" tl_pred_term "," tl_pred_term ")" : tl_pred_term
+syntax "|" tl_pred_term "|"                      : tl_pred_term  -- iabs; value, not bool
 syntax "(" tl_pred_term ")"                      : tl_pred_term
 
 -- Layer 3: predicates
@@ -983,7 +990,6 @@ syntax tl_pred_term "≥"  tl_pred_term             : tl_bool_expr
 syntax tl_bool_expr "∧" tl_bool_expr              : tl_bool_expr
 syntax tl_bool_expr "∨" tl_bool_expr              : tl_bool_expr
 syntax "¬" tl_bool_expr                           : tl_bool_expr
-syntax "|" tl_pred_term "|"                        : tl_bool_expr
 syntax "ieq(" tl_pred_term "," tl_pred_term ")"   : tl_bool_expr
 syntax "(" tl_bool_expr ")"                        : tl_bool_expr
 
@@ -1057,15 +1063,19 @@ structure ThreadedComposed where
 -- the other, and `write_sbr`/`read_sbr` round-trip that SBrInstance to and from CSV. So the
 -- DSL path (this section) and the CSV path (§8) land on the very same `∫Dat`-morphism.
 
-/-- Lower a TLProgram to a ThreadedComposed morphism. Runs in TermM to mint
-    fresh UIDs for synthetic intermediates introduced during index-arithmetic
-    lowering and nonlinearity splitting. -/
-def TLProgram.compile : TLProgram → TermM ThreadedComposed
+/-- Lower a TLProgram to a ThreadedComposed morphism.
+    Runs in FreshM (= EStateM CompileError ℕ, Lean core Init.Control.EStateM):
+    mints fresh UIDs for synthetic intermediates and throws CompileError on
+    validation failures. Kleisli composition (>=> from Init.Core) sequences
+    the typed phases; each phase narrows the type invariant. -/
+def TLProgram.compile : TLProgram → FreshM ThreadedComposed :=
+  assignUIDs >=> resolveDecls >=> unifyAxes >=> lowerArith
+             >=> finalizeScans >=> splitNonlins >=> schedule >=> route
 ```
 
-The compilation is a typed pipeline; each phase boundary carries a more constrained type so that Python-comment invariants become enforced by construction:
+The pipeline is a typed chain; each phase boundary carries a more constrained intermediate type so that Python-comment invariants become enforced by construction:
 
-```
+```text
 TLProgram
   →[assignUIDs]    LabeledProgram        -- every AxisSpec has a fresh UID
   →[resolveDecls]  ResolvedProgram       -- DeclEnv built; external names identified; bias materialized
@@ -1079,14 +1089,14 @@ TLProgram
 
 | Phase | What it does | Key Lean idiom |
 | --- | --- | --- |
-| **assignUIDs** | Traverses `decls` and `stmts`; mints a fresh UID for each `AxisSpec` via `freshUData` ([§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer)). | `StateT UID TermM` |
-| **resolveDecls** | Builds `DeclEnv : HashMap String Decl`. Validates: `linear` weight appears in exactly one product factor; every declared name has a consistent shape across stmts. `linear ... bias:=true` emits a bias-add stmt. Marks each name as external (declared) or internal (produced by a stmt) — drives routing. Predicate-typed names are tagged here; the tag tells the Algebra ([§7.5](#75-algebras-and-construct)) to evaluate that output in the Boolean value semiring `R = Bool` rather than `R = ℝ`. | `WriterT (DList Stmt) Id` for bias stmts; pure `DeclEnv` output |
-| **unifyAxes** | The [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) UID coequalizer, computed in batch. Collects the `(uid_a, uid_b)` identifications from axis occurrences sharing a name within program scope (Domingos' name-binding, [§12.1](#121-bnf-grammar)), feeds them to `Context.merge`, and applies the result with `Context.apply`. The canonical representative is the **largest UID** — the universal cocone vertex of [§7.3](#73-composition-as-pushout) — so a DSL-built morphism and a CSV-built one agree on axis identity on the nose. The whole program is known statically, so this runs once rather than incrementally (Python's `Context.append_iter`), but it is the *same* coequalizer with the *same* representative rule. | `Context` / `EqClass` ([§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer)) |
-| **lowerArith** | `IdxExpr.const` reads → fresh `Slice` intermediate; `IdxExpr.affine` reads → fresh `Reindex` intermediate; affine `LHSSlot`s → `Scatter` (injectivity checked; `reduce = some "sum"` required for non-injective maps). Each is a `BrBase` ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) whose `reindexings` field carries the affine map as an `St` stride matrix `StMat` — the locus where `St` lives inside `Br`. Non-zero fill emits a fill-initialization stmt before the scatter. All auxiliary stmts emitted into the writer, not registered into a global. | `WriterT (DList Stmt) (StateT UID Id)` |
-| **finalizeScans** | Groups stmts by name + iteration axis UID; pairs `iterAt`/`iterNext` slots into `Scan` nodes; stmts sharing the same iteration-axis UID across names form a coupled `Scan` (`n_states > 1`). Each `Scan` is the `cata(step)` of the `TemporalGraded` mixin ([§6.1](#61-temporalgraded--scan)) over the iteration axis as temporal object `L`; the prefix-restriction and batching laws it obeys are Props 8.7–8.8. `Stmt.recurMorphism` supplies the step morphism directly, bypassing equation lowering for that scan state. Validates: every `recur_step` has a matching `base_case`; `l+1` absent from RHS for the iteration axis. | Pure `List Stmt → List ScanStmt` |
-| **splitNonlins** | Lifts `relu`/`softmax`/`normalize` out of `RHSExpr.nonlin` into a separate composed step. These are genuinely nonlinear, so they are not reindexings (`StMat` is affine); each becomes a `BrBase` op ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) whose numeric semantics are supplied by the Algebra functor `F : C → V` into the target actegory ([§7.5](#75-algebras-and-construct)). For `softmax`/`normalize` the `norm`-flagged axis ([§12.2](#122-abstract-syntax)) is the contraction dimension; masked variants emit an alignment-permutation step computed from the `where` mask. | `WriterT (DList ScanStmt) Id` |
-| **schedule** | Backward reachability BFS from the output name simultaneously determines liveness (DCE) and produces a valid reverse-topological order. Two passes in Python; one here because the BFS visit order is already a reverse topo order. | Pure `String → List ScanStmt → List ScanStmt` |
-| **route** | Detects contracted axes (present in a `ProdTerm` but absent from the LHS) and builds one `BrBase` ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) per stmt, carrying the `tensor`/`predicate` tag from `DeclEnv`. The contraction *arithmetic* is not fixed here but at evaluation, by the Algebra's value semiring `R` ([§7.5](#75-algebras-and-construct)): `R = ℝ` (×, then Σ) for `tensor` outputs, `R = Bool` (∧, then ∃) for `predicate` outputs — the ∃/∧-vs-Σ split is exactly that choice of `R`. Assigns index slots; builds `ThreadedComposed.routing` and `n_external`. Automatic associative-scan detection (syntactic check on the recurrence `IdxExpr`) selects the `ScanAffine` fast path — the case where the step algebra factors through a monoid, i.e. Prop 8.7's `O(log N)` parallel prefix. | Pure `List ScanStmt → DeclEnv → Context → ThreadedComposed` |
+| **assignUIDs** | Traverses `decls` and `stmts`; mints a fresh UID for each `AxisSpec` via `freshUData` ([§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer)). | `FreshM`; `List.mapM freshUData` traverses declarations |
+| **resolveDecls** | Builds `DeclEnv : Std.HashMap String Decl` (`Std.Data.HashMap`; `String` has `BEq` and `Hashable`). Validates: `linear` weight appears in exactly one product factor; every declared name has a consistent shape across stmts; throws `CompileError` on violation. `linear ... bias:=true` appends a bias-add stmt to the returned `ResolvedProgram`. Marks each name as external (declared) or internal (produced by a stmt) — drives routing. Predicate-typed names are tagged here; the tag tells the Algebra ([§7.5](#75-algebras-and-construct)) to evaluate that output in the Boolean value semiring `R = Bool` rather than `R = ℝ`. | `FreshM`; validation errors via `throw`; bias stmts accumulated in `ResolvedProgram.extraStmts : Array Stmt` |
+| **unifyAxes** | The [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) UID coequalizer, computed in batch. Collects the `(uid_a, uid_b)` identifications from axis occurrences sharing a name within program scope (Domingos' name-binding, [§12.1](#121-bnf-grammar)), feeds them to `Context.merge`, and applies the result with `Context.apply`. The canonical representative is the **largest UID** — the universal cocone vertex of [§7.3](#73-composition-as-pushout) — so a DSL-built morphism and a CSV-built one agree on axis identity on the nose. The whole program is known statically, so this runs once rather than incrementally (Python's `Context.append_iter`), but it is the *same* coequalizer with the *same* representative rule. | Pure (`ResolvedProgram → CanonicalProgram`); lifted to `FreshM` by `pure`; `Context` / `EqClass` ([§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer)) |
+| **lowerArith** | `IdxExpr.const` reads → fresh `Slice` intermediate; `IdxExpr.affine` reads → fresh `Reindex` intermediate; affine `LHSSlot`s → `Scatter` (injectivity checked; `reduce = some "sum"` required for non-injective maps). Each is a `BrBase` ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) whose `reindexings` field carries the affine map as an `St` stride matrix `StMat` — the locus where `St` lives inside `Br`. Non-zero fill prepends a fill-initialization stmt. Auxiliary stmts are stored in `LoweredProgram.auxStmts : Array Stmt`, not a global. | `FreshM`; `freshUData` mints UIDs for synthetic intermediates; auxiliary stmts in output type, not a writer monad |
+| **finalizeScans** | Groups stmts by name + iteration axis UID; pairs `iterAt`/`iterNext` slots into `Scan` nodes; stmts sharing the same iteration-axis UID across names form a coupled `Scan` (`n_states > 1`). Each `Scan` is the `cata(step)` of the `TemporalGraded` mixin ([§6.1](#61-temporalgraded--scan)) over the iteration axis as temporal object `L`; the prefix-restriction and batching laws it obeys are Props 8.7–8.8. `Stmt.recurMorphism` supplies the step morphism directly, bypassing equation lowering for that scan state. Validates: every `recur_step` has a matching `base_case`; `l+1` absent from RHS for the iteration axis. | `FreshM`; pure grouping; `throw` on missing base case |
+| **splitNonlins** | Lifts `relu`/`softmax`/`normalize` out of `RHSExpr.nonlin` into a separate composed step. These are genuinely nonlinear, so they are not reindexings (`StMat` is affine); each becomes a `BrBase` op ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) whose numeric semantics are supplied by the Algebra functor `F : C → V` into the target actegory ([§7.5](#75-algebras-and-construct)). For `softmax`/`normalize` the `norm`-flagged axis ([§12.2](#122-abstract-syntax)) is the contraction dimension; masked variants emit an alignment-permutation step computed from the `where` mask. | `FreshM`; `freshUData` mints UIDs for nonlin step intermediates |
+| **schedule** | Backward reachability BFS from the output name simultaneously determines liveness (DCE) and produces a valid reverse-topological order. Two passes in Python; one here because the BFS visit order is already a reverse topo order. | Pure (`String → List ScanStmt → List ScanStmt`); lifted to `FreshM` by `pure` |
+| **route** | Detects contracted axes (present in a `ProdTerm` but absent from the LHS) and builds one `BrBase` ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) per stmt, carrying the `tensor`/`predicate` tag from `DeclEnv`. The contraction *arithmetic* is not fixed here but at evaluation, by the Algebra's value semiring `R` ([§7.5](#75-algebras-and-construct)): `R = ℝ` (×, then Σ) for `tensor` outputs, `R = Bool` (∧, then ∃) for `predicate` outputs — the ∃/∧-vs-Σ split is exactly that choice of `R`. Assigns index slots; builds `ThreadedComposed.routing` and `n_external`. Automatic associative-scan detection (syntactic check on the recurrence `IdxExpr`) selects the `ScanAffine` fast path — the case where the step algebra factors through a monoid, i.e. Prop 8.7's `O(log N)` parallel prefix. | Pure (`List ScanStmt → DeclEnv → Context → ThreadedComposed`); lifted to `FreshM` by `pure` |
 
 The result is a `ThreadedComposed` (a presentation of a `BrMorph`, [§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) — a finite presentation of an `∫Dat`-morphism, the very thing an `SBrInstance` ([§8.1](#81-sbrinstance-as-a-finite-presentation-of-an-dat-morphism)) presents in tabular form. The DSL path of this section and the CSV path of [§8](#8-acsets-and-python-interop) therefore produce the same categorical object: the acset extraction relates the `ThreadedComposed` and `SBrInstance` presentations, and `write_sbr`/`read_sbr` serialize the latter to and from CSV — none of these steps changes the morphism.
 
@@ -1112,7 +1122,7 @@ The result is a `ThreadedComposed` (a presentation of a `BrMorph`, [§2.3](#23-b
 | `Y[n*i] := …` | `tl.Y[n*i] = …` (affine LHS) | Scatter — affine write |
 | `Stmt.recurMorphism name axis morphism` | `tl.name.recur(l, morphism)` | escape hatch; step morphism as a term (syntax TBD) |
 | `elabTLProgram` (Stage 1) | — | `Syntax → MetaM Expr`; no Python analogue |
-| `TLProgram.compile` (Stage 2) | `tl.to_morphism()` | `TLProgram → TermM ThreadedComposed` |
+| `TLProgram.compile` (Stage 2) | `tl.to_morphism()` | `TLProgram → FreshM ThreadedComposed`; run at elaboration time via `FreshM.run 0` |
 
 ## 13. Appendix: out of scope
 
