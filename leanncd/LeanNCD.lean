@@ -16,3 +16,6 @@ import LeanNCD.Algebra.Target
 import LeanNCD.Algebra.Algebra
 import LeanNCD.Props.Generic
 import LeanNCD.Instances.StBr
+import LeanNCD.Exec.Uid
+import LeanNCD.Exec.Traversable
+import LeanNCD.Exec.Context

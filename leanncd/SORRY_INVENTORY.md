@@ -108,3 +108,17 @@ Notes:
   8.4 (equivariance), 8.5, and 8.6 (obstruction species) are **OMITTED** — not vacuous, but no class
   field carries faithful content to state yet (EM-machinery / pushout / obstruction datum gated for
   later milestones). They are deliberately not stubbed with a `True`.
+
+## Milestone D — executable seam (zero sorries)
+
+`LeanNCD/Exec/` — the executable side of the §7.4 proposition/computation seam — is **fully
+discharged with no `sorry`** (the first fully-executable milestone):
+
+- `Uid.lean`: `UID`/`UData`/`CompileError`/`FreshM`/`freshUData` (Lean core only).
+- `Traversable.lean`: `WithUID`, `TermTraversable` class (Lean core only; real per-type instances are Milestone E).
+- `Context.lean`: `EqClass`, `Context`, `Context.merge` (largest-UID canonical), `Context.apply`
+  (generalized to `(ctx : Context α) (target : β) : β` — the substitution is UID-level, α-independent).
+
+Verified by evaluated `#guard` tests + an LSpec suite (`test/Exec/ContextSpec.lean`). LSpec was
+adopted (argumentcomputer/LSpec `main`, rev d3c15b9 — v4.29-targeted but compiles under v4.30; zero
+deps, so Mathlib's pins are untouched).
