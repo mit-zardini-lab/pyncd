@@ -420,25 +420,30 @@ The core `DGradedColoredPROP D C` of [§4](#4-the-core-dgradedcoloredprop-d-c) c
 ```lean
 class TemporalGraded (D C : Type) [ColoredPROP D] [ColoredPROP C]
     extends DGradedColoredPROP D C where
-  L          : D                    -- temporal object; ℕ-graded, carrying prefix inclusions ιₘ
-  iota       : ∀ m : ℕ, hom unit_D L   -- ιₘ : I_D → L; the m-th prefix inclusion
-  iota_unit  : iota 0 = 𝟙 unit_D      -- ι₀ is the unit (0-length prefix)
-  iota_mono  : ∀ m n, m ≤ n → comp (iota m) (𝟙 L) = iota n  -- inclusions are compatible
-  -- directed action: restriction natural transformations along ιₘ
-  restrict   : ∀ (m : ℕ) (X : C),
-                 hom (act.obj (X, L)) (act.obj (X, iota m))
-                 -- act(X, ιₘ) : X ⊛ L → X ⊛ [0..m]; contravariant in D-slot
-  -- finite N-fold iteration of a step endomorphism
+  L          : D                    -- temporal object; the colimit/top of the prefix family
+  prefix     : ℕ → D                -- the prefix objects [0..m]
+  iotaTo     : ∀ {m n}, m ≤ n → hom (prefix m) (prefix n)   -- (ℕ,≤)-functor of prefix inclusions
+  iota       : ∀ m : ℕ, hom (prefix m) L                    -- ιₘ : [0..m] ↪ L (cocone into L)
+  -- the prefix family is a functor (ℕ,≤) ⥤ D, and L is a cocone over it:
+  iotaTo_id   : ∀ m, iotaTo (le_refl m) = 𝟙 (prefix m)
+  iotaTo_comp : ∀ {m n k} (h₁ : m ≤ n) (h₂ : n ≤ k), comp (iotaTo h₁) (iotaTo h₂) = iotaTo (le_trans h₁ h₂)
+  iota_factor : ∀ {m n} (h : m ≤ n), comp (iotaTo h) (iota n) = iota m
+  -- directed restriction action along the prefix maps: act(X, [m↪n]) : X ⊛ [0..n] → X ⊛ [0..m]
+  restrict   : ∀ {m n} (h : m ≤ n) (X : C),
+                 hom (act.obj (X, prefix n)) (act.obj (X, prefix m))   -- contravariant in D-slot
+  -- finite N-fold iteration of a step endomorphism (cata):
   iterate    : ∀ (N : ℕ) (X : C) (step : hom X X),
-                 hom X (act.obj (X, iota N))
-                 -- N-fold composition of step, with output indexed by [0..N]; cata(step)
-  -- state history: codomain H ⊗ L_{N+1} (scanl); truncating along ιₘ agrees with iterate m
+                 hom X (act.obj (X, prefix N))               -- cata(step), output indexed by [0..N]
+  -- state history (scanl): records the full trajectory; truncating along [m↪N] agrees with iterate m
   trace      : ∀ (N : ℕ) (X : C) (step : hom X X),
-                 hom X (act.obj (X, tensor L (iota (N + 1))))
-                 -- act(X, L ⊗ [0..N+1]) records the full state history
-  lift_fold_dist : ∀ (N : ℕ) (X : C) (step : hom X X) (P : D),
-                     act.obj (act.obj (X, iota N), P) ≅ act.obj (X, iota N)
+                 hom X (act.obj (X, prefix N))
+  lift_fold_dist : ∀ (N : ℕ) (X : C) (P : D),
+                     act.obj (act.obj (X, prefix N), P) ≅ act.obj (X, prefix N)
                      -- act(Scan, P) ≅ Scan(act(step, P)) for P orthogonal to L
+-- NB: the design's `iota 0 = 𝟙 unit_D` is ill-typed (codomains differ); the prefix-family form above
+-- — `prefix`/`iotaTo`/`iota` with the functor laws `iotaTo_id`/`iotaTo_comp` and the cocone law
+-- `iota_factor` — is the genuine well-typed encoding of Definition 3.3's prefix inclusions.
+-- (D-objects sit in the `Dᵒᵖ` slot of `act` via `Opposite.op`; elided here for readability.)
 ```
 
 `TemporalGraded` internalizes the four additions of [graded_prop.md §3.4](graded_prop.md#34-the-temporal-grading-and-making-scan-first-class) that turn `Scan` from a bare generator into a definition. `L` is the **temporal object** of Definition 3.3 — an `Ob D` carrying the augmented-simplex / `(ℕ,+,0)` length grading, with prefix inclusions `ιₘ : [0..m] ↪ [0..N]`. `restrict` is the **directed action**: restriction natural transformations `act(−, ιₘ) : (− ⊛ [0..N]) ⇒ (− ⊛ [0..m])` along the `ιₘ`, satisfying the unit and composition laws of an action. `iterate` is the **finite iteration** of Definition 3.4 — for a parametric step endofunctor (the per-step inputs ride as parameters) and a length `N`, the `N`-fold iterate and its catamorphism `cata(step)` exist (for fixed `N` this is plain `N`-fold composition; no fixpoint, no natural-numbers object, until unbounded length is wanted). `trace` is the **state history** of Definition 3.5 — codomain `H ⊗ L_{N+1}` (scanl), with the coherence that truncating the trace along `ιₘ` agrees with running the `m`-fold. `lift_fold_dist` is the **lift–fold distributivity** law: for an ordinary degree `P` orthogonal to `L`, `act(Scan, P) ≅ Scan(act(step, P))`.
@@ -484,21 +489,23 @@ recovers the fully-sized graded PROP (graded_prop.md Prop 8.3).
 -- `C`'s color type, leaving the shape (list-of-wires) structure intact.
 -- The quotient construction: two C-morphisms are C♯-equivalent iff they agree on connectivity
 -- (weave shapes, op names, routing) and differ only on Numeric attributes.
-abbrev Cˢʰᵃʳᵖ (C : Type) [ColoredPROP C] : Type :=
+-- structuralCongruence C : HomRel C — the connectivity-agreement relation (a Congruence).
+abbrev CSharp (C : Type) [ColoredPROP C] : Type :=
   CategoryTheory.Quotient (structuralCongruence C)
-  -- where structuralCongruence relates morphisms agreeing on connectivity, differing on sizes
--- `C♯` is the informal notation; `Cˢʰᵃʳᵖ C` is the Lean identifier.
+notation "Cˢʰᵃʳᵖ" => CSharp
+-- `C♯`/`Cˢʰᵃʳᵖ` is notation for `CSharp` — the superscript chars are not legal Lean identifiers,
+-- so the real identifier is `CSharp`.
 
--- The data functor: sends each C♯-object to its set of valid size-assignments.
-def Dat [ColoredPROP C] : Cˢʰᵃʳᵖ C ⥤ Type :=
-  { obj := fun c => { d : C // Quotient.mk _ d = c }  -- size-assignments over the structural skeleton
-    map := fun _ => id                                  -- trivial on morphisms (graded_prop.md Def 5.1)
-    … }
-def Dat' [ColoredPROP C] : Cˢʰᵃʳᵖ C ⥤ CategoryTheory.Cat :=
-  Dat (C := C) ⋙ CategoryTheory.discreteCat  -- discrete category on each fiber set
--- Recommended: build C directly as CategoryTheory.Grothendieck Dat', making the iso definitional:
-example [ColoredPROP C] : C ≅ CategoryTheory.Grothendieck (Dat' (C := C)) := Iso.refl _
--- ^ holds when C is *defined* as ∫Dat; is a non-trivial iso otherwise.
+-- The data functor: each C♯-object ↦ its set of valid size-assignments; trivial on morphisms.
+def Dat (C : Type) [ColoredPROP C] : CSharp C ⥤ Type :=
+  …   -- obj := fun c => { d : C // Quotient.mk _ d = c }; map := fun _ => id  (graded_prop.md Def 5.1)
+-- Valued in `Cat` via `typeToCat` (the discrete-category functor `Type ⥤ Cat`) for `Grothendieck`:
+noncomputable def Dat' (C : Type) [ColoredPROP C] : CSharp C ⥤ CategoryTheory.Cat :=
+  Dat C ⋙ typeToCat
+-- Prop 8.3: the structure/data split. Stated as the existence of an equivalence `C ≌ ∫Dat`
+-- (definitional `Iso.refl` if `C` is *built* as `∫Dat`; a constructed equivalence otherwise):
+theorem grothendieck_split (C : Type) [ColoredPROP C] :
+    Nonempty (C ≌ CategoryTheory.Grothendieck (Dat' C)) := …
 ```
 
 Mathlib supplies `CategoryTheory.Grothendieck` for the Grothendieck construction of a functor into `Cat`; with `Dat` valued in discrete categories of size-assignments, `∫Dat` is a direct instance. The iso `C ≅ ∫Dat` is a per-instantiation theorem in general, but it is **definitional — `Iso.refl` — if `C` is *built* as `∫Dat`**, which is the recommended posture: define the sized PROP as the integral, and the splitting is true by construction rather than by proof.
@@ -623,35 +630,35 @@ The framing is the whole point. **The pushout/coequalizer is the spec; union-fin
 The algebra `F` (graded_prop.md Def 7.2 / [§7](graded_prop.md#7-algebras-construct-and-the-para-refinement)) is the strong symmetric monoidal, `D`-equivariant functor `C → V` into a target actegory — the categorical content of `ConstructedModule.construct()`. It is the last layer of the tower, and the clearest instance of the doc's recurring shape: a typeclass parameterised by the classes below it. The target `V` is itself a right `D`-actegory parameterised by a value semiring `R` (graded_prop.md Def 7.1); the algebra is parametric on both the source graded PROP `C`, the target `V`, and `R`:
 
 ```lean
-class TargetActegory (D V : Type) [ColoredPROP D] (R : CommSemiring) where
-  actV : (V ×ᶜ Dᵒᵖ) ⥤ V              -- P acts by appending R-valued dimensions
-  …                                   -- same υ/α/δ coherences as §4, now in V; ⊗_V uses R
+-- `V` is `Type*` (a module category lives in `Type 1`); `D`/`C`/`R` are `Type`. `R` is a value
+-- semiring carried as `(R : Type) [CommSemiring R]`.
+class TargetActegory (D : Type) (V : Type*) [ColoredPROP D] [Category V] (R : Type) [CommSemiring R] where
+  actV : (V × Dᵒᵖ) ⥤ V               -- P acts by appending R-valued dimensions
+  -- … same υ/α/δ coherences as §4, now in V; ⊗_V uses R (deferred — only actV stated)
 
--- Default instance: R = ℝ, the standard (×, +) semiring (multiply, then sum over contracted indices).
--- Declare a different instance only when a non-standard contraction arithmetic is needed.
-/-- The default target actegory: finite-dimensional real vector spaces, encoded as
-    Mathlib's `FdMod ℝ` (finite-dimensional modules over ℝ). Each `Br`-object (list of
-    ArrayTypes) maps to the tensor product of the corresponding finite-dimensional spaces. -/
-abbrev Mat (R : Type*) [CommRing R] := FdMod R
--- FdMod R : the category of finite-dimensional R-modules (Mathlib.LinearAlgebra.FdMod).
--- Alternatively: Matrix (Fin m) (Fin n) R for fixed dimensions m n, if full FdMod is heavy.
--- For the default instance, R = ℝ and composition = matrix multiply over ℝ.
+-- Default: R = ℝ, the standard (×, +) semiring (multiply, then sum over contracted indices).
+/-- The default target actegory: finite-dimensional/finitely-generated `R`-modules, encoded as
+    Mathlib's `FGModuleCat R`. (The design's `FdMod` is not a Mathlib v4.30 name; `FGModuleCat` is
+    its realization. `ModuleCat R` is the all-modules fallback.) -/
+abbrev Mat (R : Type) [CommRing R] := FGModuleCat R
 
-instance : TargetActegory St (Mat ℝ) ℝ where
+noncomputable instance : TargetActegory StObj (Mat ℝ) ℝ where
   actV := …   -- appends ℝ-typed dimensions; composition = matrix multiply over ℝ
 
 /-- The algebra functor F : C → V, a strong symmetric monoidal D-equivariant functor.
     Declared as a `class` (not `structure`) so that `ParaAlgebra` can extend it via
     typeclass inheritance, and so that `construct()` can be invoked via instance search. -/
-class Algebra (D C V : Type) [DGradedColoredPROP D C] {R : CommSemiring} [TargetActegory D V R] where
-  F        : C ⥤ V                                    -- strong symmetric monoidal (Mathlib MonoidalFunctor)
-  equivar  : ∀ X P, F.obj (act (X,P)) ≅ actV (F.obj X, P)   -- D-equivariance
-  coh      : …                                        -- commutes with υ, α, δ; preserves ev_p
--- R is inferred from the TargetActegory instance; defaults to ℝ.
+class Algebra (D C : Type) (V : Type*) [ColoredPROP D] [ColoredPROP C] [Category V]
+    (R : Type) [CommSemiring R] [DGradedColoredPROP D C] [TargetActegory D V R] where
+  F        : C ⥤ V                                    -- (strong symmetric monoidal; plain ⥤ for now)
+  equivar  : ∀ (X : C) (P : Dᵒᵖ),
+               F.obj (act.obj (X, P)) ≅ (TargetActegory.actV (D := D)).obj (F.obj X, P)  -- D-equivariance
+  -- coh : … commutes with υ, α, δ; preserves ev_p (deferred — only F + equivar stated)
 -- A morphism of algebras is a MonoidalNatTrans; weight tying collapses parameters via Δ.
 
-class ParaAlgebra (D C V : Type) [DGradedColoredPROP D C] {R : CommSemiring} [TargetActegory D V R]
-    extends Algebra D C V where … -- STUB: Para(C) → Para(V) 2-functor; passes-as-2-cells, weight tying
+class ParaAlgebra (D C : Type) (V : Type*) [ColoredPROP D] [ColoredPROP C] [Category V]
+    (R : Type) [CommSemiring R] [DGradedColoredPROP D C] [TargetActegory D V R]
+    extends Algebra D C V R -- STUB: Para(C) → Para(V) 2-functor; passes-as-2-cells, weight tying
 -- Note: Algebra is now `class` so that `extends` works cleanly; if Algebra is used
 -- purely as data (not synthesized), callers use `[Algebra D C V]` in signatures.
 ```
@@ -721,7 +728,7 @@ Every proposition of [graded_prop.md §8](graded_prop.md#8-propositions-the-synt
 variable {D C : Type} [ColoredPROP D] [ColoredPROP C] [DGradedColoredPROP D C]
 ```
 
-and mentions nothing beyond `act`, `δ`/`δ0`/`υ`/`α`, `sh`, and the named `Prop`-fields (`sh_act`, `act_unit_assoc`, `dist_coh`, `broadcast_gen`, plus the base `elemental`). Because the only hypotheses are class members, each proposition is **proved once, at the graded-PROP level, and inherited at every instance** — the `DGradedColoredPROP St Br` of [§10](#10-instantiation-and-future-extensions), the `DGradedColoredPROP Br CMod` MoE level, a future `Graph→C`, and the swapped-`D` rows all receive it with no per-domain proof. This is the Lean form of [graded_prop.md](graded_prop.md)'s central promise, and it *is* parametricity over a typeclass: a `theorem` whose only free assumption is `[DGradedColoredPROP D C]` applies verbatim wherever that instance resolves.
+and mentions nothing beyond `act`, `δ`/`δ0`/`υ`/`α`, `sh`, and the named `Prop`-fields (`sh_act`, `act_unit_assoc`, `υ_nat`, `dist_coh`, `broadcast_gen`, plus the base `elemental`). Because the only hypotheses are class members, each proposition is **proved once, at the graded-PROP level, and inherited at every instance** — the `DGradedColoredPROP StObj BrObj` of [§10](#10-instantiation-and-future-extensions), the `DGradedColoredPROP BrObj CMod` MoE level, a future `Graph→C`, and the swapped-`D` rows all receive it with no per-domain proof. This is the Lean form of [graded_prop.md](graded_prop.md)'s central promise, and it *is* parametricity over a typeclass: a `theorem` whose only free assumption is `[DGradedColoredPROP D C]` applies verbatim wherever that instance resolves.
 
 | Proposition | Lean statement (sketch) | Mathlib machinery | Per-instance cost |
 | --- | --- | --- | --- |
@@ -736,14 +743,16 @@ and mentions nothing beyond `act`, `δ`/`δ0`/`υ`/`α`, `sh`, and the named `Pr
 
 The inheritance is about the **theorems**, not the instance obligations. When a new `instance : DGradedColoredPROP D C` is declared, the propositions above transfer to it for free — but the instance must still **discharge the coherence `Prop`-fields** of the core: the actegory triangle and pentagon (`act_unit_assoc`), unitor naturality (`υ_nat`), the distributivity coherences (`dist_coh`), and `sh_act`/`broadcast_gen`/`elemental`. "Inherit everywhere" names the proven propositions riding on those fields; it does not waive the obligation to *supply* the fields. Each new domain pays that fixed, finite coherence cost once; everything built on top of the core is then free.
 
+In the current Lean transcription, **8.1** (lift functoriality) is *proved sorry-free* (`act.map_comp`) and **8.8** (Scan batches) is a sorry-free re-export of `lift_fold_dist`; **8.2** (weave uniqueness) and **8.7** (Scan-as-catamorphism) are stated genuinely with `sorry` proofs; **8.3** (the Grothendieck split) is in [§7.1](#71-the-structuredata-split-as-dat). **8.4/8.5/8.6 are stated only in prose here, not yet as Lean theorems**: 8.4 needs a genuine equivariance field on `SymmetryGraded` (currently a stub), 8.5 needs the `Inst(C♯)`/pushout formalization ([§7.3](#73-composition-as-pushout); Milestone D+), and 8.6 needs a classification datum — they are deferred rather than written as vacuous placeholders.
+
 ## 10. Instantiation and future extensions
 
 ### 10.1 `D = St`, `C = Br` — the flagship instance
 
-Today's instantiation is `D = St`, `C = Br`: an index PROP of axis lengths (colors = `Numeric` sizes, morphisms = stride matrices) grading an operation PROP of broadcasted arrays. The instance header supplies the core fields; the named `Prop`-fields are discharged by the laws established in [§2](#2-the-base-coloredprop)–[§4](#4-the-core-dgradedcoloredprop-d-c).
+Today's instantiation is `D = St`, `C = Br`: an index PROP of axis lengths (colors = `Numeric` sizes, morphisms = stride matrices) grading an operation PROP of broadcasted arrays. In Lean the *types* are `StObj`/`BrObj` (`St`/`Br` name the `ColoredPROP` *instances*), so the instance is `DGradedColoredPROP StObj BrObj`; it is `noncomputable` (it builds data over `Numeric`). The instance header supplies the core fields; the named `Prop`-fields are discharged by the laws established in [§2](#2-the-base-coloredprop)–[§4](#4-the-core-dgradedcoloredprop-d-c). `sh` is concrete (`fun a => a.shape`); the lift `act`, the coherence isos, and the laws are the genuine but deferred content.
 
 ```lean
-instance : DGradedColoredPROP St Br where
+noncomputable instance : DGradedColoredPROP StObj BrObj where
   sh    := fun a => a.shape        -- the array's shape: sh([a, A]) = A
   act   := …                       -- batch lift + reindexing (theory.md Lift Operations)
   δ     := …                       -- [X ⊗ Y, P] ≅ [X,P] ⊗ [Y,P]   (batch lift distributes)
@@ -781,7 +790,7 @@ The framework grows by **adding instances and mixins**, never by editing the pro
 
 | Extension | Lean addition | Kind |
 | --- | --- | --- |
-| `D = Br` mixture-of-experts | `instance : DGradedColoredPROP Br CMod` ([graded_prop.md §9.2](graded_prop.md#92-the-speculative-third-level-d--br)) — models as wires, `⊛` tiles a base computation over a family of models | **new instance** |
+| `D = Br` mixture-of-experts | `instance : DGradedColoredPROP BrObj CMod` ([graded_prop.md §9.2](graded_prop.md#92-the-speculative-third-level-d--br)) — models as wires, `⊛` tiles a base computation over a family of models | **new instance** |
 | swap-`D`: graph / incidence cat. | `instance : DGradedColoredPROP Graph C` — gather-along-edge reindexing; GNNs, meshes (fixed graph = weave; per-sample graph = `Route`) ([graded_prop.md §9.3](graded_prop.md#93-the-horizontal-axis-swapping-d)) | **new instance** |
 | swap-`D`: group `BG` / `Rep(G)` | `instance : DGradedColoredPROP (Rep G) C` — group-translation reindexing; equivariant & steerable nets | **new instance** |
 | swap-`D`: Markov cat. `Stoch` | `instance : DGradedColoredPROP Stoch C` — Markov-kernel reindexing; sampling, VAE, SMC | **new instance** |
@@ -795,7 +804,7 @@ The framework grows by **adding instances and mixins**, never by editing the pro
 
 No row is a core edit: a new domain is a new `instance` (it supplies the core fields and discharges the coherence obligations of [§9](#9-the-propositions-as-generic-theorems)), and a new capability is a new mixin layered on top (`extends DGradedColoredPROP`, or `extends Algebra` for `ParaAlgebra`). The classification of [graded_prop.md §8.6](graded_prop.md#8-propositions-the-synthesis-organizes) is `D`-uniform, so every swap-`D` row inherits the same weave-vs-`Scan`-vs-`Route` decision procedure.
 
-The MoE level deserves a specific word, because it is the one place the same category `Br` appears twice. The vertical stack `D = Br` reuses **all** of [§9](#9-the-propositions-as-generic-theorems) with zero new proof, and this is not a coincidence — it is forced by the instance-resolution discipline. `Br`-as-graded — the `DGradedColoredPROP St Br` instance of [§10.1](#101-d--st-c--br--the-flagship-instance) — occupies the **`C` position** of `DGradedColoredPROP`. `Br`-as-index — the `[ColoredPROP Br]` argument of `instance : DGradedColoredPROP Br CMod` — occupies the **`D` position**. The two are different parameter slots of the class, so the two roles of `Br` never collide in instance search: declaring `DGradedColoredPROP Br CMod` does not overlap or shadow `DGradedColoredPROP St Br`. Because the [§9](#9-the-propositions-as-generic-theorems) theorems are generic in both `D` and `C`, they fire for `DGradedColoredPROP Br CMod` the instant it resolves, exactly as they fire for `DGradedColoredPROP St Br` — the MoE level is new data, not new mathematics.
+The MoE level deserves a specific word, because it is the one place the same category `Br` (type `BrObj`) appears twice. The vertical stack `D = Br` reuses **all** of [§9](#9-the-propositions-as-generic-theorems) with zero new proof, and this is not a coincidence — it is forced by the instance-resolution discipline. `Br`-as-graded — the `DGradedColoredPROP StObj BrObj` instance of [§10.1](#101-d--st-c--br--the-flagship-instance) — occupies the **`C` position** of `DGradedColoredPROP`. `Br`-as-index — the `[ColoredPROP BrObj]` argument of `instance : DGradedColoredPROP BrObj CMod` — occupies the **`D` position**. The two are different parameter slots of the class, so the two roles of `Br` never collide in instance search: declaring `DGradedColoredPROP BrObj CMod` does not overlap or shadow `DGradedColoredPROP StObj BrObj`. Because the [§9](#9-the-propositions-as-generic-theorems) theorems are generic in both `D` and `C`, they fire for `DGradedColoredPROP BrObj CMod` the instant it resolves, exactly as they fire for `DGradedColoredPROP StObj BrObj` — the MoE level is new data, not new mathematics.
 
 ## 11. Lean formalization notes
 
