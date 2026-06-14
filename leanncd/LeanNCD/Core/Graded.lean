@@ -52,6 +52,15 @@ class DGradedColoredPROP (D C : Type) [ColoredPROP D] [ColoredPROP C] where
               ((α X P Q).hom, 𝟙 R)
             ≫ (α X (Opposite.op (ColoredPROP.tensor Q.unop P.unop)) R).hom
             ≫ eqToHom (by rw [ColoredPROP.tensor_assoc]))
+  -- (υ-naturality): the unitor υ : (− ⊛ I_D) ≅ Id is natural in C. (The §4.1 Eq.3 reasoning needs
+  -- this — `act` functoriality alone does not give it; it is stated as a law here, like δ/δ0
+  -- naturality in `dist_coh`.)
+  υ_nat : ∀ {X Y : C} (f : SmallCategory.hom X Y),
+    SmallCategory.comp
+      (act.map (X := (X, Opposite.op (ColoredPROP.unit : D)))
+               (Y := (Y, Opposite.op (ColoredPROP.unit : D))) (f, 𝟙 (Opposite.op (ColoredPROP.unit : D))))
+      (υ Y).hom
+    = SmallCategory.comp (υ X).hom f
   -- (Dist-nat / Dist-coh): the distributors are natural.
   --  • `δ`-naturality in the `C`-variable (in both tensor factors `f`, `g`).
   --  • `δ0`-naturality in the `D`-variable (for `g : P ⟶ Q` in `Dᵒᵖ`).
@@ -86,16 +95,33 @@ def ev_p {D C : Type} [ColoredPROP D] [ColoredPROP C] [DGradedColoredPROP D C]
       (𝟙 X, p))
     (DGradedColoredPROP.υ X).hom
 
+/-- Bridge: `SmallCategory.comp` is the Mathlib `≫` from the §3 seam (`instCategoryOfColoredPROP`),
+    so Mathlib's category lemmas (`Functor.map_comp`, `prod_comp`, …) apply to lift morphisms. -/
+private theorem smallComp_eq {O : Type} [ColoredPROP O] {X Y Z : O}
+    (f : SmallCategory.hom X Y) (g : SmallCategory.hom Y Z) :
+    SmallCategory.comp f g = @CategoryTheory.CategoryStruct.comp O _ X Y Z f g := rfl
+
 open CategoryTheory in
-/-- Eq. 3: the naturality square of `ev_p`. Holds by functoriality of `act` (`act.map_comp`)
-    plus naturality of `υ`. Try to discharge sorry-free; if the rewrite resists, leave a flagged
-    `sorry`. -/
+/-- Eq. 3: the naturality square of `ev_p`. Functoriality of `act` (`act.map_comp`) fuses the two
+    lift factors and `υ`-naturality (`υ_nat`) slides the unitor past `f`; the remaining obligation is
+    the product-category identity `(f, 𝟙) ≫ (𝟙, p) = (f, p) = (𝟙, p) ≫ (f, 𝟙)`. -/
 theorem ev_p_naturality {D C : Type} [ColoredPROP D] [ColoredPROP C] [DGradedColoredPROP D C]
     {P : Dᵒᵖ} (p : P ⟶ (Opposite.op (ColoredPROP.unit : D)))
     {X Y : C} (f : SmallCategory.hom X Y) :
     SmallCategory.comp
       (DGradedColoredPROP.act.map (X := (X, P)) (Y := (Y, P)) (f, 𝟙 P)) (ev_p p Y)
       = SmallCategory.comp (ev_p p X) f := by
-  sorry  -- SIGNATURE (proof milestone): naturality of ev_p, from act.map_comp + υ naturality.
+  have hnat :
+      DGradedColoredPROP.act.map (X := (X, Opposite.op (ColoredPROP.unit : D)))
+          (Y := (Y, Opposite.op (ColoredPROP.unit : D))) (f, 𝟙 (Opposite.op (ColoredPROP.unit : D)))
+        ≫ (DGradedColoredPROP.υ Y).hom
+      = (DGradedColoredPROP.υ X).hom ≫ f := DGradedColoredPROP.υ_nat f
+  simp only [ev_p, smallComp_eq]
+  rw [Category.assoc, ← hnat,
+      ← Category.assoc, ← Functor.map_comp, ← Category.assoc, ← Functor.map_comp]
+  congr 2
+  ext
+  · simp
+  · simp
 
 end LeanNCD

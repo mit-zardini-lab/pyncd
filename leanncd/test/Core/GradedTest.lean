@@ -26,4 +26,8 @@ open CategoryTheory in
 -- TEST: Eq. 3 (ev_p naturality) is recorded as a lemma.
 #check @ev_p_naturality
 
+-- TEST: ev_p_naturality is proved sorry-free (no `sorryAx` among its axioms — only the
+-- standard classical/quotient axioms remain).
+#print axioms ev_p_naturality
+
 end LeanNCD
