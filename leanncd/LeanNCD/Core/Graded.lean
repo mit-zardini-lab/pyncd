@@ -75,4 +75,27 @@ class DGradedColoredPROP (D C : Type) [ColoredPROP D] [ColoredPROP C] where
         (ρ : SmallCategory.hom (act.obj (Y', P)) Y),
         g = SmallCategory.comp (SmallCategory.comp lam (act.map (f, 𝟙 P))) ρ
 
+open CategoryTheory in
+/-- The slice of the lift at a point `p : I_D → P`: `act(𝟙, p)` post-composed with the unitor `υ`.
+    A morphism `X ⊛ P ⟶ X` for each `X`. (theory.md's `ev_p`.) -/
+def ev_p {D C : Type} [ColoredPROP D] [ColoredPROP C] [DGradedColoredPROP D C]
+    {P : Dᵒᵖ} (p : P ⟶ (Opposite.op (ColoredPROP.unit : D))) (X : C) :
+    SmallCategory.hom (DGradedColoredPROP.act.obj (X, P)) X :=
+  SmallCategory.comp
+    (DGradedColoredPROP.act.map (X := (X, P)) (Y := (X, Opposite.op (ColoredPROP.unit : D)))
+      (𝟙 X, p))
+    (DGradedColoredPROP.υ X).hom
+
+open CategoryTheory in
+/-- Eq. 3: the naturality square of `ev_p`. Holds by functoriality of `act` (`act.map_comp`)
+    plus naturality of `υ`. Try to discharge sorry-free; if the rewrite resists, leave a flagged
+    `sorry`. -/
+theorem ev_p_naturality {D C : Type} [ColoredPROP D] [ColoredPROP C] [DGradedColoredPROP D C]
+    {P : Dᵒᵖ} (p : P ⟶ (Opposite.op (ColoredPROP.unit : D)))
+    {X Y : C} (f : SmallCategory.hom X Y) :
+    SmallCategory.comp
+      (DGradedColoredPROP.act.map (X := (X, P)) (Y := (Y, P)) (f, 𝟙 P)) (ev_p p Y)
+      = SmallCategory.comp (ev_p p X) f := by
+  sorry  -- SIGNATURE (proof milestone): naturality of ev_p, from act.map_comp + υ naturality.
+
 end LeanNCD

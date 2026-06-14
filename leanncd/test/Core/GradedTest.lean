@@ -19,4 +19,11 @@ example {C D : Type} [ColoredPROP D] [ColoredPROP C] [DGradedColoredPROP D C] : 
 #check @DGradedColoredPROP.sh
 #check @DGradedColoredPROP.broadcast_gen
 
+open CategoryTheory in
+-- TEST: ev_p is defined as a morphism family derived from act + υ.
+#check @ev_p
+
+-- TEST: Eq. 3 (ev_p naturality) is recorded as a lemma.
+#check @ev_p_naturality
+
 end LeanNCD
