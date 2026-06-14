@@ -277,27 +277,38 @@ The two instances embody a complementary split. **St is semantic**: a stride mor
 The base class above is deliberately lightweight, so its `St`/`Br` instances keep the "tensor = list concat, strictness = `rfl`/`simp`" elegance. But the propositions of [§9](#9-the-propositions-as-generic-theorems) want Mathlib — `MonoidalCategory`, `SymmetricCategory`, `Grothendieck`, `Limits.pushout`, monoidal functors. A single stated **adapter** bridges the two, turning any `ColoredPROP O` into a Mathlib strict symmetric monoidal category.
 
 ```lean
--- Strictification strategy (the single genuine difficulty — §11):
---   1. Form FreeMonoidalCategory (Discrete O) — Mathlib's free strict monoidal category.
---   2. The ColoredPROP.tensor = List.append and unit = [] make O itself a strictification:
---      define the equivalence E : FreeMonoidalCategory (Discrete O) ≌ (O, List.append, [])
---      via the unique strict functor sending each generator to its Discrete-injection.
---   3. Transfer the MonoidalCategory and SymmetricCategory structures along E.inverse.
--- Result: downstream, all associators and unitors are Iso.refl (definitional strictness)
--- and PROP equations hold by rfl/simp rather than coherence threading.
-instance [ColoredPROP O] : CategoryTheory.MonoidalCategory O :=
-  -- transferred along FreeMonoidalCategory.strictify equivalence
-  CategoryTheory.MonoidalCategory.ofEquivalence (freeMonoidalEquiv O)
-instance [ColoredPROP O] : CategoryTheory.SymmetricCategory O :=
-  -- swap field of ColoredPROP gives the braiding; symmetry is then automatic
-  { braiding := fun a b => { hom := ColoredPROP.swap a b, inv := ColoredPROP.swap b a, … }
-    … }
--- freeMonoidalEquiv : FreeMonoidalCategory (Discrete O) ≌ O  (definition obligation)
+-- The bare category is direct and SORRY-FREE: forward the SmallCategory data and laws.
+instance instCategoryOfColoredPROP [ColoredPROP O] : CategoryTheory.Category O where
+  Hom X Y := SmallCategory.hom X Y
+  id X    := SmallCategory.id X
+  comp f g := SmallCategory.comp f g
+  id_comp := SmallCategory.id_comp ; comp_id := SmallCategory.comp_id ; assoc := SmallCategory.assoc
+
+-- The monoidal/symmetric structure is the *strict* one read off the ColoredPROP data, built
+-- DIRECTLY on the category above (NOT via FreeMonoidalCategory.ofEquivalence — that would supply
+-- a second Category instance and create a diamond). The structural isos are eqToIso of the
+-- already-proved strictness laws, so the category is strict by construction:
+noncomputable instance [ColoredPROP O] : CategoryTheory.MonoidalCategory O where
+  tensorObj X Y := ColoredPROP.tensor X Y
+  tensorUnit    := ColoredPROP.unit
+  whiskerLeft X _ _ g := ColoredPROP.tensorHom (𝟙 X) g
+  whiskerRight f Z    := ColoredPROP.tensorHom f (𝟙 Z)
+  tensorHom f g := ColoredPROP.tensorHom f g
+  associator  X Y Z := eqToIso (ColoredPROP.tensor_assoc  X Y Z)   -- strict: associator = eqToIso
+  leftUnitor  X     := eqToIso (ColoredPROP.tensor_unit_l X)       -- strict: unitor    = eqToIso
+  rightUnitor X     := eqToIso (ColoredPROP.tensor_unit_r X)
+  -- pentagon, triangle, the whisker/naturality coherences: §11 STRICTIFICATION OBLIGATIONS (…).
+  -- They reduce to tensorHom functoriality/interchange laws (tensorHom 𝟙 𝟙 = 𝟙, etc.) that the
+  -- lightweight ColoredPROP class does not currently carry — see the §11 note below.
+  … 
+noncomputable instance [ColoredPROP O] : CategoryTheory.SymmetricCategory O where
+  braiding X Y := { hom := ColoredPROP.swap X Y, inv := ColoredPROP.swap Y X, … }  -- swap involutivity (…)
+  …  -- naturality/hexagon/symmetry: discharged by aesop_cat over the strict structure
 ```
 
 This is the hybrid foundation of the proposition/computation separation: everything **above** the seam — the instances and executable defs (`St`, `Br`, `StMat.comp`, the union-find of [§7](#7-grothendieck-split-and-composition-as-pushout)) — speaks `ColoredPROP`; everything **below** it — the [§9](#9-the-propositions-as-generic-theorems) theorems — speaks Mathlib. The adapter *is* the proposition/computation boundary of [§1](#1-orientation-one-structure-one-seam) made into a definition: it is the one place where "what Lean computes" is handed to "what Lean proves."
 
-The adapter is produced **once** and reused by every [§9](#9-the-propositions-as-generic-theorems) theorem; per-instance proof obligations recur, but the bridge does not. The strictification strategy is the crux: Mathlib categories are not strict, so the development is carried out over `FreeMonoidalCategory (Discrete O)` and **strictified once**, so that downstream all associators and unitors become `Iso.refl` and the PROP equations (`tensor_assoc`, `tensor_unit_l`, `tensor_unit_r`) hold definitionally rather than up to coherent isomorphism. This is what lets a `ColoredPROP` law stated with `=` line up with a Mathlib `MonoidalCategory` whose coherences are isos.
+The adapter is produced **once** and reused by every [§9](#9-the-propositions-as-generic-theorems) theorem; per-instance proof obligations recur, but the bridge does not. The bare `Category` half is direct and sorry-free — it just forwards the `SmallCategory` data and laws. The strictification is the crux of the *monoidal* half: rather than carrying the development over `FreeMonoidalCategory (Discrete O)` and transferring along an equivalence (which would re-supply a `Category` instance and create a diamond), the monoidal structure is read off the `ColoredPROP` data directly, with the structural isos given by **`eqToIso` of the already-proved strictness laws** (`tensor_assoc`/`tensor_unit_l`/`tensor_unit_r`). This makes the category strict by construction and lets a `ColoredPROP` law stated with `=` line up with a Mathlib `MonoidalCategory` whose coherences are isos. The residual pentagon/triangle/whisker coherences are the genuine §11 strictification obligations (left as `…`); see the [§11](#11-lean-formalization-notes) note — they reduce to `tensorHom` functoriality/interchange and `swap` involutivity laws not carried by the lightweight base class, so adding those few laws to `ColoredPROP` would let most of them discharge.
 
 ## 4. The core: `DGradedColoredPROP D C`
 
@@ -320,28 +331,36 @@ class DGradedColoredPROP (D C : Type) [ColoredPROP D] [ColoredPROP C] where
   α     : ∀ X P Q, act.obj (act.obj (X,P), Q) ≅ act.obj (X, tensor Q P)
   sh_act : ∀ X P, sh_star sh (act.obj (X,P)) = tensor (sh_star sh X) P   -- (Sh-⊛)
   act_unit_assoc :                                                          -- right D-actegory
-    (∀ X, υ X ≫ (υ X).symm = 𝟙 _) ∧                                      --   triangle (υ coherence)
-    (∀ X P Q, (α X P Q).hom ≫ act.map ⟨𝟙, (tensor Q P).symm⟩ = …)       --   pentagon (α coherence)
+    (∀ X, …) ∧                                                            --   triangle (υ/α coherence at the unit)
+    (∀ X P Q, …)                                                          --   pentagon (α coherence)
+  υ_nat : ∀ {X Y} (f : hom X Y), act.map ⟨f, 𝟙⟩ ≫ (υ Y).hom = (υ X).hom ≫ f
+  -- (υ-naturality): the unitor is natural in C. Stated as a law here (like δ/δ0 naturality below)
+  -- because `act` functoriality alone does NOT give it — and Eq. 3 (§4.1) needs it.
   dist_coh :                                                                -- δ, δ0 naturality + interchange
     (∀ {X Y} (f : hom X Y) P, (δ X Y P).hom ≫ tensor (act.map ⟨f,𝟙⟩) (act.map ⟨f,𝟙⟩) = act.map ⟨tensorHom f f, 𝟙⟩ ≫ (δ X Y P).hom) ∧
     (∀ P, (δ0 P).hom ≫ 𝟙 unit = act.map ⟨𝟙, 𝟙⟩ ≫ (δ0 P).hom)           --   δ0 naturality
   broadcast_gen :                                                            -- (Broadcast-gen)
     ∀ {X Y : C} (g : hom X Y),
-      ∃ (X' Y' : C) (f : hom X' Y') (P : D) (ρ : hom (act.obj (Y', P)) Y),
-        g = comp (act.map ⟨f, 𝟙⟩) ρ ∧
+      ∃ (X' Y' : C) (f : hom X' Y') (P : D)
+        (lam : hom X (act.obj (X', P)))                          -- leading reindex: X → X' ⊛ P
+        (ρ : hom (act.obj (Y', P)) Y),                            -- trailing reindex: Y' ⊛ P → Y
+        g = comp (comp lam (act.map ⟨f, 𝟙⟩)) ρ ∧
         ∀ Q (h : hom unit_D Q), act.map ⟨f, h⟩ = act.map ⟨f, 𝟙⟩  -- f is degree-trivial
+  -- NB: the leading `lam` is required — without it `act.map ⟨f,𝟙⟩ : X' ⊛ P → Y' ⊛ P` has domain
+  -- `X' ⊛ P`, not `X`, so it cannot equal `g : X → Y`. `Weave` (§5) bundles exactly this datum.
 ```
 
 Each field is a direct transcription of the [graded_prop.md §3.1](graded_prop.md#31-data) data. `sh` is the **shape map** `sh : O_C → Ob D` sending each `C`-color to its underlying `D`-shape (its list of sub-wires); it extends to the monoid homomorphism `sh*` on objects used by the (Sh-⊛) law. `act` is the **lift action** `act : C × Dᵒᵖ ⥤ C` — a Mathlib functor, available because the seam adapter of [§3](#3-the-seam-adapter-into-mathlib) makes `C` and `D` Mathlib categories. Its two specializations are theory.md's lift notation: `[f, P] := act(f, 𝟙_P)` is the **batch lift** of `f` (covariant in `C`), and `[X, η] := act(𝟙_X, η)` is the **reindexing** along `η : P → Q` (contravariant in `D`, since `D` enters opposite).
 
 The four isomorphism fields are the **distributivity** and **action-coherence** isos. `δ` and `δ0` make the lift distribute over juxtaposition — `(X ⊗ Y) ⊛ P ≅ (X ⊛ P) ⊗ (Y ⊛ P)` and `I_C ⊛ P ≅ I_C`. `υ` and `α` are the actegory coherence isos — `υ : X ⊛ I_D ≅ X` (lifting by the unit shape is trivial) and `α : (X ⊛ P) ⊛ Q ≅ X ⊛ (Q ⊗ P)` (composing two lifts; the order `Q ⊗ P` is what makes `⊛` a **right** action of `(D, ⊗, I_D)`). Together `υ`/`α` are precisely the unitor and multiplicator exhibiting `C` as a right `D`-actegory.
 
-The four `Prop`-valued fields are the named laws of [graded_prop.md §3.2](graded_prop.md#32-axioms), one field each:
+The `Prop`-valued fields are the named laws of [graded_prop.md §3.2](graded_prop.md#32-axioms):
 
 - `sh_act` is **(Sh-⊛)**: `sh*(X ⊛ P) = sh*(X) ⊗ P` — lifting by `P` appends `P` to the shape.
 - `act_unit_assoc` bundles **(Act-unit / Act-assoc)**: `υ` and `α` satisfy the triangle and pentagon coherences, i.e. `C` is a right `D`-actegory.
+- `υ_nat` is **unitor naturality**: `[f, I_D] ; υ_Y = υ_X ; f`. It is a *separate* law because `act` functoriality alone does not force it; the derived Eq. 3 of [§4.1](#41-derived-ev_p-and-eq-3) depends on it.
 - `dist_coh` bundles **(Dist-nat / Dist-coh)**: `δ`, `δ0` are natural and satisfy the interchange coherence with `υ`, `α`, and the symmetry `σ` — the lift is a strong symmetric monoidal action in the `C`-variable.
-- `broadcast_gen` is **(Broadcast-gen)**: every `C`-morphism factors as `[f, P] ; ρ` with `f` degree-trivial (built without `act` over a non-unit `P`) and `ρ` a reindexing assembled from `act(𝟙, −)` and the coherence isos. This is the generation principle that makes weaves ([§5](#5-weaves-as-cartesian-lift-data)) exist.
+- `broadcast_gen` is **(Broadcast-gen)**: every `C`-morphism factors as `lam ; [f, P] ; ρ` with `f` degree-trivial (built without `act` over a non-unit `P`) and `lam`/`ρ` reindexings assembled from `act(𝟙, −)` and the coherence isos. (The leading `lam : X → X' ⊛ P` is needed for the factorization to typecheck — `[f, P]` starts at `X' ⊛ P`, not `X`.) This is the generation principle that makes weaves ([§5](#5-weaves-as-cartesian-lift-data)) exist.
 
 Note that **(Act-functor)** of [graded_prop.md §3.2](graded_prop.md#32-axioms) (`act` respects identities and composition in both variables, so `[f ; g, P] = [f, P] ; [g, P]`) and **(Sh-⊗)** (`sh*` is a monoid homomorphism) are not separate fields: the first is the `Functor` laws already carried by `act`, the second is built into the definition of `sh*` from `sh`. And **(Elem-C)** is not here either — it is the `elemental` field of `ColoredPROP` ([§2](#2-the-base-coloredprop)), inherited from the instance `[ColoredPROP C]`.
 
@@ -349,37 +368,40 @@ Note that **(Act-functor)** of [graded_prop.md §3.2](graded_prop.md#32-axioms) 
 
 ### 4.1 Derived: `ev_p` and Eq. 3
 
-Theory.md's batch-lift defining property (Eq. 3) is **not** an axiom of the core class — it falls out of `act` being a functor. For a point `p : I_D → P` in `D`, the *slice at `p`* is a derived natural transformation, and its naturality square is Eq. 3.
+Theory.md's batch-lift defining property (Eq. 3) is **not** an axiom of the core class — it is *derived*. For a point `p : I_D → P` in `D`, the *slice at `p`* is a derived morphism family, and its naturality square is Eq. 3.
 
 ```lean
-def ev_p [DGradedColoredPROP D C] (p : hom unit_D P) : (act ⊛ P) ⟶ Id := act.map ⟨𝟙, p⟩ ≫ υ
--- Eq. 3:  [f,P] ≫ (Y ⊛ p) = (X ⊛ p) ≫ f   -- naturality of ev_p, from Functor.map_comp
+def ev_p [DGradedColoredPROP D C] (p : hom unit_D P) (X : C) : hom (act.obj (X,P)) X :=
+  act.map ⟨𝟙 X, p⟩ ≫ (υ X).hom                          -- act(𝟙, p) post-composed with the unitor
+-- Eq. 3:  [f,P] ≫ ev_p p Y = ev_p p X ≫ f             -- naturality of ev_p (theorem ev_p_naturality)
 ```
 
-`ev_p` is a `def`, not a field: it is `act.map ⟨𝟙, p⟩` post-composed with the unitor `υ`, a natural transformation `(− ⊛ P) ⇒ (− ⊛ I_D) ≅ Id_C`. Because `act` is a functor, each `ev_p` is *automatically* natural — its naturality square at `f : X → Y` is exactly **(Eq. 3)** `[f, P] ; (Y ⊛ p) = (X ⊛ p) ; f`, discharged by `Functor.map_comp`. So Eq. 3 is **built in** by functoriality of `act`, not posited ([graded_prop.md §3.2](graded_prop.md#32-axioms)). The genuine content lives elsewhere: it is `elemental` (the points `ev_p` jointly separate morphisms) that pins down the weave of [§5](#5-weaves-as-cartesian-lift-data) — Eq. 3 alone holds for free and does not force the factorization.
+`ev_p` is a `def`, not a field: it is `act.map ⟨𝟙, p⟩` post-composed with the unitor `υ`. Its naturality square at `f : X → Y` is exactly **(Eq. 3)** `[f, P] ; ev_p p Y = ev_p p X ; f`. The proof combines the two `act.map` factors via `Functor.map_comp` (the product-category interchange `(f,𝟙) ; (𝟙,p) = (𝟙,p) ; (f,𝟙)`) and then slides the unitor past `f` — which is **`υ_nat`**. So Eq. 3 is derived (not posited as its own axiom), but it is *not* free from `act` functoriality alone: it rests on the `υ_nat` law of [§4](#4-the-core-dgradedcoloredprop-d-c). The remaining genuine content lives in `elemental` (the points `ev_p` jointly separate morphisms), which pins down the weave of [§5](#5-weaves-as-cartesian-lift-data) — Eq. 3 holds once `υ_nat` is supplied, and does not by itself force the factorization.
 
 ## 5. Weaves as cartesian-lift data
 
-The (Broadcast-gen) law says every `C`-morphism factors as `[f, P] ; ρ`. A **weave** is a witness of that factorization for a particular morphism — and, as [graded_prop.md §3.3](graded_prop.md#33-weaves-as-cartesian-lift-data) shows, it is precisely the cartesian-lift datum of the grading fibration `C → D`.
+The (Broadcast-gen) law says every `C`-morphism factors as `lam ; [f, P] ; ρ`. A **weave** is a witness of that factorization for a particular morphism — and, as [graded_prop.md §3.3](graded_prop.md#33-weaves-as-cartesian-lift-data) shows, it is precisely the cartesian-lift datum of the grading fibration `C → D`.
 
 > **Naming.** `WeaveShape` ([§2](#2-the-base-coloredprop)) is the *per-array slot list* (`List WeaveSlot`, the shape of one wire). The `Weave g` below is a *different* concept: the cartesian-lift factorization witness for a whole morphism `g`. The Python type named `Weave` maps to the former; this `structure Weave` is the latter.
 
 ```lean
 structure Weave [DGradedColoredPROP D C] {X Y : C} (g : hom X Y) where
+  X' : C ; Y' : C
   f       : hom X' Y'    -- base op (degree-trivial)
   P       : D
-  ρ       : hom (act.obj (Y', P)) Y   -- reindexing: act(𝟙_{Y'}, η) composed with coherence isos,
+  lam     : hom X (act.obj (X', P))   -- leading reindex (the broadcast_gen `lam`)
+  ρ       : hom (act.obj (Y', P)) Y   -- trailing reindex: act(𝟙_{Y'}, η) composed with coherence isos,
                                        -- where η : P → (degree fitting X→Y over Y'); assembled
                                        -- from [Y', −] and the α/υ isos of DGradedColoredPROP
-  factors : g = [f, P] ≫ ρ
+  factors : g = lam ≫ [f, P] ≫ ρ
 
 theorem weave_unique [DGradedColoredPROP D C] {X Y} (g : hom X Y) :
     Subsingleton (Weave g)         -- Prop 8.2, from elemental + broadcast_gen
 ```
 
-A `Weave g` records the (Broadcast-gen) factorization of `g`: a degree-trivial base op `f`, a degree `P ∈ D`, a reindexing `ρ` (assembled from `act(𝟙, −)` and the coherence isos), and a proof that `g = [f, P] ; ρ`. Per wire, the shape `sh(color) ∈ Ob D` is a list of sub-colors that the factorization partitions into **target** sub-colors (acted on directly by `f`) and **tiling** sub-colors (supplied by the degree `P` through `ρ`); the permutation relating the canonical "targets-first" order to the wire's actual sub-color order is theory.md's `Ω_w`, recovered from the symmetry `σ`. This is **precisely the cartesian-lift datum** of the grading fibration `C → D` ([graded_prop.md §3.3](graded_prop.md#33-weaves-as-cartesian-lift-data)): a weave is the choice of how a morphism's wires sit over their `D`-shapes, with the tiling part pulled back along the degree.
+A `Weave g` records the (Broadcast-gen) factorization of `g`: a degree-trivial base op `f`, a degree `P ∈ D`, the boundary reindexings `lam`/`ρ` (assembled from `act(𝟙, −)` and the coherence isos), and a proof that `g = lam ; [f, P] ; ρ`. It bundles exactly the witnesses of the `broadcast_gen` field of [§4](#4-the-core-dgradedcoloredprop-d-c), so uniqueness can be stated as a `Subsingleton`. Per wire, the shape `sh(color) ∈ Ob D` is a list of sub-colors that the factorization partitions into **target** sub-colors (acted on directly by `f`) and **tiling** sub-colors (supplied by the degree `P` through `ρ`); the permutation relating the canonical "targets-first" order to the wire's actual sub-color order is theory.md's `Ω_w`, recovered from the symmetry `σ`. This is **precisely the cartesian-lift datum** of the grading fibration `C → D` ([graded_prop.md §3.3](graded_prop.md#33-weaves-as-cartesian-lift-data)): a weave is the choice of how a morphism's wires sit over their `D`-shapes, with the tiling part pulled back along the degree.
 
-`weave_unique` (Proposition 8.2) makes `Weave g` a `Subsingleton` — at most one weave, up to the canonical coherence isos. This is what turns `Weave` into a **datum, not a choice**: the factorization is forced, not selected. The proof draws on both the `elemental` field of `[ColoredPROP C]` (points separate morphisms, so the degree `P` and the target/tiling partition are determined) and `broadcast_gen` (a factorization exists at all). Without `elemental`, Eq. 3 would still hold by functoriality but the `(f, P, ρ)` factorization would not be unique.
+`weave_unique` (Proposition 8.2) makes `Weave g` a `Subsingleton` — at most one weave, up to the canonical coherence isos. This is what turns `Weave` into a **datum, not a choice**: the factorization is forced, not selected. The proof draws on both the `elemental` field of `[ColoredPROP C]` (points separate morphisms, so the degree `P` and the target/tiling partition are determined) and `broadcast_gen` (a factorization exists at all). Without `elemental`, Eq. 3 would still hold (given `υ_nat`) but the `(lam, f, P, ρ)` factorization would not be unique.
 
 ## 6. Mixins: Scan, Route, Symmetry, Para
 
@@ -704,7 +726,7 @@ and mentions nothing beyond `act`, `δ`/`δ0`/`υ`/`α`, `sh`, and the named `Pr
 | **8.7** `Scan` as a catamorphism | `Scan := cata(step)`; the prefix-restriction law is a corollary of the catamorphism universal property | `TemporalGraded` (the `iterate`/`trace` fields of [§6.1](#61-temporalgraded--scan)) | free given `TemporalGraded`; explains the affine fast path (step algebra factors through a **monoid** → parallel prefix in `O(log N)`) |
 | **8.8** `Scan` batches | `act(Scan, P) ≅ Scan(act(step, P))` for `P` orthogonal to `L` | `lift_fold_dist` ([§6.1](#61-temporalgraded--scan)) | free given `TemporalGraded` |
 
-The inheritance is about the **theorems**, not the instance obligations. When a new `instance : DGradedColoredPROP D C` is declared, the propositions above transfer to it for free — but the instance must still **discharge the coherence `Prop`-fields** of the core: the actegory triangle and pentagon (`act_unit_assoc`), the distributivity coherences (`dist_coh`), and `sh_act`/`broadcast_gen`/`elemental`. "Inherit everywhere" names the proven propositions riding on those fields; it does not waive the obligation to *supply* the fields. Each new domain pays that fixed, finite coherence cost once; everything built on top of the core is then free.
+The inheritance is about the **theorems**, not the instance obligations. When a new `instance : DGradedColoredPROP D C` is declared, the propositions above transfer to it for free — but the instance must still **discharge the coherence `Prop`-fields** of the core: the actegory triangle and pentagon (`act_unit_assoc`), unitor naturality (`υ_nat`), the distributivity coherences (`dist_coh`), and `sh_act`/`broadcast_gen`/`elemental`. "Inherit everywhere" names the proven propositions riding on those fields; it does not waive the obligation to *supply* the fields. Each new domain pays that fixed, finite coherence cost once; everything built on top of the core is then free.
 
 ## 10. Instantiation and future extensions
 
@@ -722,8 +744,9 @@ instance : DGradedColoredPROP St Br where
   α     := …                       -- [[X,P],Q] ≅ [X, Q ⊗ P]
   sh_act         := …              -- (Sh-⊛): sh*([X,P]) = sh*(X) ⊗ P
   act_unit_assoc := …              -- actegory triangle + pentagon, by St affine-stride algebra
+  υ_nat          := …              -- unitor naturality, by the batch-lift defn
   dist_coh       := …              -- δ/δ0 naturality + interchange, from the batch-lift defn
-  broadcast_gen  := …              -- every Br morphism is a broadcasted operation (Def 13)
+  broadcast_gen  := …              -- every Br morphism factors as lam ; [f,P] ; ρ (Def 13)
   elemental      := …              -- Br is elemental (base ColoredPROP field)
 ```
 
@@ -737,6 +760,7 @@ instance : DGradedColoredPROP St Br where
 | `α` | `[[X,P],Q] ≅ [X, Q ⊗ P]` — nested lifts compose the batch shapes |
 | `sh_act` | `(Sh-⊛)`: a lifted array's shape is the base shape tensored with the batch shape `P` |
 | `act_unit_assoc` | actegory triangle/pentagon, discharged by `St`'s affine-stride matrix algebra (`Matrix.mul_assoc` + `ring`) |
+| `υ_nat` | unitor naturality `[f, I_St] ; υ_Y = υ_X ; f`, from the batch-lift definition |
 | `dist_coh` | `δ`/`δ0` naturality and interchange with `υ`/`α`/swap, from the batch-lift definition |
 | `broadcast_gen` | `(Broadcast-gen)`: every `Br` morphism is a broadcasted operation ([theory.md §Broadcasting](theory.md#broadcasting)) |
 | `elemental` | `Br` is elemental ([theory.md §Elemental Categories](theory.md#elemental-categories)) — the base `ColoredPROP` field |
@@ -771,9 +795,9 @@ The strategy of [graded_prop.md §10](graded_prop.md#10-lean-formalization-notes
 
 Beyond the coverage map, several honest notes shape any transcription:
 
-- **Strictification strategy.** Develop the whole tower over `FreeMonoidalCategory (Discrete O)` and **strictify once**, so that downstream all associators and unitors are `Iso.refl` and the PROP equations (`tensor_assoc`, `tensor_unit_l`, `tensor_unit_r`) hold *definitionally* rather than up to coherent isomorphism. This is what lets a `ColoredPROP` law stated with `=` line up with a Mathlib `MonoidalCategory` whose coherences are isos, and it is applied at the seam adapter of [§3](#3-the-seam-adapter-into-mathlib).
+- **Strictification strategy.** Build the Mathlib `MonoidalCategory` structure directly from the `ColoredPROP` data, taking the structural isos to be **`eqToIso` of the strictness laws** (`tensor_assoc`, `tensor_unit_l`, `tensor_unit_r`) already proved in [§2](#2-the-base-coloredprop). This makes the category strict by construction and lets a `ColoredPROP` law stated with `=` line up with a Mathlib `MonoidalCategory` whose coherences are isos, applied at the seam adapter of [§3](#3-the-seam-adapter-into-mathlib). It builds **on** the sorry-free `Category` instance (which just forwards `SmallCategory`), so there is no second `Category` instance and no diamond — preferred over carrying the tower over `FreeMonoidalCategory (Discrete O)` and transferring along an equivalence.
 
-- **Strictness is the real friction.** This strictification is the *single* genuine difficulty in the formalization. Mathlib's categories are not strict, so without the one-time strictification every PROP equation would have to be threaded through associator/unitor coherence by hand. The mitigation above contains the cost to one place; nothing else in the development fights the type theory.
+- **Strictness is the real friction.** The residual pentagon/triangle and whisker/naturality coherences of the monoidal seam are the *single* genuine difficulty. With the `eqToIso` construction they reduce to `tensorHom` functoriality/interchange laws (`tensorHom 𝟙 𝟙 = 𝟙`, `tensorHom (f;f') (g;g') = tensorHom f g ; tensorHom f' g'`) and `swap` involutivity (`swap ; swap = 𝟙`) — laws the lightweight `ColoredPROP` base does *not* currently carry. **Adding those few laws to `ColoredPROP`** (they hold for both `St` and `Br`) would let most of these coherences discharge by `simp`/`aesop_cat` over the strict structure; until then they are stated-with-`sorry` (they are not consumed until the [§9](#9-the-propositions-as-generic-theorems) theorems). Nothing else in the development fights the type theory.
 
 - **Inheritance is for theorems, not obligations.** The [§9](#9-the-propositions-as-generic-theorems) theorems transfer to every instance for free, because their only hypothesis is `[DGradedColoredPROP D C]`. But each new `instance` must still **discharge the coherence `Prop`-fields** of the core — the actegory triangle and pentagon (`act_unit_assoc`), the distributivity coherences (`dist_coh`), and `sh_act`/`broadcast_gen`. "Prove once, inherit everywhere" names the proven propositions; it does not waive the per-instance obligation to *supply* the coherence fields.
 
