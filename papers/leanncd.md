@@ -549,11 +549,15 @@ This is where the proposition/computation seam of [§1](#1-orientation-one-struc
 **Fresh-UID counter — `FreshM`.** Constructing a new symbolic axis mints a fresh identity. Python does this with `random.randint` as a construction side-effect; Lean 4 is pure, so the fresh-name counter is threaded explicitly. Compilation can also fail (shape mismatches, missing base cases, illegal contractions), so `FreshM` is `EStateM CompileError ℕ` — Lean core's combined error+state monad (`Init.Control.EStateM`) rather than a bare `StateM ℕ`. This is the *executable* side — it computes identities and validates constraints; it proves nothing.
 
 ```lean
+-- The executable-seam modules (LeanNCD/Exec/Uid.lean, Traversable.lean) are Lean-core-only — no
+-- Mathlib — so they write `Nat`/`Type u` where this pseudocode shows `ℕ`/`Type*`. `DynamicName` is
+-- realized as a `String` stub (display-only, §13).
 abbrev UID := ℕ
 
 structure UData where
   uid  : UID
-  name : Option DynamicName
+  name : Option DynamicName := none
+  deriving Repr, DecidableEq, Inhabited
 
 /-- Combined error + UID-counter monad for DSL compilation.
     `EStateM ε σ α` (Lean core, Init.Control.EStateM) = `σ → Result ε σ α`.
@@ -585,7 +589,7 @@ inductive CompileError
   | overlappingScatter : String → CompileError           -- non-injective scatter without reduce sum
   | linearWeightAmbiguous : String → CompileError        -- linear weight in ≠1 product factors
   | undeclaredName   : String → CompileError             -- name used but not declared
-  deriving Repr
+  deriving Repr, DecidableEq
 
 /-- Typeclass for types whose UID references can be traversed and substituted.
     One explicit instance per decorated type; instances derived mechanically by structural recursion.
@@ -606,24 +610,31 @@ structure Context (α : Type*) where
 
 /-- Merge a new class in, unioning with any overlapping classes (= Context.append_bucket). -/
 def Context.merge (ctx : Context α) (cls : EqClass α) : Context α :=
-  let overlapping := ctx.classes.filter (fun c => ¬ Disjoint c.bucket cls.bucket)
+  -- `List.filter` needs a `Bool`, so the overlap test is `decide`d (Finset disjointness is Decidable):
+  let overlaps : EqClass α → Bool := fun c => ! decide (Disjoint c.bucket cls.bucket)
+  let overlapping := ctx.classes.filter overlaps
   let merged : EqClass α := overlapping.foldl
     (fun acc c => ⟨acc.bucket ∪ c.bucket,
-                   if acc.canonical.data.uid ≥ c.canonical.data.uid
-                   then acc.canonical else c.canonical⟩)
+                   if acc.canonical.uid ≥ c.canonical.uid          -- WithUID.uid (the rep's UID), the
+                   then acc.canonical else c.canonical⟩)           -- general key — not `.data.uid`
     cls
-  ⟨merged :: ctx.classes.filter (fun c => Disjoint c.bucket cls.bucket)⟩
+  ⟨merged :: ctx.classes.filter (fun c => ! overlaps c)⟩
 -- instance : DecidableEq UID := inferInstance  -- free from abbrev UID := ℕ
 
-/-- Substitute every UID in each class by its canonical representative throughout a term. -/
-def Context.apply [TermTraversable α] (ctx : Context α) (target : α) : α :=
+/-- Substitute every UID in each class by its canonical representative throughout a term.
+    The target type `β` is independent of the context's element type `α`: substitution is purely
+    UID-level (driven by `bucket` + `canonical.uid`), so a `Context` of axes applies to a whole
+    program term. -/
+def Context.apply [TermTraversable β] (ctx : Context α) (target : β) : β :=
   ctx.classes.foldl (fun t cls =>
     TermTraversable.traverseUID
-      (fun d => if d.uid ∈ cls.bucket then cls.canonical.data else d) t)
+      (fun d => if d.uid ∈ cls.bucket then { d with uid := cls.canonical.uid } else d) t)
     target
 ```
 
 The framing is the whole point. **The pushout/coequalizer is the spec; union-find plus the fresh-name counter is the implementation; they meet at the seam.** The Stage-2 colimit *certifies* the gluing — associativity (the pasting lemma), the precise error semantics ("no cocone" = alignment failure, "inconsistent attributes" = size mismatch), the canonical representative as cocone vertex — while `Context` *computes* it in near-linear time. A Lean development proves the coequalizer is what it claims; it does not re-derive `Context` line-by-line, and pyncd would never invoke a generic colimit solver. The substitution machinery `Context.apply` rides on a `TermTraversable` typeclass — one explicit traversal instance per decorated type — but that, the `WithUID` decoration, and `DynamicName` are display/identity bookkeeping on the executable side, never propositional content.
+
+Unlike the propositional tower (§2–§10, transcribed as signatures with `sorry`), this executable seam is **fully implemented and `sorry`-free** (`LeanNCD/Exec/`): `FreshM`/`freshUData` mint an increasing counter and propagate `CompileError`; `Context.merge` unions overlapping buckets keeping the largest-UID representative; `Context.apply` substitutes UIDs by canonical representatives. It is verified by evaluated tests (`#guard` plus an LSpec suite) — `#eval`/`decide` work here precisely because nothing crosses into the noncomputable `Numeric` algebra. The per-type `TermTraversable` instances for the DSL AST (`AxisSpec`, `IdxExpr`, …, `BrBase`, `ThreadedComposed`) are written alongside the compiler in [§12](#12-the-tensor-logic-dsl).
 
 ### 7.5 Algebras and `construct()`
 
