@@ -70,6 +70,9 @@ noncomputable instance St : ColoredPROP StObj where
     { coeffs := Matrix.reindex eB.symm eC.symm (Matrix.fromBlocks f.coeffs 0 0 g.coeffs)
       bias   := fun i => Sum.elim f.bias g.bias (eB i) }
   swap := sorry        -- SIGNATURE (Milestone B+): permutation matrix, zero bias (§2.2)
+  tensorHom_id   := by sorry -- SIGNATURE (Milestone G): tensorHom_id for St
+  tensorHom_comp := by sorry -- SIGNATURE (Milestone G): tensorHom_comp for St
+  swap_swap      := by sorry -- SIGNATURE (Milestone G): swap_swap for St
   elemental := sorry   -- SIGNATURE (Milestone B+): stride matrices separated by their points (§2.2)
 
 end LeanNCD

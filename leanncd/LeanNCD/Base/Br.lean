@@ -72,6 +72,9 @@ instance Br : ColoredPROP BrObj where
   tensor_unit_r := by intro a; simp [List.append_nil]
   swap := sorry       -- SIGNATURE (Milestone B+): interleaving rearrangement morphism (§2.3)
   tensorHom := sorry  -- SIGNATURE (Milestone B+): ProductOfMorphisms / parallel product (§2.3)
+  tensorHom_id   := by sorry -- SIGNATURE (Milestone G): tensorHom_id for Br
+  tensorHom_comp := by sorry -- SIGNATURE (Milestone G): tensorHom_comp for Br
+  swap_swap      := by sorry -- SIGNATURE (Milestone G): swap_swap for Br
   elemental := sorry  -- SIGNATURE (Milestone B+): Br is elemental, theory.md argument (§2.3)
 
 end LeanNCD
