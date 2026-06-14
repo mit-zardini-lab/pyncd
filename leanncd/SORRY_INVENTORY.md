@@ -66,3 +66,45 @@ coherences of `tensorHom`/`swap` that the bifunctor + `swap_swap` laws do **not*
 Note: `braiding_naturality_*`/`hexagon_*` previously "closed by `aesop_cat`" only because the
 then-`sorry` braiding inverse let the discharger ride on `sorry`; with the inverse now a real proof
 (`swap_swap`) they are honestly deferred. `Graded.lean` is fully sorry-free.
+
+## Milestone C — intentional `sorry` inventory
+
+Milestone C adds the §7 Grothendieck split, the §7.2 target actegory / algebra layer, the §8/§9
+generic propositions, and the §10.1 flagship `St`/`Br` instance. The mixin class declarations
+(`TemporalGraded`/`RouteStructure`/`SymmetryGraded`), the `TargetActegory` class, and the
+`Algebra`/`ParaAlgebra` class declarations are **sorry-free**. All `sorry`s below are
+`-- SIGNATURE`-annotated. New real code-line `sorry` count: **15** (3 + 1 + 1 + 10).
+
+| File | Field/term | Section | Note |
+| --- | --- | --- | --- |
+| `LeanNCD/Grothendieck/Split.lean` | `structuralCongruence.instCongruence.comp_left` | §7.1 | stable under precomposition |
+| `LeanNCD/Grothendieck/Split.lean` | `structuralCongruence.instCongruence.comp_right` | §7.1 | stable under postcomposition |
+| `LeanNCD/Grothendieck/Split.lean` | `structuralCongruence.instCongruence.equivalence` | §7.1 | reflexive + symmetric + transitive |
+| `LeanNCD/Grothendieck/Split.lean` | `Dat` | §7.1 / 8.3 | data functor (size-assignments over the structural skeleton) |
+| `LeanNCD/Grothendieck/Split.lean` | `grothendieck_split` | 8.3 | Prop 8.3: `C ≌ ∫Dat` (structure/data split) |
+| `LeanNCD/Algebra/Target.lean` | `TargetActegory StObj (Mat ℝ) ℝ` instance `actV` | §7.2 | appends ℝ-typed dimensions; composition = matrix multiply over ℝ |
+| `LeanNCD/Props/Generic.lean` | `scan_catamorphism` | 8.7 | scan-as-catamorphism (iterate stable under reflexive-prefix restriction) |
+| `LeanNCD/Instances/StBr.lean` | `instDGradedStBr.act` | §10.1 | batch lift + reindexing |
+| `LeanNCD/Instances/StBr.lean` | `instDGradedStBr.δ` | §10.1 | `[X ⊗ Y, P] ≅ [X,P] ⊗ [Y,P]` |
+| `LeanNCD/Instances/StBr.lean` | `instDGradedStBr.δ0` | §10.1 | `[I, P] ≅ I` |
+| `LeanNCD/Instances/StBr.lean` | `instDGradedStBr.υ` | §10.1 | `[X, I_St] ≅ X` |
+| `LeanNCD/Instances/StBr.lean` | `instDGradedStBr.α` | §10.1 | `[[X,P],Q] ≅ [X, Q ⊗ P]` |
+| `LeanNCD/Instances/StBr.lean` | `instDGradedStBr.sh_act` | §10.1 | (Sh-⊛) |
+| `LeanNCD/Instances/StBr.lean` | `instDGradedStBr.act_unit_assoc` | §10.1 | actegory triangle + pentagon |
+| `LeanNCD/Instances/StBr.lean` | `instDGradedStBr.υ_nat` | §10.1 | unitor naturality |
+| `LeanNCD/Instances/StBr.lean` | `instDGradedStBr.dist_coh` | §10.1 | δ/δ0 naturality + interchange |
+| `LeanNCD/Instances/StBr.lean` | `instDGradedStBr.broadcast_gen` | §10.1 | every Br morphism factors `lam ; [f,P] ; ρ` |
+
+Notes:
+
+- `Props/Generic.lean` is otherwise sorry-free: `lift_functorial` (8.1) is **PROVED** sorry-free
+  (`#print axioms` ⇒ `[propext]` only), and `scan_batches` (8.8) is a **sorry-free re-export** of
+  `TemporalGraded.lift_fold_dist`; `weave_subsingleton` (8.2) re-exports `weave_unique`. Only
+  `scan_catamorphism` (8.7) is deferred.
+- `Instances/StBr.lean`: the `sh` field is **concrete** (`fun a => a.shape`, sorry-free); the 10
+  fields above (`act`/`δ`/`δ0`/`υ`/`α`/`sh_act`/`act_unit_assoc`/`υ_nat`/`dist_coh`/`broadcast_gen`)
+  are deferred §10.1 content.
+- §9 props 8.3/8.4/8.5/8.6: 8.3 is `grothendieck_split` (in `Grothendieck/Split.lean`, not restated);
+  8.4 (equivariance), 8.5, and 8.6 (obstruction species) are **OMITTED** — not vacuous, but no class
+  field carries faithful content to state yet (EM-machinery / pushout / obstruction datum gated for
+  later milestones). They are deliberately not stubbed with a `True`.

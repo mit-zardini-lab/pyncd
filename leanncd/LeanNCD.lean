@@ -9,3 +9,10 @@ import LeanNCD.Seam.Adapter
 import LeanNCD.Core.Graded
 import LeanNCD.Core.Weave
 import LeanNCD.Mixins.Temporal
+import LeanNCD.Mixins.Route
+import LeanNCD.Mixins.Symmetry
+import LeanNCD.Grothendieck.Split
+import LeanNCD.Algebra.Target
+import LeanNCD.Algebra.Algebra
+import LeanNCD.Props.Generic
+import LeanNCD.Instances.StBr
