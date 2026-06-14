@@ -10,4 +10,13 @@ namespace LeanNCD
 example : sh_star (C := BrObj) (D := StObj) (fun _ => ([] : StObj)) ([] : BrObj) = ([] : StObj) :=
   rfl
 
+open CategoryTheory in
+-- TEST: the class elaborates and is usable as a hypothesis; data fields have expected types.
+example {C D : Type} [ColoredPROP D] [ColoredPROP C] [DGradedColoredPROP D C] : True := by
+  trivial
+
+#check @DGradedColoredPROP.act
+#check @DGradedColoredPROP.sh
+#check @DGradedColoredPROP.broadcast_gen
+
 end LeanNCD
