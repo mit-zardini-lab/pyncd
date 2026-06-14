@@ -6,3 +6,5 @@ import LeanNCD.Base.ColoredPROP
 import LeanNCD.Base.St
 import LeanNCD.Base.Br
 import LeanNCD.Seam.Adapter
+import LeanNCD.Core.Graded
+import LeanNCD.Core.Weave
