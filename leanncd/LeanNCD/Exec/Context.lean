@@ -24,4 +24,14 @@ def Context.merge (ctx : Context α) (cls : EqClass α) : Context α :=
     cls
   ⟨merged :: ctx.classes.filter (fun c => ! overlaps c)⟩
 
+/-- Substitute every UID by its class's canonical representative throughout a term, for each class.
+    The target type `β` is independent of the context's `α`: only each class's `bucket` and the
+    canonical representative's `uid` drive the substitution. -/
+def Context.apply [TermTraversable β] (ctx : Context α) (target : β) : β :=
+  ctx.classes.foldl
+    (fun t cls =>
+      TermTraversable.traverseUID
+        (fun d => if d.uid ∈ cls.bucket then { d with uid := cls.canonical.uid } else d) t)
+    target
+
 end LeanNCD

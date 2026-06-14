@@ -27,4 +27,13 @@ private def c2 : Context UData := c1.merge ⟨{2, 3}, ⟨⟨3, none⟩, 3⟩⟩
 private def c3 : Context UData := c2.merge ⟨{7, 8}, ⟨⟨8, none⟩, 8⟩⟩
 #guard c3.classes.length == 2
 
+-- apply substitutes each UID by its class's canonical representative; non-members are untouched.
+private def ctxA : Context UData := (Context.mk []).merge ⟨{1, 3}, ⟨⟨3, none⟩, 3⟩⟩
+
+#guard (Context.apply ctxA ([⟨1, none⟩, ⟨5, none⟩] : List UData)).map (·.uid) == [3, 5]
+
+-- applying to a single UData (the UData instance) substitutes a member; a non-member is unchanged.
+#guard (Context.apply ctxA (⟨1, none⟩ : UData)).uid == 3
+#guard (Context.apply ctxA (⟨9, none⟩ : UData)).uid == 9
+
 end LeanNCD
