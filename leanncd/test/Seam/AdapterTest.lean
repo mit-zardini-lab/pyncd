@@ -19,4 +19,8 @@ example (a : StObj) : (𝟙 a) ≫ (𝟙 a) = 𝟙 a := by simp
 -- TEST: the Category instance carries no sorry.
 #print axioms instCategoryOfColoredPROP
 
+-- TEST: St and Br objects get a (strict) MonoidalCategory and SymmetricCategory via the seam.
+noncomputable example : MonoidalCategory StObj := inferInstance
+noncomputable example : SymmetricCategory StObj := inferInstance
+
 end LeanNCD
