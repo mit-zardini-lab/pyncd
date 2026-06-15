@@ -839,7 +839,9 @@ Beyond the coverage map, several honest notes shape any transcription:
 
 ## 12. The tensor-logic DSL
 
-A Lean 4 DSL embedding for tensor logic, following the syntax-category + elaboration pattern of the Lean 4 metaprogramming book (ch. 8): a BNF grammar defines the surface language; Lean inductive types give the abstract syntax; `declare_syntax_cat`/`syntax` rules connect them to Lean's parser; `elabXxx : Syntax → MetaM Expr` functions walk the syntax tree; and `TLProgram.compile : TLProgram → FreshM ThreadedComposed` lowers programs to morphisms in `Br`.
+A Lean 4 DSL embedding for tensor logic, following the syntax-category + elaboration pattern of the Lean 4 metaprogramming book (ch. 8): a BNF grammar defines the surface language; Lean inductive types give the abstract syntax; `declare_syntax_cat`/`syntax` rules connect them to Lean's parser; value-returning `elabXxx : Syntax → MetaM <value>` functions walk the syntax tree (building concrete AST *values*, not `Expr`s — see [§12.3](#123-concrete-syntax-and-elaboration)); and `TLProgram.compile : TLProgram → FreshM ThreadedComposed` lowers programs to morphisms in `Br`.
+
+> **Implementation status (Milestone E1).** The **front-end** — [§12.1](#121-bnf-grammar) (grammar), [§12.2](#122-abstract-syntax) (AST), [§12.3](#123-concrete-syntax-and-elaboration) (concrete syntax + elaborators) — is implemented in `leanncd/LeanNCD/DSL/` and is **fully executable and `sorry`-free**: the entry point `tlprog!{ … } : TLProgram` (Stage 1) parses surface syntax into a concrete `TLProgram` value, and all five [§12.1](#121-bnf-grammar) examples parse. The **back-end** — the `TLProgram.compile` pipeline of [§12.4](#124-semantic-compilation) and the full `tl!{}` compile macro (Stage 2) — is the design for **Milestone E2** and is *not yet implemented*. The text below marks where the implementation generalized or deferred relative to this design (axis sizes carried in a computable `SizeExpr`, value-returning elaborators, `Stmt = assign | scatter`, general-affine reads, n-ary products/sums).
 
 Compilation is a two-stage process. **Stage 1** (`MetaM`): `elabTLProgram` parses concrete syntax into a typed `TLProgram` value. **Stage 2** (`FreshM`): `TLProgram.compile` lowers the program to a `ThreadedComposed` morphism, minting fresh UIDs and validating semantic constraints via the `FreshM` monad of [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer). The entry point runs Stage 2 at elaboration time, embedding the resulting `ThreadedComposed` as a compile-time constant:
 
@@ -851,6 +853,8 @@ elab "tl!{" p:tl_program "}" : term => do
   | .error e _ => throwError s!"tl!{{...}}: {repr e}"  -- surface CompileError to Lean's elaborator
 -- toExpr requires: deriving Lean.ToExpr on ThreadedComposed and all nested types (see §12.2)
 ```
+
+Milestone E1 ships the Stage-1 half of this entry point as a standalone macro — `tlprog!{ … } : TLProgram` (`elab "tlprog!{" p:tl_program "}" : term => do return Lean.toExpr (← elabTLProgram p.raw)`) — which parses surface syntax into a `TLProgram` value and embeds it via `ToExpr`. The full `tl!{}` above additionally runs Stage 2 (`compile`) and is delivered with [§12.4](#124-semantic-compilation) in Milestone E2.
 
 ### 12.1 BNF grammar
 
@@ -871,20 +875,24 @@ axis_kind   ::= 'ℝ'    ['[' size ']']   -- real axis;          bracket = size 
               | 'ℕ'    ['[' size ']']   -- discrete axis
               | 'norm' ['[' size ']']   -- normalization axis (a ℝ axis flagged for softmax/normalize)
 
--- A size is a symbolic dimension term: an element of `Numeric` (§2.1 / §7.2).
--- Omitting the bracket leaves the size a fresh FreeNumeric generator, minted in Stage 2.
-size        ::= n                       -- literal (Numeric constant)
-              | name                    -- symbolic generator (a FreeNumeric, §2.1)
+-- A size is a symbolic dimension term. In the implemented front-end it elaborates to a
+-- computable `SizeExpr` (§12.2), the DSL mirror of `Numeric` (§2.1 / §7.2).
+-- Omitting the bracket leaves the size a fresh generator, minted in Stage 2.
+size        ::= n                       -- literal (SizeExpr.lit)
+              | name                    -- symbolic generator (SizeExpr.var)
               | size '*' size
               | size '+' size
               | '(' size ')'
 
--- Layer 2: Index expressions (strictly affine; n ∈ ℤ)
-idx_expr    ::= axis_name
+-- Layer 2: Index expressions (general integer-affine; n ∈ ℤ)
+-- The implementation generalized the single-term forms below to a left-associative
+-- '+'/'-' sum of terms (each term a bare axis_name, a literal n, or n '*' axis_name),
+-- so reads like `i+p` and `2*j+r` parse. Symbolic-coefficient strides (`s*j`, an
+-- ident coefficient) remain out of scope — IdxExpr carries integer coefficients only.
+idx_expr    ::= term (('+' | '-') term)*
+term        ::= axis_name
               | n
               | n '*' axis_name
-              | axis_name '+' n
-              | n '*' axis_name '+' n
               | '(' idx_expr ')'
 
 -- Layer 2.5: Predicate arithmetic (extends idx_expr with non-affine products and absolute value)
@@ -967,7 +975,9 @@ Y[i,j] := W[i,k] · X[k,j]
 tensor A : (q : ℝ, s : norm)
 A[q,s] := softmax(where s ≤ q)(Q[q,d] · K[s,d])
 
--- Strided convolution (affine Reindex reads)
+-- Strided convolution (affine Reindex reads). NOTE: a symbolic stride `s*j` needs an ident
+-- coefficient, which integer-coefficient IdxExpr cannot carry (§12.2); the parsed form uses a
+-- concrete stride, e.g. `X[i+p, 2*j+r]`.
 Y[i,j] := W[p,r] · X[i+p, s*j+r]
 
 -- Upsample 2× (affine Scatter write)
@@ -983,31 +993,40 @@ H[j, l+1] := relu(H[j,l] · W_H[j,k] + G[j,l] · V[j,k])
 
 ### 12.2 Abstract syntax
 
-Direct formalization of the BNF layers as Lean inductive types. `UID` and `Numeric` (= `MvPolynomial String ℕ`, [§2.1](#21-numeric)) from [§2](#2-the-base-coloredprop)/[§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer); `FreshM` from [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer).
+Direct formalization of the BNF layers as Lean inductive types. `UID` from [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer); `Numeric` (= `MvPolynomial String ℕ`, [§2.1](#21-numeric)) from [§2](#2-the-base-coloredprop); `FreshM` from [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer). Axis sizes are carried in a computable `SizeExpr` (below), not `Numeric` directly.
 
 ```lean
+-- Layer 0: computable axis-size arithmetic (the DSL mirror of Numeric)
+-- NOTE (computability). `Numeric = MvPolynomial String ℕ` is NONCOMPUTABLE — its `X`/`C`,
+-- the semiring, and even `DecidableEq` all resolve through `Classical` (see §2.1). But the
+-- elaborator builds a concrete `TLProgram` *value* (`elabTLProgram` returns a value, not an
+-- `Expr`), and `compile` runs at elaboration time, and the `tlprog!`/`tl!` macros need `ToExpr`
+-- plus size-equality dedup — none of which compiled metacode can do over `MvPolynomial`. So the
+-- DSL carries axis sizes in this COMPUTABLE `SizeExpr`, with `SizeExpr.toNumeric` used only when
+-- crossing to the proof side. (The integer stride coefficients of `IdxExpr` are plain `ℤ`, which
+-- is already computable, so they need no mirror.)
+inductive SizeExpr
+  | var : String → SizeExpr               -- symbolic generator (was a FreeNumeric, §2.1)
+  | lit : Nat → SizeExpr                   -- literal dimension
+  | add : SizeExpr → SizeExpr → SizeExpr
+  | mul : SizeExpr → SizeExpr → SizeExpr
+  deriving DecidableEq, Repr, Inhabited, Lean.ToExpr
+
+noncomputable def SizeExpr.toNumeric : SizeExpr → Numeric   -- proof-side bridge only
+  | .var s => MvPolynomial.X s | .lit n => MvPolynomial.C (n : ℕ)
+  | .add a b => a.toNumeric + b.toNumeric | .mul a b => a.toNumeric * b.toNumeric
+
 -- Layer 1
 inductive AxisKind
-  | real   : Option Numeric → AxisKind   -- ℝ axis; coordinate DType.reals (§2.3)
-  | nat    : Option Numeric → AxisKind   -- ℕ axis; coordinate DType.nat   (§2.3)
-  | norm   : Option Numeric → AxisKind   -- a ℝ axis additionally flagged for softmax/normalize
--- The `Option Numeric` is the axis SIZE (Axis.size, §2.2): `some s` concrete, `none` a fresh
--- FreeNumeric minted in Stage 2 (§7.2). The real/nat tag is the §2.3 DType of coordinates along
+  | real   : Option SizeExpr → AxisKind  -- ℝ axis; coordinate DType.reals (§2.3)
+  | nat    : Option SizeExpr → AxisKind  -- ℕ axis; coordinate DType.nat   (§2.3)
+  | norm   : Option SizeExpr → AxisKind  -- a ℝ axis additionally flagged for softmax/normalize
+  deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
+-- The `Option SizeExpr` is the axis SIZE (Axis.size, §2.2): `some s` concrete, `none` a fresh
+-- generator minted in Stage 2 (§7.2). The real/nat tag is the §2.3 DType of coordinates along
 -- the axis (fixing the assembled array's `ArrayType.dtype`). `norm` carries no new datatype — it
 -- is a `real` axis marked as the contraction dimension of a normalization nonlinearity, consumed
 -- by `splitNonlins` (§12.4) and realized in the Algebra into the target actegory (§7.5).
---
--- NOTE (computability — Milestone E). `Numeric = MvPolynomial String ℕ` is NONCOMPUTABLE
--- (its `X`/`C`/semiring/`DecidableEq` all resolve through `Classical`; see §2.1). But the
--- elaborator builds a concrete `TLProgram` *value* (`elabTLProgram` returns a value, not an
--- `Expr`), and `compile` runs at elaboration time, and the `tl!{}` macro needs `ToExpr` plus
--- size-equality dedup — none of which compiled metacode can do over `MvPolynomial`. So the DSL
--- carries sizes (and the integer stride coefficients of §12.2's `IdxExpr`) in a COMPUTABLE
--- `SizeExpr` (variables, literals, `+`, `*`; `deriving DecidableEq, Repr, Lean.ToExpr`), with
--- `SizeExpr.toNumeric : SizeExpr → Numeric` used only when crossing to the proof side. Read the
--- `Numeric` in these AST types as that computable `SizeExpr`. The full design is fixed in the
--- Milestone E plan (the alternatives — generalizing `StMat` over its coefficient ring, or
--- carrying sizes as `Expr` — are weighed there).
 
 structure AxisSpec where
   name : String
@@ -1081,13 +1100,17 @@ inductive LHSSlot
   | affine   : IdxExpr → LHSSlot                        -- affine output slot (Scatter)
 
 structure ScatterOpts where
-  fill   : Float := 0.0
-  reduce : Option String := none    -- none = injective required; 'sum' = accumulate
+  fill   : Int := 0                 -- `Int`, not `Float`: Lean's `Float` has no `DecidableEq`,
+  reduce : Option String := none    -- which the AST's `deriving DecidableEq` requires
+                                    -- none = injective required; 'sum' = accumulate
 
 inductive Stmt
   | assign        : String → List LHSSlot → RHSExpr → Stmt
   | scatter       : String → List LHSSlot → RHSExpr → ScatterOpts → Stmt
-  | recurMorphism : String → AxisSpec → ThreadedComposed → Stmt
+  -- DEFERRED to Milestone E2 — the `recurMorphism` escape hatch below references
+  -- `ThreadedComposed`/`Numeric` (the §12.4 back-end), so the E1 front-end ships
+  -- `Stmt = assign | scatter` only. The full constructor:
+  --   | recurMorphism : String → AxisSpec → ThreadedComposed → Stmt
   -- escape hatch: String = tensor name, AxisSpec = iteration axis,
   -- ThreadedComposed = a pre-built step morphism (§12.4). A value, not a metaprogramming
   -- Expr: it is the same morphism type `compile` produces. Surface syntax TBD.
@@ -1095,17 +1118,21 @@ inductive Stmt
 structure TLProgram where
   decls : List Decl
   stmts : List Stmt
--- Deriving strategy for the tl!{} macro (requires Lean.ToExpr on all DSL types):
--- deriving Lean.ToExpr, Repr for: AxisKind, AxisSpec, Decl, IdxExpr, PredArith,
---   RelOp, BoolExpr, Nonlin, Factor, ProdTerm, SumExpr, RHSExpr, LHSSlot,
---   ScatterOpts, Stmt, TLProgram
--- For ThreadedComposed and Wire: explicit instances (nested BrBase/StMat/etc. need ToExpr too).
--- MvPolynomial.toExpr: implement via coeff enumeration or ring normal form.
+  deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
+-- Deriving strategy for the tlprog!/tl! macros (requires Lean.ToExpr on all DSL types).
+-- IMPLEMENTED (E1): every front-end type above — SizeExpr, AxisKind, AxisSpec, Decl, IdxExpr,
+--   PredArith, RelOp, BoolExpr, Nonlin, Factor, ProdTerm, SumExpr, RHSExpr, LHSSlot,
+--   ScatterOpts, Stmt, TLProgram — derives `DecidableEq, Repr, Lean.ToExpr` (with `Inhabited`
+--   where a default is needed). Because sizes are `SizeExpr` (not `Numeric`), `ToExpr` derives
+--   automatically — no `MvPolynomial.toExpr` is needed for the front-end.
+-- DEFERRED (E2): ThreadedComposed and Wire need explicit `ToExpr` instances (nested
+--   BrBase/StMat/etc. need ToExpr too); that is where the noncomputable-`Numeric` ToExpr
+--   question (coeff enumeration vs ring normal form) would actually arise.
 ```
 
 ### 12.3 Concrete syntax and elaboration
 
-Following the IMP language pattern of the Lean 4 metaprogramming book (ch. 8): one `declare_syntax_cat` per BNF layer, `syntax` rules transcribing each production, and a `partial def elabXxx : Syntax → TermElabM Expr` function per category. `TermElabM` (= `Lean.Elab.Term.TermElabM`) is the monad for the `elab` elaborator; `MetaM` is a sub-monad reachable via `liftMetaM`. `partial` is required because Lean's termination checker cannot verify that syntax consumption decreases; each function uses `mkAppM ``Constructor #[…]` to build a typed `Expr` and `throwUnsupportedSyntax` on mismatch.
+Following the IMP language pattern of the Lean 4 metaprogramming book (ch. 8): one `declare_syntax_cat` per BNF layer, `syntax` rules transcribing each production, and a `partial def elabXxx` function per category. Where the book builds `Expr` terms, the implementation instead has each elaborator **return the AST value directly** — `elabXxx : Syntax → MetaM <value>` (e.g. `elabTLDecl : Syntax → MetaM Decl`) — interpreting syntax by structural recursion rather than via `mkAppM ``Constructor`. `MetaM` (not `TermElabM`) suffices, since no term-level elaboration is needed; `partial` is required because Lean's termination checker cannot verify that syntax consumption decreases; each function matches with `` `(tl_cat| …) `` quotations and falls through to `throwUnsupportedSyntax` on mismatch. **Surface conventions:** identifiers are read with `x.getId.eraseMacroScopes.getString!` (a bare `getString!` panics on quotation-introduced macro scopes); the scan-step LHS token `+1` is a single atom, so it is written spaced as `l +1`.
 
 **Syntax categories:**
 
@@ -1132,7 +1159,7 @@ declare_syntax_cat tl_program
 **Representative syntax rules (one per BNF layer):**
 
 ```lean
--- Layer 1: axis kinds (bracket holds a tl_size term elaborating to Numeric, §2.1)
+-- Layer 1: axis kinds (bracket holds a tl_size term elaborating to SizeExpr, §12.2)
 syntax num                   : tl_size
 syntax ident                 : tl_size
 syntax tl_size "*" tl_size   : tl_size
@@ -1154,14 +1181,18 @@ syntax "predicate" ident ":" tl_shape                      : tl_decl
 syntax "linear"    ident ":" tl_shape "→" tl_shape         : tl_decl
 syntax "linear"    ident ":" tl_shape "→" tl_shape " bias" : tl_decl
 
--- Layer 2: index expressions
-syntax ident                 : tl_idx_expr
-syntax num                   : tl_idx_expr
-syntax num "*" ident         : tl_idx_expr
-syntax ident "+" num         : tl_idx_expr
-syntax ident "-" num         : tl_idx_expr  -- look-back (n < 0)
-syntax num "*" ident "+" num : tl_idx_expr
-syntax "(" tl_idx_expr ")"   : tl_idx_expr
+-- Layer 2: index expressions — GENERALIZED to general integer-affine sums (the AST's
+-- IdxExpr.affine carries a full `List (ℤ × AxisSpec)`, so the grammar must reach it).
+-- A left-associative `+`/`-` sum of terms; `*` (prec 70) binds tighter than `+`/`-` (prec 65).
+syntax:70 num "*" ident                       : tl_idx_expr  -- literal-coefficient term
+syntax:max ident                              : tl_idx_expr
+syntax:max num                                : tl_idx_expr
+syntax:65 tl_idx_expr:65 " + " tl_idx_expr:66 : tl_idx_expr
+syntax:65 tl_idx_expr:65 " - " tl_idx_expr:66 : tl_idx_expr  -- look-back (n < 0)
+syntax:max "(" tl_idx_expr ")"                : tl_idx_expr
+-- elabTLIdxExpr collapses a single bare term to IdxExpr.axis/const/scale and a `±n` to
+-- IdxExpr.shift; anything longer becomes IdxExpr.affine. Symbolic-coefficient strides
+-- (`s*j`, an ident coefficient) are NOT representable in integer-coefficient IdxExpr.
 
 -- Layer 2.5: predicate arithmetic
 syntax tl_idx_expr                               : tl_pred_term
@@ -1186,11 +1217,13 @@ syntax "(" tl_bool_expr ")"                        : tl_bool_expr
 syntax ident "[" tl_idx_expr,* "]"     : tl_factor
 syntax "[" tl_bool_expr "]"            : tl_factor
 
-syntax tl_factor " · " tl_factor       : tl_prod_term
-syntax tl_factor                        : tl_prod_term
+-- N-ARY (left-recursive): `·` binds tighter than `+`, both left-associative, so that
+-- `A·B·C` flattens to ProdTerm with 3 factors and `A+B+C` to SumExpr with 3 terms.
+syntax:70 tl_prod_term:70 " · " tl_factor:71   : tl_prod_term
+syntax:71 tl_factor:71                          : tl_prod_term
 
-syntax tl_prod_term " + " tl_prod_term  : tl_sum_expr
-syntax tl_prod_term                      : tl_sum_expr
+syntax:65 tl_sum_expr:65 " + " tl_prod_term:66 : tl_sum_expr
+syntax:66 tl_prod_term:66                        : tl_sum_expr
 
 syntax "relu"                                    : tl_nonlin
 syntax "softmax"                                 : tl_nonlin
@@ -1200,6 +1233,13 @@ syntax "normalize" "(" "where" tl_bool_expr ")"  : tl_nonlin
 
 syntax tl_nonlin "(" tl_sum_expr ")"   : tl_rhs
 syntax tl_sum_expr                      : tl_rhs
+-- KNOWN LIMITATION (deferred to E2): the bare `softmax`/`normalize` tokens share a `softmax (`
+-- prefix with the `softmax "(" "where" …` rule, so the parser commits to the where-variant on
+-- seeing `(` and the bare `tl_nonlin "(" tl_sum_expr ")"` rhs form is unreachable for them — an
+-- UNMASKED `softmax(A[i]+B[i])` does not parse ("expected 'where'"). This is inherited verbatim
+-- from the grammar above; none of the five §12.1 examples need it. The fix is a grammar
+-- left-factoring (fold the optional `(where …)` into one `softmax` rule), done with E2's
+-- nonlinearity lowering.
 
 -- Layer 5: statements
 syntax ident "[" tl_lhs_slot,* "]" ":=" tl_rhs : tl_stmt
@@ -1222,31 +1262,35 @@ syntax (tl_decl <|> tl_stmt)* : tl_program  -- accepts interleaved decls/stmts; 
 **Elaboration function signatures (one per syntax category):**
 
 ```lean
-partial def elabTLSize      : Syntax → TermElabM Expr   -- → Numeric (§2.1)
-partial def elabTLAxisKind  : Syntax → TermElabM Expr   -- → AxisKind
-partial def elabTLAxisSpec  : Syntax → TermElabM Expr   -- → AxisSpec  (uid := 0; assigned in Stage 2)
-partial def elabTLShape     : Syntax → TermElabM Expr   -- → List AxisSpec
-partial def elabTLDecl      : Syntax → TermElabM Expr   -- → Decl
-partial def elabTLIdxExpr   : Syntax → TermElabM Expr   -- → IdxExpr
-partial def elabTLPredTerm  : Syntax → TermElabM Expr   -- → PredArith
-partial def elabTLRelOp     : Syntax → TermElabM Expr   -- → RelOp
-partial def elabTLBoolExpr  : Syntax → TermElabM Expr   -- → BoolExpr
-partial def elabTLNonlin    : Syntax → TermElabM Expr   -- → Nonlin
-partial def elabTLFactor    : Syntax → TermElabM Expr   -- → Factor
-partial def elabTLProdTerm  : Syntax → TermElabM Expr   -- → ProdTerm
-partial def elabTLSumExpr   : Syntax → TermElabM Expr   -- → SumExpr
-partial def elabTLRHS       : Syntax → TermElabM Expr   -- → RHSExpr
-partial def elabTLLHSSlot   : Syntax → TermElabM Expr   -- → LHSSlot
-partial def elabTLStmt      : Syntax → TermElabM Expr   -- → Stmt
-partial def elabTLProgram   : Syntax → MetaM TLProgram  -- → TLProgram value (not Expr; see FIX 15)
--- Returns a concrete TLProgram value (not an Expr); the elaborator interprets Syntax nodes
--- by structural recursion rather than building Lean Expr terms. This avoids the need for
--- kernel reduction to extract a TLProgram from an Expr at Stage 2.
+-- Every elaborator returns its AST value directly in MetaM (no Expr-building):
+partial def elabTLSize      : Syntax → MetaM SizeExpr
+partial def elabTLAxisKind  : Syntax → MetaM AxisKind
+partial def elabTLAxisSpec  : Syntax → MetaM AxisSpec        -- uid := 0; assigned in Stage 2
+partial def elabTLShape     : Syntax → MetaM (List AxisSpec)
+partial def elabTLDecl      : Syntax → MetaM Decl
+partial def elabTLIdxExpr   : Syntax → MetaM IdxExpr
+partial def elabTLPredTerm  : Syntax → MetaM PredArith
+partial def elabTLBoolExpr  : Syntax → MetaM BoolExpr
+partial def elabTLNonlin    : Syntax → MetaM Nonlin
+partial def elabTLFactor    : Syntax → MetaM Factor
+partial def elabTLProdTerm  : Syntax → MetaM ProdTerm        -- flattens the n-ary `·` chain
+partial def elabTLSumExpr   : Syntax → MetaM SumExpr         -- flattens the n-ary `+` chain
+partial def elabTLRHS       : Syntax → MetaM RHSExpr
+partial def elabTLLHSSlot   : Syntax → MetaM LHSSlot
+partial def elabTLStmt      : Syntax → MetaM Stmt            -- E1: always builds Stmt.assign
+partial def elabTLProgram   : Syntax → MetaM TLProgram      -- routes children by syntax-kind prefix
+-- The elaborators interpret Syntax nodes by structural recursion, returning concrete AST values
+-- rather than building Lean Expr terms — so no kernel reduction is needed to extract a TLProgram
+-- at Stage 2. RelOp is read inline by elabTLBoolExpr (no separate elabTLRelOp). In E1 every
+-- `name[…] := rhs` parses to Stmt.assign; the assign/scatter split is an E2 back-end concern
+-- (lowerArith reclassifies affine-LHS writes as scatter).
 ```
 
 The elaborator is pure syntax-walking with no side effects: UID minting and axis unification happen in Stage 2, not Stage 1.
 
 ### 12.4 Semantic compilation
+
+> **Milestone E2 (not yet implemented).** Everything in this subsection — the 8-phase `TLProgram.compile` pipeline, the typed intermediates (`LabeledProgram` … `ScheduledProgram`), `ScanStmt`, `Wire`, `ThreadedComposed`, the `Stmt.recurMorphism` escape hatch, and the full `tl!{}` compile macro — is the design for Milestone E2. It builds on the executable `FreshM`/`Context` seam of [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) (Milestone D) and consumes the `TLProgram` values produced by the E1 front-end above. The signatures are presented as the target; the implementation will record any deviations here, as E1 did for [§12.2](#122-abstract-syntax)/[§12.3](#123-concrete-syntax-and-elaboration).
 
 ```lean
 /-- Named alias for the declaration environment built by resolveDecls. -/
@@ -1389,7 +1433,7 @@ The result is a `ThreadedComposed` (a presentation of a `BrMorph`, [§2.3](#23-b
 | `X[i + n]` | `tl.X[i + n]` (affine expr) | Reindex — affine read |
 | `Y[n*i] := …` | `tl.Y[n*i] = …` (affine LHS) | Scatter — affine write |
 | `Stmt.recurMorphism name axis morphism` | `tl.name.recur(l, morphism)` | escape hatch; step morphism as a term (syntax TBD) |
-| `elabTLProgram` (Stage 1) | — | `Syntax → MetaM Expr`; no Python analogue |
+| `elabTLProgram` (Stage 1) | — | `Syntax → MetaM TLProgram` (value, not Expr); no Python analogue |
 | `TLProgram.compile` (Stage 2) | `tl.to_morphism()` | `TLProgram → FreshM ThreadedComposed`; run at elaboration time via `FreshM.run 0` |
 
 ## 13. Appendix: out of scope
