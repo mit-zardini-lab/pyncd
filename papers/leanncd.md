@@ -841,7 +841,7 @@ Beyond the coverage map, several honest notes shape any transcription:
 
 A Lean 4 DSL embedding for tensor logic, following the syntax-category + elaboration pattern of the Lean 4 metaprogramming book (ch. 8): a BNF grammar defines the surface language; Lean inductive types give the abstract syntax; `declare_syntax_cat`/`syntax` rules connect them to Lean's parser; value-returning `elabXxx : Syntax → MetaM <value>` functions walk the syntax tree (building concrete AST *values*, not `Expr`s — see [§12.3](#123-concrete-syntax-and-elaboration)); and `TLProgram.compile : TLProgram → FreshM ThreadedComposed` lowers programs to morphisms in `Br`.
 
-> **Implementation status (Milestone E1).** The **front-end** — [§12.1](#121-bnf-grammar) (grammar), [§12.2](#122-abstract-syntax) (AST), [§12.3](#123-concrete-syntax-and-elaboration) (concrete syntax + elaborators) — is implemented in `leanncd/LeanNCD/DSL/` and is **fully executable and `sorry`-free**: the entry point `tlprog!{ … } : TLProgram` (Stage 1) parses surface syntax into a concrete `TLProgram` value, and all five [§12.1](#121-bnf-grammar) examples parse. The **back-end** — the `TLProgram.compile` pipeline of [§12.4](#124-semantic-compilation) and the full `tl!{}` compile macro (Stage 2) — is the design for **Milestone E2** and is *not yet implemented*. The text below marks where the implementation generalized or deferred relative to this design (axis sizes carried in a computable `SizeExpr`, value-returning elaborators, `Stmt = assign | scatter`, general-affine reads, n-ary products/sums).
+> **Implementation status (Milestone E1).** The **front-end** — [§12.1](#121-bnf-grammar) (grammar), [§12.2](#122-abstract-syntax) (AST), [§12.3](#123-concrete-syntax-and-elaboration) (concrete syntax + elaborators) — is implemented in `leanncd/LeanNCD/DSL/` and is **fully executable and `sorry`-free**: the entry point `tlprog!{ … } : TLProgram` (Stage 1) parses surface syntax into a concrete `TLProgram` value, and all seven [§12.1](#121-bnf-grammar) examples parse. The **back-end** — the `TLProgram.compile` pipeline of [§12.4](#124-semantic-compilation) and the `tl!{}` compile macro (Stage 2) — is implemented in **Milestone E2a** (the noncomputable `ThreadedComposed → BrMorph` bridge remains deferred to E2b; see [§12.4](#124-semantic-compilation)). The text below marks where the implementation generalized or deferred relative to this design (axis sizes carried in a computable `SizeExpr`, value-returning elaborators, `Stmt = assign | scatter`, general-affine reads, n-ary products/sums).
 
 Compilation is a two-stage process. **Stage 1** (`MetaM`): `elabTLProgram` parses concrete syntax into a typed `TLProgram` value. **Stage 2** (`FreshM`): `TLProgram.compile` lowers the program to a `ThreadedComposed` morphism, minting fresh UIDs and validating semantic constraints via the `FreshM` monad of [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer). The entry point runs Stage 2 at elaboration time, embedding the resulting `ThreadedComposed` as a compile-time constant:
 
@@ -965,7 +965,7 @@ program     ::= decl* stmt+
 - A `recur_step` without a matching `base_case` for the same name is an error
 - A `linear`-declared weight must multiply exactly one activation factor
 
-**Five representative examples:**
+**Seven representative examples** (the last two exercise predicates):
 
 ```text
 -- Matmul (Domingos base: k is contracted)
@@ -989,6 +989,14 @@ G[j, 0]   := X[j]
 G[j, l+1] := relu(G[j,l] · W_G[j,k] + H[j,l] · U[j,k])
 H[j, 0]   := Y[j]
 H[j, l+1] := relu(H[j,l] · W_H[j,k] + G[j,l] · V[j,k])
+
+-- Predicate declaration + masked aggregation: edge(i,j) is a Bool-typed adjacency
+-- predicate gating a doubly-contracted feature product (all indices contracted → scalar)
+predicate edge : (i : ℕ, j : ℕ)
+Result[] := F[t,i] · F[t,j] · edge[i,j]
+
+-- Iverson-bracket predicate: a tridiagonal band mask via |·| (integer absolute value)
+Band[i,j] := A[i,j] · [|i − j| ≤ 1]
 ```
 
 ### 12.2 Abstract syntax
@@ -1290,7 +1298,7 @@ The elaborator is pure syntax-walking with no side effects: UID minting and axis
 
 ### 12.4 Semantic compilation
 
-> **Implementation status (Milestone E2a — implemented; E2b deferred).** The 8-phase `TLProgram.compile` pipeline, the typed intermediates (`LabeledProgram` … `ScheduledProgram`), `ScanStmt`, `Wire`, `ThreadedComposed`, and the `tl!{ … } : ThreadedComposed` compile macro are **implemented in `leanncd/LeanNCD/DSL/Pipeline/` + `Target.lean`/`Compile.lean`, fully executable and `sorry`-free**: all five [§12.1](#121-bnf-grammar) examples compile end-to-end. Building on the executable `FreshM`/`Context` seam of [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) (Milestone D), the pipeline consumes E1's `TLProgram` values and produces a **computable, first-order *presentation* of the Br morphism** — `ThreadedComposed`/`BrBaseP`/`StMatP`/`AxisP`/`WeaveSlotP` are `List`-based, `SizeExpr`/`Int`-valued, `deriving Lean.ToExpr` mirrors of the noncomputable math-tower `Br`/`St` types (the same `Numeric`→`SizeExpr` move E1 made for the AST). **Deferred to Milestone E2b:** the noncomputable bridge realizing the presentation as an actual `BrMorph` (and the [§8](#8-acsets-and-the-executable-layer) acset correspondence + Props 8.x), the `Stmt.recurMorphism`/`ScanStmt.scanPre` escape hatch, and the `ScanAffine` `O(log N)` fast path. The signatures below are shown in their implemented (presentation) form where E2a diverges from the original design; the per-phase **E2a implementation notes** after the phase table record the simplifications.
+> **Implementation status (Milestone E2a — implemented; E2b deferred).** The 8-phase `TLProgram.compile` pipeline, the typed intermediates (`LabeledProgram` … `ScheduledProgram`), `ScanStmt`, `Wire`, `ThreadedComposed`, and the `tl!{ … } : ThreadedComposed` compile macro are **implemented in `leanncd/LeanNCD/DSL/Pipeline/` + `Target.lean`/`Compile.lean`, fully executable and `sorry`-free**: the first five [§12.1](#121-bnf-grammar) examples compile end-to-end (the two predicate examples are parse-tested in E1; predicate *evaluation* is the [§7.5](#75-algebras-and-construct) Bool-semiring semantics, realized in E2b). Building on the executable `FreshM`/`Context` seam of [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) (Milestone D), the pipeline consumes E1's `TLProgram` values and produces a **computable, first-order *presentation* of the Br morphism** — `ThreadedComposed`/`BrBaseP`/`StMatP`/`AxisP`/`WeaveSlotP` are `List`-based, `SizeExpr`/`Int`-valued, `deriving Lean.ToExpr` mirrors of the noncomputable math-tower `Br`/`St` types (the same `Numeric`→`SizeExpr` move E1 made for the AST). **Deferred to Milestone E2b:** the noncomputable bridge realizing the presentation as an actual `BrMorph` (and the [§8](#8-acsets-and-the-executable-layer) acset correspondence + Props 8.x), the `Stmt.recurMorphism`/`ScanStmt.scanPre` escape hatch, and the `ScanAffine` `O(log N)` fast path. The signatures below are shown in their implemented (presentation) form where E2a diverges from the original design; the per-phase **E2a implementation notes** after the phase table record the simplifications.
 
 ```lean
 /-- Named alias for the declaration environment built by resolveDecls. -/
