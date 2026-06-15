@@ -32,4 +32,21 @@ run_cmd do
   match splitNonlins sp |>.run 0 with
   | .ok lp _ => unless lp.stmts.length == 1 do throwError "identity assign should not split"
   | .error e _ => throwError s!"errored: {repr e}"
+
+-- DCE: `Dead` is computed but never read and is not the output ⇒ dropped. `Y` (output)
+-- and its dependency `T` survive.
+run_cmd do
+  let ax (nm : String) : AxisSpec := { name := nm, uid := 1, kind := .real none }
+  let rd (nm : String) : RHSExpr :=
+    { body := { terms := [ { factors := [ .read nm [ .axis (ax "i") ] ] } ] }, nonlin := .identity }
+  let tStmt   : ScanStmt := .plain (.assign "T" [ .free (ax "i") ] (rd "X"))      -- T := X
+  let deadS   : ScanStmt := .plain (.assign "Dead" [ .free (ax "i") ] (rd "X"))   -- Dead := X (unused)
+  let yStmt   : ScanStmt := .plain (.assign "Y" [ .free (ax "i") ] (rd "T"))      -- Y := T (output)
+  let lp : LinearProgram := { decls := [], stmts := [tStmt, deadS, yStmt], env := {}, extNames := ∅, ctx := { classes := [] } }
+  match schedule lp |>.run 0 with
+  | .ok sp _ =>
+      let names := sp.stmts.flatMap ScanStmt.writes
+      unless names.contains "Y" && names.contains "T" do throwError s!"Y,T must survive; got {names}"
+      unless ¬ names.contains "Dead" do throwError s!"Dead must be eliminated; got {names}"
+  | .error e _ => throwError s!"schedule errored: {repr e}"
 end LeanNCD
