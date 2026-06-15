@@ -19,3 +19,7 @@ import LeanNCD.Instances.StBr
 import LeanNCD.Exec.Uid
 import LeanNCD.Exec.Traversable
 import LeanNCD.Exec.Context
+import LeanNCD.DSL.SizeExpr
+import LeanNCD.DSL.Ast
+import LeanNCD.DSL.Syntax
+import LeanNCD.DSL.Elab

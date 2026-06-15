@@ -122,3 +122,29 @@ discharged with no `sorry`** (the first fully-executable milestone):
 Verified by evaluated `#guard` tests + an LSpec suite (`test/Exec/ContextSpec.lean`). LSpec was
 adopted (argumentcomputer/LSpec `main`, rev d3c15b9 — v4.29-targeted but compiles under v4.30; zero
 deps, so Mathlib's pins are untouched).
+
+## Milestone E1 — DSL front-end (zero sorries)
+
+`LeanNCD/DSL/` — the tensor-logic DSL front-end (§12) — is **fully executable and `sorry`-free**
+(verified: `grep -rn sorry LeanNCD/DSL/` is empty; whole-library `lake build` green). The layer
+comprises `SizeExpr` (computable size arithmetic), `Ast` (the typed AST), `Syntax` (the surface
+grammar), and `Elab` (value-returning elaborators + the `tlprog!` macro). The five §12.1 example
+programs parse via `tlprog!{}` (`test/DSL/ParseExamplesTest.lean`). All eight DSL test modules
+(`SizeExprTest`, `AstTest`, `SyntaxTest`, `ParseLayer1Test`, `ParseLayer34Test`, `ParseNaryTest`,
+`ParseProgramTest`, `ParseExamplesTest`) elaborate under `lake build` (their `run_cmd`/`#guard`/
+`tlprog!` checks fire at elaboration).
+
+Resolved decisions / deviations (feed the §12 doc-consistency pass and the E2 plan):
+
+- `SizeExpr` (computable) replaces `Numeric` in the AST; `SizeExpr.toNumeric` is the noncomputable
+  proof-side bridge.
+- Elaborators are value-returning (`Syntax → MetaM <value>`), not `Expr`-building.
+- `Stmt = assign | scatter` only (the `recurMorphism`/`ThreadedComposed` escape hatch deferred to E2).
+- `ScatterOpts.fill : Int` (not `Float`, which lacks `DecidableEq`).
+- `tl_idx_expr` generalized to general integer-affine reads; products/sums generalized to n-ary
+  (left-recursive). Symbolic-coefficient strides (`s*j`) are unsupported (need `SizeExpr`
+  coefficients — future).
+- Idents read via `eraseMacroScopes.getString!`; the scan-step LHS token is `+1` (write `l +1`
+  spaced).
+- E1 simplifications for E2: the `num` LHS base-case uses a placeholder iteration-axis name (E2
+  resolves); all `name[…] := rhs` parse to `.assign` (E2's `lowerArith` reclassifies scatter).

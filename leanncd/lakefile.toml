@@ -25,4 +25,7 @@ globs = ["Base.NumericTest", "Base.StTest", "Base.BrTest",
          "Seam.AdapterTest", "Core.GradedTest", "Core.WeaveTest",
          "Mixins.TemporalTest", "Mixins.StubsTest", "Grothendieck.SplitTest",
          "Algebra.AlgebraTest", "Props.GenericTest", "Instances.StBrTest",
-         "Exec.UidTest", "Exec.TraversableTest", "Exec.ContextTest", "Exec.ContextSpec"]
+         "Exec.UidTest", "Exec.TraversableTest", "Exec.ContextTest", "Exec.ContextSpec",
+         "DSL.SizeExprTest", "DSL.AstTest", "DSL.SyntaxTest", "DSL.ParseLayer1Test",
+         "DSL.ParseLayer34Test", "DSL.ParseNaryTest", "DSL.ParseProgramTest",
+         "DSL.ParseExamplesTest"]
