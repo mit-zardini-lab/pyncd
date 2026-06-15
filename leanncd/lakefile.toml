@@ -28,7 +28,7 @@ globs = ["Base.NumericTest", "Base.StTest", "Base.BrTest",
          "Exec.UidTest", "Exec.TraversableTest", "Exec.ContextTest", "Exec.ContextSpec",
          "DSL.SizeExprTest", "DSL.AstTest", "DSL.SyntaxTest", "DSL.ParseLayer1Test",
          "DSL.ParseLayer34Test", "DSL.ParseNaryTest", "DSL.ParseProgramTest",
-         "DSL.ParseExamplesTest",
+         "DSL.ParseExamplesTest", "DSL.ParsePredicatesTest",
          "DSL.Pipeline.TargetTest", "DSL.Pipeline.TraverseTest",
          "DSL.Pipeline.StructuralTest", "DSL.Pipeline.LoweringTest",
          "DSL.CompileExamplesTest"]
