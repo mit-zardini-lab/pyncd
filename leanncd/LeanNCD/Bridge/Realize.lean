@@ -12,22 +12,19 @@ noncomputable def realizeAxis (a : AxisP) : Axis :=
 /-- SORRY-FREE. -/
 noncomputable def realizeStObj (s : StObjP) : StObj := s.map realizeAxis
 
-/-- Coerce an integer reindexing coefficient to `Numeric`. OBLIGATION (negative case):
-    `Numeric = MvPolynomial String ℕ` has no additive inverses, so a negative look-back
-    stride cannot be represented; the negative branch is `sorry` (feedback: `St` may need
-    ℤ-coefficients — §2.2/§7.2). The non-negative branch is real. -/
-noncomputable def intToNumeric (n : Int) : Numeric :=
-  if 0 ≤ n then MvPolynomial.C (n.toNat : ℕ) else sorry
+/-- Coerce an integer reindexing coefficient to `Coeff = MvPolynomial String ℤ`. SORRY-FREE:
+    `Coeff` is signed (a `CommRing`), so negative look-back offsets realize faithfully via
+    `MvPolynomial.C` (this is the resolution of the former negative-coefficient obstruction —
+    `StMat` now carries `Coeff`, not the ℕ-semiring `Numeric`; see §2.2/§7.2). -/
+noncomputable def intToCoeff (n : Int) : Coeff := MvPolynomial.C n
 
 /-- A presentation stride map realized into `StMat dom cod`. The list dims must match
-    `dom.length`/`cod.length`; mismatches are an OBLIGATION (the presentation erased the
-    dependent length indices). Index the lists by `i.val`/`j.val` and default out-of-range
-    to `0` — the realized matrix is correct WHEN the dims match (a `sorry`-ed side condition,
-    not needed if you default-on-mismatch). -/
+    `dom.length`/`cod.length`; out-of-range indices default to `0`, so the realized matrix
+    is total and correct WHEN the dims match (no `sorry`). -/
 noncomputable def realizeStMat (m : StMatP) (dom cod : StObj) : StMat dom cod :=
   { coeffs := fun (i : Fin cod.length) (j : Fin dom.length) =>
-      intToNumeric (((m.coeffs.getD i.val []).getD j.val 0))
-    bias   := fun (i : Fin cod.length) => intToNumeric (m.bias.getD i.val 0) }
+      intToCoeff (((m.coeffs.getD i.val []).getD j.val 0))
+    bias   := fun (i : Fin cod.length) => intToCoeff (m.bias.getD i.val 0) }
 
 /-- SORRY-FREE. -/
 noncomputable def realizeWeaveSlot : WeaveSlotP → WeaveSlot
