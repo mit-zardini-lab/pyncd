@@ -65,4 +65,47 @@ run_cmd do
       let iUIDs := ((collectAxisNameUID prog).filter (·.1 == "i")).map (·.2) |>.eraseDups
       unless iUIDs == [5] do throwError s!"i should stay [5], got {iUIDs}"
   | .error e _ => throwError s!"errored: {repr e}"
+
+-- lowerArith
+-- Upsample: Out[2*i, 2*j] := X[i,j] — affine LHS ⇒ reclassified to Stmt.scatter, injective (no error).
+run_cmd do
+  let ax (nm : String) : AxisSpec := { name := nm, uid := 1, kind := .real none }
+  let upsample : Stmt := .assign "Out"
+    [ .affine (.scale 2 (ax "i")), .affine (.scale 2 (ax "j")) ]
+    { body := { terms := [ { factors := [ .read "X" [ .axis (ax "i"), .axis (ax "j") ] ] } ] },
+      nonlin := .identity }
+  let cp : CanonicalProgram :=
+    { decls := [], stmts := [upsample], env := {}, extNames := ∅, ctx := { classes := [] } }
+  match lowerArith cp |>.run 0 with
+  | .ok lp _ =>
+      match lp.stmts with
+      | [ .scatter "Out" _ _ _ ] => pure ()
+      | _ => throwError s!"expected one Stmt.scatter for Out, got {repr lp.stmts}"
+  | .error e _ => throwError s!"lowerArith errored: {repr e}"
+
+-- Plain matmul assign is left as Stmt.assign.
+run_cmd do
+  let ax (nm : String) : AxisSpec := { name := nm, uid := 1, kind := .real none }
+  let mm : Stmt := .assign "Y" [ .free (ax "i"), .free (ax "j") ]
+    { body := { terms := [ { factors := [ .read "W" [.axis (ax "i"), .axis (ax "k")],
+                                            .read "X" [.axis (ax "k"), .axis (ax "j")] ] } ] },
+      nonlin := .identity }
+  let cp : CanonicalProgram :=
+    { decls := [], stmts := [mm], env := {}, extNames := ∅, ctx := { classes := [] } }
+  match lowerArith cp |>.run 0 with
+  | .ok lp _ => match lp.stmts with
+                | [ .assign "Y" _ _ ] => pure ()
+                | _ => throwError "matmul assign should remain Stmt.assign"
+  | .error e _ => throwError s!"errored: {repr e}"
+
+-- A collapsing constant LHS coord without reduce ⇒ overlappingScatter.
+run_cmd do
+  let collapse : Stmt := .assign "Z" [ .affine (.const 0) ]
+    { body := { terms := [ { factors := [ .read "X" [ .const 0 ] ] } ] }, nonlin := .identity }
+  let cp : CanonicalProgram :=
+    { decls := [], stmts := [collapse], env := {}, extNames := ∅, ctx := { classes := [] } }
+  match lowerArith cp |>.run 0 with
+  | .error (.overlappingScatter "Z") _ => pure ()
+  | .error e _ => throwError s!"wrong error: {repr e}"
+  | .ok _ _ => throwError "expected overlappingScatter for collapsing const LHS"
 end LeanNCD

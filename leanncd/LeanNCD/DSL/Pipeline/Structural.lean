@@ -207,4 +207,44 @@ def unifyAxes (rp : ResolvedProgram) : FreshM CanonicalProgram := do
   return { decls := prog'.decls, stmts := prog'.stmts,
            env := rp.env, extNames := rp.extNames, ctx }
 
+/-! ## The `lowerArith` phase (Phase 4 — affine index arithmetic)
+
+E2a SCOPING DECISION (a deliberate divergence from §12.4): affine *reads* (e.g.
+`X[i+p, 2*j+r]`) are LEFT IN PLACE here — the later `route` phase absorbs each read's affine
+`IdxExpr` into the consuming step's `reindexings` field (exactly where stride-maps live in
+`BrBase`, §2.3). So `lowerArith` emits NO separate Slice/Reindex intermediate steps and leaves
+`auxStmts := #[]`. Its real job is the affine-LHS → `Stmt.scatter` reclassification plus a
+*conservative* `overlappingScatter` injectivity guard (a const LHS coord collapses a dimension
+and so needs `reduce sum`; strided coords like upsample `2*i` are injective). -/
+
+/-- A LHS slot that denotes an affine output coordinate (a Scatter write). Plain `free`
+    axes and the scan slots (`iterAt`/`iterNext`) are NOT affine-scatter slots. -/
+def LHSSlot.isAffine : LHSSlot → Bool
+  | .affine _   => true
+  | .free _     => false
+  | .iterAt _ _ => false
+  | .iterNext _ => false
+
+/-- Conservative non-injectivity test (E2a): a constant LHS coordinate collapses a
+    dimension and so needs `reduce sum`; a strided coordinate (`scale`/general affine
+    over an axis, e.g. upsample `2*i`) is injective. -/
+def LHSSlot.collapses : LHSSlot → Bool
+  | .affine (.const _) => true
+  | _                  => false
+
+def lowerArith (cp : CanonicalProgram) : FreshM LoweredProgram := do
+  let stmts' ← cp.stmts.mapM (fun s => do
+    match s with
+    | .assign nm slots rhs =>
+        if slots.any LHSSlot.isAffine then
+          if slots.any LHSSlot.collapses then throw (CompileError.overlappingScatter nm)
+          else return Stmt.scatter nm slots rhs { fill := 0, reduce := none }
+        else return s
+    | .scatter nm slots rhs opts =>
+        if (slots.any LHSSlot.collapses) && opts.reduce ≠ some "sum" then
+          throw (CompileError.overlappingScatter nm)
+        else return s)
+  return { decls := cp.decls, stmts := stmts', env := cp.env,
+           extNames := cp.extNames, ctx := cp.ctx, auxStmts := #[] }
+
 end LeanNCD
