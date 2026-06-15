@@ -152,4 +152,68 @@ partial def elabTLRHS : Syntax → MetaM RHSExpr
       return { body := (← elabTLSumExpr s), nonlin := .identity }
   | _ => throwUnsupportedSyntax
 
+/-! ## Layers 5–6: LHS slots, statements, whole program (Task E1.5) -/
+
+/-- Elaborate a single `tl_lhs_slot` into an `LHSSlot`.
+
+    * `x`          → `.free` (a free output axis);
+    * `n`          → `.iterAt … n` — a scan *base case* `l = n`.  The iteration
+      axis cannot be named at parse time (it is recovered from the matching
+      `iterNext` slot during E2's lowering), so we use a placeholder name `""`
+      via `idxAxis ""`. REPORTED simplification.
+    * `x +1`       → `.iterNext` (the scan step);
+    * `n*x`, `x+n`, `n*x+n` → `.affine` of the corresponding integer-affine
+      `IdxExpr`, built directly from the slot's pieces. -/
+partial def elabTLLHSSlot : Syntax → MetaM LHSSlot
+  | `(tl_lhs_slot| $x:ident) =>
+      return .free (idxAxis x.getId.eraseMacroScopes.getString!)
+  | `(tl_lhs_slot| $n:num) =>
+      return .iterAt (idxAxis "") (Int.ofNat n.getNat)
+  | `(tl_lhs_slot| $x:ident +1) =>
+      return .iterNext (idxAxis x.getId.eraseMacroScopes.getString!)
+  | `(tl_lhs_slot| $n:num * $x:ident + $m:num) =>
+      return .affine (.affine (Int.ofNat m.getNat)
+        [(Int.ofNat n.getNat, idxAxis x.getId.eraseMacroScopes.getString!)])
+  | `(tl_lhs_slot| $n:num * $x:ident) =>
+      return .affine (.scale (Int.ofNat n.getNat) (idxAxis x.getId.eraseMacroScopes.getString!))
+  | `(tl_lhs_slot| $x:ident + $n:num) =>
+      return .affine (.shift (idxAxis x.getId.eraseMacroScopes.getString!) (Int.ofNat n.getNat))
+  | _ => throwUnsupportedSyntax
+
+/-- Elaborate a `tl_stmt` (`name[slots] := rhs`) into a `Stmt`.
+
+    E1 parses ALL `name[…] := rhs` to `.assign`.  Scatter classification
+    (affine LHS slots / fill / reduce → the `.scatter` constructor) is deferred to
+    E2's `lowerArith`; the `scatter` constructor exists for E2 to produce.
+    REPORTED simplification. -/
+partial def elabTLStmt : Syntax → MetaM Stmt
+  | `(tl_stmt| $name:ident [ $slots,* ] := $rhs:tl_rhs) =>
+      return .assign (name.getId.eraseMacroScopes.getString!)
+        (← slots.getElems.toList.mapM elabTLLHSSlot) (← elabTLRHS rhs)
+  | _ => throwUnsupportedSyntax
+
+/-- Elaborate a whole `tl_program` = `(tl_decl <|> tl_stmt)*`.
+
+    The alternation produces a flat sequence of child nodes, each of category
+    `tl_decl` or `tl_stmt`.  We route on the child's syntax-kind: every stmt node
+    has a kind whose final component is prefixed `tl_stmt`; every decl node's
+    final component is prefixed `tl_decl`.  Decls and stmts are collected
+    (in source order) into the respective lists. -/
+partial def elabTLProgram (stx : Syntax) : MetaM TLProgram := do
+  let mut decls : List Decl := []
+  let mut stmts : List Stmt := []
+  for child in stx[0].getArgs do
+    if "tl_stmt".isPrefixOf child.getKind.getString! then
+      stmts := stmts ++ [(← elabTLStmt child)]
+    else
+      decls := decls ++ [(← elabTLDecl child)]
+  return { decls := decls, stmts := stmts }
+
+-- `tlprog!{ … } : TLProgram` — parse a whole program and embed the resulting
+-- `TLProgram` value via its derived `ToExpr`.
+open Lean Elab Term in
+elab "tlprog!{" p:tl_program "}" : term => do
+  let prog ← elabTLProgram p.raw
+  return Lean.toExpr prog
+
 end LeanNCD
