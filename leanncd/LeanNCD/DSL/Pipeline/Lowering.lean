@@ -3,6 +3,7 @@
 -- nonlinearity (relu/softmax/normalize) into its own step so contraction steps and
 -- nonlinearity steps don't mix. Phases 1–5 live in `Structural.lean`.
 import LeanNCD.DSL.Pipeline.Structural
+import LeanNCD.DSL.Target
 
 namespace LeanNCD
 
@@ -104,5 +105,141 @@ def schedule (lp : LinearProgram) : FreshM ScheduledProgram := do
   let live := liveFix lp.stmts outputs.eraseDups
   let liveStmts := lp.stmts.filter (fun sc => (sc.writes).any (fun w => live.contains w))
   return { decls := lp.decls, stmts := liveStmts, env := lp.env, extNames := lp.extNames, ctx := lp.ctx }
+
+/-! ## Phase 8 — `route`
+
+The executable back-end's final phase: turn the scheduled statements into a `ThreadedComposed`
+— a routed DAG of `BrBaseP` steps. Build is two-pass:
+
+1. PASS 1 (indexing). Assign each `ScanStmt` a step index `0,1,…`. Build `nameToStep`
+   mapping every produced tensor name (for a `.scan` node, ALL its `writes` names) to its
+   step index. Number the external read names `0,1,…` in first-seen order (over reads, NOT
+   `Finset.toList`, which is noncomputable) into `extIndex`.
+
+2. PASS 2 (build). For each step's representative stmt — for `.scan`, the first recurrence
+   stmt, else the first base stmt (it carries the reads/axes):
+   * LHS (retained) axes = the `AxisSpec`s named by `free`/`iterAt`/`iterNext` slots.
+   * Read axes = every `AxisSpec` in the read-factor index expressions.
+   * Contracted axes = read axes whose `uid` is NOT among the LHS axis uids.
+   * `degree` = (LHS ++ contracted) de-duplicated by uid; each → `AxisP (some name) (var name)`
+     (symbolic size — sizes aren't load-bearing in E2a). LHS axes first, then contracted.
+   * `op` = relu/softmax/normalize from `rhs.nonlin`, else "scatter" for a `.scatter` stmt,
+     else "contract"; a `.scan` node uses "scan".
+   * `inputWeaves` = one shape per read factor; `outputWeaves` = one shape; each over `degree`,
+     mapping contracted axes (by uid) to `.tiled`, retained axes to `.fixed a`.
+   * `reindexings` = one `StMatP` per read factor; `idxToRow` expresses each read coordinate as
+     an integer-affine combination of the degree axes (column order = degree order).
+   * `routing[i]` = per read factor: producer step `j` (`Wire j 0`) if internal, else the
+     external sentinel `Wire nExternal (extIndex nm)`.
+
+`nExternal := sp.extNames.card`. -/
+
+/-- The read factors (tensor name + read index expressions) of a stmt, in order. -/
+def Stmt.readFactors : Stmt → List (String × List IdxExpr)
+  | .assign _ _ r | .scatter _ _ r _ =>
+      r.body.terms.flatMap (fun t => t.factors.filterMap (fun
+        | .read nm es => some (nm, es)
+        | .iverson _  => none))
+
+/-- The retained-output `AxisSpec`s of a stmt: those named by `free`/`iterAt`/`iterNext` slots.
+    `.affine` (scatter) slots carry no single retained axis and are skipped. -/
+def Stmt.lhsAxes : Stmt → List AxisSpec
+  | .assign _ ls _ | .scatter _ ls _ _ =>
+      ls.filterMap (fun
+        | .free a     => some a
+        | .iterAt a _ => some a
+        | .iterNext a => some a
+        | .affine _   => none)
+
+/-- The `RHSExpr.nonlin` of a stmt. -/
+def Stmt.nonlin : Stmt → Nonlin
+  | .assign _ _ r | .scatter _ _ r _ => r.nonlin
+
+/-- Every `AxisSpec` appearing in a single read index expression. -/
+def idxAxes : IdxExpr → List AxisSpec
+  | .axis a     => [a]
+  | .const _    => []
+  | .scale _ a  => [a]
+  | .shift a _  => [a]
+  | .affine _ xs => xs.map (·.2)
+
+/-- Express a read coordinate `IdxExpr` as an integer-affine combination of the degree axes
+    identified by uids `us` (column order = `us`): returns `(coeff-row, bias)`. -/
+def idxToRow (us : List UID) : IdxExpr → (List Int × Int)
+  | .axis a      => (us.map (fun u => if u == a.uid then 1 else 0), 0)
+  | .const n     => (us.map (fun _ => 0), n)
+  | .scale c a   => (us.map (fun u => if u == a.uid then c else 0), 0)
+  | .shift a n   => (us.map (fun u => if u == a.uid then 1 else 0), n)
+  | .affine n xs => (us.map (fun u => (xs.foldl (fun acc p => if p.2.uid == u then acc + p.1 else acc) 0)), n)
+
+/-- A ScanStmt's representative stmt: for `.scan`, the first recurrence stmt (else the first
+    base stmt); for `.plain`, the stmt itself. It carries the reads/axes used to build the step. -/
+def ScanStmt.repStmt : ScanStmt → Option Stmt
+  | .plain s        => some s
+  | .scan _ _ b r   => r.head?.orElse (fun _ => b.head?)
+
+/-- Is this ScanStmt a `.scan` node? (drives the "scan" op label). -/
+def ScanStmt.isScan : ScanStmt → Bool
+  | .plain _    => false
+  | .scan ..    => true
+
+/-- Phase 8: route the scheduled statements into a `ThreadedComposed`. -/
+def route (sp : ScheduledProgram) : FreshM ThreadedComposed := do
+  -- PASS 1: step indices, name→step map, external-name numbering.
+  let mut nameToStep : Std.HashMap String Nat := {}
+  for (sc, i) in sp.stmts.zipIdx do
+    for nm in sc.writes do
+      nameToStep := nameToStep.insert nm i
+  let nExternal := sp.extNames.card
+  let mut extIndex : Std.HashMap String Nat := {}
+  let mut extCount : Nat := 0
+  for sc in sp.stmts do
+    for nm in sc.reads do
+      if decide (nm ∈ sp.extNames) && !extIndex.contains nm then
+        extIndex := extIndex.insert nm extCount
+        extCount := extCount + 1
+  -- PASS 2: build one step + its routing per ScanStmt.
+  let mut steps : List BrBaseP := []
+  let mut routing : List (List Wire) := []
+  for sc in sp.stmts do
+    let s := sc.repStmt.getD (.assign "" [] { body := { terms := [] }, nonlin := .identity })
+    let lhsAxes := s.lhsAxes
+    let lhsUids := lhsAxes.map (·.uid)
+    let readFactors := s.readFactors
+    let readAxes := readFactors.flatMap (fun rf => rf.2.flatMap idxAxes)
+    let contracted := readAxes.filter (fun a => !lhsUids.contains a.uid)
+    -- degree = LHS axes ++ contracted, de-duplicated by uid (LHS first).
+    let degAxes : List AxisSpec :=
+      (lhsAxes ++ contracted).foldl (fun acc a =>
+        if acc.any (fun b => b.uid == a.uid) then acc else acc ++ [a]) []
+    let contractedUids : List UID := contracted.map (·.uid)
+    let degree : StObjP := degAxes.map (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name))
+    -- weave per degree axis: contracted ⇒ tiled, else fixed.
+    let mkWeave : List WeaveSlotP :=
+      degAxes.map (fun a => if contractedUids.contains a.uid then WeaveSlotP.tiled else WeaveSlotP.fixed (AxisP.mk (some a.name) (SizeExpr.var a.name)))
+    let inputWeaves : List WeaveShapeP := readFactors.map (fun _ => mkWeave)
+    let outputWeaves : List WeaveShapeP := [ mkWeave ]
+    let degUids : List UID := degAxes.map (·.uid)
+    let reindexings : List StMatP := readFactors.map (fun rf =>
+      let rows := rf.2.map (idxToRow degUids)
+      { domLen := degUids.length, codLen := rf.2.length,
+        coeffs := rows.map (·.1), bias := rows.map (·.2) })
+    let op : String :=
+      if sc.isScan then "scan"
+      else match s.nonlin with
+        | .relu        => "relu"
+        | .softmax _   => "softmax"
+        | .normalize _ => "normalize"
+        | .identity    => match s with
+            | .scatter .. => "scatter"
+            | .assign ..  => "contract"
+    let step : BrBaseP := { op, degree, inputWeaves, outputWeaves, reindexings }
+    let wires : List Wire := readFactors.map (fun rf =>
+      match nameToStep[rf.1]? with
+      | some j => Wire.mk j 0
+      | none   => Wire.mk nExternal ((extIndex[rf.1]?).getD 0))
+    steps := steps ++ [ step ]
+    routing := routing ++ [ wires ]
+  return { steps, routing, nExternal }
 
 end LeanNCD

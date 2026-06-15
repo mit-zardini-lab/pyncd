@@ -49,4 +49,39 @@ run_cmd do
       unless names.contains "Y" && names.contains "T" do throwError s!"Y,T must survive; got {names}"
       unless ¬ names.contains "Dead" do throwError s!"Dead must be eliminated; got {names}"
   | .error e _ => throwError s!"schedule errored: {repr e}"
+
+-- Matmul Y[i,j] := W[i,k]·X[k,j]: W,X external ⇒ nExternal=2; one step; k contracted ⇒
+-- exactly one .tiled slot in the output weave; W,X reindexings present.
+run_cmd do
+  let ax (nm : String) (u : Nat) : AxisSpec := { name := nm, uid := u, kind := .real none }
+  let i := ax "i" 1; let j := ax "j" 2; let k := ax "k" 3
+  let mm : Stmt := .assign "Y" [ .free i, .free j ]
+    { body := { terms := [ { factors := [ .read "W" [.axis i, .axis k], .read "X" [.axis k, .axis j] ] } ] },
+      nonlin := .identity }
+  let sp : ScheduledProgram := { decls := [], stmts := [ .plain mm ], env := {}, extNames := (insert "W" (insert "X" (∅ : Finset String))), ctx := { classes := [] } }
+  match route sp |>.run 0 with
+  | .ok tc _ =>
+      unless tc.nExternal == 2 do throwError s!"nExternal should be 2, got {tc.nExternal}"
+      unless tc.steps.length == 1 do throwError s!"expected 1 step, got {tc.steps.length}"
+      let step := tc.steps.head!
+      -- output weave: i,j fixed, k tiled ⇒ exactly one tiled
+      let nTiled := step.outputWeaves.head!.filter (fun | .tiled => true | .fixed _ => false) |>.length
+      unless nTiled == 1 do throwError s!"expected exactly one contracted (tiled) axis, got {nTiled}"
+      unless step.reindexings.length == 2 do throwError s!"expected 2 input reindexings, got {step.reindexings.length}"
+      -- both inputs route to externals (step = nExternal sentinel)
+      unless tc.routing.head!.all (fun w => w.step == 2) do throwError "matmul inputs should be external"
+  | .error e _ => throwError s!"route errored: {repr e}"
+
+-- Strided read: Y[i] := X[2*i] ⇒ the X reindexing row has coefficient 2.
+run_cmd do
+  let ax (nm : String) (u : Nat) : AxisSpec := { name := nm, uid := u, kind := .real none }
+  let i := ax "i" 1
+  let conv : Stmt := .assign "Y" [ .free i ]
+    { body := { terms := [ { factors := [ .read "X" [ .scale 2 i ] ] } ] }, nonlin := .identity }
+  let sp : ScheduledProgram := { decls := [], stmts := [ .plain conv ], env := {}, extNames := (insert "X" (∅ : Finset String)), ctx := { classes := [] } }
+  match route sp |>.run 0 with
+  | .ok tc _ =>
+      let sm := tc.steps.head!.reindexings.head!
+      unless sm.coeffs == [[2]] do throwError s!"expected strided coeff [[2]], got {sm.coeffs}"
+  | .error e _ => throwError s!"route errored: {repr e}"
 end LeanNCD
