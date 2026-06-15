@@ -1125,9 +1125,11 @@ structure TLProgram where
 --   ScatterOpts, Stmt, TLProgram — derives `DecidableEq, Repr, Lean.ToExpr` (with `Inhabited`
 --   where a default is needed). Because sizes are `SizeExpr` (not `Numeric`), `ToExpr` derives
 --   automatically — no `MvPolynomial.toExpr` is needed for the front-end.
--- DEFERRED (E2): ThreadedComposed and Wire need explicit `ToExpr` instances (nested
---   BrBase/StMat/etc. need ToExpr too); that is where the noncomputable-`Numeric` ToExpr
---   question (coeff enumeration vs ring normal form) would actually arise.
+-- RESOLVED (E2a): the §12.4 ThreadedComposed/BrBase/StMat are realized as COMPUTABLE
+--   first-order presentations (BrBaseP/StMatP/AxisP/WeaveSlotP/Wire, sizes in SizeExpr,
+--   coeffs in ℤ), so `ToExpr` derives directly and the anticipated noncomputable-`Numeric`
+--   ToExpr question (coeff enumeration vs ring normal form) is SIDESTEPPED, not answered —
+--   it would only resurface in the E2b bridge that maps a presentation to a real BrMorph.
 ```
 
 ### 12.3 Concrete syntax and elaboration
@@ -1288,7 +1290,7 @@ The elaborator is pure syntax-walking with no side effects: UID minting and axis
 
 ### 12.4 Semantic compilation
 
-> **Milestone E2 (not yet implemented).** Everything in this subsection — the 8-phase `TLProgram.compile` pipeline, the typed intermediates (`LabeledProgram` … `ScheduledProgram`), `ScanStmt`, `Wire`, `ThreadedComposed`, the `Stmt.recurMorphism` escape hatch, and the full `tl!{}` compile macro — is the design for Milestone E2. It builds on the executable `FreshM`/`Context` seam of [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) (Milestone D) and consumes the `TLProgram` values produced by the E1 front-end above. The signatures are presented as the target; the implementation will record any deviations here, as E1 did for [§12.2](#122-abstract-syntax)/[§12.3](#123-concrete-syntax-and-elaboration).
+> **Implementation status (Milestone E2a — implemented; E2b deferred).** The 8-phase `TLProgram.compile` pipeline, the typed intermediates (`LabeledProgram` … `ScheduledProgram`), `ScanStmt`, `Wire`, `ThreadedComposed`, and the `tl!{ … } : ThreadedComposed` compile macro are **implemented in `leanncd/LeanNCD/DSL/Pipeline/` + `Target.lean`/`Compile.lean`, fully executable and `sorry`-free**: all five [§12.1](#121-bnf-grammar) examples compile end-to-end. Building on the executable `FreshM`/`Context` seam of [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) (Milestone D), the pipeline consumes E1's `TLProgram` values and produces a **computable, first-order *presentation* of the Br morphism** — `ThreadedComposed`/`BrBaseP`/`StMatP`/`AxisP`/`WeaveSlotP` are `List`-based, `SizeExpr`/`Int`-valued, `deriving Lean.ToExpr` mirrors of the noncomputable math-tower `Br`/`St` types (the same `Numeric`→`SizeExpr` move E1 made for the AST). **Deferred to Milestone E2b:** the noncomputable bridge realizing the presentation as an actual `BrMorph` (and the [§8](#8-acsets-and-the-executable-layer) acset correspondence + Props 8.x), the `Stmt.recurMorphism`/`ScanStmt.scanPre` escape hatch, and the `ScanAffine` `O(log N)` fast path. The signatures below are shown in their implemented (presentation) form where E2a diverges from the original design; the per-phase **E2a implementation notes** after the phase table record the simplifications.
 
 ```lean
 /-- Named alias for the declaration environment built by resolveDecls. -/
@@ -1300,8 +1302,10 @@ inductive ScanStmt
   | plain  : Stmt → ScanStmt                                  -- non-recursive statement
   | scan   : String → AxisSpec → List Stmt → List Stmt → ScanStmt
              -- (tensor name, iteration axis, base stmts, recurrence stmts)
-  | scanPre : String → AxisSpec → ThreadedComposed → ScanStmt
-             -- Stmt.recurMorphism case: step morphism provided directly
+  -- DEFERRED to E2b — the `scanPre` case references the noncomputable math-tower
+  -- ThreadedComposed via Stmt.recurMorphism (out of scope for E2a's front-end + presentation):
+  --   | scanPre : String → AxisSpec → ThreadedComposed → ScanStmt
+  --     (Stmt.recurMorphism case: step morphism provided directly)
 
 /-- Typed intermediate representations for the 8-phase pipeline.
     Each type carries the invariant guaranteed by its producing phase. -/
@@ -1325,11 +1329,13 @@ structure CanonicalProgram where
 
 structure LoweredProgram where
   decls    : List Decl
-  stmts    : List Stmt                  -- no const/affine IdxExprs in reads (replaced by intermediates)
+  stmts    : List Stmt                  -- affine-LHS assigns reclassified to Stmt.scatter
   env      : DeclEnv
   extNames : Finset String
   ctx      : Context AxisSpec
-  auxStmts : Array Stmt                 -- Slice/Reindex/Scatter intermediates emitted by lowerArith
+  auxStmts : Array Stmt                 -- `#[]` in E2a — affine READS are NOT split into separate
+                                        -- Slice/Reindex steps but folded into the consuming step's
+                                        -- `reindexings` at `route` (see the E2a notes below)
 
 structure ScanProgram where
   decls    : List Decl
@@ -1352,26 +1358,49 @@ structure ScheduledProgram where
   extNames : Finset String
   ctx      : Context AxisSpec
 
+-- COMPUTABLE PRESENTATION TYPES (Target.lean). The math-tower Br/St types (§2.2/§2.3) are
+-- noncomputable (over `Numeric`) and use function-valued fields (`Fin _ → …`), so they cannot
+-- `deriving ToExpr`. E2a therefore lowers them to first-order, `List`-based, `SizeExpr`/`Int`-
+-- valued mirrors — the term-world PRESENTATION the tl!{} macro embeds. Each `P`-type drops the
+-- dependent length/shape indices of its math-tower twin (an invariant the E2b bridge re-establishes).
+structure StMatP where                          -- presentation of StMat (§2.2): integer-affine map
+  domLen : Nat; codLen : Nat
+  coeffs : List (List Int)                       -- codLen × domLen (DSL reindexings are integer-affine)
+  bias   : List Int
+  deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
+structure AxisP where name : Option String; size : SizeExpr   -- presentation of Axis: size is SizeExpr
+  deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
+abbrev StObjP := List AxisP
+inductive WeaveSlotP | fixed : AxisP → WeaveSlotP | tiled : WeaveSlotP
+  deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
+abbrev WeaveShapeP := List WeaveSlotP
+structure BrBaseP where                          -- presentation of BrBase (§2.3): Fin-functions → Lists
+  op : String; degree : StObjP
+  inputWeaves outputWeaves : List WeaveShapeP
+  reindexings : List StMatP
+  deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
+
 /-- A wire in the DAG: identifies a specific output slot of a specific step (or the external inputs). -/
 structure Wire where
-  step : ℕ         -- index into steps; n_external = "external input" sentinel
-  slot : ℕ         -- output slot index within that step
+  step : Nat       -- index into steps; step = nExternal is the "external input" sentinel
+  slot : Nat       -- output slot index within that step
+  deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
 
-/-- A routed DAG of Br base morphisms: the term-world presentation of one Br morphism. -/
+/-- A routed DAG of (presented) Br base morphisms: the term-world presentation of one Br morphism. -/
 structure ThreadedComposed where
-  steps      : List BrBase     -- the lowered operations, each a Br base morphism (§2.3)
-  /-- For each step and each input slot, which Wire feeds it.
-      `routing i j` = the Wire connected to the j-th input slot of steps[i]. -/
-  routing    : Fin steps.length → ℕ → Wire
-  n_external : ℕ               -- number of external inputs (declared tensors / weights)
--- deriving Lean.ToExpr  -- required for the tl!{} macro; also derive for Wire, BrBase,
---   WeaveShape, WeaveSlot, StMat, ArrayType, DType, Axis, Numeric (= MvPolynomial String ℕ).
--- Note: deriving ToExpr for MvPolynomial may require a custom instance.
+  steps     : List BrBaseP            -- the lowered operations (presentation of §2.3 BrBase)
+  routing   : List (List Wire)        -- routing[i] = the input wires of steps[i]
+                                      -- (was `Fin steps.length → ℕ → Wire`; a List for ToExpr)
+  nExternal : Nat                     -- number of external inputs (declared tensors / weights)
+  deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
+-- Because every field is first-order with `SizeExpr` sizes, `Lean.ToExpr` derives directly — no
+-- `MvPolynomial.toExpr` is needed, and the tl!{} macro embeds the value as a compile-time constant.
 -- A ThreadedComposed PRESENTS one `BrMorph` (§2.3): composing and tensoring `steps` along
--- `routing` collapses to a single morphism of `Br`. It is the term-world twin of the acset
--- `SBrInstance` (§8.1) — the acset extraction (Python `from_tensor_program`) turns one into
--- the other, and `write_sbr`/`read_sbr` round-trip that SBrInstance to and from CSV. So the
--- DSL path (this section) and the CSV path (§8) land on the very same `∫Dat`-morphism.
+-- `routing` collapses to a single morphism of `Br` (the realizing bridge is Milestone E2b). It is
+-- the term-world twin of the acset `SBrInstance` (§8.1) — the acset extraction (Python
+-- `from_tensor_program`) turns one into the other, and `write_sbr`/`read_sbr` round-trip that
+-- SBrInstance to and from CSV. So the DSL path (this section) and the CSV path (§8) land on the
+-- very same `∫Dat`-morphism.
 
 /-- Lower a TLProgram to a ThreadedComposed morphism.
     Runs in FreshM (= EStateM CompileError ℕ, Lean core Init.Control.EStateM):
@@ -1387,14 +1416,14 @@ The pipeline is a typed chain; each phase boundary carries a more constrained in
 
 ```text
 TLProgram
-  →[assignUIDs]    LabeledProgram        -- every AxisSpec has a fresh UID
-  →[resolveDecls]  ResolvedProgram       -- DeclEnv built; external names identified; bias materialized
+  →[assignUIDs]    LabeledProgram        -- every AxisSpec has a fresh UID (name-keyed in E2a)
+  →[resolveDecls]  ResolvedProgram       -- DeclEnv built; external names = read-not-produced
   →[unifyAxes]     CanonicalProgram      -- axis UIDs are canonical (pure)
-  →[lowerArith]    LoweredProgram        -- no const/affine IdxExprs in reads; Scatter fill initialized
-  →[finalizeScans] ScanProgram           -- no bare iterAt/iterNext LHSSlots
-  →[splitNonlins]  LinearProgram         -- no nonlinearity in RHSExpr.nonlin
-  →[schedule]      ScheduledProgram      -- live stmts in reverse-topological order
-  →[route]         ThreadedComposed
+  →[lowerArith]    LoweredProgram        -- affine-LHS assigns reclassified to Stmt.scatter
+  →[finalizeScans] ScanProgram           -- iterAt/iterNext grouped into ScanStmt.scan nodes
+  →[splitNonlins]  LinearProgram         -- nonlinearity isolated into its own step
+  →[schedule]      ScheduledProgram      -- live stmts (DCE); root = last stmt's output
+  →[route]         ThreadedComposed      -- one BrBaseP per stmt; routing wires + nExternal
 ```
 
 | Phase | What it does | Key Lean idiom |
@@ -1407,6 +1436,15 @@ TLProgram
 | **splitNonlins** | Lifts `relu`/`softmax`/`normalize` out of `RHSExpr.nonlin` into a separate composed step. These are genuinely nonlinear, so they are not reindexings (`StMat` is affine); each becomes a `BrBase` op ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) whose numeric semantics are supplied by the Algebra functor `F : C → V` into the target actegory ([§7.5](#75-algebras-and-construct)). For `softmax`/`normalize` the `norm`-flagged axis ([§12.2](#122-abstract-syntax)) is the contraction dimension; masked variants emit an alignment-permutation step computed from the `where` mask. | `FreshM`; `freshUData` mints UIDs for nonlin step intermediates |
 | **schedule** | Backward reachability BFS from the output name simultaneously determines liveness (DCE) and produces a valid reverse-topological order. Two passes in Python; one here because the BFS visit order is already a reverse topo order. | Pure (`String → List ScanStmt → List ScanStmt`); lifted to `FreshM` by `pure` |
 | **route** | Detects contracted axes (present in a `ProdTerm` but absent from the LHS) and builds one `BrBase` ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) per stmt, carrying the `tensor`/`predicate` tag from `DeclEnv`. The contraction *arithmetic* is not fixed here but at evaluation, by the Algebra's value semiring `R` ([§7.5](#75-algebras-and-construct)): `R = ℝ` (×, then Σ) for `tensor` outputs, `R = Bool` (∧, then ∃) for `predicate` outputs — the ∃/∧-vs-Σ split is exactly that choice of `R`. Assigns index slots; builds `ThreadedComposed.routing` and `n_external`. Automatic associative-scan detection (syntactic check on the recurrence `IdxExpr`) selects the `ScanAffine` fast path — the case where the step algebra factors through a monoid, i.e. Prop 8.7's `O(log N)` parallel prefix. | Pure (`List ScanStmt → DeclEnv → Context → ThreadedComposed`); lifted to `FreshM` by `pure` |
+
+**E2a implementation notes.** The phase-table rows above describe the full design; the implemented E2a pipeline simplifies several rows (all recorded in `leanncd/SORRY_INVENTORY.md`, all `sorry`-free):
+
+- **assignUIDs** binds by axis *name* (E1 emits `uid := 0` for every axis), reusing the [§12.3](#123-concrete-syntax-and-elaboration) `traverseUID`; a `freshNonZero` guard skips the sentinel `0`.
+- **resolveDecls** is purely constructive (it never throws): an undeclared read name is an *external input* (the [§12.1](#121-bnf-grammar) examples read `W`/`X`/`Q`/`K` with no `tensor` decl), so `extNames` = read-not-produced. `linear`-weight arity, shape consistency, and bias materialization are deferred (no example declares a `linear` weight); `extraStmts := #[]`. The `tensor`/`predicate` value-semiring tagging is an [§7.5](#75-algebras-and-construct) *semantic* concern realized in E2b, not in the presentation.
+- **lowerArith** reclassifies affine-LHS assigns to `Stmt.scatter` with a conservative injectivity guard (`overlappingScatter` on a dimension-collapsing constant coordinate); affine *reads* are left in place and folded into the consuming step's `reindexings` at `route` (which is exactly where `St` lives inside `BrBase`, [§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) rather than emitted as separate Slice/Reindex steps; `auxStmts := #[]`.
+- **finalizeScans** groups by iteration-axis UID into (coupled) `Scan` nodes; a pre-pass makes each base case adopt a same-named recurrence's iteration axis (E1 emits scan base cases with a placeholder iteration-axis name); `missingBaseCase`/`causalityViolation` guards fire; `scanPre`/`recurMorphism` deferred to E2b.
+- **schedule** does backward-reachability DCE; the output root is the last stmt's written name(s) (single-result-at-tail — a genuine multi-output-not-at-tail program would need an explicit outputs field).
+- **route** builds one `BrBaseP` per stmt with contracted axes (read axes absent from the LHS) as `tiled` weave slots; each read's affine `IdxExpr` becomes an integer-coefficient `StMatP` via an `idxToRow` translation; inputs are wired to their producer step or to the external sentinel (`step = nExternal`). The `ScanAffine` `O(log N)` fast path and the value-semiring contraction arithmetic are deferred to E2b.
 
 The result is a `ThreadedComposed` (a presentation of a `BrMorph`, [§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) — a finite presentation of an `∫Dat`-morphism, the very thing an `SBrInstance` ([§8.1](#81-sbrinstance-as-a-finite-presentation-of-an-dat-morphism)) presents in tabular form. The DSL path of this section and the CSV path of [§8](#8-acsets-and-the-executable-layer) therefore produce the same categorical object: the acset extraction relates the `ThreadedComposed` and `SBrInstance` presentations, and `write_sbr`/`read_sbr` serialize the latter to and from CSV — none of these steps changes the morphism.
 
@@ -1430,9 +1468,9 @@ The result is a `ThreadedComposed` (a presentation of a `BrMorph`, [§2.3](#23-b
 | `X[n]` | `tl.X[n]` (int index) | Slice — constant read |
 | `X[i + n]` | `tl.X[i + n]` (affine expr) | Reindex — affine read |
 | `Y[n*i] := …` | `tl.Y[n*i] = …` (affine LHS) | Scatter — affine write |
-| `Stmt.recurMorphism name axis morphism` | `tl.name.recur(l, morphism)` | escape hatch; step morphism as a term (syntax TBD) |
+| `Stmt.recurMorphism name axis morphism` | `tl.name.recur(l, morphism)` | escape hatch; deferred to E2b (syntax + math-tower morphism) |
 | `elabTLProgram` (Stage 1) | — | `Syntax → MetaM TLProgram` (value, not Expr); no Python analogue |
-| `TLProgram.compile` (Stage 2) | `tl.to_morphism()` | `TLProgram → FreshM ThreadedComposed`; run at elaboration time via `FreshM.run 0` |
+| `TLProgram.compile` (Stage 2) | `tl.to_morphism()` | `TLProgram → FreshM ThreadedComposed`; run at elaboration time via `.run 0` (implemented, E2a) |
 
 ## 13. Appendix: out of scope
 
