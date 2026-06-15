@@ -108,4 +108,37 @@ run_cmd do
   | .error (.overlappingScatter "Z") _ => pure ()
   | .error e _ => throwError s!"wrong error: {repr e}"
   | .ok _ _ => throwError "expected overlappingScatter for collapsing const LHS"
+
+-- Coupled scan: G and H both recur over `l` (uid 9) ⇒ ONE ScanStmt.scan whose recur list
+-- has BOTH G and H steps; each has a base case (no missingBaseCase).
+run_cmd do
+  let l : AxisSpec := { name := "l", uid := 9, kind := .nat none }
+  let j : AxisSpec := { name := "j", uid := 1, kind := .real none }
+  let rhs (nm : String) : RHSExpr :=
+    { body := { terms := [ { factors := [ .read nm [ .axis j, .axis l ] ] } ] }, nonlin := .relu }
+  let gBase : Stmt := .assign "G" [ .free j, .iterAt l 0 ] { body := { terms := [] }, nonlin := .identity }
+  let gRec  : Stmt := .assign "G" [ .free j, .iterNext l ] (rhs "G")
+  let hBase : Stmt := .assign "H" [ .free j, .iterAt l 0 ] { body := { terms := [] }, nonlin := .identity }
+  let hRec  : Stmt := .assign "H" [ .free j, .iterNext l ] (rhs "H")
+  let lp : LoweredProgram := { decls := [], stmts := [gBase, gRec, hBase, hRec], env := {}, extNames := ∅, ctx := { classes := [] }, auxStmts := #[] }
+  match finalizeScans lp |>.run 0 with
+  | .ok sp _ =>
+      let scans := sp.stmts.filterMap (fun | .scan _ _ b r => some (b, r) | .plain _ => none)
+      match scans with
+      | [(base, recur)] =>
+          unless recur.length == 2 do throwError s!"coupled scan recur should have 2 steps, got {recur.length}"
+          unless base.length == 2 do throwError s!"coupled scan should have 2 base steps, got {base.length}"
+      | _ => throwError s!"expected exactly one coupled ScanStmt.scan, got {scans.length}"
+  | .error e _ => throwError s!"finalizeScans errored: {repr e}"
+
+-- A recurrence with no matching base case ⇒ missingBaseCase.
+run_cmd do
+  let l : AxisSpec := { name := "l", uid := 9, kind := .nat none }
+  let orphan : Stmt := .assign "S" [ .iterNext l ]
+    { body := { terms := [ { factors := [ .read "S" [ .axis l ] ] } ] }, nonlin := .identity }
+  let lp : LoweredProgram := { decls := [], stmts := [orphan], env := {}, extNames := ∅, ctx := { classes := [] }, auxStmts := #[] }
+  match finalizeScans lp |>.run 0 with
+  | .error (.missingBaseCase "S") _ => pure ()
+  | .error e _ => throwError s!"wrong error: {repr e}"
+  | .ok _ _ => throwError "expected missingBaseCase for orphan recurrence"
 end LeanNCD

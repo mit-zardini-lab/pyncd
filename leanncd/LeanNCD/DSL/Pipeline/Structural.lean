@@ -247,4 +247,60 @@ def lowerArith (cp : CanonicalProgram) : FreshM LoweredProgram := do
   return { decls := cp.decls, stmts := stmts', env := cp.env,
            extNames := cp.extNames, ctx := cp.ctx, auxStmts := #[] }
 
+/-! ## The `finalizeScans` phase (Phase 5 — recurrence → Scan nodes)
+
+A scan is a base case (`LHSSlot.iterAt`, the `l = 0` slot) plus a recurrence step
+(`LHSSlot.iterNext`, the `l+1` slot). Statements for DIFFERENT tensor names that share the SAME
+iteration-axis UID form a COUPLED scan (the §12.1 example: `G` and `H` both recur over `l`), so
+they are grouped into ONE `ScanStmt.scan`. Validation: every recur step needs a matching base
+step of the same name (else `missingBaseCase`); and a recur step may not read its iteration axis
+"ahead" (`l+1` look-ahead on the RHS — else `causalityViolation`). -/
+
+/-- The LHS slots of a statement. -/
+def Stmt.slots : Stmt → List LHSSlot
+  | .assign _ ls _ => ls | .scatter _ ls _ _ => ls
+
+/-- `(iteration-axis uid, axis, isRecur)` if this stmt is a scan base/recur stmt. A stmt has
+    at most one iteration slot, so the first match is the only one. -/
+def Stmt.iterInfo (s : Stmt) : Option (UID × AxisSpec × Bool) :=
+  s.slots.findSome? (fun
+    | .iterAt a _ => some (a.uid, a, false)
+    | .iterNext a => some (a.uid, a, true)
+    | _           => none)
+
+/-- All `IdxExpr`s read on the RHS of a stmt. -/
+def Stmt.rhsReads : Stmt → List IdxExpr
+  | .assign _ _ r | .scatter _ _ r _ =>
+      r.body.terms.flatMap (fun t => t.factors.flatMap (fun
+        | .read _ es => es
+        | .iverson _ => []))
+
+/-- Conservative causality check: does any RHS read reference iteration axis `u` with a
+    strictly-positive look-ahead offset (`shift a n`, `n > 0`)? -/
+def readsIterAhead (s : Stmt) (u : UID) : Bool :=
+  s.rhsReads.any (fun
+    | .shift a n => a.uid == u && n > 0
+    | _          => false)
+
+/-- Group `iterAt`/`iterNext` stmts by iteration-axis UID into (coupled) `ScanStmt.scan` nodes;
+    pass everything else through as `ScanStmt.plain`. Validates base-case coverage and causality. -/
+def finalizeScans (lp : LoweredProgram) : FreshM ScanProgram := do
+  let scanStmts  := lp.stmts.filter (fun s => s.iterInfo.isSome)
+  let plainStmts := lp.stmts.filter (fun s => s.iterInfo.isNone)
+  let uids := (scanStmts.filterMap (fun s => s.iterInfo.map (·.1))).eraseDups
+  let mut nodes : List ScanStmt := []
+  for u in uids do
+    let group := scanStmts.filter (fun s => (s.iterInfo.map (fun t => t.1 == u)).getD false)
+    let axis : AxisSpec := (group.findSome? (fun s => s.iterInfo.map (·.2.1))).getD default
+    let baseStmts  := group.filter (fun s => (s.iterInfo.map (fun t => t.2.2 == false)).getD false)
+    let recurStmts := group.filter (fun s => (s.iterInfo.map (fun t => t.2.2 == true)).getD false)
+    for r in recurStmts do
+      unless baseStmts.any (fun b => b.lhsName == r.lhsName) do
+        throw (CompileError.missingBaseCase r.lhsName)
+      if readsIterAhead r u then throw (CompileError.causalityViolation r.lhsName)
+    let repName := (group.head?.map Stmt.lhsName).getD ""
+    nodes := nodes ++ [ ScanStmt.scan repName axis baseStmts recurStmts ]
+  return { decls := lp.decls, stmts := plainStmts.map ScanStmt.plain ++ nodes,
+           env := lp.env, extNames := lp.extNames, ctx := lp.ctx }
+
 end LeanNCD
