@@ -10,4 +10,9 @@ noncomputable example (m : StMatP) (d c : StObj) : StMat d c := realizeStMat m d
 #print axioms realizeStObj
 -- intToNumeric legitimately uses sorryAx (the negative-coeff obligation):
 #print axioms intToNumeric
+-- WEAVE realizations + dependent realizeBrBaseP (Task 2):
+noncomputable example (w : WeaveShapeP) : WeaveShape := realizeWeaveShape w
+noncomputable example (b : BrBaseP) : Σ (dom cod : BrObj), BrBase dom cod := realizeBrBaseP b
+#print axioms realizeWeaveShape   -- must be sorry-FREE
+#print axioms realizeBrBaseP      -- sorry-free IF you gave the real reindexings term; else uses sorryAx
 end LeanNCD
