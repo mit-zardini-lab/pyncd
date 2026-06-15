@@ -105,4 +105,39 @@ def assignUIDs (p : TLProgram) : FreshM LabeledProgram := do
   let p' := TermTraversable.traverseUID relabel p
   return { decls := p'.decls, stmts := p'.stmts }
 
+/-! ## The `resolveDecls` phase
+
+Builds the `DeclEnv` and classifies tensor names as external inputs vs internally produced.
+Per the §12.1 contract this phase is purely constructive: §12.1 example programs READ names like
+`W`, `X`, `Q`, `K` with no `tensor` declaration, so an undeclared read is an external input — not
+an error. `resolveDecls` therefore NEVER throws. -/
+
+/-- The declaration's tensor name. -/
+def Decl.name : Decl → String
+  | .tensor n _ => n | .predicate n _ => n | .linear n _ _ _ => n
+
+/-- The tensor name a stmt writes to (its LHS). -/
+def Stmt.lhsName : Stmt → String
+  | .assign n _ _ => n | .scatter n _ _ _ => n
+
+/-- The tensor names a stmt reads (from `.read` factors; iverson factors read nothing). -/
+def Stmt.readNames : Stmt → List String
+  | .assign _ _ r | .scatter _ _ r _ =>
+      r.body.terms.flatMap (fun t => t.factors.filterMap (fun
+        | .read nm _ => some nm
+        | .iverson _ => none))
+
+/-- Build the declaration environment and classify external-input names.
+    `extNames` = names READ in some stmt but never PRODUCED (never a stmt LHS).
+    `extraStmts := #[]`: bias materialization for `linear … bias := true` is deferred — none of
+    the five §12.1 examples declare a `linear` weight, so it is unexercised here. Never throws. -/
+def resolveDecls (lp : LabeledProgram) : FreshM ResolvedProgram := do
+  let env : DeclEnv := lp.decls.foldl (fun m d => m.insert d.name d) {}
+  let produced : List String := lp.stmts.map Stmt.lhsName
+  let reads    : List String := lp.stmts.flatMap Stmt.readNames
+  let extNames : Finset String :=
+    reads.foldl (fun s n => if produced.contains n then s else insert n s) ∅
+  return { decls := lp.decls, stmts := lp.stmts, env,
+           extNames, extraStmts := #[] }
+
 end LeanNCD
