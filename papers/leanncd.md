@@ -100,39 +100,39 @@ The `ColoredPROP` typeclass earns its keep in three ways: generic rearrangements
 
 ### 2.1 `Numeric`
 
-Both **St** and **Br** rely on symbolic dimension expressions — axis sizes and stride coefficients are terms in a free commutative semiring. The right type is Mathlib's `MvPolynomial String ℕ`, already a `CommSemiring` and `DecidableEq` with no extra proof work, covering the Python `Numeric` hierarchy (`Integer`, `FreeNumeric`, `Addition`, `Multiplication`, `Power`) uniformly.
+Both **St** and **Br** rely on symbolic dimension expressions — terms in a free commutative ring on `String`-named generators. Two roles need DIFFERENT coefficient rings: axis **sizes** are non-negative, so they live in `Numeric = MvPolynomial String ℕ` (a `CommSemiring`); affine **stride coefficients and offsets** are *signed* (a look-back read `X[i-1]` has offset `-1`), so they live in `Coeff = MvPolynomial String ℤ` (a `CommRing`). Both are Mathlib types with `DecidableEq` and a `ring`-ready algebra for free, covering the Python `Numeric` hierarchy (`Integer`, `FreeNumeric`, `Addition`, `Multiplication`, `Power`) uniformly.
 
 ```lean
-abbrev Numeric := MvPolynomial String ℕ
+abbrev Numeric := MvPolynomial String ℕ   -- axis SIZES (non-negative); a CommSemiring
+abbrev Coeff   := MvPolynomial String ℤ   -- StMat COEFFICIENTS/offsets (signed); a CommRing
 -- free variable s  ↦  MvPolynomial.X s     (a degree-1 monomial)
 -- literal n        ↦  MvPolynomial.C ↑n    (a constant polynomial)
 -- addition, multiplication ↦ ring operations
--- instance : CommSemiring Numeric           -- free from Mathlib (NONCOMPUTABLE, see below)
--- instance : DecidableEq Numeric            -- free from Mathlib
+-- instances : CommSemiring Numeric / CommRing Coeff, DecidableEq — free from Mathlib (NONCOMPUTABLE)
 ```
 
-This is the minimal type making `StMat`'s laws provable: the free commutative semiring on a `String`-indexed generator set, exactly the algebra symbolic axis sizes inhabit. The `ring` tactic works immediately over any `CommSemiring`, so all three `StMat` laws discharge without setup. `MvPolynomial.X s` plays the role of a `FreeNumeric` — a name carrying no interpretation until indeterminates are substituted.
+These are the minimal types making `StMat`'s laws provable: free commutative algebras on a `String`-indexed generator set. The `ring` tactic works immediately over any `CommSemiring`/`CommRing`, so all three `StMat` laws discharge without setup over `Coeff`. `MvPolynomial.X s` plays the role of a `FreeNumeric` — a name carrying no interpretation until indeterminates are substituted. **(Why two types:** an earlier design used `Numeric` for both roles, but its ℕ-semiring has no additive inverses, so negative look-back offsets — supported by the DSL and the [§12.2](#122-abstract-syntax) `IdxExpr` — were unrepresentable; separating out the signed `Coeff` fixes that while keeping sizes non-negative.)
 
-Mathlib's `CommSemiring (MvPolynomial …)` instance is **noncomputable** (it factors through `AddMonoidAlgebra`); so are `MvPolynomial.X`/`.C` and even `DecidableEq` (which resolves through `Classical.propDecidable`). This has no effect on the proof tower — `ring`/`simp` and the [§9](#9-the-propositions-as-generic-theorems) proofs work fine over a noncomputable semiring — but it has two consequences. (i) Any `def` that *builds* a value over `Numeric` (so `StMat.id`, `StMat.comp`, and the `St` instance of [§2.2](#22-st--stride-matrices)) must be marked `noncomputable`. (ii) **Compiled code cannot construct or `decide`-compare `Numeric` values at all** — neither `#eval`, `decide`, nor `native_decide` reduces them. The executable / DSL layer must therefore not construct `Numeric` directly: the tensor-logic DSL ([§12](#12-the-tensor-logic-dsl)) carries sizes in a *computable* `SizeExpr` mirror, interpreted into `Numeric` only on the proof side (see the note in [§12.2](#122-abstract-syntax)).
+Mathlib's `CommSemiring (MvPolynomial …)` instance is **noncomputable** (it factors through `AddMonoidAlgebra`); so are `MvPolynomial.X`/`.C` and even `DecidableEq` (which resolves through `Classical.propDecidable`). This has no effect on the proof tower — `ring`/`simp` and the [§9](#9-the-propositions-as-generic-theorems) proofs work fine over a noncomputable semiring — but it has two consequences (`Coeff = MvPolynomial String ℤ` is noncomputable for the same reason). (i) Any `def` that *builds* a value over `Numeric`/`Coeff` (so `StMat.id`, `StMat.comp`, and the `St` instance of [§2.2](#22-st--stride-matrices)) must be marked `noncomputable`. (ii) **Compiled code cannot construct or `decide`-compare `Numeric`/`Coeff` values at all** — neither `#eval`, `decide`, nor `native_decide` reduces them. The executable / DSL layer must therefore not construct `Numeric` directly: the tensor-logic DSL ([§12](#12-the-tensor-logic-dsl)) carries sizes in a *computable* `SizeExpr` mirror, interpreted into `Numeric` only on the proof side (see the note in [§12.2](#122-abstract-syntax)).
 
 ### 2.2 `St` — stride matrices
 
-**St** instantiates `ColoredPROP` with `gen = Axis`. Its objects are shapes (lists of axes); its morphisms are affine coordinate transforms stored as stride matrices over `Numeric`.
+**St** instantiates `ColoredPROP` with `gen = Axis`. Its objects are shapes (lists of axes, whose sizes are `Numeric`); its morphisms are affine coordinate transforms stored as stride matrices over `Coeff`.
 
 ```lean
 structure Axis where
   name : Option String
-  size : Numeric      -- symbolic; filled in at configuration time
+  size : Numeric      -- symbolic SIZE (non-negative, ℕ); filled in at configuration time
 
 abbrev StObj := List Axis  -- a shape = an ordered list of axes
 ```
 
-A morphism `dom → cod` is a matrix `Λ ∈ ℕ^{|cod|×|dom|}` of `Numeric` coefficients plus a bias vector, with row `j` giving the linear combination of input coordinates producing output coordinate `j`. Using Mathlib's `Matrix` gives the composition law for free:
+A morphism `dom → cod` is a matrix `Λ ∈ Coeff^{|cod|×|dom|}` of signed coefficients plus a bias vector, with row `j` giving the linear combination of input coordinates producing output coordinate `j`. Coefficients live in `Coeff = MvPolynomial String ℤ` ([§2.1](#21-numeric)), not the size type `Numeric`, so look-back offsets (negative) are representable. Using Mathlib's `Matrix` gives the composition law for free:
 
 ```lean
 @[ext] structure StMat (dom cod : StObj) where   -- @[ext]: equality of stride matrices is entrywise on coeffs + bias
-  coeffs : Matrix (Fin cod.length) (Fin dom.length) Numeric
-  bias   : Fin cod.length → Numeric
+  coeffs : Matrix (Fin cod.length) (Fin dom.length) Coeff   -- signed (ℤ), NOT Numeric (ℕ)
+  bias   : Fin cod.length → Coeff
 
 noncomputable def StMat.id (a : StObj) : StMat a a where   -- noncomputable: Numeric semiring (§2.1)
   coeffs := 1        -- Matrix.one : Matrix (Fin n) (Fin n) Numeric
@@ -175,7 +175,7 @@ noncomputable instance St : ColoredPROP StObj where   -- noncomputable: StMat.id
   elemental     := …   -- SIGNATURE: stride matrices are separated by their points (global elements ⊢ each row)
 ```
 
-The category laws discharge using Mathlib's `Matrix` API (`Matrix.mul_one`/`one_mul`/`mul_assoc` for coefficients; root-namespace `dotProduct` lemmas + a sum-reordering rewrite for the bias), all over the noncomputable `CommSemiring Numeric`. `Matrix.fromBlocks` builds the block-diagonal `tensorHom` (reindexed through `finSumFinEquiv` to land in `Fin (·.length)`). `swap` (a reindexed identity matrix) and `elemental` are the two `SIGNATURE` fields left as obligations: `elemental` holds because a stride matrix is determined by its action on global elements (points) — evaluating against the basis points recovers each coefficient row, so two stride matrices agreeing on all points are equal — but its proof is deferred.
+The category laws discharge using Mathlib's `Matrix` API (`Matrix.mul_one`/`one_mul`/`mul_assoc` for coefficients; root-namespace `dotProduct` lemmas + a sum-reordering rewrite for the bias), all over the noncomputable `CommRing Coeff` ([§2.1](#21-numeric); the proofs are `CommRing`-generic, so they were unchanged when coefficients moved from `Numeric` to the signed `Coeff`). `Matrix.fromBlocks` builds the block-diagonal `tensorHom` (reindexed through `finSumFinEquiv` to land in `Fin (·.length)`). `swap` (a reindexed identity matrix) and `elemental` are the two `SIGNATURE` fields left as obligations: `elemental` holds because a stride matrix is determined by its action on global elements (points) — evaluating against the basis points recovers each coefficient row, so two stride matrices agreeing on all points are equal — but its proof is deferred.
 
 ### 2.3 `Br` — free category over broadcasted base morphisms
 
@@ -704,6 +704,8 @@ acset.md interprets this `G` as a strict monoidal functor `D : J → Br` from a 
 The acset tables and their CSV serialization are the **executable realization** of the `∫Dat` *specification* — the same proposition/computation seam as [§7](#7-grothendieck-split-and-composition-as-pushout), now in fully concrete form. `write_sbr`/`read_sbr` write the two halves of an `∫Dat`-morphism to separate tables — connectivity (the C-set part: `equations`, `arrays`, `array_axes`, `samples`) and data (the attribute part: `axis_sizes`, coefficients, datatypes) — which is precisely the Grothendieck split serialized. The same `Axis` UIDs appear in the term world's `Weave` objects and in the acset's `ArrayAxis` rows, so any `Context`-mediated unification (the [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) coequalizer computation) is reflected in both views without a round-trip. The categorical object `∫Dat` is what a Lean development *proves about*; the acset tables and CSV are what pyncd *computes and stores*. They meet at the seam.
 
 There are thus **two ways to populate one `∫Dat`-morphism**, and they are complementary, not rival. The tensor-logic DSL of [§12](#12-the-tensor-logic-dsl) builds one statically, as a `ThreadedComposed` term ([§12.4](#124-semantic-compilation)); `read_sbr` builds one dynamically, as an `SBrInstance` read from CSV tables exported by the Python acset machinery. The acset extraction (`from_tensor_program`) turns a `ThreadedComposed` into an `SBrInstance`, and `write_sbr`/`read_sbr` round-trip that `SBrInstance` to and from CSV — so a morphism authored in the DSL and one read from CSV are the *same* object, and either may be checked against the other. Both routes share the [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) UID coequalizer and so agree on axis identity on the nose.
+
+> **Implementation status (Milestone E2b).** This agreement is realized in Lean in `leanncd/LeanNCD/Bridge/`. `Realize.lean` realizes the [§12.4](#124-semantic-compilation) computable presentation into the math tower — `realizeAxis`/`realizeStObj`/`realizeWeaveShape`/`realizeBrBaseP` are `sorry`-free, and `realize : ThreadedComposed → Σ dom cod, BrMorph dom cod` threads the routed DAG (the multi-input/permutation glue rests on the Milestone-B+ `Br.tensorHom`/`swap`, so it is a `sorry`). `SBr.lean` gives a self-contained `SBrInstance` (the four-table presentation above) and `realizeSBr`. `Agreement.lean` states `fromThreadedComposed` (the `from_tensor_program` extraction) and the **agreement Props** — `realize_fromThreadedComposed_agree : realize tc = realizeSBr (fromThreadedComposed tc)` (full equality of the two realized `Br` morphisms) plus `agree_dom`/`agree_cod` — as faithful, `sorry`-proved statements. So "DSL path = CSV path = same morphism" is now a stated Lean theorem, pending the B+ glue and the extraction algorithm. (Signatures + `sorry`, math-tower style; see `SORRY_INVENTORY.md`.)
 
 ### 8.3 Lean tower reference
 
@@ -1298,7 +1300,7 @@ The elaborator is pure syntax-walking with no side effects: UID minting and axis
 
 ### 12.4 Semantic compilation
 
-> **Implementation status (Milestone E2a — implemented; E2b deferred).** The 8-phase `TLProgram.compile` pipeline, the typed intermediates (`LabeledProgram` … `ScheduledProgram`), `ScanStmt`, `Wire`, `ThreadedComposed`, and the `tl!{ … } : ThreadedComposed` compile macro are **implemented in `leanncd/LeanNCD/DSL/Pipeline/` + `Target.lean`/`Compile.lean`, fully executable and `sorry`-free**: the first five [§12.1](#121-bnf-grammar) examples compile end-to-end (the two predicate examples are parse-tested in E1; predicate *evaluation* is the [§7.5](#75-algebras-and-construct) Bool-semiring semantics, realized in E2b). Building on the executable `FreshM`/`Context` seam of [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) (Milestone D), the pipeline consumes E1's `TLProgram` values and produces a **computable, first-order *presentation* of the Br morphism** — `ThreadedComposed`/`BrBaseP`/`StMatP`/`AxisP`/`WeaveSlotP` are `List`-based, `SizeExpr`/`Int`-valued, `deriving Lean.ToExpr` mirrors of the noncomputable math-tower `Br`/`St` types (the same `Numeric`→`SizeExpr` move E1 made for the AST). **Deferred to Milestone E2b:** the noncomputable bridge realizing the presentation as an actual `BrMorph` (and the [§8](#8-acsets-and-the-executable-layer) acset correspondence + Props 8.x), the `Stmt.recurMorphism`/`ScanStmt.scanPre` escape hatch, and the `ScanAffine` `O(log N)` fast path. The signatures below are shown in their implemented (presentation) form where E2a diverges from the original design; the per-phase **E2a implementation notes** after the phase table record the simplifications.
+> **Implementation status (Milestone E2a — implemented; E2b deferred).** The 8-phase `TLProgram.compile` pipeline, the typed intermediates (`LabeledProgram` … `ScheduledProgram`), `ScanStmt`, `Wire`, `ThreadedComposed`, and the `tl!{ … } : ThreadedComposed` compile macro are **implemented in `leanncd/LeanNCD/DSL/Pipeline/` + `Target.lean`/`Compile.lean`, fully executable and `sorry`-free**: the first five [§12.1](#121-bnf-grammar) examples compile end-to-end (the two predicate examples are parse-tested in E1; predicate *evaluation* is the [§7.5](#75-algebras-and-construct) Bool-semiring semantics, realized in E2b). Building on the executable `FreshM`/`Context` seam of [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) (Milestone D), the pipeline consumes E1's `TLProgram` values and produces a **computable, first-order *presentation* of the Br morphism** — `ThreadedComposed`/`BrBaseP`/`StMatP`/`AxisP`/`WeaveSlotP` are `List`-based, `SizeExpr`/`Int`-valued, `deriving Lean.ToExpr` mirrors of the noncomputable math-tower `Br`/`St` types (the same `Numeric`→`SizeExpr` move E1 made for the AST). **Realized in Milestone E2b** (`leanncd/LeanNCD/Bridge/`, signatures + `sorry`): the bridge `realize : ThreadedComposed → Σ dom cod, BrMorph dom cod` mapping the presentation into the math tower (leaf realizations `sorry`-free; the routed-DAG composite rests on the B+ `Br.tensorHom`/`swap`), the CSV-side `SBrInstance`/`realizeSBr`, and the [§8](#8-acsets-and-the-executable-layer) agreement Props (`realize_fromThreadedComposed_agree` etc.) — see the [§8.2](#82-the-seam-made-tangible) status note. The E2b bridge also drove the `StMat`-coefficient fix: reindexing coefficients are signed (`Coeff = MvPolynomial String ℤ`, [§2.1](#21-numeric)/[§2.2](#22-st--stride-matrices)), so the presentation's `Int` coeffs realize faithfully (look-back offsets included). **Still deferred:** the `Stmt.recurMorphism`/`ScanStmt.scanPre` escape hatch, the `ScanAffine` `O(log N)` fast path, predicate *evaluation* (the [§7.5](#75-algebras-and-construct) Bool-semiring Algebra — and with it threading a `DType`/op-semiring tag onto `BrBaseP`, which E2a's presentation currently drops), and closing the B+/G `Br` coherence `sorry`s. The signatures below are shown in their implemented (presentation) form where E2a diverges from the original design; the per-phase **E2a implementation notes** after the phase table record the simplifications.
 
 ```lean
 /-- Named alias for the declaration environment built by resolveDecls. -/
@@ -1373,8 +1375,8 @@ structure ScheduledProgram where
 -- dependent length/shape indices of its math-tower twin (an invariant the E2b bridge re-establishes).
 structure StMatP where                          -- presentation of StMat (§2.2): integer-affine map
   domLen : Nat; codLen : Nat
-  coeffs : List (List Int)                       -- codLen × domLen (DSL reindexings are integer-affine)
-  bias   : List Int
+  coeffs : List (List Int)                       -- codLen × domLen; `Int` mirrors StMat's signed
+  bias   : List Int                              -- `Coeff = ℤ`-poly (§2.2) — realizeStMat: Int→Coeff
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
 structure AxisP where name : Option String; size : SizeExpr   -- presentation of Axis: size is SizeExpr
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
