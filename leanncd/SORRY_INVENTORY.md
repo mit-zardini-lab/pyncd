@@ -160,3 +160,39 @@ Review findings:
   `test/DSL/ParseLayer34Test.lean`; masked variants unchanged. Doc updated (§12.3).
 - `elabTLProgram`'s child router keys on `child.getKind.getString!` (partial on non-string `Name`
   components; safe for the `tl_decl | tl_stmt` alternation, whose kinds are always string-named).
+
+## Milestone E2a — DSL back-end (zero sorries)
+
+`LeanNCD/DSL/Pipeline/` + `Target.lean`/`Traverse.lean`/`Compile.lean` — the §12.4 compile
+pipeline — is **fully executable and `sorry`-free** (`grep -rn sorry LeanNCD/DSL/` empty;
+`lake build` green). `TLProgram.compile : TLProgram → FreshM ThreadedComposed` is the 8-phase
+Kleisli chain (assignUIDs → resolveDecls → unifyAxes → lowerArith → finalizeScans →
+splitNonlins → schedule → route), and `tl!{ … } : ThreadedComposed` compiles all five §12.1
+examples at elaboration time (`test/DSL/CompileExamplesTest.lean`).
+
+Resolved decisions / deviations from §12.4 (feed the §12.4 doc-consistency pass and E2b):
+
+- **Computable presentation.** `ThreadedComposed`/`BrBaseP`/`StMatP`/`AxisP`/`WeaveSlotP` are
+  first-order, `List`-based, `SizeExpr`/`Int`-valued mirrors of the noncomputable math-tower
+  `Br`/`St` types (functions → lists; `Numeric` → `SizeExpr`; `Int` coeffs), all
+  `deriving DecidableEq, Repr, Lean.ToExpr` so `tl!{}` can embed the result. The bridge to a
+  real `BrMorph` is Milestone E2b.
+- **assignUIDs** binds by axis NAME (E1 emits `uid := 0`); `freshNonZero` skips the sentinel 0.
+- **resolveDecls** is constructive (never throws): undeclared read names are external inputs
+  (the §12.1 examples read `W`/`X`/`Q`/`K` without decls); `extNames` = read-not-produced.
+- **unifyAxes** is the §7.4 Context coequalizer (largest-UID canonical); identity in the real
+  pipeline (assignUIDs already name-binds) — kept for parity with the CSV path.
+- **lowerArith** reclassifies affine-LHS assigns → `Stmt.scatter` (conservative injectivity →
+  `overlappingScatter`); affine READS are NOT split into separate Slice/Reindex steps but folded
+  into the consuming step's `reindexings` at `route` (where St-maps live in `BrBase`, §2.3);
+  `auxStmts := #[]`.
+- **finalizeScans** groups iterAt/iterNext by iteration-axis UID into (coupled) `Scan` nodes;
+  a pre-pass makes each base case adopt a same-named recurrence's iteration axis (E1 emits scan
+  base cases with a placeholder iteration-axis name — the deferred E1 simplification, now resolved).
+- **schedule** does backward-reachability DCE; output = last-stmt's written name(s) (single-result-
+  at-tail; a genuine multi-output-not-at-tail program would need an explicit outputs field).
+- **route** detects contracted axes (tiled weaves), builds `reindexings` via integer-affine
+  `idxToRow`, and wires inputs to producer steps or the external sentinel (`step = nExternal`).
+- **Out of scope (E2b/later):** the noncomputable presentation→`BrMorph` bridge + Props 8.x;
+  `Stmt.recurMorphism`/`ScanStmt.scanPre`; the `ScanAffine` `O(log N)` fast path; numeric
+  evaluation (the Algebra `F : C → V`).
