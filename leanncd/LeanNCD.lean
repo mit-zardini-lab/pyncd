@@ -29,3 +29,6 @@ import LeanNCD.DSL.Pipeline.Types
 import LeanNCD.DSL.Pipeline.Structural
 import LeanNCD.DSL.Pipeline.Lowering
 import LeanNCD.DSL.Compile
+import LeanNCD.Bridge.Realize
+import LeanNCD.Bridge.SBr
+import LeanNCD.Bridge.Agreement

@@ -206,3 +206,32 @@ Known limitations (final E2a review):
 - Scatter output weaves mark all affine-LHS read axes `.tiled` (`Stmt.lhsAxes` contributes no retained
   axis for `.affine` slots), e.g. upsample `Out[2*i,2*j]` tiles both `i` and `j`. Internally
   consistent for E2a; the E2b bridge must reconcile scatter output weaves.
+
+## Milestone E2b — presentation→BrMorph bridge (signatures + sorry)
+
+`LeanNCD/Bridge/` realizes the E2a computable presentation into the noncomputable math tower
+and states the §8 DSL/CSV agreement. INTENTIONALLY signatures + `sorry` (a math-tower bridge,
+like §2–§9), verified by elaboration + `#print axioms`. Builds on the Milestone-B+ `Br.tensorHom`
+/`Br.swap` `sorry`s (NOT closed here, per the E2b scope decision).
+
+Sorry-free realizations (depend only on `SizeExpr.toNumeric`):
+- `realizeAxis`, `realizeStObj`, `realizeWeaveSlot`, `realizeWeaveShape`, `realizeBrBaseP`
+  (the dependent `reindexings` field typechecked with the real `realizeStMat` term — no sorry;
+  `realizeBrBaseP`'s `sorryAx` is purely transitive via `intToNumeric`).
+
+Named obligations (the `sorry`s):
+- `intToNumeric` negative branch — `Numeric = MvPolynomial String ℕ` has no additive inverses;
+  negative look-back strides can't be represented. FEEDBACK: `St` may need ℤ-coefficients (§2.2/§7.2).
+- `weaveToArrayType` defaults `dtype := .reals` (NOT a sorry — a documented choice). FEEDBACK:
+  `BrBaseP`/`AxisP` dropped `DType`; predicate (Bool) outputs are not distinguished — `BrBaseP`
+  could carry an op-semiring/dtype tag.
+- `realize` (ThreadedComposed→BrMorph) body, `realizeSBr` (SBrInstance→BrMorph) body — the routed-DAG
+  threading rests on `Br.tensorHom`/`Br.swap` (B+). `realize` derives real `dom`/`cod` (first step's
+  inputs / last step's outputs); full external-input assembly (walk `routing` for `step = nExternal`
+  wires) is the documented obligation.
+- `fromThreadedComposed` — the §8.2 acset extraction algorithm (acset.md).
+- `realize_fromThreadedComposed_agree` (full Σ-equality of the two realized morphisms), `agree_dom`,
+  `agree_cod` — the §8 DSL/CSV agreement; faithful statements, sorry-proved.
+
+Out of scope (later): closing the B+ `Br.tensorHom`/`swap`/`elemental` + G coherences; `recurMorphism`
+/`scanPre`; `ScanAffine` fast path; the §7.5 Algebra evaluation functor.
