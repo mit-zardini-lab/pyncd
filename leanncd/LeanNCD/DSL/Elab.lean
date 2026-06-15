@@ -95,4 +95,61 @@ partial def elabTLPredTerm : Syntax → MetaM PredArith
   | `(tl_pred_term| ($a:tl_pred_term)) => elabTLPredTerm a
   | _ => throwUnsupportedSyntax
 
+/-! ## Layers 3–4: predicates, nonlinearities, factors, products, sums, RHS (Task E1.4) -/
+
+partial def elabTLBoolExpr : Syntax → MetaM BoolExpr
+  | `(tl_bool_expr| $a:tl_pred_term < $b:tl_pred_term)  => return .rel .lt (← elabTLPredTerm a) (← elabTLPredTerm b)
+  | `(tl_bool_expr| $a:tl_pred_term ≤ $b:tl_pred_term)  => return .rel .le (← elabTLPredTerm a) (← elabTLPredTerm b)
+  | `(tl_bool_expr| $a:tl_pred_term = $b:tl_pred_term)  => return .rel .eq (← elabTLPredTerm a) (← elabTLPredTerm b)
+  | `(tl_bool_expr| $a:tl_pred_term ≠ $b:tl_pred_term)  => return .rel .ne (← elabTLPredTerm a) (← elabTLPredTerm b)
+  | `(tl_bool_expr| $a:tl_pred_term > $b:tl_pred_term)  => return .rel .gt (← elabTLPredTerm a) (← elabTLPredTerm b)
+  | `(tl_bool_expr| $a:tl_pred_term ≥ $b:tl_pred_term)  => return .rel .ge (← elabTLPredTerm a) (← elabTLPredTerm b)
+  | `(tl_bool_expr| $a:tl_bool_expr ∧ $b:tl_bool_expr)  => return .and (← elabTLBoolExpr a) (← elabTLBoolExpr b)
+  | `(tl_bool_expr| $a:tl_bool_expr ∨ $b:tl_bool_expr)  => return .or (← elabTLBoolExpr a) (← elabTLBoolExpr b)
+  | `(tl_bool_expr| ¬ $a:tl_bool_expr)                  => return .not (← elabTLBoolExpr a)
+  | `(tl_bool_expr| ieq( $a , $b ))                     => return .ieq (← elabTLPredTerm a) (← elabTLPredTerm b)
+  | `(tl_bool_expr| ($b:tl_bool_expr))                  => elabTLBoolExpr b
+  | _ => throwUnsupportedSyntax
+
+partial def elabTLNonlin : Syntax → MetaM Nonlin
+  | `(tl_nonlin| relu)                          => return .relu
+  | `(tl_nonlin| softmax)                       => return .softmax none
+  | `(tl_nonlin| softmax( where $b ))           => return .softmax (some (← elabTLBoolExpr b))
+  | `(tl_nonlin| normalize)                     => return .normalize none
+  | `(tl_nonlin| normalize( where $b ))         => return .normalize (some (← elabTLBoolExpr b))
+  | _ => throwUnsupportedSyntax
+
+partial def elabTLFactor : Syntax → MetaM Factor
+  | `(tl_factor| $name:ident [ $idxs,* ]) =>
+      return .read (name.getId.eraseMacroScopes.getString!) (← idxs.getElems.toList.mapM elabTLIdxExpr)
+  | `(tl_factor| [ $b:tl_bool_expr ]) => return .iverson (← elabTLBoolExpr b)
+  | _ => throwUnsupportedSyntax
+
+/-- Collect the factor list of a `tl_prod_term`. Per §12.3 the `·` rule is a binary
+    `tl_factor · tl_factor`, so a product has at most two factors. -/
+partial def prodFactors : Syntax → MetaM (List Factor)
+  | `(tl_prod_term| $a:tl_factor · $b:tl_factor) => return [(← elabTLFactor a), (← elabTLFactor b)]
+  | `(tl_prod_term| $f:tl_factor)                => return [(← elabTLFactor f)]
+  | _ => throwUnsupportedSyntax
+
+partial def elabTLProdTerm (stx : Syntax) : MetaM ProdTerm :=
+  return { factors := (← prodFactors stx) }
+
+/-- Collect the product-term list of a `tl_sum_expr`. Per §12.3 the `+` rule is a binary
+    `tl_prod_term + tl_prod_term`, so a sum has at most two terms. -/
+partial def sumTerms : Syntax → MetaM (List ProdTerm)
+  | `(tl_sum_expr| $a:tl_prod_term + $b:tl_prod_term) => return [(← elabTLProdTerm a), (← elabTLProdTerm b)]
+  | `(tl_sum_expr| $p:tl_prod_term)                   => return [(← elabTLProdTerm p)]
+  | _ => throwUnsupportedSyntax
+
+partial def elabTLSumExpr (stx : Syntax) : MetaM SumExpr :=
+  return { terms := (← sumTerms stx) }
+
+partial def elabTLRHS : Syntax → MetaM RHSExpr
+  | `(tl_rhs| $nl:tl_nonlin ( $s:tl_sum_expr )) =>
+      return { body := (← elabTLSumExpr s), nonlin := (← elabTLNonlin nl) }
+  | `(tl_rhs| $s:tl_sum_expr) =>
+      return { body := (← elabTLSumExpr s), nonlin := .identity }
+  | _ => throwUnsupportedSyntax
+
 end LeanNCD
