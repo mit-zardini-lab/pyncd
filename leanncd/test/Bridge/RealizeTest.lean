@@ -15,4 +15,7 @@ noncomputable example (w : WeaveShapeP) : WeaveShape := realizeWeaveShape w
 noncomputable example (b : BrBaseP) : Σ (dom cod : BrObj), BrBase dom cod := realizeBrBaseP b
 #print axioms realizeWeaveShape   -- must be sorry-FREE
 #print axioms realizeBrBaseP      -- sorry-free IF you gave the real reindexings term; else uses sorryAx
+-- COMPOSITE realize (Task 3): the threaded DAG → one Br morphism.
+noncomputable example (tc : ThreadedComposed) : Σ (dom cod : BrObj), BrMorph dom cod := realize tc
+#print axioms realize    -- uses sorryAx (expected: the composite obligation)
 end LeanNCD

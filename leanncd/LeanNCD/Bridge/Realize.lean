@@ -62,4 +62,35 @@ noncomputable def realizeBrBaseP (b : BrBaseP) : Σ (dom cod : BrObj), BrBase do
         ((realizeWeaveShape (b.inputWeaves.getD i.val [])).targetAxes)
   }⟩
 
+/-- Realize a routed-DAG presentation (`ThreadedComposed`, §12.4) into ONE `Br` morphism
+    `BrMorph dom cod`.
+
+    `dom`/`cod` are computed REALLY from the presentation:
+    * `cod` (the composite's outputs) = the LAST step's `outputWeaves`, realized to
+      `ArrayType`s. The final step is the DAG sink, so its outputs are the composite's
+      outputs. (If `steps = []`, `getLast?` gives `none` and `cod = []`.)
+    * `dom` (the composite's external inputs) = the FIRST step's `inputWeaves`, realized to
+      `ArrayType`s. This is a DEFENSIBLE but PARTIAL derivation: the presentation routes
+      external inputs via wires with `step = nExternal` (see `Wire`/`ThreadedComposed`),
+      and in general the external `dom` is the concatenation of all input weaves across
+      steps whose wire targets the sentinel — capped to `nExternal`. The presentation as
+      given under-determines the exact external-input assembly (which slots are external
+      vs. produced internally is encoded only in `routing`, not directly in the weaves),
+      so we take the first step's inputs as the faithful representative external `dom`.
+      DOCUMENTED OBLIGATION: a fully faithful `dom` must walk `routing`, collect the
+      `step = nExternal` wires, and gather the corresponding input weaves in wire order.
+
+    OBLIGATION (the `BrMorph dom cod` body, `sorry`): threading the per-step
+    `realizeBrBaseP` morphisms along `routing` into a single `BrMorph dom cod` requires
+    * `BrMorph.comp` to sequence steps (available, sorry-free), and
+    * `Br.tensorHom` to place independent steps side-by-side and `Br.swap` to permute
+      inputs/outputs per the wiring — BOTH are Milestone-B+ `sorry`s in `LeanNCD/Base/Br.lean`.
+    Per the E2b scope decision we do NOT close `Br.tensorHom`/`Br.swap`, so the threaded
+    morphism is necessarily `sorry`-dependent here; this `sorry` CITES that B+ dependence. -/
+noncomputable def realize (tc : ThreadedComposed) : Σ (dom cod : BrObj), BrMorph dom cod :=
+  let cod : BrObj := ((tc.steps.getLast?.map (fun b => b.outputWeaves)).getD []).map weaveToArrayType
+  let dom : BrObj := ((tc.steps.head?.map (fun b => b.inputWeaves)).getD []).map weaveToArrayType
+  ⟨dom, cod, sorry⟩  -- OBLIGATION: thread `realizeBrBaseP` steps along `routing` via
+                     -- `BrMorph.comp` + `Br.tensorHom`/`Br.swap` (the latter two are B+ sorries).
+
 end LeanNCD
