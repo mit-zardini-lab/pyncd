@@ -60,16 +60,20 @@ syntax "predicate" ident ":" tl_shape                      : tl_decl
 syntax "linear"    ident ":" tl_shape "→" tl_shape         : tl_decl
 syntax "linear"    ident ":" tl_shape "→" tl_shape " bias" : tl_decl
 
--- Layer 2: index expressions
--- More specific (longer) productions are given higher precedence so the parser
--- prefers them over the bare `ident` / `num` rules.
-syntax:60 num "*" ident "+" num : tl_idx_expr
-syntax:55 num "*" ident         : tl_idx_expr
-syntax:55 ident "+" num         : tl_idx_expr
-syntax:55 ident "-" num         : tl_idx_expr  -- look-back (n < 0)
-syntax:max ident                : tl_idx_expr
-syntax:max num                  : tl_idx_expr
-syntax:max "(" tl_idx_expr ")"  : tl_idx_expr
+-- Layer 2: index expressions — GENERALIZED to general integer-affine sums (E1.3).
+-- A `tl_idx_expr` is a left-associative `+`/`-` sum of terms, where each term is a
+-- bare `num`, a bare `ident`, or a literal-coefficient product `num "*" ident`.
+-- This subsumes the former single-term forms (`ident`, `num`, `num*ident`,
+-- `ident±num`, `num*ident+num`) and admits general reads like `i + p`, `2*j + r`.
+-- NOTE: symbolic-coefficient strides `ident "*" ident` (e.g. `s * j`) are NOT
+-- representable in the integer-coefficient `IdxExpr` and are out of scope.
+-- `*` (prec 70) binds tighter than `+`/`-` (prec 65); both left-associative.
+syntax:70 num "*" ident          : tl_idx_expr  -- literal-coefficient term
+syntax:max ident                 : tl_idx_expr
+syntax:max num                   : tl_idx_expr
+syntax:65 tl_idx_expr:65 " + " tl_idx_expr:66 : tl_idx_expr
+syntax:65 tl_idx_expr:65 " - " tl_idx_expr:66 : tl_idx_expr  -- look-back (n < 0)
+syntax:max "(" tl_idx_expr ")"   : tl_idx_expr
 
 -- Layer 2.5: predicate arithmetic
 syntax:max tl_idx_expr                           : tl_pred_term
