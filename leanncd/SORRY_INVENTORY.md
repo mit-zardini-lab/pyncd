@@ -214,17 +214,23 @@ and states the §8 DSL/CSV agreement. INTENTIONALLY signatures + `sorry` (a math
 like §2–§9), verified by elaboration + `#print axioms`. Builds on the Milestone-B+ `Br.tensorHom`
 /`Br.swap` `sorry`s (NOT closed here, per the E2b scope decision).
 
-Sorry-free realizations (depend only on `SizeExpr.toNumeric`):
-- `realizeAxis`, `realizeStObj`, `realizeWeaveSlot`, `realizeWeaveShape`, `realizeBrBaseP`
-  (the dependent `reindexings` field typechecked with the real `realizeStMat` term — no sorry;
-  `realizeBrBaseP`'s `sorryAx` is purely transitive via `intToNumeric`).
+Sorry-free realizations:
+- `realizeAxis`, `realizeStObj`, `realizeWeaveSlot`, `realizeWeaveShape`, `intToCoeff`,
+  `realizeStMat`, `realizeBrBaseP` — ALL `#print axioms`-verified `[propext, Classical.choice,
+  Quot.sound]` (no `sorryAx`). The dependent `reindexings` field typechecked with the real
+  `realizeStMat` term, and (post negative-coeff fix below) `realizeStMat`/`realizeBrBaseP` are
+  now fully sorry-free, not merely transitively-sorry.
 
-Named obligations (the `sorry`s):
-- `intToNumeric` negative branch — `Numeric = MvPolynomial String ℕ` has no additive inverses;
-  negative look-back strides can't be represented. FEEDBACK: `St` may need ℤ-coefficients (§2.2/§7.2).
-- `weaveToArrayType` defaults `dtype := .reals` (NOT a sorry — a documented choice). FEEDBACK:
-  `BrBaseP`/`AxisP` dropped `DType`; predicate (Bool) outputs are not distinguished — `BrBaseP`
-  could carry an op-semiring/dtype tag.
+**RESOLVED — negative-coefficient obstruction.** The original `intToNumeric` `sorry`'d negative
+coefficients because `StMat` carried `Numeric = MvPolynomial String ℕ` (ℕ-semiring, no inverses).
+Fixed in the math tower: `StMat.coeffs`/`bias` now carry the new `Coeff = MvPolynomial String ℤ`
+(`LeanNCD/Base/Numeric.lean`), a signed `CommRing` — the `St` laws (`id_comp`/`comp_id`/`comp_assoc`)
+re-prove sorry-free over it (their tactics are CommRing-generic). The size type stays `Numeric = ℕ`
+(sizes are non-negative); the fix separates the conflated *size* and *coefficient* roles. The bridge's
+`intToCoeff : Int → Coeff := MvPolynomial.C` is sorry-free, so look-back offsets (`X[i-1]`) realize
+faithfully. (`St`'s `swap`/`tensorHom`/`elemental` remain the pre-existing B+/G sorries — untouched.)
+
+Named obligations (the remaining 6 `sorry`s):
 - `realize` (ThreadedComposed→BrMorph) body, `realizeSBr` (SBrInstance→BrMorph) body — the routed-DAG
   threading rests on `Br.tensorHom`/`Br.swap` (B+). `realize` derives real `dom`/`cod` (first step's
   inputs / last step's outputs); full external-input assembly (walk `routing` for `step = nExternal`
@@ -232,6 +238,13 @@ Named obligations (the `sorry`s):
 - `fromThreadedComposed` — the §8.2 acset extraction algorithm (acset.md).
 - `realize_fromThreadedComposed_agree` (full Σ-equality of the two realized morphisms), `agree_dom`,
   `agree_cod` — the §8 DSL/CSV agreement; faithful statements, sorry-proved.
+
+Documented choice (NOT a sorry) / DEFERRED feedback:
+- `weaveToArrayType` defaults `dtype := .reals`. The E2a presentation (`BrBaseP`/`AxisP`) dropped
+  `DType`, so predicate (Bool) outputs are not distinguished from real ones. The consumer of `DType`
+  is the §7.5 Algebra evaluation functor (`R = ℝ` vs `R = Bool`), which is not yet built, so nothing
+  is currently mis-evaluated; FEEDBACK (fix when §7.5 evaluation / Milestone F lands): `route` should
+  thread the `DeclEnv` `tensor`/`predicate` tag + `AxisKind` into a dtype/op-semiring field on `BrBaseP`.
 
 Out of scope (later): closing the B+ `Br.tensorHom`/`swap`/`elemental` + G coherences; `recurMorphism`
 /`scanPre`; `ScanAffine` fast path; the §7.5 Algebra evaluation functor.
