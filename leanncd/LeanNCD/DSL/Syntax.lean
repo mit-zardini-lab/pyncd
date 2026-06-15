@@ -100,12 +100,12 @@ syntax:max "(" tl_bool_expr ")"                  : tl_bool_expr
 syntax ident "[" tl_idx_expr,* "]"     : tl_factor
 syntax "[" tl_bool_expr "]"            : tl_factor
 
--- `·` (product) binds tighter than `+` (sum); both left-associative.
-syntax:70 tl_factor:70 " · " tl_factor:71 : tl_prod_term
-syntax:max tl_factor                       : tl_prod_term
+-- `·` (product) binds tighter than `+` (sum); both left-associative, n-ary.
+syntax:70 tl_prod_term:70 " · " tl_factor:71 : tl_prod_term
+syntax:71 tl_factor:71                       : tl_prod_term
 
-syntax:65 tl_prod_term:65 " + " tl_prod_term:66 : tl_sum_expr
-syntax:max tl_prod_term                          : tl_sum_expr
+syntax:65 tl_sum_expr:65 " + " tl_prod_term:66 : tl_sum_expr
+syntax:66 tl_prod_term:66                       : tl_sum_expr
 
 syntax "relu"                                    : tl_nonlin
 syntax "softmax"                                 : tl_nonlin

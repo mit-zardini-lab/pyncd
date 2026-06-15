@@ -125,21 +125,21 @@ partial def elabTLFactor : Syntax → MetaM Factor
   | `(tl_factor| [ $b:tl_bool_expr ]) => return .iverson (← elabTLBoolExpr b)
   | _ => throwUnsupportedSyntax
 
-/-- Collect the factor list of a `tl_prod_term`. Per §12.3 the `·` rule is a binary
-    `tl_factor · tl_factor`, so a product has at most two factors. -/
+/-- Collect the factor list of a `tl_prod_term`. The `·` rule is left-recursive
+    and n-ary (`tl_prod_term · tl_factor`); flatten left-recursively into a list. -/
 partial def prodFactors : Syntax → MetaM (List Factor)
-  | `(tl_prod_term| $a:tl_factor · $b:tl_factor) => return [(← elabTLFactor a), (← elabTLFactor b)]
-  | `(tl_prod_term| $f:tl_factor)                => return [(← elabTLFactor f)]
+  | `(tl_prod_term| $p:tl_prod_term · $f:tl_factor) => return (← prodFactors p) ++ [(← elabTLFactor f)]
+  | `(tl_prod_term| $f:tl_factor)                   => return [(← elabTLFactor f)]
   | _ => throwUnsupportedSyntax
 
 partial def elabTLProdTerm (stx : Syntax) : MetaM ProdTerm :=
   return { factors := (← prodFactors stx) }
 
-/-- Collect the product-term list of a `tl_sum_expr`. Per §12.3 the `+` rule is a binary
-    `tl_prod_term + tl_prod_term`, so a sum has at most two terms. -/
+/-- Collect the product-term list of a `tl_sum_expr`. The `+` rule is left-recursive
+    and n-ary (`tl_sum_expr + tl_prod_term`); flatten left-recursively into a list. -/
 partial def sumTerms : Syntax → MetaM (List ProdTerm)
-  | `(tl_sum_expr| $a:tl_prod_term + $b:tl_prod_term) => return [(← elabTLProdTerm a), (← elabTLProdTerm b)]
-  | `(tl_sum_expr| $p:tl_prod_term)                   => return [(← elabTLProdTerm p)]
+  | `(tl_sum_expr| $s:tl_sum_expr + $p:tl_prod_term) => return (← sumTerms s) ++ [(← elabTLProdTerm p)]
+  | `(tl_sum_expr| $p:tl_prod_term)                  => return [(← elabTLProdTerm p)]
   | _ => throwUnsupportedSyntax
 
 partial def elabTLSumExpr (stx : Syntax) : MetaM SumExpr :=
