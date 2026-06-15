@@ -196,3 +196,13 @@ Resolved decisions / deviations from §12.4 (feed the §12.4 doc-consistency pas
 - **Out of scope (E2b/later):** the noncomputable presentation→`BrMorph` bridge + Props 8.x;
   `Stmt.recurMorphism`/`ScanStmt.scanPre`; the `ScanAffine` `O(log N)` fast path; numeric
   evaluation (the Algebra `F : C → V`).
+
+Known limitations (final E2a review):
+
+- The `overlappingScatter` dimension-collapse guard keys on `LHSSlot.affine (.const _)`, but the E1
+  parser renders a literal LHS coordinate as `LHSSlot.iterAt {name:=""} 0` (a scan base case), so the
+  guard is currently unreachable via surface syntax. Guard logic is correct for the AST shape it
+  targets; reachability awaits E1 distinguishing a constant output coordinate from a scan-base index.
+- Scatter output weaves mark all affine-LHS read axes `.tiled` (`Stmt.lhsAxes` contributes no retained
+  axis for `.affine` slots), e.g. upsample `Out[2*i,2*j]` tiles both `i` and `j`. Internally
+  consistent for E2a; the E2b bridge must reconcile scatter output weaves.
