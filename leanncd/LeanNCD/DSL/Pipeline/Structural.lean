@@ -140,4 +140,71 @@ def resolveDecls (lp : LabeledProgram) : FreshM ResolvedProgram := do
   return { decls := lp.decls, stmts := lp.stmts, env,
            extNames, extraStmts := #[] }
 
+/-! ## The `unifyAxes` phase (§7.4 UID coequalizer)
+
+Groups every axis occurrence sharing a NAME within program scope, picks the largest UID as the
+canonical representative (the §7.3 cocone vertex), and substitutes it throughout the program. In
+the full pipeline `assignUIDs` already binds each name to one UID, so this is effectively identity
+there; the standalone test feeds DISTINCT UIDs for one name to genuinely exercise the merge. -/
+
+/-- Pair each axis name with its `AxisSpec.uid`. Mirrors `TLProgram.axisNames` exactly, but keeps
+    the uid alongside the name. Exhaustive structural recursion (every constructor) ⇒ nothing
+    dropped. Public: the test reads it back to assert post-unification UIDs. -/
+private def axNameUIDIdx : IdxExpr → List (String × UID)
+  | .axis a => [(a.name, a.uid)] | .const _ => [] | .scale _ a => [(a.name, a.uid)]
+  | .shift a _ => [(a.name, a.uid)] | .affine _ xs => xs.map (fun p => (p.2.name, p.2.uid))
+
+private def axNameUIDPred : PredArith → List (String × UID)
+  | .embed e => axNameUIDIdx e | .mul a b => axNameUIDPred a ++ axNameUIDPred b
+  | .iabs a => axNameUIDPred a
+
+private def axNameUIDBool : BoolExpr → List (String × UID)
+  | .rel _ a b => axNameUIDPred a ++ axNameUIDPred b
+  | .and a b => axNameUIDBool a ++ axNameUIDBool b | .or a b => axNameUIDBool a ++ axNameUIDBool b
+  | .not a => axNameUIDBool a | .ieq a b => axNameUIDPred a ++ axNameUIDPred b
+
+private def axNameUIDNonlin : Nonlin → List (String × UID)
+  | .softmax (some m) => axNameUIDBool m | .normalize (some m) => axNameUIDBool m | _ => []
+
+private def axNameUIDFactor : Factor → List (String × UID)
+  | .read _ es => es.flatMap axNameUIDIdx | .iverson b => axNameUIDBool b
+
+private def axNameUIDRHS (r : RHSExpr) : List (String × UID) :=
+  (r.body.terms.flatMap (fun t => t.factors.flatMap axNameUIDFactor)) ++ axNameUIDNonlin r.nonlin
+
+private def axNameUIDLHS : LHSSlot → List (String × UID)
+  | .free a => [(a.name, a.uid)] | .iterAt a _ => [(a.name, a.uid)]
+  | .iterNext a => [(a.name, a.uid)] | .affine e => axNameUIDIdx e
+
+private def axNameUIDDecl : Decl → List (String × UID)
+  | .tensor _ ax => ax.map (fun a => (a.name, a.uid))
+  | .predicate _ ax => ax.map (fun a => (a.name, a.uid))
+  | .linear _ i o _ => i.map (fun a => (a.name, a.uid)) ++ o.map (fun a => (a.name, a.uid))
+
+private def axNameUIDStmt : Stmt → List (String × UID)
+  | .assign _ ls r => ls.flatMap axNameUIDLHS ++ axNameUIDRHS r
+  | .scatter _ ls r _ => ls.flatMap axNameUIDLHS ++ axNameUIDRHS r
+
+/-- Every (axis-name, axis-uid) pair occurring anywhere in the program, in program order. -/
+def collectAxisNameUID (p : TLProgram) : List (String × UID) :=
+  p.decls.flatMap axNameUIDDecl ++ p.stmts.flatMap axNameUIDStmt
+
+/-- Realize the §7.4 UID coequalizer: group UIDs by axis name, canonical = largest UID per name,
+    substitute throughout. Pure inside; lifted via `return`. Identity when each name has one UID. -/
+def unifyAxes (rp : ResolvedProgram) : FreshM CanonicalProgram := do
+  let prog : TLProgram := { decls := rp.decls, stmts := rp.stmts }
+  -- group UIDs by axis name
+  let byName : HashMap String (Finset UID) :=
+    (collectAxisNameUID prog).foldl
+      (fun m (nm, u) => m.insert nm (insert u (m.getD nm ∅))) {}
+  -- one EqClass per name; canonical = largest UID
+  let ctx : Context AxisSpec :=
+    byName.fold (fun c _ uids =>
+      match uids.max with
+      | some top => Context.merge c { bucket := uids, canonical := { data := default, uid := top } }
+      | none     => c) { classes := [] }
+  let prog' := Context.apply ctx prog        -- TermTraversable TLProgram
+  return { decls := prog'.decls, stmts := prog'.stmts,
+           env := rp.env, extNames := rp.extNames, ctx }
+
 end LeanNCD

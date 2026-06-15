@@ -42,4 +42,27 @@ run_cmd do
   match (assignUIDs p >>= resolveDecls) |>.run 0 with
   | .ok rp _ => unless rp.env.contains "A" do throwError "env missing declared A"
   | .error e _ => throwError s!"errored: {repr e}"
+
+-- Two `k` axes with DIFFERENT uids (7 and 3) must unify to the canonical (max = 7);
+-- i,j keep their own uids. (Feeds resolveDecls directly with distinct uids — skips
+-- assignUIDs, which would otherwise pre-bind the two k's.)
+run_cmd do
+  let i : AxisSpec := { name := "i", uid := 5, kind := .real none }
+  let j : AxisSpec := { name := "j", uid := 4, kind := .real none }
+  let k1 : AxisSpec := { name := "k", uid := 7, kind := .real none }
+  let k2 : AxisSpec := { name := "k", uid := 3, kind := .real none }
+  let lp : LabeledProgram := { decls := [], stmts := [
+    .assign "Y" [ .free i, .free j ]
+      { body := { terms := [ { factors := [
+            .read "W" [ .axis i, .axis k1 ],
+            .read "X" [ .axis k2, .axis j ] ] } ] },
+        nonlin := .identity } ] }
+  match (resolveDecls lp >>= unifyAxes) |>.run 0 with
+  | .ok cp _ =>
+      let prog : TLProgram := { decls := cp.decls, stmts := cp.stmts }
+      let kUIDs := ((collectAxisNameUID prog).filter (·.1 == "k")).map (·.2) |>.eraseDups
+      unless kUIDs == [7] do throwError s!"k should unify to [7], got {kUIDs}"
+      let iUIDs := ((collectAxisNameUID prog).filter (·.1 == "i")).map (·.2) |>.eraseDups
+      unless iUIDs == [5] do throwError s!"i should stay [5], got {iUIDs}"
+  | .error e _ => throwError s!"errored: {repr e}"
 end LeanNCD
