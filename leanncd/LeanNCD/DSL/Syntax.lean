@@ -107,11 +107,14 @@ syntax:71 tl_factor:71                       : tl_prod_term
 syntax:65 tl_sum_expr:65 " + " tl_prod_term:66 : tl_sum_expr
 syntax:66 tl_prod_term:66                       : tl_sum_expr
 
-syntax "relu"                                    : tl_nonlin
-syntax "softmax"                                 : tl_nonlin
-syntax "softmax"   "(" "where" tl_bool_expr ")"  : tl_nonlin
-syntax "normalize"                               : tl_nonlin
-syntax "normalize" "(" "where" tl_bool_expr ")"  : tl_nonlin
+-- `atomic("(" "where")` left-factors the masked variants against the bare token: on an
+-- unmasked `softmax(sum)` the `( where` lookahead fails and rewinds (it does not commit to
+-- `where`), so the bare `softmax` rule wins and the `(sum)` is consumed at the tl_rhs level.
+syntax "relu"                                           : tl_nonlin
+syntax "softmax"                                        : tl_nonlin
+syntax "softmax"   atomic("(" "where") tl_bool_expr ")" : tl_nonlin
+syntax "normalize"                                      : tl_nonlin
+syntax "normalize" atomic("(" "where") tl_bool_expr ")" : tl_nonlin
 
 syntax tl_nonlin "(" tl_sum_expr ")"   : tl_rhs
 syntax tl_sum_expr                      : tl_rhs

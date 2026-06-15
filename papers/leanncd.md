@@ -1225,21 +1225,19 @@ syntax:71 tl_factor:71                          : tl_prod_term
 syntax:65 tl_sum_expr:65 " + " tl_prod_term:66 : tl_sum_expr
 syntax:66 tl_prod_term:66                        : tl_sum_expr
 
-syntax "relu"                                    : tl_nonlin
-syntax "softmax"                                 : tl_nonlin
-syntax "softmax"   "(" "where" tl_bool_expr ")"  : tl_nonlin
-syntax "normalize"                               : tl_nonlin
-syntax "normalize" "(" "where" tl_bool_expr ")"  : tl_nonlin
+-- `atomic("(" "where")` LEFT-FACTORS the masked variants against the bare token. Without it,
+-- the shared `softmax (` prefix made the parser commit to the where-variant on seeing `(`, so an
+-- UNMASKED `softmax(A[i]+B[i])` failed ("expected 'where'"). `atomic` makes the `( where`
+-- lookahead all-or-nothing: when there is no `where` it rewinds the `(`, the bare `softmax` rule
+-- wins, and the `(sum)` is consumed at the tl_rhs level below.
+syntax "relu"                                           : tl_nonlin
+syntax "softmax"                                        : tl_nonlin
+syntax "softmax"   atomic("(" "where") tl_bool_expr ")" : tl_nonlin
+syntax "normalize"                                      : tl_nonlin
+syntax "normalize" atomic("(" "where") tl_bool_expr ")" : tl_nonlin
 
 syntax tl_nonlin "(" tl_sum_expr ")"   : tl_rhs
 syntax tl_sum_expr                      : tl_rhs
--- KNOWN LIMITATION (deferred to E2): the bare `softmax`/`normalize` tokens share a `softmax (`
--- prefix with the `softmax "(" "where" …` rule, so the parser commits to the where-variant on
--- seeing `(` and the bare `tl_nonlin "(" tl_sum_expr ")"` rhs form is unreachable for them — an
--- UNMASKED `softmax(A[i]+B[i])` does not parse ("expected 'where'"). This is inherited verbatim
--- from the grammar above; none of the five §12.1 examples need it. The fix is a grammar
--- left-factoring (fold the optional `(where …)` into one `softmax` rule), done with E2's
--- nonlinearity lowering.
 
 -- Layer 5: statements
 syntax ident "[" tl_lhs_slot,* "]" ":=" tl_rhs : tl_stmt
