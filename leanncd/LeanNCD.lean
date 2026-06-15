@@ -23,3 +23,9 @@ import LeanNCD.DSL.SizeExpr
 import LeanNCD.DSL.Ast
 import LeanNCD.DSL.Syntax
 import LeanNCD.DSL.Elab
+import LeanNCD.DSL.Target
+import LeanNCD.DSL.Traverse
+import LeanNCD.DSL.Pipeline.Types
+import LeanNCD.DSL.Pipeline.Structural
+import LeanNCD.DSL.Pipeline.Lowering
+import LeanNCD.DSL.Compile

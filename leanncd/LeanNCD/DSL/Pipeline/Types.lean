@@ -1,0 +1,68 @@
+import LeanNCD.DSL.Ast
+import LeanNCD.Exec.Context
+import Std.Data.HashMap
+
+namespace LeanNCD
+open Std
+
+/-- Declaration environment built by resolveDecls (`String` has BEq+Hashable). -/
+abbrev DeclEnv := HashMap String Decl
+
+/-- A statement after finalizeScans grouped iterAt/iterNext pairs into Scan nodes.
+    (E2a omits the §12.4 `scanPre` recurMorphism case — out of scope.) -/
+inductive ScanStmt
+  | plain : Stmt → ScanStmt
+  | scan  : String → AxisSpec → List Stmt → List Stmt → ScanStmt
+            -- (tensor name, iteration axis, base stmts, recurrence stmts)
+  deriving Inhabited
+
+structure LabeledProgram where
+  decls : List Decl
+  stmts : List Stmt           -- every AxisSpec.uid is fresh & non-zero
+
+structure ResolvedProgram where
+  decls      : List Decl
+  stmts      : List Stmt
+  env        : DeclEnv
+  extNames   : Finset String  -- externally declared (input) tensor names
+  extraStmts : Array Stmt     -- bias-add stmts for `linear … bias`
+
+structure CanonicalProgram where
+  decls    : List Decl
+  stmts    : List Stmt
+  env      : DeclEnv
+  extNames : Finset String
+  ctx      : Context AxisSpec  -- canonical axis equivalence classes
+
+structure LoweredProgram where
+  decls    : List Decl
+  stmts    : List Stmt         -- no const/affine IdxExprs in reads
+  env      : DeclEnv
+  extNames : Finset String
+  ctx      : Context AxisSpec
+  auxStmts : Array Stmt        -- Slice/Reindex/Scatter intermediates
+
+structure ScanProgram where
+  decls    : List Decl
+  stmts    : List ScanStmt     -- iterAt/iterNext grouped
+  env      : DeclEnv
+  extNames : Finset String
+  ctx      : Context AxisSpec
+
+structure LinearProgram where
+  decls    : List Decl
+  stmts    : List ScanStmt     -- no nonlinearity in RHSExpr.nonlin
+  env      : DeclEnv
+  extNames : Finset String
+  ctx      : Context AxisSpec
+
+structure ScheduledProgram where
+  decls    : List Decl
+  stmts    : List ScanStmt     -- live stmts, reverse-topological order
+  env      : DeclEnv
+  extNames : Finset String
+  ctx      : Context AxisSpec
+
+example : ScanStmt := .plain (.assign "x" [] { body := { terms := [] }, nonlin := .identity })
+
+end LeanNCD

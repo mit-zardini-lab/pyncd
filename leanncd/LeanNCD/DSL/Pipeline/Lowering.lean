@@ -1,0 +1,245 @@
+-- LeanNCD/DSL/Pipeline/Lowering.lean
+-- Phases 6–8 of the tensor-logic DSL back-end. Phase 6 (`splitNonlins`) isolates each
+-- nonlinearity (relu/softmax/normalize) into its own step so contraction steps and
+-- nonlinearity steps don't mix. Phases 1–5 live in `Structural.lean`.
+import LeanNCD.DSL.Pipeline.Structural
+import LeanNCD.DSL.Target
+
+namespace LeanNCD
+
+/-! ## Phase 6 — `splitNonlins`
+
+For each `Stmt` whose `RHSExpr.nonlin ≠ .identity`, split it into TWO stmts:
+1. a LINEAR step computing the pre-activation into a fresh intermediate tensor
+   (`nonlin := .identity`, original body, same LHS slots); and
+2. a NONLIN step that READS that intermediate at the output's own coordinates and carries
+   the original nonlinearity (and its mask).
+A stmt already at `.identity` is emitted unchanged. -/
+
+/-- Axis indices that index the output of a stmt (its free/scan slots). An `.affine` slot is a
+    scatter output; the §12.1 examples never apply a nonlinearity over a scatter, so it is
+    dropped here. -/
+def LHSSlot.toReadIdx : LHSSlot → Option IdxExpr
+  | .free a     => some (.axis a)
+  | .iterAt a _ => some (.axis a)
+  | .iterNext a => some (.axis a)
+  | .affine _   => none      -- scatter outputs: skipped (no example needs nonlin-over-scatter)
+
+/-- Split one stmt's nonlinearity into (≤2) stmts. Identity stmts and scatters pass through
+    unchanged (scatters carry no nonlinearity in the §12.1 examples). -/
+def splitStmt (s : Stmt) : FreshM (List Stmt) := do
+  match s with
+  | .assign nm slots rhs =>
+      if rhs.nonlin == Nonlin.identity then return [s]
+      else
+        let d ← freshUData
+        let interName := s!"%nl{d.uid}"
+        let linStep : Stmt := .assign interName slots { body := rhs.body, nonlin := .identity }
+        let readIdxs := slots.filterMap LHSSlot.toReadIdx
+        let nlStep : Stmt := .assign nm slots
+          { body := { terms := [ { factors := [ .read interName readIdxs ] } ] },
+            nonlin := rhs.nonlin }
+        return [linStep, nlStep]
+  | .scatter .. => return [s]   -- scatters carry no nonlinearity in the §12.1 examples
+
+/-- Split nonlinearities within a `ScanStmt`. For `.scan`, split each stmt in `base`/`recur`
+    and flatten back into the base/recur lists, keeping the node coupled. -/
+def splitScan (sc : ScanStmt) : FreshM (List ScanStmt) := do
+  match sc with
+  | .plain s => (← splitStmt s).mapM (fun s' => pure (ScanStmt.plain s'))
+  | .scan nm ax base recur =>
+      let base'  ← base.flatMapM splitStmt
+      let recur' ← recur.flatMapM splitStmt
+      return [ ScanStmt.scan nm ax base' recur' ]
+
+/-- Isolate every relu/softmax/normalize into its own step across the whole program. -/
+def splitNonlins (sp : ScanProgram) : FreshM LinearProgram := do
+  let stmts' ← sp.stmts.flatMapM splitScan
+  return { decls := sp.decls, stmts := stmts', env := sp.env,
+           extNames := sp.extNames, ctx := sp.ctx }
+
+/-! ## Phase 7 — `schedule`
+
+Dead-code elimination by backward reachability from the program's outputs. A statement is
+kept iff it writes a tensor name that is (transitively) needed to compute an output.
+
+NOTE: a full topological re-sort is NOT performed here — for the §12.1 example programs
+source order already places producers before consumers, so we keep the surviving stmts in
+their original source order. -/
+
+/-- Tensor names a ScanStmt writes (its LHS name(s)). -/
+def ScanStmt.writes : ScanStmt → List String
+  | .plain s        => [s.lhsName]
+  | .scan _ _ b r   => (b.map Stmt.lhsName ++ r.map Stmt.lhsName).eraseDups
+
+/-- Tensor names a ScanStmt reads. -/
+def ScanStmt.reads : ScanStmt → List String
+  | .plain s        => s.readNames
+  | .scan _ _ b r   => (b.flatMap Stmt.readNames ++ r.flatMap Stmt.readNames).eraseDups
+
+/-- One backward-reachability pass: add names read by any stmt that writes a live name. -/
+def liveStep (stmts : List ScanStmt) (live : List String) : List String :=
+  (live ++ stmts.flatMap (fun sc =>
+    if (sc.writes).any (fun w => live.contains w) then sc.reads else [])).eraseDups
+
+/-- Iterate `liveStep` to a fixpoint. Terminates because `live` grows monotonically and is
+    bounded by the finite tensor-name set; `partial` sidesteps the termination proof. -/
+partial def liveFix (stmts : List ScanStmt) (live : List String) : List String :=
+  let live' := liveStep stmts live
+  if live'.length == live.length then live else liveFix stmts live'
+
+/-- Phase 7: keep only the stmts (transitively) needed to compute the program's outputs.
+
+    Output detection: the program's result is the LAST stmt's written name(s). We then UNION
+    any other produced names that are read by NO stmt — these are additional results — but
+    ONLY when they are still live, which prevents a genuinely dead unread tensor (computed,
+    never consumed, not the final result) from masquerading as an output. Concretely we seed
+    reachability from the last stmt's writes, take the fixpoint, then fold in unread-produced
+    names that already turned out live. -/
+def schedule (lp : LinearProgram) : FreshM ScheduledProgram := do
+  let produced := lp.stmts.flatMap ScanStmt.writes
+  let read     := lp.stmts.flatMap ScanStmt.reads
+  -- Primary output(s): the last stmt's written name(s); fall back to all unread-produced.
+  let lastOut  := (lp.stmts.reverse.head?.map ScanStmt.writes).getD []
+  let outputs  := if lastOut.isEmpty then produced.filter (fun n => ¬ read.contains n) else lastOut
+  let live := liveFix lp.stmts outputs.eraseDups
+  let liveStmts := lp.stmts.filter (fun sc => (sc.writes).any (fun w => live.contains w))
+  return { decls := lp.decls, stmts := liveStmts, env := lp.env, extNames := lp.extNames, ctx := lp.ctx }
+
+/-! ## Phase 8 — `route`
+
+The executable back-end's final phase: turn the scheduled statements into a `ThreadedComposed`
+— a routed DAG of `BrBaseP` steps. Build is two-pass:
+
+1. PASS 1 (indexing). Assign each `ScanStmt` a step index `0,1,…`. Build `nameToStep`
+   mapping every produced tensor name (for a `.scan` node, ALL its `writes` names) to its
+   step index. Number the external read names `0,1,…` in first-seen order (over reads, NOT
+   `Finset.toList`, which is noncomputable) into `extIndex`.
+
+2. PASS 2 (build). For each step's representative stmt — for `.scan`, the first recurrence
+   stmt, else the first base stmt (it carries the reads/axes):
+   * LHS (retained) axes = the `AxisSpec`s named by `free`/`iterAt`/`iterNext` slots.
+   * Read axes = every `AxisSpec` in the read-factor index expressions.
+   * Contracted axes = read axes whose `uid` is NOT among the LHS axis uids.
+   * `degree` = (LHS ++ contracted) de-duplicated by uid; each → `AxisP (some name) (var name)`
+     (symbolic size — sizes aren't load-bearing in E2a). LHS axes first, then contracted.
+   * `op` = relu/softmax/normalize from `rhs.nonlin`, else "scatter" for a `.scatter` stmt,
+     else "contract"; a `.scan` node uses "scan".
+   * `inputWeaves` = one shape per read factor; `outputWeaves` = one shape; each over `degree`,
+     mapping contracted axes (by uid) to `.tiled`, retained axes to `.fixed a`.
+   * `reindexings` = one `StMatP` per read factor; `idxToRow` expresses each read coordinate as
+     an integer-affine combination of the degree axes (column order = degree order).
+   * `routing[i]` = per read factor: producer step `j` (`Wire j 0`) if internal, else the
+     external sentinel `Wire nExternal (extIndex nm)`.
+
+`nExternal := sp.extNames.card`. -/
+
+/-- The read factors (tensor name + read index expressions) of a stmt, in order. -/
+def Stmt.readFactors : Stmt → List (String × List IdxExpr)
+  | .assign _ _ r | .scatter _ _ r _ =>
+      r.body.terms.flatMap (fun t => t.factors.filterMap (fun
+        | .read nm es => some (nm, es)
+        | .iverson _  => none))
+
+/-- The retained-output `AxisSpec`s of a stmt: those named by `free`/`iterAt`/`iterNext` slots.
+    `.affine` (scatter) slots carry no single retained axis and are skipped. -/
+def Stmt.lhsAxes : Stmt → List AxisSpec
+  | .assign _ ls _ | .scatter _ ls _ _ =>
+      ls.filterMap (fun
+        | .free a     => some a
+        | .iterAt a _ => some a
+        | .iterNext a => some a
+        | .affine _   => none)
+
+/-- The `RHSExpr.nonlin` of a stmt. -/
+def Stmt.nonlin : Stmt → Nonlin
+  | .assign _ _ r | .scatter _ _ r _ => r.nonlin
+
+/-- Every `AxisSpec` appearing in a single read index expression. -/
+def idxAxes : IdxExpr → List AxisSpec
+  | .axis a     => [a]
+  | .const _    => []
+  | .scale _ a  => [a]
+  | .shift a _  => [a]
+  | .affine _ xs => xs.map (·.2)
+
+/-- Express a read coordinate `IdxExpr` as an integer-affine combination of the degree axes
+    identified by uids `us` (column order = `us`): returns `(coeff-row, bias)`. -/
+def idxToRow (us : List UID) : IdxExpr → (List Int × Int)
+  | .axis a      => (us.map (fun u => if u == a.uid then 1 else 0), 0)
+  | .const n     => (us.map (fun _ => 0), n)
+  | .scale c a   => (us.map (fun u => if u == a.uid then c else 0), 0)
+  | .shift a n   => (us.map (fun u => if u == a.uid then 1 else 0), n)
+  | .affine n xs => (us.map (fun u => (xs.foldl (fun acc p => if p.2.uid == u then acc + p.1 else acc) 0)), n)
+
+/-- A ScanStmt's representative stmt: for `.scan`, the first recurrence stmt (else the first
+    base stmt); for `.plain`, the stmt itself. It carries the reads/axes used to build the step. -/
+def ScanStmt.repStmt : ScanStmt → Option Stmt
+  | .plain s        => some s
+  | .scan _ _ b r   => r.head?.orElse (fun _ => b.head?)
+
+/-- Is this ScanStmt a `.scan` node? (drives the "scan" op label). -/
+def ScanStmt.isScan : ScanStmt → Bool
+  | .plain _    => false
+  | .scan ..    => true
+
+/-- Phase 8: route the scheduled statements into a `ThreadedComposed`. -/
+def route (sp : ScheduledProgram) : FreshM ThreadedComposed := do
+  -- PASS 1: step indices, name→step map, external-name numbering.
+  let mut nameToStep : Std.HashMap String Nat := {}
+  for (sc, i) in sp.stmts.zipIdx do
+    for nm in sc.writes do
+      nameToStep := nameToStep.insert nm i
+  let nExternal := sp.extNames.card
+  let mut extIndex : Std.HashMap String Nat := {}
+  let mut extCount : Nat := 0
+  for sc in sp.stmts do
+    for nm in sc.reads do
+      if decide (nm ∈ sp.extNames) && !extIndex.contains nm then
+        extIndex := extIndex.insert nm extCount
+        extCount := extCount + 1
+  -- PASS 2: build one step + its routing per ScanStmt.
+  let mut steps : List BrBaseP := []
+  let mut routing : List (List Wire) := []
+  for sc in sp.stmts do
+    let s := sc.repStmt.getD (.assign "" [] { body := { terms := [] }, nonlin := .identity })
+    let lhsAxes := s.lhsAxes
+    let lhsUids := lhsAxes.map (·.uid)
+    let readFactors := s.readFactors
+    let readAxes := readFactors.flatMap (fun rf => rf.2.flatMap idxAxes)
+    let contracted := readAxes.filter (fun a => !lhsUids.contains a.uid)
+    -- degree = LHS axes ++ contracted, de-duplicated by uid (LHS first).
+    let degAxes : List AxisSpec :=
+      (lhsAxes ++ contracted).foldl (fun acc a =>
+        if acc.any (fun b => b.uid == a.uid) then acc else acc ++ [a]) []
+    let contractedUids : List UID := contracted.map (·.uid)
+    let degree : StObjP := degAxes.map (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name))
+    -- weave per degree axis: contracted ⇒ tiled, else fixed.
+    let mkWeave : List WeaveSlotP :=
+      degAxes.map (fun a => if contractedUids.contains a.uid then WeaveSlotP.tiled else WeaveSlotP.fixed (AxisP.mk (some a.name) (SizeExpr.var a.name)))
+    let inputWeaves : List WeaveShapeP := readFactors.map (fun _ => mkWeave)
+    let outputWeaves : List WeaveShapeP := [ mkWeave ]
+    let degUids : List UID := degAxes.map (·.uid)
+    let reindexings : List StMatP := readFactors.map (fun rf =>
+      let rows := rf.2.map (idxToRow degUids)
+      { domLen := degUids.length, codLen := rf.2.length,
+        coeffs := rows.map (·.1), bias := rows.map (·.2) })
+    let op : String :=
+      if sc.isScan then "scan"
+      else match s.nonlin with
+        | .relu        => "relu"
+        | .softmax _   => "softmax"
+        | .normalize _ => "normalize"
+        | .identity    => match s with
+            | .scatter .. => "scatter"
+            | .assign ..  => "contract"
+    let step : BrBaseP := { op, degree, inputWeaves, outputWeaves, reindexings }
+    let wires : List Wire := readFactors.map (fun rf =>
+      match nameToStep[rf.1]? with
+      | some j => Wire.mk j 0
+      | none   => Wire.mk nExternal ((extIndex[rf.1]?).getD 0))
+    steps := steps ++ [ step ]
+    routing := routing ++ [ wires ]
+  return { steps, routing, nExternal }
+
+end LeanNCD
