@@ -149,15 +149,14 @@ Resolved decisions / deviations (feed the §12 doc-consistency pass and the E2 p
 - E1 simplifications for E2: the `num` LHS base-case uses a placeholder iteration-axis name (E2
   resolves); all `name[…] := rhs` parse to `.assign` (E2's `lowerArith` reclassifies scatter).
 
-Known limitations (deferred to E2, recorded by the final E1 review):
+Review findings:
 
-- **Unmasked `softmax(…)` / `normalize(…)` over a sum do not parse.** The grammar has both
-  `softmax "(" "where" …` and a bare `tl_nonlin "(" tl_sum_expr ")"` rule, but the shared
-  `softmax (` prefix makes the parser commit to the `where`-variant without backtracking, so the
-  bare form is unreachable (`softmax(A[i] + B[i])` → "expected 'where'"). This is transcribed
-  verbatim from the §12.3 spec (`papers/leanncd.md` §12.3) — an inherited spec-level shared-prefix
-  issue, not an E1 regression. None of the five §12.1 acceptance examples need it (example 2 uses
-  `softmax(where …)`). Fix is a grammar left-factoring (fold the optional `(where …)` into one
-  `softmax` rule) and belongs with E2's nonlinearity lowering + a §12.3 doc update.
+- **FIXED — unmasked `softmax(…)` / `normalize(…)` over a sum now parse.** The masked
+  `softmax "(" "where" …` rule shared a `softmax (` prefix with the bare token, so the parser
+  committed to the `where`-variant on seeing `(` and an unmasked `softmax(A[i] + B[i])` failed
+  ("expected 'where'"). Resolved by wrapping the distinguishing lookahead in
+  `atomic("(" "where")` (`LeanNCD/DSL/Syntax.lean`), which rewinds cleanly when there is no
+  `where` so the bare rule wins and `(sum)` parses at `tl_rhs`. Regression tests in
+  `test/DSL/ParseLayer34Test.lean`; masked variants unchanged. Doc updated (§12.3).
 - `elabTLProgram`'s child router keys on `child.getKind.getString!` (partial on non-string `Name`
   components; safe for the `tl_decl | tl_stmt` alternation, whose kinds are always string-named).
