@@ -282,9 +282,35 @@ def readsIterAhead (s : Stmt) (u : UID) : Bool :=
     | .shift a n => a.uid == u && n > 0
     | _          => false)
 
+/-- Rewrite a stmt's `iterAt` base-case slot to carry the iteration axis `ax`. The E1 parser
+    cannot name the base-case iteration axis (it emits a placeholder `idxAxis ""`, so the slot's
+    uid is the placeholder's, NOT the recurrence's), so the matching recurrence's axis is adopted
+    here. A no-op on stmts with no `iterAt` slot, and (since `ax` is the recurrence's axis) on
+    base cases already carrying the correct axis. -/
+def Stmt.adoptBaseIterAxis (ax : AxisSpec) : Stmt → Stmt
+  | .assign nm ls r    => .assign  nm (ls.map (fun | .iterAt _ n => .iterAt ax n | sl => sl)) r
+  | .scatter nm ls r o => .scatter nm (ls.map (fun | .iterAt _ n => .iterAt ax n | sl => sl)) r o
+
 /-- Group `iterAt`/`iterNext` stmts by iteration-axis UID into (coupled) `ScanStmt.scan` nodes;
-    pass everything else through as `ScanStmt.plain`. Validates base-case coverage and causality. -/
+    pass everything else through as `ScanStmt.plain`. Validates base-case coverage and causality.
+
+    PRE-PASS: each recurrence (`iterNext`) carries the real iteration axis (name + uid); each base
+    case (`iterAt`) carries only the E1 placeholder axis (`idxAxis ""`). Before grouping, every base
+    case adopts the iteration axis of a recurrence with the same tensor name, so base and recurrence
+    land in the same UID group. -/
 def finalizeScans (lp : LoweredProgram) : FreshM ScanProgram := do
+  -- Recover each base case's iteration axis from the matching (same-name) recurrence.
+  let recurAxisFor (nm : String) : Option AxisSpec :=
+    lp.stmts.findSome? (fun s => match s.iterInfo with
+      | some (_, a, true) => if s.lhsName == nm then some a else none
+      | _                 => none)
+  let stmts0 := lp.stmts.map (fun s =>
+    match s.iterInfo with
+    | some (_, _, false) => match recurAxisFor s.lhsName with
+                            | some ax => s.adoptBaseIterAxis ax
+                            | none    => s
+    | _                  => s)
+  let lp := { lp with stmts := stmts0 }
   let scanStmts  := lp.stmts.filter (fun s => s.iterInfo.isSome)
   let plainStmts := lp.stmts.filter (fun s => s.iterInfo.isNone)
   let uids := (scanStmts.filterMap (fun s => s.iterInfo.map (·.1))).eraseDups
