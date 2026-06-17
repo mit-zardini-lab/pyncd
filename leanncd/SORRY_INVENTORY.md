@@ -295,9 +295,13 @@ B+/G `Br`/`St` coherence sorries.
 - **TargetActegory** (`Target.lean`): full actegory coherences in `V` (`υ_V`/`α_V`/`δ_V`/`δ0_V` +
   triangle/pentagon `act_unit_assoc_V`, `υ_nat_V`, `dist_coh_V`), over `[MonoidalCategory V]`,
   transposed from `DGradedColoredPROP`. The `Mat ℝ = FGModuleCat ℝ` instance fields are `sorry`.
-- **R = Bool target obligation** (`Target.lean` note): `Mat Bool` doesn't typecheck (`FGModuleCat`
-  needs `CommRing`; `Bool` is `CommSemiring`), so the predicate (∧/∃) target needs a separate
-  `TargetActegory _ V Bool` over a relations/Bool-semimodule `V` — a deferred obligation.
+- **R = Bool target obligation** (`Target.lean` note): the predicate (∧/∃) target needs the
+  `(∨, ∧)` Boolean *semiring* (∨ has no additive inverse → genuinely not a ring). The wrinkle is
+  semantic, NOT typechecking: Mathlib's `Bool` *type* is the Boolean *ring* (`+` = XOR, so
+  `true + true = false`, and `FGModuleCat Bool` DOES elaborate) — but reusing it computes over XOR,
+  the wrong addition for `∃`. So the predicate target needs a separate `TargetActegory _ V Bool`
+  over a relations / `(∨,∧)`-semimodule `V` (with `Bool` carrying the `(∨,∧)` semiring, not XOR) —
+  a deferred obligation.
 - **Algebra** (`Algebra.lean`): `F` is strong symmetric monoidal via Mathlib `Functor.Braided`
   (genuine pentagon/unitor/invertibility + braiding laws), `[SymmetricCategory V]`; plus the
   `equivar` coherence laws `equivar_nat`/`equivar_υ`/`equivar_α`/`equivar_δ` (μ-mediated) and
@@ -306,9 +310,11 @@ B+/G `Br`/`St` coherence sorries.
   μ-mediated `paraMap_eq` + the `weightTie` reparameterization-2-cell law (real equations).
 - **Flagship + propositions** (`Construct.lean`): `instAlgebraBrMatR : Algebra StObj BrObj (Mat ℝ) ℝ`
   (Br evaluates into ℝ-modules; all 8 fields `sorry`); `construct_correspondence` (the `F_ev_p` law
-  specialized — F realizes construct()'s ℝ-valued read); `semiring_choice_split` (Σ/×-vs-∃/∧ as the
-  choice of R, stated as a PROXY via additive idempotency `(1:ℝ)+1≠1 ∧ true+true=true` — the Bool
-  target being a deferred obligation; a class-scoped `actV` comparison awaits the Bool category).
+  specialized — F realizes construct()'s ℝ-valued read, `sorry`); `semiring_choice_split` (Σ/×-vs-∃/∧
+  as the choice of R, a PROXY via additive idempotency `((1:ℝ)+1 ≠ 1) ∧ (true || true = true)` —
+  ℝ's `+` non-idempotent (Σ) vs the `(∨,∧)` semiring's `∨`/`||` idempotent (∃); uses `||` NOT Bool's
+  XOR `+`. This is PROVEN (`⟨by norm_num, by decide⟩`), not `sorry`. A class-scoped `actV` comparison
+  awaits the deferred Bool target).
 
 Out of scope (later): the executable Algebra *interpreter* (parse→compile→evaluate→numbers; retires
 the dtype obstruction); the B+/G `Br`/`St` coherence proofs.

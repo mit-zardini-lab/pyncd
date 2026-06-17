@@ -50,16 +50,20 @@ theorem construct_correspondence
 
       • `R = ℝ`   ⇒ combine is `Σ` (genuine summation/counting); `ℝ`'s `+` is NOT idempotent
                     (`(1 : ℝ) + 1 = 2 ≠ 1`).
-      • `R = Bool` ⇒ combine is `∃` (`∨`); `Bool`'s `+` (= `∨`) IS idempotent
-                    (`(true : Bool) + true = true`).
+      • `R = Bool` ⇒ combine is `∃` (`∨`); the predicate semiring's addition `∨` (`||`) IS
+                    idempotent (`(true || true) = true`).
 
-    So the additive structure of `R` — idempotent or not — is exactly what switches
+    So the additive structure — idempotent or not — is exactly what switches
     exists-of-conjunctions (relational/predicate) contraction for sum-of-products (tensor/linear)
-    contraction. We state this faithful, NON-vacuous fact about the two value semirings directly
-    (the `Bool` target category itself is a deferred Task-2 obligation — see `Target.lean` §7.5
-    note — so we do not reference a `TargetActegory _ _ Bool` instance here). -/
+    contraction. NOTE: the predicate combine is the `(∨, ∧)` Boolean *semiring* addition `∨`/`||`,
+    NOT Mathlib's default `Bool` addition (`HAdd Bool`), which is XOR (`Bool` carries the Boolean
+    *ring*, so `true + true = false`). The `(∨, ∧)` semiring is genuinely not a ring (`∨` has no
+    inverse) — that is exactly why its target category is the deferred Task-2 obligation (see the
+    `Target.lean` §7.5 note); we state the faithful, NON-vacuous idempotency fact directly with
+    `||` rather than referencing a `TargetActegory _ _ Bool` instance. This is provable, so it is
+    a genuine theorem (not a `sorry`). -/
 theorem semiring_choice_split :
-    ((1 : ℝ) + 1 ≠ 1) ∧ ((true : Bool) + true = true) :=
-  sorry
+    ((1 : ℝ) + 1 ≠ 1) ∧ ((true || true) = true) :=
+  ⟨by norm_num, by decide⟩
 
 end LeanNCD

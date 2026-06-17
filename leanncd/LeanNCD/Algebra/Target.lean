@@ -90,25 +90,29 @@ The "∃/∧-vs-Σ/× split is exactly the choice of `R`" (the proposition Task 
 `semiring_choice_split`): the same actegory skeleton instantiated at a different value
 semiring switches sum-of-products contraction for exists-of-conjunctions contraction.
 
-**The wrinkle.** Although the *class* `TargetActegory _ _ Bool` typechecks (`Bool` is a
-`CommSemiring`: `(⊕, ⊗) = (∨, ∧)`, with `false`/`true` as `0`/`1`), the *default realization*
-does NOT. `Mat R := FGModuleCat R` (line 68) requires `[CommRing R]`, because finitely-generated
-modules need additive inverses on the scalars. `Bool` has none: `true` has no additive
-inverse under `∨` (there is no `b` with `true ∨ b = false`), so `Bool` is a `CommSemiring`
-but *not* a `CommRing`. Hence `Mat Bool = FGModuleCat Bool` does not elaborate, and the
-predicate target cannot reuse the `R = ℝ` value category.
+**The wrinkle (semantics, not typechecking).** The predicate reading needs the `(∨, ∧)` Boolean
+*semiring* — addition `∨` (= `∃`), multiplication `∧`. The subtlety is that Mathlib's `Bool`
+*type* does NOT carry that semiring as its default arithmetic: `Bool` is the Boolean *ring*
+(`+` = XOR, `*` = `∧`; `instance : CommRing Bool := BooleanRing.toCommRing`), so `true + true =
+false` and `Mat Bool = FGModuleCat Bool` *does* elaborate — but it computes over the WRONG
+(XOR) addition, not `∨`/`∃`. The `(∨, ∧)` semiring we actually want is genuinely *not a ring*
+(`∨` has no additive inverse: no `b` with `true ∨ b = false`), so it is a `CommSemiring` but
+not a `CommRing` — and it is NOT the algebra `FGModuleCat` would put on `Bool`. So the obstacle
+is not "`Mat Bool` fails to typecheck" (it doesn't fail); it is that reusing `Mat`/`Bool`'s
+default ring gives XOR-modules, the wrong semantics for `(∧, ∃)` contraction.
 
-**The obligation.** The `R = Bool` case requires a *different* value category `V` — a
-`Bool`-semimodule / relations target realizing (`∧`, `∃`): e.g. the category of finite
-sets and *relations* (`Rel`), or finitely-generated `Bool`-semimodules (free join-semilattices
-= finite powersets), whose hom-sets are Boolean matrices and whose composition is
+**The obligation.** The `R = Bool` case requires a value category `V` carrying the `(∨, ∧)`
+semiring structure — a `Bool`-*semimodule* / relations target realizing (`∧`, `∃`): e.g. the
+category of finite sets and *relations* (`Rel`), or finitely-generated join-semilattice
+semimodules (= finite powersets), whose hom-sets are Boolean matrices and whose composition is
 (`∧`-then-`∃`) Boolean matrix multiply. Such a `V` carries `Category V`, a symmetric
-`MonoidalCategory V`, and a `TargetActegory StObj V Bool` whose `actV` appends `Bool`-typed
-dimensions. We do not construct `V` here: a faithful relations / `Bool`-semimodule category
-with the full υ/α/δ/triangle/pentagon/naturality coherences is a substantial development,
-and forcing `FGModuleCat Bool` (which fails to typecheck) or a degenerate stub would
-misrepresent the structure. This is therefore recorded as a deferred formalization
-obligation; `semiring_choice_split` (Task 6) is stated abstractly over the class, so it
-applies to any such future `Bool`-target instance without depending on `Mat`. -/
+`MonoidalCategory V`, and a `TargetActegory StObj V Bool` (with `R = Bool` AS THE `(∨,∧)`
+semiring, e.g. via a `Tropical`/lattice wrapper so the `CommSemiring Bool` in scope is `(∨, ∧)`
+rather than XOR) whose `actV` appends `Bool`-typed dimensions. We do not construct `V` here: a
+faithful relations / `Bool`-semimodule category with the full υ/α/δ/triangle/pentagon/naturality
+coherences — over the `(∨, ∧)` (not XOR) semiring — is a substantial development, and reusing
+`FGModuleCat Bool` would misrepresent the structure (XOR, not `∃`). This is therefore recorded
+as a deferred formalization obligation; the §7.5 split is witnessed for now by the idempotency
+proxy `semiring_choice_split` (Task 6), which uses `∨`/`||` directly rather than `Bool`'s XOR `+`. -/
 
 end LeanNCD
