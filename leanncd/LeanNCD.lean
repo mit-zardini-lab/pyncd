@@ -36,3 +36,11 @@ import LeanNCD.Bridge.Agreement
 import LeanNCD.Acset.SBrInstance
 import LeanNCD.Acset.Csv
 import LeanNCD.Acset.Io
+import LeanNCD.Eval.Tensor
+import LeanNCD.Eval.Shape
+import LeanNCD.Eval.Gather
+import LeanNCD.Eval.Contract
+import LeanNCD.Eval.Nonlin
+import LeanNCD.Eval.Scatter
+import LeanNCD.Eval.Scan
+import LeanNCD.Eval.Eval

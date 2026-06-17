@@ -36,4 +36,7 @@ globs = ["Base.NumericTest", "Base.StTest", "Base.BrTest",
          "DSL.CompileExamplesTest",
          "Bridge.RealizeTest", "Bridge.SBrTest", "Bridge.AgreementTest",
          "Acset.SBrInstanceTest", "Acset.CsvTest", "Acset.IoTest",
-         "Acset.FixtureTest"]
+         "Acset.FixtureTest",
+         "Eval.TensorTest", "Eval.ShapeTest", "Eval.GatherTest",
+         "Eval.ContractTest", "Eval.NonlinTest", "Eval.ScatterTest",
+         "Eval.ScanTest", "Eval.EvalExamplesTest"]
