@@ -123,7 +123,7 @@ run_cmd do
   let lp : LoweredProgram := { decls := [], stmts := [gBase, gRec, hBase, hRec], env := {}, extNames := ∅, ctx := { classes := [] }, auxStmts := #[] }
   match finalizeScans lp |>.run 0 with
   | .ok sp _ =>
-      let scans := sp.stmts.filterMap (fun | .scan _ _ b r => some (b, r) | .plain _ => none)
+      let scans := sp.stmts.filterMap (fun | .scan _ _ b r _ => some (b, r) | .plain _ => none | .scanPre _ _ _ => none)
       match scans with
       | [(base, recur)] =>
           unless recur.length == 2 do throwError s!"coupled scan recur should have 2 steps, got {recur.length}"

@@ -1,5 +1,6 @@
 import LeanNCD.DSL.SizeExpr
 import LeanNCD.Exec.Uid   -- reuse the canonical `UID := Nat`; do NOT redefine it (duplicate-def error)
+import LeanNCD.DSL.Target
 
 namespace LeanNCD
 
@@ -82,7 +83,8 @@ structure ScatterOpts where
 inductive Stmt
   | assign  : String → List LHSSlot → RHSExpr → Stmt
   | scatter : String → List LHSSlot → RHSExpr → ScatterOpts → Stmt
-  -- (recurMorphism omitted in E1 — references ThreadedComposed/Numeric; deferred to E2.)
+  | recurMorphism : String → AxisSpec → ThreadedComposed → Stmt
+    -- escape hatch (§12.2): tensor name, iteration axis, a pre-built step morphism (programmatic-only)
   deriving DecidableEq, Repr, Lean.ToExpr
 
 structure TLProgram where

@@ -41,16 +41,18 @@ def splitStmt (s : Stmt) : FreshM (List Stmt) := do
             nonlin := rhs.nonlin }
         return [linStep, nlStep]
   | .scatter .. => return [s]   -- scatters carry no nonlinearity in the §12.1 examples
+  | .recurMorphism .. => return [s]   -- pre-built morphism: nothing to split
 
 /-- Split nonlinearities within a `ScanStmt`. For `.scan`, split each stmt in `base`/`recur`
     and flatten back into the base/recur lists, keeping the node coupled. -/
 def splitScan (sc : ScanStmt) : FreshM (List ScanStmt) := do
   match sc with
   | .plain s => (← splitStmt s).mapM (fun s' => pure (ScanStmt.plain s'))
-  | .scan nm ax base recur =>
+  | .scan nm ax base recur isAff =>
       let base'  ← base.flatMapM splitStmt
       let recur' ← recur.flatMapM splitStmt
-      return [ ScanStmt.scan nm ax base' recur' ]
+      return [ ScanStmt.scan nm ax base' recur' isAff ]
+  | .scanPre nm ax tc => return [ ScanStmt.scanPre nm ax tc ]
 
 /-- Isolate every relu/softmax/normalize into its own step across the whole program. -/
 def splitNonlins (sp : ScanProgram) : FreshM LinearProgram := do
@@ -70,12 +72,14 @@ their original source order. -/
 /-- Tensor names a ScanStmt writes (its LHS name(s)). -/
 def ScanStmt.writes : ScanStmt → List String
   | .plain s        => [s.lhsName]
-  | .scan _ _ b r   => (b.map Stmt.lhsName ++ r.map Stmt.lhsName).eraseDups
+  | .scan _ _ b r _ => (b.map Stmt.lhsName ++ r.map Stmt.lhsName).eraseDups
+  | .scanPre nm _ _ => [nm]
 
 /-- Tensor names a ScanStmt reads. -/
 def ScanStmt.reads : ScanStmt → List String
   | .plain s        => s.readNames
-  | .scan _ _ b r   => (b.flatMap Stmt.readNames ++ r.flatMap Stmt.readNames).eraseDups
+  | .scan _ _ b r _ => (b.flatMap Stmt.readNames ++ r.flatMap Stmt.readNames).eraseDups
+  | .scanPre _ _ _  => []
 
 /-- One backward-reachability pass: add names read by any stmt that writes a live name. -/
 def liveStep (stmts : List ScanStmt) (live : List String) : List String :=
@@ -140,6 +144,7 @@ def Stmt.readFactors : Stmt → List (String × List IdxExpr)
       r.body.terms.flatMap (fun t => t.factors.filterMap (fun
         | .read nm es => some (nm, es)
         | .iverson _  => none))
+  | .recurMorphism _ _ _ => []
 
 /-- The retained-output `AxisSpec`s of a stmt: those named by `free`/`iterAt`/`iterNext` slots.
     `.affine` (scatter) slots carry no single retained axis and are skipped. -/
@@ -150,10 +155,12 @@ def Stmt.lhsAxes : Stmt → List AxisSpec
         | .iterAt a _ => some a
         | .iterNext a => some a
         | .affine _   => none)
+  | .recurMorphism _ _ _ => []
 
 /-- The `RHSExpr.nonlin` of a stmt. -/
 def Stmt.nonlin : Stmt → Nonlin
   | .assign _ _ r | .scatter _ _ r _ => r.nonlin
+  | .recurMorphism _ _ _ => .identity
 
 /-- Every `AxisSpec` appearing in a single read index expression. -/
 def idxAxes : IdxExpr → List AxisSpec
@@ -176,12 +183,19 @@ def idxToRow (us : List UID) : IdxExpr → (List Int × Int)
     base stmt); for `.plain`, the stmt itself. It carries the reads/axes used to build the step. -/
 def ScanStmt.repStmt : ScanStmt → Option Stmt
   | .plain s        => some s
-  | .scan _ _ b r   => r.head?.orElse (fun _ => b.head?)
+  | .scan _ _ b r _ => r.head?.orElse (fun _ => b.head?)
+  | .scanPre _ _ _  => none
 
 /-- Is this ScanStmt a `.scan` node? (drives the "scan" op label). -/
 def ScanStmt.isScan : ScanStmt → Bool
-  | .plain _    => false
-  | .scan ..    => true
+  | .plain _      => false
+  | .scan ..      => true
+  | .scanPre _ _ _ => true
+
+/-- Is this ScanStmt a `.scanPre` (recurMorphism) node? (drives the "scan_pre" op label). -/
+def ScanStmt.isScanPre : ScanStmt → Bool
+  | .scanPre _ _ _ => true
+  | _              => false
 
 /-- Phase 8: route the scheduled statements into a `ThreadedComposed`. -/
 def route (sp : ScheduledProgram) : FreshM ThreadedComposed := do
@@ -225,7 +239,8 @@ def route (sp : ScheduledProgram) : FreshM ThreadedComposed := do
       { domLen := degUids.length, codLen := rf.2.length,
         coeffs := rows.map (·.1), bias := rows.map (·.2) })
     let op : String :=
-      if sc.isScan then "scan"
+      if sc.isScanPre then "scan_pre"   -- Task 3 refines/validates the step morphism
+      else if sc.isScan then "scan"     -- `.scan` ignores isAffine for now (Task 2 wires it)
       else match s.nonlin with
         | .relu        => "relu"
         | .softmax _   => "softmax"
@@ -233,6 +248,7 @@ def route (sp : ScheduledProgram) : FreshM ThreadedComposed := do
         | .identity    => match s with
             | .scatter .. => "scatter"
             | .assign ..  => "contract"
+            | .recurMorphism .. => "contract"   -- unreachable: scanPre handled above
     let step : BrBaseP := { op, degree, inputWeaves, outputWeaves, reindexings }
     let wires : List Wire := readFactors.map (fun rf =>
       match nameToStep[rf.1]? with
