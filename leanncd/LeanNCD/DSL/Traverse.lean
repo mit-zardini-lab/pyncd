@@ -65,6 +65,7 @@ instance : TermTraversable Decl where traverseUID := Decl.mapUID
 def Stmt.mapUID (f : UData → UData) : Stmt → Stmt
   | .assign nm ls r      => .assign nm (ls.map (LHSSlot.mapUID f)) (RHSExpr.mapUID f r)
   | .scatter nm ls r o   => .scatter nm (ls.map (LHSSlot.mapUID f)) (RHSExpr.mapUID f r) o
+  | .recurMorphism nm ax tc => .recurMorphism nm (AxisSpec.mapUID f ax) tc
 instance : TermTraversable Stmt where traverseUID := Stmt.mapUID
 
 instance : TermTraversable TLProgram where

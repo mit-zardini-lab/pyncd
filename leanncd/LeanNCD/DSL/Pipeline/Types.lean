@@ -1,4 +1,5 @@
 import LeanNCD.DSL.Ast
+import LeanNCD.DSL.Target
 import LeanNCD.Exec.Context
 import Std.Data.HashMap
 
@@ -9,11 +10,12 @@ open Std
 abbrev DeclEnv := HashMap String Decl
 
 /-- A statement after finalizeScans grouped iterAt/iterNext pairs into Scan nodes.
-    (E2a omits the §12.4 `scanPre` recurMorphism case — out of scope.) -/
+    `scanPre` carries a pre-built step morphism (the `Stmt.recurMorphism` escape hatch, E2c);
+    the trailing `Bool` on `scan` is the ScanAffine flag. -/
 inductive ScanStmt
-  | plain : Stmt → ScanStmt
-  | scan  : String → AxisSpec → List Stmt → List Stmt → ScanStmt
-            -- (tensor name, iteration axis, base stmts, recurrence stmts)
+  | plain   : Stmt → ScanStmt
+  | scan    : String → AxisSpec → List Stmt → List Stmt → Bool → ScanStmt  -- final Bool = isAffine
+  | scanPre : String → AxisSpec → ThreadedComposed → ScanStmt              -- recurMorphism case
   deriving Inhabited
 
 structure LabeledProgram where

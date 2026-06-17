@@ -13,10 +13,10 @@ run_cmd do
     { decls := [], stmts := [ .plain attn ], env := {}, extNames := ∅, ctx := { classes := [] } }
   match splitNonlins sp |>.run 0 with
   | .ok lp _ =>
-      let stmts := lp.stmts.filterMap (fun | .plain s => some s | .scan .. => none)
+      let stmts := lp.stmts.filterMap (fun | .plain s => some s | .scan .. => none | .scanPre .. => none)
       -- exactly two stmts: a linear (identity) and a softmax-carrying step
       unless stmts.length == 2 do throwError s!"expected 2 stmts after split, got {stmts.length}"
-      let nlins := stmts.map (fun | .assign _ _ r => r.nonlin | .scatter _ _ r _ => r.nonlin)
+      let nlins := stmts.map (fun | .assign _ _ r => r.nonlin | .scatter _ _ r _ => r.nonlin | .recurMorphism .. => .identity)
       unless nlins.any (· == .identity) do throwError "missing linear (identity) step"
       unless nlins.any (fun n => match n with | .softmax (some _) => true | _ => false) do
         throwError "missing masked-softmax step"

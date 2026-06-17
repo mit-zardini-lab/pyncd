@@ -270,3 +270,18 @@ Decisions: CRLF (`\r\n`) line terminator matching Python `csv`; no-quoting CSV (
 embedded commas/quotes — documented assumption); sizes only `.lit`/`.var` (compound never serializes);
 coeffs always integer. F's `Acset.SBrInstance` SUPERSEDES E2b's minimal placeholder — `realizeSBr`/
 `fromThreadedComposed`/the agreement Props (Bridge/) now use it (their E2b `sorry`s unchanged).
+
+## Milestone E2c — recurMorphism/scanPre + ScanAffine (zero sorries)
+
+DSL feature-completion on the E2a pipeline — fully executable, `sorry`-free.
+- **recurMorphism escape hatch:** `Stmt.recurMorphism : String → AxisSpec → ThreadedComposed → Stmt`
+  (programmatic-only — no `tlprog!` surface syntax). It flows through the pipeline and `finalizeScans`
+  turns it into `ScanStmt.scanPre`; `route` emits a single `op="scan_pre"` `BrBaseP` step and VALIDATES
+  the pre-built morphism is non-empty (`CompileError.shapeMismatch` on empty `steps`). **Consistent-collapse:**
+  the pre-built `ThreadedComposed` is validated but NOT embedded in the flat routed output — symmetric with
+  how regular scans already collapse their body (deep scan-body embedding remains a future refinement).
+  recurMorphism reads are not introspected (`readNames := []`).
+- **ScanAffine:** a scan whose recurrence has no nonlinearity (Prop 8.7, associative/parallel-prefix) is
+  detected in `finalizeScans` (BEFORE `splitNonlins` lifts nonlinearities out) via the `isAffine` flag on
+  `ScanStmt.scan`, and `route` emits `op="scan_affine"` (vs `"scan"`). The §12.1 coupled scan (relu
+  recurrence) stays `op="scan"`. So routed scan steps now carry `op ∈ {scan, scan_affine, scan_pre}`.

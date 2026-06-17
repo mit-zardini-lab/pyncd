@@ -45,6 +45,7 @@ private def axNamesDecl : Decl → List String
 private def axNamesStmt : Stmt → List String
   | .assign _ ls r => ls.flatMap axNamesLHS ++ axNamesRHS r
   | .scatter _ ls r _ => ls.flatMap axNamesLHS ++ axNamesRHS r
+  | .recurMorphism _ ax _ => [ax.name]
 
 /-- The ordered, de-duplicated list of axis names occurring anywhere in the program. -/
 def TLProgram.axisNames (p : TLProgram) : List String :=
@@ -80,6 +81,7 @@ private def uidsLHS : LHSSlot → List UID
 def Stmt.uids : Stmt → List UID
   | .assign _ ls r => ls.flatMap uidsLHS ++ uidsRHS r
   | .scatter _ ls r _ => ls.flatMap uidsLHS ++ uidsRHS r
+  | .recurMorphism _ ax _ => [ax.uid]
 
 /-! ## The `assignUIDs` phase -/
 
@@ -118,7 +120,7 @@ def Decl.name : Decl → String
 
 /-- The tensor name a stmt writes to (its LHS). -/
 def Stmt.lhsName : Stmt → String
-  | .assign n _ _ => n | .scatter n _ _ _ => n
+  | .assign n _ _ => n | .scatter n _ _ _ => n | .recurMorphism n _ _ => n
 
 /-- The tensor names a stmt reads (from `.read` factors; iverson factors read nothing). -/
 def Stmt.readNames : Stmt → List String
@@ -126,6 +128,7 @@ def Stmt.readNames : Stmt → List String
       r.body.terms.flatMap (fun t => t.factors.filterMap (fun
         | .read nm _ => some nm
         | .iverson _ => none))
+  | .recurMorphism _ _ _ => []   -- recurMorphism reads not introspected (E2c)
 
 /-- Build the declaration environment and classify external-input names.
     `extNames` = names READ in some stmt but never PRODUCED (never a stmt LHS).
@@ -184,6 +187,7 @@ private def axNameUIDDecl : Decl → List (String × UID)
 private def axNameUIDStmt : Stmt → List (String × UID)
   | .assign _ ls r => ls.flatMap axNameUIDLHS ++ axNameUIDRHS r
   | .scatter _ ls r _ => ls.flatMap axNameUIDLHS ++ axNameUIDRHS r
+  | .recurMorphism _ ax _ => [(ax.name, ax.uid)]
 
 /-- Every (axis-name, axis-uid) pair occurring anywhere in the program, in program order. -/
 def collectAxisNameUID (p : TLProgram) : List (String × UID) :=
@@ -243,7 +247,8 @@ def lowerArith (cp : CanonicalProgram) : FreshM LoweredProgram := do
     | .scatter nm slots rhs opts =>
         if (slots.any LHSSlot.collapses) && opts.reduce ≠ some "sum" then
           throw (CompileError.overlappingScatter nm)
-        else return s)
+        else return s
+    | .recurMorphism _ _ _ => return s)   -- no affine LHS; passes through unchanged
   return { decls := cp.decls, stmts := stmts', env := cp.env,
            extNames := cp.extNames, ctx := cp.ctx, auxStmts := #[] }
 
@@ -258,7 +263,17 @@ step of the same name (else `missingBaseCase`); and a recur step may not read it
 
 /-- The LHS slots of a statement. -/
 def Stmt.slots : Stmt → List LHSSlot
-  | .assign _ ls _ => ls | .scatter _ ls _ _ => ls
+  | .assign _ ls _ => ls | .scatter _ ls _ _ => ls | .recurMorphism _ _ _ => []
+
+/-- The nonlinearity wrapping a stmt's step. A `recurMorphism` is pre-built (already-lowered),
+    so it is affine-neutral (`identity`). Used by `finalizeScans` to detect ScanAffine (Prop 8.7):
+    a scan whose every recurrence stmt is `identity`-nonlin carries no nonlinearity and is thus
+    associative/parallel-prefix-able. This MUST be checked here (pre-`splitNonlins`), since
+    `splitNonlins` later lifts nonlinearities out of `RHSExpr.nonlin` into separate steps. -/
+def Stmt.nonlinOf : Stmt → Nonlin
+  | .assign _ _ r => r.nonlin
+  | .scatter _ _ r _ => r.nonlin
+  | .recurMorphism _ _ _ => .identity
 
 /-- `(iteration-axis uid, axis, isRecur)` if this stmt is a scan base/recur stmt. A stmt has
     at most one iteration slot, so the first match is the only one. -/
@@ -274,6 +289,7 @@ def Stmt.rhsReads : Stmt → List IdxExpr
       r.body.terms.flatMap (fun t => t.factors.flatMap (fun
         | .read _ es => es
         | .iverson _ => []))
+  | .recurMorphism _ _ _ => []
 
 /-- Conservative causality check: does any RHS read reference iteration axis `u` with a
     strictly-positive look-ahead offset (`shift a n`, `n > 0`)? -/
@@ -290,6 +306,7 @@ def readsIterAhead (s : Stmt) (u : UID) : Bool :=
 def Stmt.adoptBaseIterAxis (ax : AxisSpec) : Stmt → Stmt
   | .assign nm ls r    => .assign  nm (ls.map (fun | .iterAt _ n => .iterAt ax n | sl => sl)) r
   | .scatter nm ls r o => .scatter nm (ls.map (fun | .iterAt _ n => .iterAt ax n | sl => sl)) r o
+  | s@(.recurMorphism _ _ _) => s
 
 /-- Group `iterAt`/`iterNext` stmts by iteration-axis UID into (coupled) `ScanStmt.scan` nodes;
     pass everything else through as `ScanStmt.plain`. Validates base-case coverage and causality.
@@ -311,8 +328,13 @@ def finalizeScans (lp : LoweredProgram) : FreshM ScanProgram := do
                             | none    => s
     | _                  => s)
   let lp := { lp with stmts := stmts0 }
-  let scanStmts  := lp.stmts.filter (fun s => s.iterInfo.isSome)
-  let plainStmts := lp.stmts.filter (fun s => s.iterInfo.isNone)
+  -- recurMorphism stmts convert directly to `.scanPre` (NOT grouped with iterAt/iterNext).
+  let preNodes : List ScanStmt := lp.stmts.filterMap (fun s => match s with
+    | .recurMorphism nm ax tc => some (ScanStmt.scanPre nm ax tc)
+    | _                       => none)
+  let nonPre     := lp.stmts.filter (fun s => match s with | .recurMorphism _ _ _ => false | _ => true)
+  let scanStmts  := nonPre.filter (fun s => s.iterInfo.isSome)
+  let plainStmts := nonPre.filter (fun s => s.iterInfo.isNone)
   let uids := (scanStmts.filterMap (fun s => s.iterInfo.map (·.1))).eraseDups
   let mut nodes : List ScanStmt := []
   for u in uids do
@@ -325,8 +347,11 @@ def finalizeScans (lp : LoweredProgram) : FreshM ScanProgram := do
         throw (CompileError.missingBaseCase r.lhsName)
       if readsIterAhead r u then throw (CompileError.causalityViolation r.lhsName)
     let repName := (group.head?.map Stmt.lhsName).getD ""
-    nodes := nodes ++ [ ScanStmt.scan repName axis baseStmts recurStmts ]
-  return { decls := lp.decls, stmts := plainStmts.map ScanStmt.plain ++ nodes,
+    -- ScanAffine (Prop 8.7): the recurrence carries NO nonlinearity (every recur stmt is
+    -- identity-nonlin) ⇒ associative/parallel-prefix-able. Empty `recur` ⇒ vacuously affine.
+    let isAffine : Bool := recurStmts.all (fun s => Stmt.nonlinOf s == Nonlin.identity)
+    nodes := nodes ++ [ ScanStmt.scan repName axis baseStmts recurStmts isAffine ]
+  return { decls := lp.decls, stmts := plainStmts.map ScanStmt.plain ++ preNodes ++ nodes,
            env := lp.env, extNames := lp.extNames, ctx := lp.ctx }
 
 end LeanNCD
