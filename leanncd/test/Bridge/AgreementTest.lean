@@ -1,6 +1,6 @@
 import LeanNCD.Bridge.Agreement
 namespace LeanNCD
-noncomputable example (tc : ThreadedComposed) : SBrInstance := fromThreadedComposed tc
+noncomputable example (tc : ThreadedComposed) : Acset.SBrInstance := fromThreadedComposed tc
 -- the agreement theorem has the intended Σ-equality TYPE (not weakened):
 example (tc : ThreadedComposed) :
     (realize tc = realizeSBr (fromThreadedComposed tc)) = (realize tc = realizeSBr (fromThreadedComposed tc)) := rfl

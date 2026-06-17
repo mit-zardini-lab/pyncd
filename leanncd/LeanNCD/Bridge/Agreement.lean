@@ -6,7 +6,7 @@ namespace LeanNCD
 
 /-- §8.2 acset extraction (`from_tensor_program`): a ThreadedComposed's tabular twin.
     OBLIGATION (`sorry`): the extraction algorithm (acset.md). -/
-noncomputable def fromThreadedComposed (tc : ThreadedComposed) : SBrInstance := sorry
+noncomputable def fromThreadedComposed (tc : ThreadedComposed) : Acset.SBrInstance := sorry
 
 /-- **Prop 8 (DSL/CSV agreement).** The DSL-path realization of `tc` and the CSV-path
     realization of its extracted `SBrInstance` are the SAME `Br` morphism (equal as
