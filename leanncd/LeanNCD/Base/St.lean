@@ -16,7 +16,7 @@ abbrev StObj := List Axis
     matrix over `Coeff` plus a bias vector. Row `j` is the linear combination of input
     coordinates producing output coordinate `j`. The entries are `Coeff = MvPolynomial String ℤ`
     (signed), NOT `Numeric` (the ℕ size type): reindexing offsets can be negative (look-back). -/
-@[ext]
+@[ext]       -- generate the extensionality lemma StMat.ext for St
 structure StMat (dom cod : StObj) where
   coeffs : Matrix (Fin cod.length) (Fin dom.length) Coeff
   bias   : Fin cod.length → Coeff
