@@ -30,6 +30,12 @@ variable (D C : Type) (V : Type*) [ColoredPROP D] [ColoredPROP C] [Category V] [
   [inst : Algebra D C V R]
 example : C ⥤ V := inst.F
 example : inst.F.Braided := inst.Fbraided
+-- The new equivar coherence (coh) fields are accessible and typecheck as fields:
+#check @inst.equivar_nat   -- equivar natural in the `C`-variable
+#check @inst.equivar_υ     -- equivar carries `υ` to `υ_V`
+#check @inst.equivar_α     -- equivar carries `α` to `α_V`
+#check @inst.equivar_δ     -- equivar carries `δ` to `δ_V` (mediated by `F.μ`)
+#check @inst.F_ev_p        -- `F` preserves the §4.1 evaluation `ev_p`
 end
 
 end LeanNCD
