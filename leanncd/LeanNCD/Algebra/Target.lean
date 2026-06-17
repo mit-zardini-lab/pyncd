@@ -77,4 +77,38 @@ noncomputable instance : TargetActegory StObj (Mat ℝ) ℝ where
   υ_nat_V := sorry
   dist_coh_V := sorry
 
+/-! ## §7.5 — The `R = Bool` predicate target (deferred formalization obligation)
+
+The `TargetActegory` class above is parameterised by the value semiring `R : CommSemiring`
+(line 15), and §7.5 turns precisely on that parameter:
+
+  • `R = ℝ`   ⇒ contraction is (`×`, then `Σ`) — the *tensor* / linear-algebra reading,
+                 realised by the `matTargetActegory` instance over `Mat ℝ = FGModuleCat ℝ`.
+  • `R = Bool` ⇒ contraction is (`∧`, then `∃`) — the *predicate* / relational reading.
+
+The "∃/∧-vs-Σ/× split is exactly the choice of `R`" (the proposition Task 6 will state as
+`semiring_choice_split`): the same actegory skeleton instantiated at a different value
+semiring switches sum-of-products contraction for exists-of-conjunctions contraction.
+
+**The wrinkle.** Although the *class* `TargetActegory _ _ Bool` typechecks (`Bool` is a
+`CommSemiring`: `(⊕, ⊗) = (∨, ∧)`, with `false`/`true` as `0`/`1`), the *default realization*
+does NOT. `Mat R := FGModuleCat R` (line 68) requires `[CommRing R]`, because finitely-generated
+modules need additive inverses on the scalars. `Bool` has none: `true` has no additive
+inverse under `∨` (there is no `b` with `true ∨ b = false`), so `Bool` is a `CommSemiring`
+but *not* a `CommRing`. Hence `Mat Bool = FGModuleCat Bool` does not elaborate, and the
+predicate target cannot reuse the `R = ℝ` value category.
+
+**The obligation.** The `R = Bool` case requires a *different* value category `V` — a
+`Bool`-semimodule / relations target realizing (`∧`, `∃`): e.g. the category of finite
+sets and *relations* (`Rel`), or finitely-generated `Bool`-semimodules (free join-semilattices
+= finite powersets), whose hom-sets are Boolean matrices and whose composition is
+(`∧`-then-`∃`) Boolean matrix multiply. Such a `V` carries `Category V`, a symmetric
+`MonoidalCategory V`, and a `TargetActegory StObj V Bool` whose `actV` appends `Bool`-typed
+dimensions. We do not construct `V` here: a faithful relations / `Bool`-semimodule category
+with the full υ/α/δ/triangle/pentagon/naturality coherences is a substantial development,
+and forcing `FGModuleCat Bool` (which fails to typecheck) or a degenerate stub would
+misrepresent the structure. This is therefore recorded as a deferred formalization
+obligation; `semiring_choice_split` (Task 6) is stated abstractly over the class, so it
+applies to any such future `Bool`-target instance without depending on `Mat`. -/
+
 end LeanNCD
