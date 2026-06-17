@@ -8,7 +8,7 @@ open CategoryTheory
 /-- The algebra functor `F : C → V` — a strong symmetric monoidal, `D`-equivariant functor into a
     target actegory (graded_prop.md Def 7.2); the categorical content of `construct()`. A `class`
     (not `structure`) so `ParaAlgebra` can `extend` it. -/
-class Algebra (D C : Type) (V : Type*) [ColoredPROP D] [ColoredPROP C] [Category V]
+class Algebra (D C : Type) (V : Type*) [ColoredPROP D] [ColoredPROP C] [Category V] [MonoidalCategory V]
     (R : Type) [CommSemiring R] [DGradedColoredPROP D C] [TargetActegory D V R] where
   F       : C ⥤ V
   equivar : ∀ (X : C) (P : Dᵒᵖ),
@@ -16,7 +16,7 @@ class Algebra (D C : Type) (V : Type*) [ColoredPROP D] [ColoredPROP C] [Category
                 ≅ (TargetActegory.actV (D := D) (V := V) (R := R)).obj (F.obj X, P)
 
 /-- The `Para` refinement: `Para(C) → Para(V)` 2-functor, weight tying as passes-as-2-cells. STUB. -/
-class ParaAlgebra (D C : Type) (V : Type*) [ColoredPROP D] [ColoredPROP C] [Category V]
+class ParaAlgebra (D C : Type) (V : Type*) [ColoredPROP D] [ColoredPROP C] [Category V] [MonoidalCategory V]
     (R : Type) [CommSemiring R] [DGradedColoredPROP D C] [TargetActegory D V R]
     extends Algebra D C V R
 
