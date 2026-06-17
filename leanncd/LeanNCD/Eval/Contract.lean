@@ -80,4 +80,41 @@ def evalAssignWith (mul : Float → Float → Float) (combine : Float → Float 
 /-- The default tensor (ℝ) contraction: multiply factors, then sum contributions. -/
 def evalAssign := evalAssignWith (· * ·) (· + ·) 0.0
 
+/-- Like `evalAssign`, but with a `seed : HashMap UID Int` of axis-UIDs pinned to fixed values
+    (e.g. the iteration axis of a scan, pinned to the current slice `l`). The seeded UIDs are
+    excluded from BOTH the free (output) axes and the contracted axes; every per-output coord is
+    seeded with these fixed values. Output shape/order follows the NON-seeded free slots.
+    Reuses the ℝ contraction `(*, +, 0)`. -/
+def evalAssignSeeded (env : HashMap String DenseTensor) (sizes : HashMap UID Nat)
+    (seed : HashMap UID Int) (nm : String) (slots : List LHSSlot) (rhs : RHSExpr) :
+    Except EvalError (String × DenseTensor) := do
+  for rn in (readNames rhs).eraseDups do
+    if !(env.contains rn) then
+      throw s!"evalAssign: unknown tensor {rn}"
+  -- free axes = LHS slot axes minus the seeded UIDs (and minus affine slots, which contribute none)
+  let freesAll := freeAxisUIDs slots
+  let frees := freesAll.filter (fun u => ! seed.contains u)
+  let contr := (readAxisUIDs rhs).eraseDups.filter (fun u => ! frees.contains u && ! seed.contains u)
+  -- output shape: each non-seeded free slot's size, in slot order
+  let outShape := slots.filterMap (fun sl => match lhsAxisUID? sl with
+    | some u => if seed.contains u then none else some ((sizes[u]?).getD 0)
+    | none   => none)
+  let contrSizes := contr.map (fun u => (sizes[u]?).getD 1)
+  let out := DenseTensor.ofFn outShape (fun fcoord =>
+    Id.run do
+      let baseCoord : HashMap UID Int :=
+        (frees.zip fcoord).foldl (fun m (u, v) => m.insert u (Int.ofNat v)) seed
+      let mut acc := 0.0
+      for t in rhs.body.terms do
+        for cc in cartesian contrSizes do
+          let coord := (contr.zip cc).foldl (fun m (u, v) => m.insert u (Int.ofNat v)) baseCoord
+          let mut prod := 1.0
+          for f in t.factors do
+            match gather env coord f with
+            | .ok v    => prod := prod * v
+            | .error _ => prod := prod * 0.0
+          acc := acc + prod
+      pure acc)
+  return (nm, out)
+
 end LeanNCD.Eval
