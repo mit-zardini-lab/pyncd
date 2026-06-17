@@ -18,7 +18,18 @@ noncomputable example : TargetActegory StObj (Mat ℝ) ℝ := inferInstance
 #check @ParaAlgebra
 -- ParaAlgebra extends Algebra:
 example {D C : Type} {V : Type*} [ColoredPROP D] [ColoredPROP C] [Category V] [MonoidalCategory V]
+    [SymmetricCategory V]
     {R : Type} [CommSemiring R] [DGradedColoredPROP D C] [TargetActegory D V R]
     [ParaAlgebra D C V R] : Algebra D C V R := inferInstance
+
+-- The Algebra class elaborates with the new strong-symmetric-monoidal field; `F` and `Fbraided`
+-- are accessible from a variable instance.
+section
+variable (D C : Type) (V : Type*) [ColoredPROP D] [ColoredPROP C] [Category V] [MonoidalCategory V]
+  [SymmetricCategory V] (R : Type) [CommSemiring R] [DGradedColoredPROP D C] [TargetActegory D V R]
+  [inst : Algebra D C V R]
+example : C ⥤ V := inst.F
+example : inst.F.Braided := inst.Fbraided
+end
 
 end LeanNCD
