@@ -1,0 +1,5 @@
+equation_idx,reindexing_slot,src_uid,tgt_uid,coeff,offset
+0,1,RawAxis:1641333978,RawAxis:1641333978,1,0
+0,2,RawAxis:1726451349,RawAxis:1726451349,1,0
+1,1,RawAxis:1641333978,RawAxis:1641333978,1,0
+1,2,RawAxis:1202986561,RawAxis:1202986561,1,0

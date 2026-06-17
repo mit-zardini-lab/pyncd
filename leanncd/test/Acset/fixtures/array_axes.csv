@@ -1,0 +1,13 @@
+equation_idx,array_slot,axis_uid,is_target,position
+0,0,RawAxis:1641333978,false,0
+0,0,RawAxis:1726451349,false,1
+0,1,RawAxis:1641333978,false,0
+0,1,RawAxis:1202986561,true,1
+0,2,RawAxis:1726451349,false,0
+0,2,RawAxis:1202986561,true,1
+1,0,RawAxis:1641333978,false,0
+1,0,RawAxis:1202986561,false,1
+1,1,RawAxis:1641333978,false,0
+1,1,RawAxis:1726451349,true,1
+1,2,RawAxis:1202986561,false,0
+1,2,RawAxis:1726451349,true,1
