@@ -38,4 +38,15 @@ example : inst.F.Braided := inst.Fbraided
 #check @inst.F_ev_p        -- `F` preserves the §4.1 evaluation `ev_p`
 end
 
+-- The Para fields of `ParaAlgebra` elaborate as intended: the `Para(C)→Para(V)` action on
+-- parametric morphisms, its `μ`-mediated defining law, and the weight-tying reparameterization 2-cell.
+section
+variable (D C : Type) (V : Type*) [ColoredPROP D] [ColoredPROP C] [Category V] [MonoidalCategory V]
+  [SymmetricCategory V] (R : Type) [CommSemiring R] [DGradedColoredPROP D C] [TargetActegory D V R]
+  [inst : ParaAlgebra D C V R]
+#check @inst.paraMap       -- Para(C)→Para(V) action on 1-cells
+#check @inst.paraMap_eq    -- paraMap factors as μ ≫ F.map f
+#check @inst.weightTie     -- weight tying as a reparameterization 2-cell
+end
+
 end LeanNCD

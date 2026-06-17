@@ -82,10 +82,43 @@ class Algebra (D C : Type) (V : Type*) [ColoredPROP D] [ColoredPROP C] [Category
             (X := (F.obj X, P)) (Y := (F.obj X, Opposite.op (ColoredPROP.unit : D))) (𝟙 (F.obj X), p)
         ≫ (TargetActegory.υ_V (D := D) (R := R) (F.obj X)).hom
 
-/-- The `Para` refinement: `Para(C) → Para(V)` 2-functor, weight tying as passes-as-2-cells. STUB. -/
+/-- The `Para` refinement: the `Para(C) → Para(V)` 2-functor + weight tying as a reparameterization
+    2-cell (§7.5 / graded_prop.md §7 / the §11 "lightweight-Para" note).
+
+    `Para(C)` is the parametric category over the monoidal `C`: a morphism `X ⟶ Y` is a PAIR
+    `(P : C, f : P ⊗ X ⟶ Y)` — a parameter object `P` plus a map. The algebra functor `F : C ⥤ V`
+    induces a 2-functor `Para(C) → Para(V)` sending the parametric morphism `(P, f)` to
+    `(F P, paraMap P f)`, where the `V`-side map `F P ⊗ F X ⟶ F Y` is the `F`-image of `f` mediated
+    by `F`'s lax-monoidal comparison `μ`. **Weight tying** is a reparameterization 2-cell: a map of
+    parameter objects `Δ : P' ⟶ P` (collapsing tied weights) induces the corresponding 2-cell.
+
+    Kept LIGHTWEIGHT: we state the action-on-1-cells map + its `μ`-mediated defining law + the
+    reparameterization-2-cell (weight-tying) law as obligations; no double-category / 2-category
+    typeclass machinery. -/
 class ParaAlgebra (D C : Type) (V : Type*) [ColoredPROP D] [ColoredPROP C] [Category V] [MonoidalCategory V]
     [SymmetricCategory V]
     (R : Type) [CommSemiring R] [DGradedColoredPROP D C] [TargetActegory D V R]
-    extends Algebra D C V R
+    extends Algebra D C V R where
+  /-- The `Para(C) → Para(V)` action on parametric morphisms: a parameter `P : C` and a map
+      `f : P ⊗ X ⟶ Y` lift to parameter `F.obj P` and a `V`-map `F.obj P ⊗ F.obj X ⟶ F.obj Y`
+      (built from `F.map f` mediated by the lax-monoidal `μ`). This is the 2-functor's
+      action on 1-cells. -/
+  paraMap : ∀ {X Y : C} (P : C) (_f : MonoidalCategory.tensorObj P X ⟶ Y),
+              MonoidalCategory.tensorObj (toAlgebra.F.obj P) (toAlgebra.F.obj X) ⟶ toAlgebra.F.obj Y
+  /-- `paraMap` is the `F`-image mediated by `μ`: it factors as the lax comparison
+      `μ : F P ⊗ F X ⟶ F (P ⊗ X)` followed by `F.map f`. (The 2-functor's action-on-1-cells
+      coherence.) `F.LaxMonoidal` comes from `Fbraided.toMonoidal`. -/
+  paraMap_eq : ∀ {X Y : C} (P : C) (f : MonoidalCategory.tensorObj P X ⟶ Y),
+                 haveI : toAlgebra.F.Monoidal := toAlgebra.Fbraided.toMonoidal
+                 paraMap P f
+                   = Functor.LaxMonoidal.μ toAlgebra.F P X ≫ toAlgebra.F.map f
+  /-- Weight tying as a reparameterization 2-cell: a map of parameter objects `Δ : P' ⟶ P`
+      (collapsing tied weights) induces the corresponding 2-cell on parametric morphisms.
+      Precomposing the parameter by `Δ` upstairs (`(Δ ⊗ 𝟙 X) ≫ f`) corresponds downstairs to
+      precomposing the `V`-side parameter by `F.map Δ`. Genuine reparameterization-2-cell law. -/
+  weightTie : ∀ {X Y : C} {P' P : C} (Δ : P' ⟶ P) (f : MonoidalCategory.tensorObj P X ⟶ Y),
+                paraMap P' (MonoidalCategory.tensorHom Δ (𝟙 X) ≫ f)
+                  = MonoidalCategory.tensorHom (toAlgebra.F.map Δ) (𝟙 (toAlgebra.F.obj X))
+                      ≫ paraMap P f
 
 end LeanNCD
