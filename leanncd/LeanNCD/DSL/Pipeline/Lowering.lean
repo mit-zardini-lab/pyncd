@@ -222,6 +222,12 @@ def route (sp : ScheduledProgram) : FreshM ThreadedComposed := do
   let mut steps : List BrBaseP := []
   let mut routing : List (List Wire) := []
   for sc in sp.stmts do
+    -- Validate a pre-built (escape-hatch) morphism: its step list must be non-empty.
+    match sc with
+    | .scanPre nm _ tc =>
+        if tc.steps.isEmpty then
+          throw (CompileError.shapeMismatch s!"recurMorphism {nm}: empty step morphism" "non-empty ThreadedComposed")
+    | _ => pure ()
     let s := sc.repStmt.getD (.assign "" [] { body := { terms := [] }, nonlin := .identity })
     let lhsAxes := s.lhsAxes
     let lhsUids := lhsAxes.map (·.uid)
