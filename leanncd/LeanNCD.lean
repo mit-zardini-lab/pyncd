@@ -14,6 +14,7 @@ import LeanNCD.Mixins.Symmetry
 import LeanNCD.Grothendieck.Split
 import LeanNCD.Algebra.Target
 import LeanNCD.Algebra.Algebra
+import LeanNCD.Algebra.Construct
 import LeanNCD.Props.Generic
 import LeanNCD.Instances.StBr
 import LeanNCD.Exec.Uid

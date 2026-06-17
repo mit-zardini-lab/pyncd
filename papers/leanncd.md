@@ -638,14 +638,22 @@ Unlike the propositional tower (§2–§10, transcribed as signatures with `sorr
 
 ### 7.5 Algebras and `construct()`
 
-The algebra `F` (graded_prop.md Def 7.2 / [§7](graded_prop.md#7-algebras-construct-and-the-para-refinement)) is the strong symmetric monoidal, `D`-equivariant functor `C → V` into a target actegory — the categorical content of `ConstructedModule.construct()`. It is the last layer of the tower, and the clearest instance of the doc's recurring shape: a typeclass parameterised by the classes below it. The target `V` is itself a right `D`-actegory parameterised by a value semiring `R` (graded_prop.md Def 7.1); the algebra is parametric on both the source graded PROP `C`, the target `V`, and `R`:
+The algebra `F` (graded_prop.md Def 7.2 / [§7](graded_prop.md#7-algebras-construct-and-the-para-refinement)) is the strong symmetric monoidal, `D`-equivariant functor `C → V` into a target actegory — the categorical content of `ConstructedModule.construct()`. It is the last layer of the tower, and the clearest instance of the doc's recurring shape: a typeclass parameterised by the classes below it. The target `V` is itself a right `D`-actegory parameterised by a value semiring `R` (graded_prop.md Def 7.1); the algebra is parametric on both the source graded PROP `C`, the target `V`, and `R`. As of this milestone the coherence/monoidal/equivariance/`Para` laws are all **stated** (signatures + `sorry`, math-tower style); only the `Mat ℝ` instance proofs are deferred.
 
 ```lean
 -- `V` is `Type*` (a module category lives in `Type 1`); `D`/`C`/`R` are `Type`. `R` is a value
--- semiring carried as `(R : Type) [CommSemiring R]`.
-class TargetActegory (D : Type) (V : Type*) [ColoredPROP D] [Category V] (R : Type) [CommSemiring R] where
+-- semiring carried as `(R : Type) [CommSemiring R]`. `V` is symmetric monoidal.
+class TargetActegory (D : Type) (V : Type*) [ColoredPROP D] [Category V] [MonoidalCategory V]
+    (R : Type) [CommSemiring R] where
   actV : (V × Dᵒᵖ) ⥤ V               -- P acts by appending R-valued dimensions
-  -- … same υ/α/δ coherences as §4, now in V; ⊗_V uses R (deferred — only actV stated)
+  -- The full υ/α/δ coherences of §4, now TRANSPOSED into `V` (⊗_V/𝟙_ V for tensor/unit on `C`):
+  δ_V  : …   -- (Dist-⊗) the lift distributes over ⊗_V          (mirrors DGradedColoredPROP.δ)
+  δ0_V : …   -- (Dist-I)  the lift distributes over 𝟙_ V         (mirrors …δ0)
+  υ_V  : …   -- (Act-unit) the unit grading I_D acts trivially   (mirrors …υ)
+  α_V  : …   -- (Act-assoc) consecutive lifts compose by ⊗_D     (mirrors …α)
+  act_unit_assoc_V : …  -- triangle + pentagon (right D-actegory; eqToHom bridges the D-grading)
+  υ_nat_V : …           -- υ_V naturality in V
+  dist_coh_V : …        -- δ_V/δ0_V naturality (in V and in Dᵒᵖ)
 
 -- Default: R = ℝ, the standard (×, +) semiring (multiply, then sum over contracted indices).
 /-- The default target actegory: finite-dimensional/finitely-generated `R`-modules, encoded as
@@ -654,27 +662,45 @@ class TargetActegory (D : Type) (V : Type*) [ColoredPROP D] [Category V] (R : Ty
 abbrev Mat (R : Type) [CommRing R] := FGModuleCat R
 
 noncomputable instance : TargetActegory StObj (Mat ℝ) ℝ where
-  actV := …   -- appends ℝ-typed dimensions; composition = matrix multiply over ℝ
+  actV := sorry   -- appends ℝ-typed dimensions; composition = matrix multiply over ℝ
+  …               -- all coherence fields `sorry` (the Mat ℝ instance is the deferred obligation)
 
 /-- The algebra functor F : C → V, a strong symmetric monoidal D-equivariant functor.
     Declared as a `class` (not `structure`) so that `ParaAlgebra` can extend it via
     typeclass inheritance, and so that `construct()` can be invoked via instance search. -/
-class Algebra (D C : Type) (V : Type*) [ColoredPROP D] [ColoredPROP C] [Category V]
+class Algebra (D C : Type) (V : Type*) [ColoredPROP D] [ColoredPROP C] [Category V] [MonoidalCategory V]
+    [SymmetricCategory V]
     (R : Type) [CommSemiring R] [DGradedColoredPROP D C] [TargetActegory D V R] where
-  F        : C ⥤ V                                    -- (strong symmetric monoidal; plain ⥤ for now)
+  F        : C ⥤ V
+  Fbraided : F.Braided          -- F is STRONG SYMMETRIC MONOIDAL (Mathlib `Functor.Braided`:
+                                -- μ/ε invertible + pentagon/unitor + the braiding law);
+                                -- `C` is symmetric via the Seam adapter, `V` by the class binder
   equivar  : ∀ (X : C) (P : Dᵒᵖ),
                F.obj (act.obj (X, P)) ≅ (TargetActegory.actV (D := D)).obj (F.obj X, P)  -- D-equivariance
-  -- coh : … commutes with υ, α, δ; preserves ev_p (deferred — only F + equivar stated)
+  -- The equivariance/preservation coherence laws (real, non-vacuous equations):
+  equivar_nat : …   -- equivar natural in the C-variable
+  equivar_υ   : …   -- equivar carries C's υ to V's υ_V
+  equivar_α   : …   -- equivar carries C's α to V's α_V
+  equivar_δ   : …   -- equivar carries C's δ to V's δ_V, mediated by F's μ (from Fbraided.toMonoidal)
+  F_ev_p      : …   -- F preserves the §4.1 evaluation ev_p (actV.map (𝟙, p) ≫ υ_V downstairs)
 -- A morphism of algebras is a MonoidalNatTrans; weight tying collapses parameters via Δ.
 
-class ParaAlgebra (D C : Type) (V : Type*) [ColoredPROP D] [ColoredPROP C] [Category V]
+class ParaAlgebra (D C : Type) (V : Type*) [ColoredPROP D] [ColoredPROP C] [Category V] [MonoidalCategory V]
+    [SymmetricCategory V]
     (R : Type) [CommSemiring R] [DGradedColoredPROP D C] [TargetActegory D V R]
-    extends Algebra D C V R -- STUB: Para(C) → Para(V) 2-functor; passes-as-2-cells, weight tying
--- Note: Algebra is now `class` so that `extends` works cleanly; if Algebra is used
--- purely as data (not synthesized), callers use `[Algebra D C V]` in signatures.
+    extends Algebra D C V R where
+  paraMap    : …   -- the Para(C) → Para(V) action on 1-cells: (P, f) ↦ (F P, paraMap P f)
+  paraMap_eq : …   -- paraMap factors as the lax μ followed by F.map f
+  weightTie  : …   -- weight tying as a reparameterization 2-cell (precompose parameter by Δ / F.map Δ)
+-- Kept LIGHTWEIGHT: the action-on-1-cells + its μ-mediated law + the 2-cell law as obligations;
+-- no double-/2-category machinery.
 ```
 
-The full development of these — the `equivar`/`coh` obligations, the `Para` refinement, weight tying as a reparameterization 2-cell — lives in the propositions and instantiation sections ([§9](#9-the-propositions-as-generic-theorems), [§10](#10-instantiation-and-future-extensions)) and the lightweight-`Para` note of [§11](#11-lean-formalization-notes); the trained model is a *section of the Para fibration over `∫Dat`*, tying the algebra back to the Grothendieck split of [§7.1](#71-the-structuredata-split-as-dat).
+These laws are now stated rather than deferred: the `υ_V`/`α_V`/`δ_V` coherences (with triangle/pentagon and naturality), `F` strong-symmetric-monoidal via `Functor.Braided` under `[SymmetricCategory V]`, the `equivar_*`/`F_ev_p` equivariance/preservation laws, and the `paraMap`/`weightTie` `Para` refinement. Their further interpretation lives in the propositions and instantiation sections ([§9](#9-the-propositions-as-generic-theorems), [§10](#10-instantiation-and-future-extensions)) and the lightweight-`Para` note of [§11](#11-lean-formalization-notes); the trained model is a *section of the Para fibration over `∫Dat`*, tying the algebra back to the Grothendieck split of [§7.1](#71-the-structuredata-split-as-dat).
+
+**The `R = Bool` target wrinkle.** §7.5 turns on the value-semiring parameter `R`: `R = ℝ` gives (`×`, then `Σ`) — the tensor/linear reading, realised over `Mat ℝ = FGModuleCat ℝ`; `R = Bool` gives (`∧`, then `∃`) — the predicate/relational reading. The wrinkle is *semantic*, not typechecking: the predicate reading needs the `(∨, ∧)` Boolean *semiring* (addition `∨` = `∃`), which is genuinely not a ring (`∨` has no additive inverse). But Mathlib's `Bool` *type* carries the Boolean *ring* (`+` = XOR, `*` = `∧`; via `BooleanRing.toCommRing`), so `true + true = false` and `Mat Bool = FGModuleCat Bool` *does* elaborate — over the WRONG (XOR) addition, not `∨`/`∃`. The predicate target therefore needs a separate `TargetActegory _ V Bool` over a relations / `(∨,∧)`-semimodule value category `V` (`∧`-then-`∃` Boolean matrix multiply, with `Bool` carrying the `(∨,∧)` semiring rather than XOR) — recorded as a deferred formalization obligation. The split is witnessed for now by the idempotency proxy `semiring_choice_split` (`(1:ℝ)+1 ≠ 1 ∧ true || true = true`, using `∨`/`||`, not XOR `+`).
+
+**Flagship + propositions (now in Lean, signatures + `sorry`).** `instAlgebraBrMatR : Algebra StObj BrObj (Mat ℝ) ℝ` is the flagship instance (`Br` evaluates into ℝ-modules; all 8 fields `sorry`). Two propositions are stated and verified by `#print axioms` (each lists `sorryAx`): `construct_correspondence` — the `F_ev_p` law specialized, stating that `F` realizes `construct()`'s ℝ-valued read (plug the point `p`, then contract via the unitor); and `semiring_choice_split` — the Σ/×-vs-∃/∧ split *as the choice of `R`*, stated as a PROXY via additive idempotency (`(1:ℝ)+1 ≠ 1 ∧ true+true = true`) since the `Bool` target category is the deferred obligation above.
 
 ## 8. Acsets and the executable layer
 

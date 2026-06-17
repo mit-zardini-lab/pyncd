@@ -285,3 +285,36 @@ DSL feature-completion on the E2a pipeline — fully executable, `sorry`-free.
   detected in `finalizeScans` (BEFORE `splitNonlins` lifts nonlinearities out) via the `isAffine` flag on
   `ScanStmt.scan`, and `route` emits `op="scan_affine"` (vs `"scan"`). The §12.1 coupled scan (relu
   recurrence) stays `op="scan"`. So routed scan steps now carry `op ∈ {scan, scan_affine, scan_pre}`.
+
+## Milestone H — §7.5 Algebra & construct() (signatures + sorry)
+
+`LeanNCD/Algebra/` — the §7.5 Algebra layer — formalized as signatures + `sorry` (math-tower
+style, like §2–§9), verified by elaboration + `#print axioms`. Builds ON (does not close) the
+B+/G `Br`/`St` coherence sorries.
+
+- **TargetActegory** (`Target.lean`): full actegory coherences in `V` (`υ_V`/`α_V`/`δ_V`/`δ0_V` +
+  triangle/pentagon `act_unit_assoc_V`, `υ_nat_V`, `dist_coh_V`), over `[MonoidalCategory V]`,
+  transposed from `DGradedColoredPROP`. The `Mat ℝ = FGModuleCat ℝ` instance fields are `sorry`.
+- **R = Bool target obligation** (`Target.lean` note): the predicate (∧/∃) target needs the
+  `(∨, ∧)` Boolean *semiring* (∨ has no additive inverse → genuinely not a ring). The wrinkle is
+  semantic, NOT typechecking: Mathlib's `Bool` *type* is the Boolean *ring* (`+` = XOR, so
+  `true + true = false`, and `FGModuleCat Bool` DOES elaborate) — but reusing it computes over XOR,
+  the wrong addition for `∃`. So the predicate target needs a separate `TargetActegory _ V Bool`
+  over a relations / `(∨,∧)`-semimodule `V` (with `Bool` carrying the `(∨,∧)` semiring, not XOR) —
+  a deferred obligation.
+- **Algebra** (`Algebra.lean`): `F` is strong symmetric monoidal via Mathlib `Functor.Braided`
+  (genuine pentagon/unitor/invertibility + braiding laws), `[SymmetricCategory V]`; plus the
+  `equivar` coherence laws `equivar_nat`/`equivar_υ`/`equivar_α`/`equivar_δ` (μ-mediated) and
+  `F_ev_p` (F preserves the §4.1 evaluation) — all real non-vacuous equations (class fields, no sorry).
+- **ParaAlgebra** (`Algebra.lean`): the lightweight `Para(C)→Para(V)` action `paraMap` + its
+  μ-mediated `paraMap_eq` + the `weightTie` reparameterization-2-cell law (real equations).
+- **Flagship + propositions** (`Construct.lean`): `instAlgebraBrMatR : Algebra StObj BrObj (Mat ℝ) ℝ`
+  (Br evaluates into ℝ-modules; all 8 fields `sorry`); `construct_correspondence` (the `F_ev_p` law
+  specialized — F realizes construct()'s ℝ-valued read, `sorry`); `semiring_choice_split` (Σ/×-vs-∃/∧
+  as the choice of R, a PROXY via additive idempotency `((1:ℝ)+1 ≠ 1) ∧ (true || true = true)` —
+  ℝ's `+` non-idempotent (Σ) vs the `(∨,∧)` semiring's `∨`/`||` idempotent (∃); uses `||` NOT Bool's
+  XOR `+`. This is PROVEN (`⟨by norm_num, by decide⟩`), not `sorry`. A class-scoped `actV` comparison
+  awaits the deferred Bool target).
+
+Out of scope (later): the executable Algebra *interpreter* (parse→compile→evaluate→numbers; retires
+the dtype obstruction); the B+/G `Br`/`St` coherence proofs.
