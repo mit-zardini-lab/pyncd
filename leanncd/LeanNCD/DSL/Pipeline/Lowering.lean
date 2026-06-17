@@ -197,6 +197,12 @@ def ScanStmt.isScanPre : ScanStmt → Bool
   | .scanPre _ _ _ => true
   | _              => false
 
+/-- Is this a `.scan` node flagged affine by `finalizeScans` (Prop 8.7)? Drives the
+    "scan_affine" vs "scan" op label. The flag was computed pre-`splitNonlins`. -/
+def ScanStmt.isAffineScan : ScanStmt → Bool
+  | .scan _ _ _ _ isAff => isAff
+  | _                   => false
+
 /-- Phase 8: route the scheduled statements into a `ThreadedComposed`. -/
 def route (sp : ScheduledProgram) : FreshM ThreadedComposed := do
   -- PASS 1: step indices, name→step map, external-name numbering.
@@ -240,7 +246,7 @@ def route (sp : ScheduledProgram) : FreshM ThreadedComposed := do
         coeffs := rows.map (·.1), bias := rows.map (·.2) })
     let op : String :=
       if sc.isScanPre then "scan_pre"   -- Task 3 refines/validates the step morphism
-      else if sc.isScan then "scan"     -- `.scan` ignores isAffine for now (Task 2 wires it)
+      else if sc.isScan then (if sc.isAffineScan then "scan_affine" else "scan")  -- Prop 8.7
       else match s.nonlin with
         | .relu        => "relu"
         | .softmax _   => "softmax"

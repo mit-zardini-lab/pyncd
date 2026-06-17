@@ -265,6 +265,16 @@ step of the same name (else `missingBaseCase`); and a recur step may not read it
 def Stmt.slots : Stmt → List LHSSlot
   | .assign _ ls _ => ls | .scatter _ ls _ _ => ls | .recurMorphism _ _ _ => []
 
+/-- The nonlinearity wrapping a stmt's step. A `recurMorphism` is pre-built (already-lowered),
+    so it is affine-neutral (`identity`). Used by `finalizeScans` to detect ScanAffine (Prop 8.7):
+    a scan whose every recurrence stmt is `identity`-nonlin carries no nonlinearity and is thus
+    associative/parallel-prefix-able. This MUST be checked here (pre-`splitNonlins`), since
+    `splitNonlins` later lifts nonlinearities out of `RHSExpr.nonlin` into separate steps. -/
+def Stmt.nonlinOf : Stmt → Nonlin
+  | .assign _ _ r => r.nonlin
+  | .scatter _ _ r _ => r.nonlin
+  | .recurMorphism _ _ _ => .identity
+
 /-- `(iteration-axis uid, axis, isRecur)` if this stmt is a scan base/recur stmt. A stmt has
     at most one iteration slot, so the first match is the only one. -/
 def Stmt.iterInfo (s : Stmt) : Option (UID × AxisSpec × Bool) :=
@@ -337,7 +347,10 @@ def finalizeScans (lp : LoweredProgram) : FreshM ScanProgram := do
         throw (CompileError.missingBaseCase r.lhsName)
       if readsIterAhead r u then throw (CompileError.causalityViolation r.lhsName)
     let repName := (group.head?.map Stmt.lhsName).getD ""
-    nodes := nodes ++ [ ScanStmt.scan repName axis baseStmts recurStmts false ]  -- isAffine := false (Task 2)
+    -- ScanAffine (Prop 8.7): the recurrence carries NO nonlinearity (every recur stmt is
+    -- identity-nonlin) ⇒ associative/parallel-prefix-able. Empty `recur` ⇒ vacuously affine.
+    let isAffine : Bool := recurStmts.all (fun s => Stmt.nonlinOf s == Nonlin.identity)
+    nodes := nodes ++ [ ScanStmt.scan repName axis baseStmts recurStmts isAffine ]
   return { decls := lp.decls, stmts := plainStmts.map ScanStmt.plain ++ preNodes ++ nodes,
            env := lp.env, extNames := lp.extNames, ctx := lp.ctx }
 
