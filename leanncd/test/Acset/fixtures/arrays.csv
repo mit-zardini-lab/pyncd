@@ -1,0 +1,7 @@
+equation_idx,slot,name,is_input,operator_tag,norm_axis,datatype_tag,max_value,bias,elementwise_fn,op_predicate,wire_label
+0,0,H,false,linear,,reals,,false,,,
+0,1,X,true,,,reals,,,,,
+0,2,W1,true,,,reals,,,,,
+1,0,Y,false,linear,,reals,,true,,,
+1,1,H,true,,,reals,,,,,
+1,2,W2,true,,,reals,,,,,
