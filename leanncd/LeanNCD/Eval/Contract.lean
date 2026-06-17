@@ -58,6 +58,10 @@ def evalAssignWith (mul : Float → Float → Float) (combine : Float → Float 
     if !(env.contains rn) then
       throw s!"evalAssign: unknown tensor {rn}"
   let frees := freeAxisUIDs slots
+  -- fail loud: a free output axis with no inferred size would silently yield a 0-extent tensor.
+  for u in frees do
+    if (sizes[u]?).isNone then
+      throw s!"evalAssign {nm}: output axis (uid {u}) has no inferable size (it appears in no read position)"
   let contr := (readAxisUIDs rhs).eraseDups.filter (fun u => ! frees.contains u)
   let outShape := outputShape sizes slots
   let contrSizes := contr.map (fun u => (sizes[u]?).getD 1)
