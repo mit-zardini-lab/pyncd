@@ -80,6 +80,40 @@ def evalAssignWith (mul : Float → Float → Float) (combine : Float → Float 
 /-- The default tensor (ℝ) contraction: multiply factors, then sum contributions. -/
 def evalAssign := evalAssignWith (· * ·) (· + ·) 0.0
 
+/-- The contraction "semiring" to use for an output, selected by its declared dtype. -/
+structure Combine where
+  mul     : Float → Float → Float
+  combine : Float → Float → Float
+  unit0   : Float
+
+/-- The ℝ contraction `(×, Σ)`: multiply factors, then sum. -/
+def Combine.real : Combine := ⟨(· * ·), (· + ·), 0.0⟩
+
+/-- The Boolean contraction `(∧, ∃)` on 0/1 Floats: `min` factors (∧), `max` terms (∃). -/
+def Combine.bool : Combine := ⟨min, max, 0.0⟩
+
+/-- The declared name of a `Decl`. -/
+def declName : Decl → String
+  | .tensor n _      => n
+  | .predicate n _   => n
+  | .linear n _ _ _  => n
+
+/-- Pick the `Combine` for an output name from the decls: `predicate` ⇒ bool, else real. -/
+def combineFor (decls : List Decl) (nm : String) : Combine :=
+  match decls.find? (fun d => declName d == nm) with
+  | some (.predicate _ _) => Combine.bool
+  | _                     => Combine.real
+
+/-- dtype-aware assign: choose the `Combine` from the decls, then evaluate.
+    A `predicate` output contracts in `(∧, ∃)` (min/max on 0/1) computing a Boolean result;
+    every other (or unknown) output contracts in the ℝ default `(×, Σ)`. -/
+def evalAssignDtyped (decls : List Decl)
+    (env : HashMap String DenseTensor) (sizes : HashMap UID Nat)
+    (nm : String) (slots : List LHSSlot) (rhs : RHSExpr) :
+    Except EvalError (String × DenseTensor) :=
+  let c := combineFor decls nm
+  evalAssignWith c.mul c.combine c.unit0 env sizes nm slots rhs
+
 /-- Like `evalAssign`, but with a `seed : HashMap UID Int` of axis-UIDs pinned to fixed values
     (e.g. the iteration axis of a scan, pinned to the current slice `l`). The seeded UIDs are
     excluded from BOTH the free (output) axes and the contracted axes; every per-output coord is

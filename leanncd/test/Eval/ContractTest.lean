@@ -44,4 +44,25 @@ run_cmd do
   match evalAssign env sizes "Q" [.free i] rhs with
   | .error _ => pure ()
   | .ok _ => throwError "expected error for missing input tensor"
+
+-- Masked aggregation: Result[] := F[t,i]·F[t,j]·edge[i,j], all axes contracted ⇒ scalar.
+-- F : [1,2] (t=1, i/j=2): F = [[1, 1]] (so F[0,0]=1, F[0,1]=1). edge : [2,2] = [[1,0],[0,1]] (identity).
+-- ℝ reading: Σ_{t,i,j} F[t,i]·F[t,j]·edge[i,j] = (i=j terms) F[0,0]²·1 + F[0,1]²·1 = 1 + 1 = 2.
+run_cmd do
+  let t := ax "t" 1; let i := ax "i" 2; let j := ax "j" 3
+  let F := tensorOf [1,2] [1, 1]
+  let edge := tensorOf [2,2] [1,0, 0,1]
+  let env : HashMap String DenseTensor := (({} : HashMap String DenseTensor).insert "F" F).insert "edge" edge
+  let rhs : RHSExpr := { body := { terms := [{ factors := [.read "F" [.axis t, .axis i], .read "F" [.axis t, .axis j], .read "edge" [.axis i, .axis j]] }] }, nonlin := .identity }
+  match inferAxisSizes env [.assign "Result" [] rhs] with
+  | .error e => throwError e
+  | .ok sizes =>
+    -- ℝ (tensor) reading ⇒ scalar 2.0
+    match evalAssignDtyped [.tensor "Result" []] env sizes "Result" [] rhs with
+    | .error e => throwError e
+    | .ok (_, R) => unless DenseTensor.approxEq R (tensorOf [] [2.0]) do throwError s!"ℝ agg wrong: {repr R.data}"
+    -- Boolean (predicate) reading ⇒ ∃ t,i,j with all-1 ⇒ 1.0 (there is such a term)
+    match evalAssignDtyped [.predicate "Result" []] env sizes "Result" [] rhs with
+    | .error e => throwError e
+    | .ok (_, R) => unless DenseTensor.approxEq R (tensorOf [] [1.0]) do throwError s!"Bool agg wrong: {repr R.data}"
 end LeanNCD.Eval
