@@ -50,4 +50,75 @@ def writeSBr (inst : SBrInstance) : List (String × String) :=
     ("samples.csv",    renderTable
         ["equation_idx","reindexing_slot","src_uid","tgt_uid","coeff","offset"] (sampleRows inst)) ]
 
+/-!
+## Deserialize the five CSV tables back into an `SBrInstance` (Task 4)
+
+`readSBr` is the inverse of `writeSBr`: it parses each table, drops the header, and decodes
+each data row. The CORE property is `readSBr (writeSBr inst) = .ok inst`. Fully executable.
+-/
+
+/-- Fetch a file's content from the pairs, or error if absent. -/
+private def lookup (pairs : List (String × String)) (nm : String) : Except CsvError String :=
+  match pairs.find? (·.1 == nm) with
+  | some (_, c) => .ok c
+  | none        => .error s!"missing file: {nm}"
+
+/-- Decode a plain (header-less) Nat field. -/
+private def decodeNat (s : String) : Except CsvError Nat :=
+  match s.toNat? with
+  | some n => .ok n
+  | none   => .error s!"expected Nat, got '{s}'"
+
+/-- `"" ⇒ none`; else `some (← decodeUID s)`. -/
+private def decodeUidOpt (s : String) : Except CsvError (Option AxisUID) :=
+  if s.isEmpty then .ok none else (some <$> decodeUID s)
+
+/-- `"" ⇒ none`; else `some (← decodeSize s)`. -/
+private def decodeSizeOpt (s : String) : Except CsvError (Option SizeExpr) :=
+  if s.isEmpty then .ok none else (some <$> decodeSize s)
+
+/-- Data rows of a CSV table (header dropped). -/
+private def dataRows (content : String) : List (List String) := (parseTable content).drop 1
+
+private def rowToAxisSize : List String → Except CsvError (AxisUID × SizeExpr)
+  | [u, sz] => do return (← decodeUID u, ← decodeSize sz)
+  | r => .error s!"axis_sizes.csv: expected 2 fields, got {r.length}"
+
+private def rowToEquation : List String → Except CsvError EquationRow
+  | [eq, lhs] => do return { equationIdx := ← decodeNat eq, lhsName := decodeName lhs }
+  | r => .error s!"equations.csv: expected 2 fields, got {r.length}"
+
+private def rowToArray : List String → Except CsvError ArrayRow
+  | [eq, slot, name, isInp, op, norm, dt, mx, bias, efn, opred, wlab] => do
+      return { equationIdx := ← decodeNat eq, slot := ← decodeNat slot, name := decodeName name,
+               isInput := decodeReqBool isInp, operatorTag := ← decodeOpTagOpt op,
+               normAxis := ← decodeUidOpt norm, datatypeTag := ← decodeDataTag dt,
+               maxValue := ← decodeSizeOpt mx, bias := decodeBoolOpt bias,
+               elementwiseFn := decodeName efn, opPredicate := decodeName opred,
+               wireLabel := decodeName wlab }
+  | r => .error s!"arrays.csv: expected 12 fields, got {r.length}"
+
+private def rowToArrayAxis : List String → Except CsvError ArrayAxisRow
+  | [eq, slot, uid, isTgt, pos] => do
+      return { equationIdx := ← decodeNat eq, arraySlot := ← decodeNat slot,
+               axisUid := ← decodeUID uid, isTarget := decodeReqBool isTgt,
+               position := ← decodeNat pos }
+  | r => .error s!"array_axes.csv: expected 5 fields, got {r.length}"
+
+private def rowToSample : List String → Except CsvError SampleRow
+  | [eq, slot, src, tgt, coeff, offset] => do
+      return { equationIdx := ← decodeNat eq, reindexingSlot := ← decodeNat slot,
+               srcUid := ← decodeUID src, tgtUid := ← decodeUID tgt,
+               coeff := ← decodeInt coeff, offset := ← decodeInt offset }
+  | r => .error s!"samples.csv: expected 6 fields, got {r.length}"
+
+/-- Parse the five acset CSV tables back into an `SBrInstance` (inverse of `writeSBr`). -/
+def readSBr (pairs : List (String × String)) : Except CsvError SBrInstance := do
+  let axisSizes ← (dataRows (← lookup pairs "axis_sizes.csv")).mapM rowToAxisSize
+  let equations ← (dataRows (← lookup pairs "equations.csv")).mapM rowToEquation
+  let arrays    ← (dataRows (← lookup pairs "arrays.csv")).mapM rowToArray
+  let arrayAxes ← (dataRows (← lookup pairs "array_axes.csv")).mapM rowToArrayAxis
+  let samples   ← (dataRows (← lookup pairs "samples.csv")).mapM rowToSample
+  return { axisSizes, equations, arrays, arrayAxes, samples }
+
 end LeanNCD.Acset
