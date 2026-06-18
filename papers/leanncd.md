@@ -1294,6 +1294,8 @@ Following the IMP language pattern of the Lean 4 metaprogramming book (ch. 8): o
 declare_syntax_cat tl_size
 declare_syntax_cat tl_axis_kind
 declare_syntax_cat tl_axis_spec
+declare_syntax_cat tl_named_shape
+declare_syntax_cat tl_axis_decl_item
 declare_syntax_cat tl_shape
 declare_syntax_cat tl_decl
 declare_syntax_cat tl_idx_expr
@@ -1325,15 +1327,17 @@ syntax "ℝ[" tl_size "]"      : tl_axis_kind
 syntax "ℕ"                   : tl_axis_kind
 syntax "ℕ[" tl_size "]"      : tl_axis_kind
 
-syntax ident : tl_axis_spec               -- a tensor shape lists axis NAMES only
-syntax "(" tl_axis_spec,* ")" : tl_shape
+syntax ident : tl_axis_spec               -- an axis name (bare ident)
+syntax ident "(" tl_axis_spec,* ")" : tl_named_shape   -- `T(a, b, c)`
+syntax ident ":" tl_axis_kind         : tl_axis_decl_item  -- dtype only
+syntax ident ":" tl_axis_kind "=" num : tl_axis_decl_item  -- dtype + pinned size
+syntax "(" tl_axis_spec,* ")" : tl_shape   -- used only by `linear`
 
-syntax "tensor"    ident ":" tl_shape                      : tl_decl
-syntax "predicate" ident ":" tl_shape                      : tl_decl
+syntax "tensor"    tl_named_shape,+                        : tl_decl   -- `tensor A(q,m), B(x,y)`
+syntax "predicate" tl_named_shape,+                        : tl_decl   -- `predicate P(i,j)`
 syntax "linear"    ident ":" tl_shape "→" tl_shape         : tl_decl
 syntax "linear"    ident ":" tl_shape "→" tl_shape " bias" : tl_decl
-syntax "axis"      ident ":" tl_axis_kind                  : tl_decl   -- dtype only
-syntax "axis"      ident ":" tl_axis_kind "=" num          : tl_decl   -- dtype + pinned size
+syntax "axis"      tl_axis_decl_item,+                     : tl_decl   -- `axis l : ℕ = 3, s : ℕ = 2`
 
 -- Layer 2: index expressions — GENERALIZED to general integer-affine sums (the AST's
 -- IdxExpr.affine carries a full `List (ℤ × AxisSpec)`, so the grammar must reach it).
@@ -1605,8 +1609,8 @@ The result is a `ThreadedComposed` (a presentation of a `BrMorph`, [§2.3](#23-b
 
 | Lean DSL | Python DSL | Notes |
 | --- | --- | --- |
-| `tensor Name : shape` | `tl.Name.tensor(*axes)` | shape declaration |
-| `predicate Name : shape` | `tl.Name.predicate(*axes)` | Bool-typed |
+| `tensor A(q, m), B(x, y)` | `tl.Name.tensor(*axes)` | grouped; no colon |
+| `predicate P(i, j)` | `tl.Name.predicate(*axes)` | Bool-typed; same form |
 | `linear Name : in → out [bias]` | `tl.Name.linear(out_axes=…, in_axes=…, bias=…)` | weight declaration |
 | `Name[i,j] := rhs` | `tl.Name[i,j] = rhs` | normal assignment |
 | `Name[0, j] := rhs` | `tl.Name[j, 0] = rhs` | scan base case |

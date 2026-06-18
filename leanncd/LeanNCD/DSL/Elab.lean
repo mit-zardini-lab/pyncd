@@ -39,17 +39,31 @@ partial def elabTLShape : Syntax → MetaM (List AxisSpec)
   | `(tl_shape| ( $specs,* )) => specs.getElems.toList.mapM elabTLAxisSpec
   | _ => throwUnsupportedSyntax
 
-partial def elabTLDecl : Syntax → MetaM Decl
-  | `(tl_decl| tensor $x:ident : $sh:tl_shape)    => return .tensor x.getId.eraseMacroScopes.getString! (← elabTLShape sh)
-  | `(tl_decl| predicate $x:ident : $sh:tl_shape) => return .predicate x.getId.eraseMacroScopes.getString! (← elabTLShape sh)
-  | `(tl_decl| linear $x:ident : $i:tl_shape → $o:tl_shape) =>
-      return .linear x.getId.eraseMacroScopes.getString! (← elabTLShape i) (← elabTLShape o) false
-  | `(tl_decl| linear $x:ident : $i:tl_shape → $o:tl_shape bias) =>
-      return .linear x.getId.eraseMacroScopes.getString! (← elabTLShape i) (← elabTLShape o) true
-  | `(tl_decl| axis $x:ident : $k:tl_axis_kind) =>
+private def elabTLNamedShape : Syntax → MetaM (String × List AxisSpec)
+  | `(tl_named_shape| $x:ident ( $specs,* )) => do
+      return (x.getId.eraseMacroScopes.getString!, ← specs.getElems.toList.mapM elabTLAxisSpec)
+  | _ => throwUnsupportedSyntax
+
+private def elabTLAxisDeclItem : Syntax → MetaM Decl
+  | `(tl_axis_decl_item| $x:ident : $k:tl_axis_kind) => do
       return .axis { name := x.getId.eraseMacroScopes.getString!, uid := 0, kind := (← elabTLAxisKind k) } none
-  | `(tl_decl| axis $x:ident : $k:tl_axis_kind = $n:num) =>
+  | `(tl_axis_decl_item| $x:ident : $k:tl_axis_kind = $n:num) => do
       return .axis { name := x.getId.eraseMacroScopes.getString!, uid := 0, kind := (← elabTLAxisKind k) } (some n.getNat)
+  | _ => throwUnsupportedSyntax
+
+partial def elabTLDecl : Syntax → MetaM (List Decl)
+  | `(tl_decl| tensor $items:tl_named_shape,*) => do
+      let pairs ← items.getElems.toList.mapM elabTLNamedShape
+      return pairs.map fun (nm, axes) => .tensor nm axes
+  | `(tl_decl| predicate $items:tl_named_shape,*) => do
+      let pairs ← items.getElems.toList.mapM elabTLNamedShape
+      return pairs.map fun (nm, axes) => .predicate nm axes
+  | `(tl_decl| linear $x:ident : $i:tl_shape → $o:tl_shape) =>
+      return [.linear x.getId.eraseMacroScopes.getString! (← elabTLShape i) (← elabTLShape o) false]
+  | `(tl_decl| linear $x:ident : $i:tl_shape → $o:tl_shape bias) =>
+      return [.linear x.getId.eraseMacroScopes.getString! (← elabTLShape i) (← elabTLShape o) true]
+  | `(tl_decl| axis $items:tl_axis_decl_item,*) => do
+      items.getElems.toList.mapM elabTLAxisDeclItem
   | _ => throwUnsupportedSyntax
 
 /-- A placeholder `AxisSpec` for an index-expression axis reference.
@@ -211,7 +225,7 @@ partial def elabTLProgram (stx : Syntax) : MetaM TLProgram := do
     if "tl_stmt".isPrefixOf child.getKind.getString! then
       stmts := stmts ++ [(← elabTLStmt child)]
     else
-      decls := decls ++ [(← elabTLDecl child)]
+      decls := decls ++ (← elabTLDecl child)
   return { decls := decls, stmts := stmts }
 
 -- `tlprog!{ … } : TLProgram` — parse a whole program and embed the resulting

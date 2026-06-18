@@ -4,12 +4,12 @@ namespace LeanNCD
 open Lean Elab
 
 run_cmd do
-  let d ← Command.liftTermElabM <| LeanNCD.elabTLDecl (← `(tl_decl| tensor A : (i)))
-  match d with
-  | .tensor name axes =>
+  let ds ← Command.liftTermElabM <| LeanNCD.elabTLDecl (← `(tl_decl| tensor A(i)))
+  match ds with
+  | [.tensor name axes] =>
       unless name == "A" do throwError "decl name"
       unless axes.length == 1 do throwError "axis count"
-  | _ => throwError "expected tensor decl"
+  | _ => throwError "expected single tensor decl"
 
 -- general affine read: i + p  (axis + axis) → affine with two unit-coefficient terms
 run_cmd do

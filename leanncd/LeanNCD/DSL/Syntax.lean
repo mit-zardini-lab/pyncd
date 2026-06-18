@@ -21,6 +21,8 @@ open Lean
 declare_syntax_cat tl_size
 declare_syntax_cat tl_axis_kind
 declare_syntax_cat tl_axis_spec
+declare_syntax_cat tl_named_shape
+declare_syntax_cat tl_axis_decl_item
 declare_syntax_cat tl_shape
 declare_syntax_cat tl_decl
 declare_syntax_cat tl_idx_expr
@@ -50,19 +52,25 @@ syntax "ℝ[" tl_size "]"      : tl_axis_kind
 syntax "ℕ"                   : tl_axis_kind
 syntax "ℕ[" tl_size "]"      : tl_axis_kind
 
--- A tensor's shape lists only its axis NAMES (and order); an axis's dtype/size lives in an
--- `axis` declaration, and the softmax/normalize reduction axis is marked on the output slot (`m.`).
+-- Axis names in tensor/predicate shapes are bare identifiers.
 syntax ident : tl_axis_spec
+-- `tl_shape` is used only by `linear` declarations (which need the `→` form).
 syntax "(" tl_axis_spec,* ")" : tl_shape
+-- `T(a, b, c)` — tensor/predicate name followed by its axis list, no colon needed.
+syntax ident "(" tl_axis_spec,* ")" : tl_named_shape
+-- `l : ℕ` or `l : ℕ = 3` — a single axis declaration item (may appear in a comma group).
+syntax ident ":" tl_axis_kind         : tl_axis_decl_item
+syntax ident ":" tl_axis_kind "=" num : tl_axis_decl_item
 
-syntax "tensor"    ident ":" tl_shape                      : tl_decl
-syntax "predicate" ident ":" tl_shape                      : tl_decl
+-- `tensor A(q, m), B(x, y)` — one or more named shapes, comma-separated, no colon.
+syntax "tensor"    tl_named_shape,+                        : tl_decl
+-- `predicate edge(i, j)` — same grouped form.
+syntax "predicate" tl_named_shape,+                        : tl_decl
 syntax "linear"    ident ":" tl_shape "→" tl_shape         : tl_decl
 syntax "linear"    ident ":" tl_shape "→" tl_shape " bias" : tl_decl
--- `axis l : ℕ` declares an axis's dtype; `axis l : ℕ = 3` also pins its concrete size
--- (used to size a scan/iteration axis that no input tensor's shape would otherwise fix).
-syntax "axis"      ident ":" tl_axis_kind                  : tl_decl
-syntax "axis"      ident ":" tl_axis_kind "=" num          : tl_decl
+-- `axis l : ℕ = 3, s : ℕ = 2` — one or more axis items, comma-separated.
+-- Each item may independently have or omit the `= size` pin.
+syntax "axis"      tl_axis_decl_item,+                     : tl_decl
 
 -- Layer 2: index expressions — GENERALIZED to general integer-affine sums (E1.3).
 -- A `tl_idx_expr` is a left-associative `+`/`-` sum of terms, where each term is a

@@ -38,7 +38,7 @@ run_cmd do
   let env : HashMap String DenseTensor :=
     (({} : HashMap String DenseTensor).insert "Q" (tensorOf [2,2] [1,0, 0,1])).insert "K" (tensorOf [2,2] [1,0, 0,1])
   match TLProgram.eval (tlprog!{
-    tensor A : (q, s)
+    tensor A(q, s)
     A[q, s.] := softmax(where s ≤ q)(Q[q, d] · K[s, d])
   }) env with
   | .error e => throwError s!"attn: {e}"
@@ -76,7 +76,7 @@ run_cmd do
   let env : HashMap String DenseTensor :=
     ({} : HashMap String DenseTensor).insert "X" (tensorOf [2,2] [1,2, 3,4])
   match TLProgram.eval (tlprog!{
-    tensor Out : (i, j)
+    tensor Out(i, j)
     Out[2 * i, 2 * j] := X[i, j]
   }) env with
   | .error e => throwError s!"upsample: {e}"
@@ -118,7 +118,7 @@ run_cmd do
   let env : HashMap String DenseTensor :=
     (({} : HashMap String DenseTensor).insert "F" (tensorOf [2,2] [1,2, 3,4])).insert "edge" (tensorOf [2,2] [0,1, 1,0])
   match TLProgram.eval (tlprog!{
-    predicate edge : (i, j)
+    predicate edge(i, j)
     Result[] := F[t, i] · F[t, j] · edge[i, j]
   }) env with
   | .error e => throwError s!"maskedAgg: {e}"
@@ -182,7 +182,7 @@ run_cmd do
   let env : HashMap String DenseTensor :=
     ({} : HashMap String DenseTensor).insert "A" (tensorOf [2,2] [1,3, 2,2])
   match TLProgram.eval (tlprog!{
-    tensor Y : (q, s)
+    tensor Y(q, s)
     Y[q, s.] := normalize(A[q, s])
   }) env with
   | .error e => throwError s!"normalize: {e}"
@@ -215,15 +215,15 @@ run_cmd do
     Q[q, h, k]       := W_Q[h, k, m] · X[q, m]
     K[s, h, k]       := W_K[h, k, m] · X[s, m]
     V[s, h, k]       := W_V[h, k, m] · X[s, m]
-    tensor S : (h, q, s)
+    tensor S(h, q, s)
     S[h, q, s.]      := softmax(where s ≤ q)(Q[q, h, k] · K[s, h, k])
     AttnOut[q, h, k] := S[h, q, s] · V[s, h, k]
     Attn[q, m]       := W_O[m, h, k] · AttnOut[q, h, k]
-    tensor A : (q, m)
+    tensor A(q, m)
     A[q, m.]         := normalize(Attn[q, m] + X[q, m])
     F[q, d]          := relu(W_in[d, m] · A[q, m])
     Y[q, m]          := W_out[m, d] · F[q, d]
-    tensor H : (q, m)
+    tensor H(q, m)
     H[q, m.]         := normalize(Y[q, m] + A[q, m])
   }) env with
   | .error e => throwError s!"transformer: {e}"
@@ -265,11 +265,8 @@ run_cmd do
   let env := env.insert "W_in"  (tensorOf [2,2] [1,0, 0,1])
   let env := env.insert "W_out" (tensorOf [2,2] [1,0, 0,1])
   match TLProgram.eval (tlprog!{
-    axis l : ℕ = 3
-    axis s : ℕ = 2          -- key/sequence position; no input tensor sizes it once H is purely produced
-    tensor S : (h, q, s)
-    tensor A : (q, m)
-    tensor H : (q, m, l)
+    axis l : ℕ = 3, s : ℕ = 2
+    tensor S(h, q, s), A(q, m), H(q, m, l)
     H[q, m, 0]       := X[q, m]
     Q[q, h, k]       := W_Q[h, k, m] · H[q, m, l]
     K[s, h, k]       := W_K[h, k, m] · H[s, m, l]

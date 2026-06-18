@@ -18,13 +18,13 @@ and each `#guard` asserts a structural fact calibrated to what the pipeline actu
 --    linear pre-activation step + a `softmax` step ⇒ ≥2 steps, one of which is `op == "softmax"`.
 #guard
   let tc := tl!{
-    tensor A : (q, s)
+    tensor A(q, s)
     A[q, s.] := softmax(where s ≤ q)(Q[q, d] · K[s, d])
   }
   tc.steps.length ≥ 2
 #guard
   let tc := tl!{
-    tensor A : (q, s)
+    tensor A(q, s)
     A[q, s.] := softmax(where s ≤ q)(Q[q, d] · K[s, d])
   }
   tc.steps.any (fun s => s.op == "softmax")
@@ -39,7 +39,7 @@ and each `#guard` asserts a structural fact calibrated to what the pipeline actu
 --    some step has `op == "scatter"`.
 #guard
   let tc := tl!{
-    tensor Out : (i, j)
+    tensor Out(i, j)
     Out[2 * i, 2 * j] := X[i, j]
   }
   tc.steps.any (fun s => s.op == "scatter")
