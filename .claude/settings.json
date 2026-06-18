@@ -65,7 +65,15 @@
       "Bash(grep -n \"-- Python:\" /Users/williammacready/code/python/pyncd/papers/leanncd.md)",
       "WebFetch(domain:lean-lang.org)",
       "mcp__context7__resolve-library-id",
-      "mcp__context7__query-docs"
+      "mcp__context7__query-docs",
+      "Bash(elan show *)",
+      "Bash(lean --version)",
+      "Bash(lake --version)",
+      "Bash(lake update *)",
+      "Bash(lake exe *)",
+      "Bash(lake build *)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(lake env *)"
     ],
     "additionalDirectories": [
       "/tmp"

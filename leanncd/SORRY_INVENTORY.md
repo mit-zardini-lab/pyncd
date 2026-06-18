@@ -3,10 +3,10 @@
 These are SIGNATURE placeholders for data/proof fields the design doc (`papers/leanncd.md` §2.2/§2.3)
 elides with `…`. They are discharged in later milestones (B+), not Milestone A.
 
+`St.swap` and `St.elemental` have since been proved (see Milestone G notes below).
+
 | File | Field | Section |
 | --- | --- | --- |
-| `LeanNCD/Base/St.lean` | `St.swap` | §2.2 |
-| `LeanNCD/Base/St.lean` | `St.elemental` | §2.2 |
 | `LeanNCD/Base/Br.lean` | `Br.swap` | §2.3 |
 | `LeanNCD/Base/Br.lean` | `Br.tensorHom` | §2.3 |
 | `LeanNCD/Base/Br.lean` | `Br.elemental` | §2.3 |
@@ -14,16 +14,15 @@ elides with `…`. They are discharged in later milestones (B+), not Milestone A
 ## Milestone G — `ColoredPROP` morphism-level symmetric-monoidal laws
 
 `ColoredPROP` now carries three genuine `Prop` laws — `tensorHom_id`, `tensorHom_comp`
-(bifunctoriality of `tensorHom`) and `swap_swap` (`swap` is an involution). The `St`/`Br`
-instances supply them as `-- SIGNATURE` `sorry`s, consistent with the existing `swap`/`tensorHom`/
-`elemental` deferrals (St's would need Matrix-block algebra; Br's `tensorHom`/`swap` are themselves
-still stubbed).
+(bifunctoriality of `tensorHom`) and `swap_swap` (`swap` is an involution). `St` now proves all
+five of these fields (plus `swap` and `elemental`) sorry-free. `Br`'s laws remain stubbed because
+`Br.tensorHom`/`Br.swap` are themselves still stubbed.
+
+`St.lean` is now **fully sorry-free**: `swap`, `elemental`, `tensorHom_id`, `tensorHom_comp`, and
+`swap_swap` are all proved. The remaining open items are all in `Br`.
 
 | File | Field | Note |
 | --- | --- | --- |
-| `LeanNCD/Base/St.lean` | `St.tensorHom_id` | Matrix-block: `fromBlocks 1 0 0 1` reindexes to `1` |
-| `LeanNCD/Base/St.lean` | `St.tensorHom_comp` | Matrix-block interchange |
-| `LeanNCD/Base/St.lean` | `St.swap_swap` | swap permutation is an involution (depends on stubbed `St.swap`) |
 | `LeanNCD/Base/Br.lean` | `Br.tensorHom_id` | depends on stubbed `Br.tensorHom` |
 | `LeanNCD/Base/Br.lean` | `Br.tensorHom_comp` | depends on stubbed `Br.tensorHom` |
 | `LeanNCD/Base/Br.lean` | `Br.swap_swap` | depends on stubbed `Br.swap` |
@@ -228,7 +227,7 @@ Fixed in the math tower: `StMat.coeffs`/`bias` now carry the new `Coeff = MvPoly
 re-prove sorry-free over it (their tactics are CommRing-generic). The size type stays `Numeric = ℕ`
 (sizes are non-negative); the fix separates the conflated *size* and *coefficient* roles. The bridge's
 `intToCoeff : Int → Coeff := MvPolynomial.C` is sorry-free, so look-back offsets (`X[i-1]`) realize
-faithfully. (`St`'s `swap`/`tensorHom`/`elemental` remain the pre-existing B+/G sorries — untouched.)
+faithfully. (`St.lean` is now fully sorry-free; the remaining B+/G open items are all in `Br`.)
 
 Named obligations (the remaining 6 `sorry`s):
 - `realize` (ThreadedComposed→BrMorph) body, `realizeSBr` (SBrInstance→BrMorph) body — the routed-DAG
