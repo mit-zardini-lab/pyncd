@@ -318,3 +318,38 @@ B+/G `Br`/`St` coherence sorries.
 
 Out of scope (later): the executable Algebra *interpreter* (parse→compile→evaluate→numbers; retires
 the dtype obstruction); the B+/G `Br`/`St` coherence proofs.
+
+## Milestone I — executable evaluator (zero sorries)
+
+`LeanNCD/Eval/` — the reference `Float`-tensor evaluator for the tensor-logic DSL. Fully
+executable, **ZERO `sorry`** (`grep -rn sorry LeanNCD/Eval/` is empty); the eight modules
+(`Tensor`/`Shape`/`Gather`/`Contract`/`Nonlin`/`Scatter`/`Scan`/`Eval`) are wired into the
+`Tests` lean_lib and exercised by per-module unit tests plus the eleven-example integration
+test (`test/Eval/EvalExamplesTest.lean`).
+
+- **`DenseTensor`** (`Tensor.lean`): a row-major `{ shape : List Nat, data : Array Float }`
+  Float reference interpreter — `get!`/`set!`/`zeros`/`ofFn`/`allCoords`/`approxEq`.
+- **`TLProgram.eval`** (`Eval.lean`): the entry point. It runs `compileToScheduled` and
+  evaluates the **pre-route `ScheduledProgram`** — NOT the routed `ThreadedComposed`, which is
+  lossy for scans (it keeps only the representative recurrence step, dropping the base case and
+  coupled bodies). The `ScheduledProgram` retains the full scan `base`/`recur` stmt lists.
+- **dtype-driven combine** (`Contract.lean`): the contraction semiring is read from the decls —
+  a `predicate` output contracts in `(∧, ∃)` = `(min, max)` on 0/1 Floats, every other output in
+  the ℝ default `(×, Σ)`. Reading the dtype from the decls sidesteps the open `BrBaseP` dtype gap
+  (the routed presentation defaults `dtype := .reals`).
+- **All ELEVEN example programs compute** with numeric assertions (the 5 §12.1 examples —
+  matmul, masked attention, strided conv, upsample, coupled scan — plus the 2 predicate examples
+  — masked aggregation, band mask — plus look-back, outer product, contraction+relu, normalize).
+- **Affine-output size inference** (`Shape.lean`): `inferAxisSizes` was extended (Milestone I) to
+  size output axes that appear ONLY in affine read positions, via the standard "valid"/largest-
+  in-range rule `size(a) = ⌊(d-1 - c0 - Σ_{k≠a} cₖ(sizeₖ-1)) / cₐ⌋ + 1`, solved one unknown axis
+  per position over a fixpoint. This is what lets the strided-conv (output `i,j`) and look-back
+  (`Y[i] := X[i-1]` ⇒ length 5, `Y[0]=0` pad) examples size their purely-affine output axes; for
+  a bare axis it reduces to `size(a) = d`, and the conflicting-bare-read check is preserved.
+- Scan iteration count `L` is a runtime parameter not present in the program text; the coupled-scan
+  example supplies it as the time-extent of the `G` state buffer passed in `inputs`.
+
+**Out of scope (error):** `scanPre`/`recurMorphism` evaluation (the §12.4 escape hatches) and
+symbolic-size evaluation — `Numeric = MvPolynomial String ℕ` is noncomputable, so a `SizeExpr`
+that does not reduce to a concrete `Nat` from the inputs cannot be evaluated. Both raise an
+`EvalError`.

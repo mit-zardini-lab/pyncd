@@ -1511,6 +1511,25 @@ The result is a `ThreadedComposed` (a presentation of a `BrMorph`, [§2.3](#23-b
 | `elabTLProgram` (Stage 1) | — | `Syntax → MetaM TLProgram` (value, not Expr); no Python analogue |
 | `TLProgram.compile` (Stage 2) | `tl.to_morphism()` | `TLProgram → FreshM ThreadedComposed`; run at elaboration time via `.run 0` (implemented, E2a) |
 
+### 12.5 Evaluation
+
+> **Implementation status (Milestone I).** The DSL now has a reference **`Float` evaluator**,
+> `TLProgram.eval : TLProgram → Std.HashMap String DenseTensor → Except EvalError (HashMap String DenseTensor)`
+> (in `leanncd/LeanNCD/Eval/`), which runs a program on concrete input tensors and produces concrete
+> output tensors (`DenseTensor` = a row-major `{ shape, data : Array Float }`). It is fully executable
+> and `sorry`-free.
+>
+> The evaluator interprets the **pre-route `ScheduledProgram`** rather than the routed
+> `ThreadedComposed` of [§12.4](#124-semantic-compilation): the routed presentation keeps only a scan's
+> representative recurrence step (it is lossy for scans), whereas the `ScheduledProgram` retains the full
+> `base`/`recur` stmt lists, so coupled and base cases evaluate. The output **dtype** — tensor vs
+> predicate, i.e. the `(Σ, ×)` vs `(∃, ∧)` contraction — is read from the decls (a `predicate` output
+> contracts in `(max, min)` on 0/1 Floats), which sidesteps the deferred `BrBaseP` dtype gap. All eleven
+> example programs (the seven §12.1/predicate examples plus look-back, outer product, contraction+relu,
+> and normalize) evaluate with hand-checked numeric assertions in `test/Eval/EvalExamplesTest.lean`.
+> Symbolic-size evaluation and the `scanPre`/`recurMorphism` escape hatches are out of scope (they raise
+> an `EvalError`). See `SORRY_INVENTORY.md` (Milestone I).
+
 ## 13. Appendix: out of scope
 
 Two families of structure are deliberately **not encoded**, because they carry no propositional or computational content the framework reasons about. The first is **`DynamicName` and its LaTeX rendering** — the human-readable, mathematically-typeset names attached to axes and arrays. The second is the **`Block` display metadata** — the layout and presentation bookkeeping the visualizer consumes. Both are *semantically transparent*: erasing them changes no morphism, no shape, no composite, and no proof. They ride on the executable side of the seam as identity/display decoration (the `WithUID` decoration of [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) carries the optional `DynamicName`), and they are left exactly where the current document already leaves `Block` — outside the encoding, mentioned but never formalized.
