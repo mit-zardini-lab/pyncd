@@ -1,17 +1,20 @@
 <!-- markdownlint-disable MD024 -->
 # Tensor Logic DSL — Worked Examples
 
-Each example is shown five ways:
+Each example is shown six ways:
 
 1. **Mathematical description** — the tensor-logic / einsum form.
-2. **PyRel** — the equivalent [PyRel](https://docs.relational.ai) program. PyRel is a
+2. **Lean DSL** — the equivalent `tlprog!{…}` program (`leanncd/`). This is the Lean 4
+   formalization: parse-compiled by the Lean type-checker, evaluated on concrete `Float`
+   tensors via `TLProgram.eval`. See [leanncd.md](../papers/leanncd.md).
+3. **PyRel** — the equivalent [PyRel](https://docs.relational.ai) program. PyRel is a
    Datalog extension that subsumes tensor logic; tensors are relations and contraction is
    `sum(product).per(output_indices)`. See [tensor_logic_in_pyrel.md](../papers/tensor_logic_in_pyrel.md).
-3. **TL DSL** — the equivalent `data_structure/TensorDSL.py` program (runnable as-is).
-4. **Visualization** — the string diagram. pyncd's text renderer (`display.print_category`)
+4. **TL DSL** — the equivalent `data_structure/TensorDSL.py` program (runnable as-is).
+5. **Visualization** — the string diagram. pyncd's text renderer (`display.print_category`)
    draws the same node graph that the tsncd TypeScript frontend renders as an interactive
    SVG; the ASCII form is shown here, with a note on launching the live graphical view.
-5. **Generated PyTorch** — pyncd does **not** emit `.py` source; `ConstructedModule.construct`
+6. **Generated PyTorch** — pyncd does **not** emit `.py` source; `ConstructedModule.construct`
    builds an `nn.Module`. The faithful artifacts are that module's structure (`repr`), the
    `einops.einsum` signature strings its `forward` runs, and its buffers/parameters.
 
@@ -47,7 +50,21 @@ $$
 `x`, `y`, `w`, `z` are absent from the left-hand side and therefore contracted; `a`, `c_1`, `c_2`, `e`
 appear on both sides and are retained.
 
-### 2. PyRel
+### 2. Lean DSL
+
+No declarations needed — all axis sizes infer from the input tensor shapes. Contracted
+axes (`x`, `y`, `w`, `z`) appear only on the right; retained axes appear on both sides.
+
+```lean
+tlprog!{
+  Result[a, c1, c2, e] := A[a, x] · B[x, y, w] · C[y, c1, c2] · D[y, w, z] · E[z, e]
+}
+```
+
+(Lean identifiers use `c1`/`c2`; these are the same axes as `c_1`/`c_2` in the math —
+the string name stored in the AST is whatever identifier is written here.)
+
+### 3. PyRel
 
 Each factor is declared as a `Relationship`; shared index variables are unified across
 patterns in `where(...)`. All four contracted indices are summed by `.per(a, c1, c2, e)`.
@@ -76,7 +93,7 @@ where(
 )
 ```
 
-### 3. TL DSL
+### 4. TL DSL
 
 ```python
 import torch
@@ -113,7 +130,7 @@ out = out[0] if isinstance(out, tuple) else out
 assert out.shape == (4, 2, 2, 3)
 ```
 
-### 4. Visualization
+### 5. Visualization
 
 Read the diagram left-to-right. Five input factor groups enter from the left, each
 labelled by their two axes. The **`Σ`** box contracts all shared variables simultaneously,
@@ -122,7 +139,7 @@ delimit the five factor inputs.
 
 ![Factor graph string diagram](factor_graph_render.png)
 
-### 5. Generated PyTorch
+### 6. Generated PyTorch
 
 The whole contraction compiles to a single `ConstructedTensorEquation`:
 
@@ -165,7 +182,20 @@ $$
 `t`, `i`, and `j` are all absent from the left-hand side and are therefore contracted.
 The Iverson bracket $[\text{edge}(i,j)]$ restricts the sum to pairs where an edge exists.
 
-### 2. PyRel
+### 2. Lean DSL
+
+The `predicate` declaration marks `edge` as Bool-typed. The empty subscript `[]` on the
+LHS declares `Result` as a scalar (zero free axes). `F` is read twice under different
+index names — the DSL treats them as two independent reads of the same tensor.
+
+```lean
+tlprog!{
+  predicate edge(i, j)
+  Result[] := F[t, i] · F[t, j] · edge[i, j]
+}
+```
+
+### 3. PyRel
 
 `F` is joined against itself on shared table index `t`. Including `edge(i, j)` in the
 `where(...)` clause acts as the Iverson bracket. No output indices → scalar aggregate.
@@ -188,7 +218,7 @@ where(edge(i, j), F(t, i, vfi), F(t, j, vfj)).define(
 )
 ```
 
-### 3. TL DSL
+### 4. TL DSL
 
 All three indices are contracted. The empty subscript `[()]` on the LHS declares
 `Result` as a scalar (zero free axes).
@@ -219,7 +249,7 @@ out = out[0] if isinstance(out, tuple) else out
 assert out.shape == torch.Size([])
 ```
 
-### 4. Visualization
+### 5. Visualization
 
 Read the diagram left-to-right. The three input groups are the two F instances
 (axes `t(5)` and `i(5)` / `j(5)`) and the edge predicate (orange **𝔹** wire,
@@ -229,7 +259,7 @@ wires from real-valued ones.
 
 ![Graph aggregation string diagram](graph_agg_render.png)
 
-### 5. Generated PyTorch
+### 6. Generated PyTorch
 
 ```text
 ConstructedThreadedComposed(
@@ -271,7 +301,21 @@ contracted, and likewise `f` in the second; the left-hand indices are retained.
 This implicit-summation convention is exactly the DSL's rule — contraction is
 read from axis (UID) identity, never written as an explicit `Σ`.
 
-### 2. PyRel
+### 2. Lean DSL
+
+No declarations needed; axis sizes infer from the input tensor shapes of `W_in`, `W_out`,
+and `X`. For learned-parameter semantics (weights as module parameters rather than caller
+inputs), add `linear W_in : (d) → (dff)` and `linear W_out : (dff) → (d)` declarations
+— the explicit-weight form below is equivalent when the weights are supplied as inputs.
+
+```lean
+tlprog!{
+  H[q, dff]  := relu(W_in[dff, d] · X[q, d])
+  Out[q, d]  := W_out[d, dff] · H[q, dff]
+}
+```
+
+### 3. PyRel
 
 Two rules, one per equation. Shared index `d` is contracted in the first rule via
 `.per(q, f)`; shared `f` is contracted in the second. The intermediate `H` is a
@@ -304,7 +348,7 @@ where(W_out(d, f, vw), H(q, f, vh)).define(
 )
 ```
 
-### 3. TL DSL
+### 4. TL DSL
 
 We build it from `.linear()` layers (§4 of [tensor_logic_dsl.md](tensor_logic_dsl.md)):
 each weight is declared a Linear layer, so the weight-multiplies become `Linear`
@@ -340,7 +384,7 @@ assert out.shape == (2, 4)
 > the tensor-logic philosophy of weights-as-explicit-data. `.linear()` is the opt-in
 > that reframes a weight as a trainable layer.
 
-### 4. Visualization
+### 5. Visualization
 
 Read the diagram left-to-right. Wires are labelled `axis(size)` and carry tensors
 between boxes. **`L`** boxes (subscripted by weight name) are learned linear layers.
@@ -350,7 +394,7 @@ upper wire (`q`) is the batch dimension, which passes through unchanged; the low
 
 ![MLP string diagram](mlp_render.png)
 
-### 5. Generated PyTorch
+### 6. Generated PyTorch
 
 The compiled module is a `ThreadedComposed` of the two layers; the ReLU is folded into
 the first as a `Lambda`. Each layer is a `ConstructedLinear` wrapping a `Multilinear`
@@ -425,7 +469,27 @@ step, not shared across depth. Total learned parameters:
 $W_{\mathrm{in}}$ ($d_0 \times d_h$), $W$ ($3 \times d_h \times d_h$),
 $W_{\mathrm{out}}$ ($d_h \times c$); 5 linear applications.
 
-### 2. PyRel
+### 2. Lean DSL
+
+`axis l : ℕ = 3` pins the scan depth (no input tensor sizes the iteration axis).
+`h[q, dh, 0]` is the base case; `h[q, dh, l +1]` is the recurrence step (the space
+before `+1` is required). `c.` marks `c` as the softmax normalization axis. The constant
+read `h[q, dh, 3]` extracts the final hidden state via an integer literal in the index.
+
+```lean
+tlprog!{
+  axis l : ℕ = 3
+  h[q, dh, 0]    := W_in[dh, d0] · x[q, d0]
+  h[q, dh, l +1] := relu(W[l, dh_in, dh] · h[q, dh_in, l])
+  y[q, c.]        := softmax(W_out[c, dh] · h[q, dh, 3])
+}
+```
+
+`W` is a 3D weight stack read at the current layer index `l` inside the scan step;
+`dh_in` names the contracted hidden dimension to distinguish it from the free output
+axis `dh`.
+
+### 3. PyRel
 
 Each recurrence step is a separate `where(...).define(...)` rule that joins the
 hidden state at depth `l` with the weight relation for that step. PyRel evaluates
@@ -476,7 +540,7 @@ where(H(q, dh, 3, vh), W_out(dh, c, wout)).define(
 )
 ```
 
-### 3. TL DSL
+### 4. TL DSL
 
 `iteration_axis(l)` declares `l` as the scan counter; the base case and step
 equation together define how `h[q, dh, l]` evolves. `W` is a 3D weight stack
@@ -520,7 +584,7 @@ assert torch.allclose(y.sum(-1), torch.ones(8), atol=1e-5)
 `W` is passed as an external input, not a module parameter. In practice wrap it in
 an `nn.Parameter` and pass it at each forward call.
 
-### 4. Visualization
+### 5. Visualization
 
 The recurrence is drawn with the **rolled `ScanBox`** notation of
 [iteration.md § 7](../papers/iteration.md#7-diagrammatic-notation-a-string-diagram-realization-of-the-scanbox),
@@ -549,7 +613,7 @@ final-state assembly originally used to render the diagram.)
 See [iteration.md § 7](../papers/iteration.md#7-diagrammatic-notation-a-string-diagram-realization-of-the-scanbox)
 for the unrolled semantics and the mapping onto `ConstructedScan`.
 
-### 5. Generated PyTorch
+### 6. Generated PyTorch
 
 ```text
 ConstructedThreadedComposed(
@@ -629,7 +693,24 @@ hexagon) composed around the einsum core.
 
 Output size of Pooled: ⌊(H−P)/S⌋+1 in each spatial dimension.
 
-### 2. PyRel
+### 2. Lean DSL
+
+All axis sizes infer from input shapes (`Filter` sizes `dx`, `dy`, `ch`; `Image` sizes
+the padded spatial axes). The concrete stride `2` in `2 * xo + px` is a numeric literal
+— symbolic strides (`S * xo` where `S` is a variable) are not supported.
+
+```lean
+tlprog!{
+  Features[x, y]  := relu(Filter[dx, dy, ch] · Image[x + dx, y + dy, ch])
+  Pooled[xo, yo]  := Features[2 * xo + px, 2 * yo + py]
+}
+```
+
+The affine index expressions `x + dx`, `y + dy`, `2 * xo + px`, `2 * yo + py` lower to
+`IdxExpr.shift`/`IdxExpr.affine` nodes and compile to **St reindexing morphisms** (the
+tsncd hexagon boxes) composed around the einsum core — the same pipeline as §12.2.
+
+### 3. PyRel
 
 Index arithmetic appears directly in relation patterns (`Image(x+dx, y+dy, ch, vi)`),
 following the convention of [tensor_logic_in_pyrel.md § 5](../papers/tensor_logic_in_pyrel.md).
@@ -664,7 +745,7 @@ where(Features(S*xo+px, S*yo+py, vfeat)).define(
 )
 ```
 
-### 3. TL DSL
+### 4. TL DSL
 
 ```python
 import torch
@@ -711,7 +792,7 @@ The affine bounds are verified at construction time (`_check_gather_bounds`):
 - `x+dx ∈ [0, H+W−2] = [0, 7]` fits within `xi` (size 8) ✓
 - `S·xo+px ∈ [0, S·(H_out−1)+(P−1)] = [0, 5]` fits within `x` (size 6) ✓
 
-### 4. Visualization
+### 5. Visualization
 
 The string diagram has two consecutive reindexing stages.
 
@@ -730,7 +811,7 @@ A **`Σ`** box contracts over `dx, dy, ch`, yielding `(x(6), y(6))`. A
 Both hexagons are the tsncd notation for St morphisms (weaves paper, Fig. 3);
 the reindexing is composed *around* the einsum core rather than folded into it.
 
-### 5. Generated PyTorch
+### 6. Generated PyTorch
 
 The two equations compile to a `ConstructedThreadedComposed` of two stages. Each
 stage is a `ConstructedReindex` feeding a `ConstructedTensorEquation`; the relu is
