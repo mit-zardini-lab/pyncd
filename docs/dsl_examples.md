@@ -321,10 +321,9 @@ axes.
 
 ```lean
 tlprog!{
-  linear W_in  : (d) → (dff)
-  linear W_out : (dff) → (d)
-  H[q, dff]    := relu(W_in[dff, d] · X[q, d])
-  Out[q, d]    := W_out[d, dff] · H[q, dff]
+  linear W_in(d) → (dff), W_out(dff) → (d)
+  H[q, dff]  := relu(W_in[dff, d] · X[q, d])
+  Out[q, d]  := W_out[d, dff] · H[q, dff]
 }
 ```
 
@@ -492,8 +491,7 @@ read `h[q, dh, 3]` extracts the final hidden state via an integer literal in the
 ```lean
 tlprog!{
   axis l : ℕ = 3
-  linear W_in  : (d0) → (dh)
-  linear W_out : (dh) → (c)
+  linear W_in(d0) → (dh), W_out(dh) → (c)
   h[q, dh, 0]    := W_in[dh, d0] · x[q, d0]
   h[q, dh, l +1] := relu(W[l, dh_in, dh] · h[q, dh_in, l])
   y[q, c.]        := softmax(W_out[c, dh] · h[q, dh, 3])

@@ -44,6 +44,17 @@ private def elabTLNamedShape : Syntax → MetaM (String × List AxisSpec)
       return (x.getId.eraseMacroScopes.getString!, ← specs.getElems.toList.mapM elabTLAxisSpec)
   | _ => throwUnsupportedSyntax
 
+private def elabTLLinearItem : Syntax → MetaM Decl
+  | `(tl_linear_item| $x:ident ( $ins,* ) → ( $outs,* )) => do
+      return .linear x.getId.eraseMacroScopes.getString!
+        (← ins.getElems.toList.mapM elabTLAxisSpec)
+        (← outs.getElems.toList.mapM elabTLAxisSpec) false
+  | `(tl_linear_item| $x:ident ( $ins,* ) → ( $outs,* ) bias) => do
+      return .linear x.getId.eraseMacroScopes.getString!
+        (← ins.getElems.toList.mapM elabTLAxisSpec)
+        (← outs.getElems.toList.mapM elabTLAxisSpec) true
+  | _ => throwUnsupportedSyntax
+
 private def elabTLAxisDeclItem : Syntax → MetaM Decl
   | `(tl_axis_decl_item| $x:ident : $k:tl_axis_kind) => do
       return .axis { name := x.getId.eraseMacroScopes.getString!, uid := 0, kind := (← elabTLAxisKind k) } none
@@ -58,10 +69,8 @@ partial def elabTLDecl : Syntax → MetaM (List Decl)
   | `(tl_decl| predicate $items:tl_named_shape,*) => do
       let pairs ← items.getElems.toList.mapM elabTLNamedShape
       return pairs.map fun (nm, axes) => .predicate nm axes
-  | `(tl_decl| linear $x:ident : $i:tl_shape → $o:tl_shape) =>
-      return [.linear x.getId.eraseMacroScopes.getString! (← elabTLShape i) (← elabTLShape o) false]
-  | `(tl_decl| linear $x:ident : $i:tl_shape → $o:tl_shape bias) =>
-      return [.linear x.getId.eraseMacroScopes.getString! (← elabTLShape i) (← elabTLShape o) true]
+  | `(tl_decl| linear $items:tl_linear_item,*) => do
+      items.getElems.toList.mapM elabTLLinearItem
   | `(tl_decl| axis $items:tl_axis_decl_item,*) => do
       items.getElems.toList.mapM elabTLAxisDeclItem
   | _ => throwUnsupportedSyntax

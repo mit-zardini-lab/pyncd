@@ -1296,6 +1296,7 @@ declare_syntax_cat tl_axis_kind
 declare_syntax_cat tl_axis_spec
 declare_syntax_cat tl_named_shape
 declare_syntax_cat tl_axis_decl_item
+declare_syntax_cat tl_linear_item
 declare_syntax_cat tl_shape
 declare_syntax_cat tl_decl
 declare_syntax_cat tl_idx_expr
@@ -1331,12 +1332,13 @@ syntax ident : tl_axis_spec               -- an axis name (bare ident)
 syntax ident "(" tl_axis_spec,* ")" : tl_named_shape   -- `T(a, b, c)`
 syntax ident ":" tl_axis_kind         : tl_axis_decl_item  -- dtype only
 syntax ident ":" tl_axis_kind "=" num : tl_axis_decl_item  -- dtype + pinned size
-syntax "(" tl_axis_spec,* ")" : tl_shape   -- used only by `linear`
+syntax ident "(" tl_axis_spec,* ")" "→" "(" tl_axis_spec,* ")"        : tl_linear_item  -- `W(d) → (dff)`
+syntax ident "(" tl_axis_spec,* ")" "→" "(" tl_axis_spec,* ")" "bias" : tl_linear_item  -- with bias
+syntax "(" tl_axis_spec,* ")" : tl_shape   -- kept; no longer used by any tl_decl rule
 
 syntax "tensor"    tl_named_shape,+                        : tl_decl   -- `tensor A(q,m), B(x,y)`
 syntax "predicate" tl_named_shape,+                        : tl_decl   -- `predicate P(i,j)`
-syntax "linear"    ident ":" tl_shape "→" tl_shape         : tl_decl
-syntax "linear"    ident ":" tl_shape "→" tl_shape " bias" : tl_decl
+syntax "linear"    tl_linear_item,+                        : tl_decl   -- `linear W(d) → (dff), V(dff) → (d)`
 syntax "axis"      tl_axis_decl_item,+                     : tl_decl   -- `axis l : ℕ = 3, s : ℕ = 2`
 
 -- Layer 2: index expressions — GENERALIZED to general integer-affine sums (the AST's
