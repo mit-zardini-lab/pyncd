@@ -23,9 +23,17 @@ All captured output below is real (produced by running the code, not hand-writte
 For the DSL itself see [tensor_logic_dsl.md](tensor_logic_dsl.md); for the Boolean
 semiring / rendering see [bool_semiring_extension.md](bool_semiring_extension.md).
 
+## Contents
+
+1. [Basic Factor Graph Contraction](#basic-factor-graph-contraction)
+2. [Predicates for Masked Aggregation](#predicates-for-masked-aggregation)
+3. [Multi-Layer Perceptron](#multi-layer-perceptron)
+4. [Deep MLP](#deep-mlp)
+5. [Index Arithmetic: 2D Convolution and Strided Sum Pooling](#index-arithmetic-2d-convolution-and-strided-sum-pooling)
+
 ---
 
-## Example 1 — Basic Factor Graph Contraction
+## Basic Factor Graph Contraction
 
 A factor graph over five binary factors with the topology:
 
@@ -165,7 +173,7 @@ The module has no learned parameters — all five factors are caller inputs.
 
 ---
 
-## Example 2 — Predicates for Masked Aggregation
+## Predicates for Masked Aggregation
 
 A rank-2 feature table F (table × node) on a 5-node graph. F is used twice in the
 equation — once for source nodes and once for target nodes. An `edge(i, j)` predicate
@@ -282,7 +290,7 @@ The module has no learned parameters — F and the adjacency matrix are caller i
 
 ---
 
-## Example 3 — Multi-Layer Perceptron
+## Multi-Layer Perceptron
 
 A two-layer MLP (one hidden layer with a ReLU): project the input up to a hidden
 dimension, apply ReLU, project back down.
@@ -437,7 +445,7 @@ feature blocks like `out_axes=(h, k)` give a weight whose shape is `in_size + ou
 
 ---
 
-## Example 4 — Deep MLP
+## Deep MLP
 
 A 5-layer MLP expressed as a scan over layer depth: input projection followed by a
 3-step recurrence with an independent weight matrix at each step, then a softmax
@@ -654,7 +662,7 @@ ConstructedThreadedComposed(
 
 ---
 
-## Example 5 — Index Arithmetic: 2D Convolution and Strided Sum Pooling
+## Index Arithmetic: 2D Convolution and Strided Sum Pooling
 
 A two-stage CNN building block: a 2D convolution with a centred W×W filter over a
 pre-padded image, followed by P×P sum pooling at stride S. Both stages use affine
