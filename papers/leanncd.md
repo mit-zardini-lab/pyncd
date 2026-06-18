@@ -940,7 +940,7 @@ def main : IO Unit := do
 | --- | --- | --- |
 | `leanncd/test/DSL/ParseExamplesTest.lean` | `tlprog!{}` | Stage 1: the five [§13.2](#132-bnf-grammar) example programs parse |
 | `leanncd/test/DSL/CompileExamplesTest.lean` | `tl!{}` | Stage 1+2: the five examples compile; structural `#guard` assertions |
-| `leanncd/test/Eval/EvalExamplesTest.lean` | `TLProgram.eval` | End-to-end: eleven programs evaluated with numeric assertions |
+| `leanncd/test/Eval/EvalExamplesTest.lean` | `TLProgram.eval` | End-to-end: thirteen programs evaluated with numeric assertions |
 
 **Running the tests.** From `leanncd/`:
 
@@ -1058,7 +1058,7 @@ program     ::= decl* stmt+
 - A `recur_step` without a matching `base_case` for the same name is an error
 - A `linear`-declared weight must multiply exactly one activation factor
 
-**Seven representative examples** (the last two exercise predicates):
+**Nine representative examples** (two exercise predicates; the last two are the transformer, flat and scanned):
 
 ```text
 -- Matmul (Domingos base: k is contracted)
@@ -1090,6 +1090,45 @@ Result[] := F[t,i] · F[t,j] · edge[i,j]
 
 -- Iverson-bracket predicate: a tridiagonal band mask via |·| (integer absolute value)
 Band[i,j] := A[i,j] · [|i − j| ≤ 1]
+
+-- Single-layer transformer (L=1 unrolled, Option A — papers/transformer_example.md).
+-- Nine equations flat (no scan): Q/K/V projections (contract m), causal masked softmax
+-- (norm s), SV aggregation (contract s), output projection (contract h,k), attention
+-- residual + normalize (norm m), FFN relu in (contract m), FFN out (contract d), FFN
+-- residual + normalize (norm m). normalize stands in for rmsnorm.
+Q[q, h, k]       := W_Q[h, k, m] · X[q, m]
+K[s, h, k]       := W_K[h, k, m] · X[s, m]
+V[s, h, k]       := W_V[h, k, m] · X[s, m]
+tensor S : (h : ℝ, q : ℝ, s : norm)
+S[h, q, s]       := softmax(where s ≤ q)(Q[q, h, k] · K[s, h, k])
+AttnOut[q, h, k] := S[h, q, s] · V[s, h, k]
+Attn[q, m]       := W_O[m, h, k] · AttnOut[q, h, k]
+tensor A : (q : ℝ, m : norm)
+A[q, m]          := normalize(Attn[q, m] + X[q, m])
+F[q, d]          := relu(W_in[d, m] · A[q, m])
+Y[q, m]          := W_out[m, d] · F[q, d]
+tensor H : (q : ℝ, m : norm)
+H[q, m]          := normalize(Y[q, m] + A[q, m])
+
+-- Multi-layer transformer as a SCAN over the layer axis l. The layer hidden state H[q,m,l] is
+-- the only scan state (base = embeddings); the attention+FFN block becomes per-step
+-- INTERMEDIATES, recomputed from H[·,·,l] each step. `finalizeScans` routes any non-iteration
+-- stmt that transitively reads a scan state into the recurrence body (in source order); the
+-- iteration count L is the extent of the H buffer's l axis. (norm axes resolve through the decls.)
+tensor S : (h : ℝ, q : ℝ, s : norm)
+tensor A : (q : ℝ, m : norm)
+tensor H : (q : ℝ, m : norm, l : ℝ)
+H[q, m, 0]       := X[q, m]                              -- base case: layer 0 = embeddings
+Q[q, h, k]       := W_Q[h, k, m] · H[q, m, l]           -- per-step intermediate (reads state at l)
+K[s, h, k]       := W_K[h, k, m] · H[s, m, l]
+V[s, h, k]       := W_V[h, k, m] · H[s, m, l]
+S[h, q, s]       := softmax(where s ≤ q)(Q[q, h, k] · K[s, h, k])
+AttnOut[q, h, k] := S[h, q, s] · V[s, h, k]
+Attn[q, m]       := W_O[m, h, k] · AttnOut[q, h, k]
+A[q, m]          := normalize(Attn[q, m] + H[q, m, l])
+F[q, d]          := relu(W_in[d, m] · A[q, m])
+Y[q, m]          := W_out[m, d] · F[q, d]
+H[q, m, l+1]     := normalize(Y[q, m] + A[q, m])         -- state recurrence: writes layer l+1
 ```
 
 ### 13.3 Abstract syntax

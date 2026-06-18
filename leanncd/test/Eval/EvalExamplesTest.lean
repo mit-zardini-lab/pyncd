@@ -2,7 +2,7 @@ import LeanNCD.Eval.Eval
 /-!
 # End-to-end evaluation examples (Milestone I integration test)
 
-Eleven tensor-logic programs are parse-compiled (`tlprog!{…}`), run on concrete `Float`
+Thirteen tensor-logic programs are parse-compiled (`tlprog!{…}`), run on concrete `Float`
 input tensors via `TLProgram.eval`, and asserted against hand-computed numbers
 (`DenseTensor.approxEq`, or exact equality for placement). A failure here means an
 `Eval/` evaluator module has a bug — this doubles as the integration test for the whole
@@ -10,7 +10,9 @@ input tensors via `TLProgram.eval`, and asserted against hand-computed numbers
 
 Coverage: the five §12.1 examples (matmul, masked attention, strided conv, upsample,
 coupled scan) + the two predicate examples (masked aggregation, band mask) + four extra
-examples (look-back, outer product, contraction+relu, normalize).
+examples (look-back, outer product, contraction+relu, normalize) + two transformer
+examples (L=1 unrolled flat; the same layer as a multi-layer scan with per-step
+intermediates routed into the recurrence).
 -/
 namespace LeanNCD.Eval
 open Std
@@ -72,7 +74,7 @@ run_cmd do
     the input values at the even coordinates and 0 elsewhere. Exact placement. -/
 run_cmd do
   let env : HashMap String DenseTensor :=
-    (({} : HashMap String DenseTensor).insert "X" (tensorOf [2,2] [1,2, 3,4])).insert "_L" (tensorOf [1] [0])
+    ({} : HashMap String DenseTensor).insert "X" (tensorOf [2,2] [1,2, 3,4])
   match TLProgram.eval (tlprog!{
     tensor Out : (i : ℝ[2 * m], j : ℝ[2 * n])
     Out[2 * i, 2 * j] := X[i, j]
@@ -129,7 +131,7 @@ run_cmd do
     zeros out the [0,2] and [2,0] corners, keeps the rest. -/
 run_cmd do
   let env : HashMap String DenseTensor :=
-    (({} : HashMap String DenseTensor).insert "A" (tensorOf [3,3] [1,2,3, 4,5,6, 7,8,9])).insert "_L" (tensorOf [1] [0])
+    ({} : HashMap String DenseTensor).insert "A" (tensorOf [3,3] [1,2,3, 4,5,6, 7,8,9])
   match TLProgram.eval (tlprog!{ Band[i, j] := A[i, j] · [|i - j| ≤ 1] }) env with
   | .error e => throwError s!"band: {e}"
   | .ok out => match out["Band"]? with
@@ -142,7 +144,7 @@ run_cmd do
     `Y[0]=0` (out-of-range zero-pad), `Y[i]=X[i-1]` for i≥1: [0,10,20,30,40]. -/
 run_cmd do
   let env : HashMap String DenseTensor :=
-    (({} : HashMap String DenseTensor).insert "X" (tensorOf [4] [10,20,30,40])).insert "_L" (tensorOf [1] [0])
+    ({} : HashMap String DenseTensor).insert "X" (tensorOf [4] [10,20,30,40])
   match TLProgram.eval (tlprog!{ Y[i] := X[i - 1] }) env with
   | .error e => throwError s!"lookback: {e}"
   | .ok out => match out["Y"]? with
@@ -178,7 +180,7 @@ run_cmd do
     each q-row divided by its sum: [[0.25,0.75],[0.5,0.5]] (each row sums to 1, ∝ A). -/
 run_cmd do
   let env : HashMap String DenseTensor :=
-    (({} : HashMap String DenseTensor).insert "A" (tensorOf [2,2] [1,3, 2,2])).insert "_L" (tensorOf [1] [0])
+    ({} : HashMap String DenseTensor).insert "A" (tensorOf [2,2] [1,3, 2,2])
   match TLProgram.eval (tlprog!{
     tensor Y : (q : ℝ, s : norm)
     Y[q, s] := normalize(A[q, s])
@@ -191,5 +193,115 @@ run_cmd do
         let row0 := Y.get! [0,0] + Y.get! [0,1]
         unless Float.abs (row0 - 1.0) < 1e-6 do throwError s!"normalize: row ≠ 1: {repr Y.data}"
     | none => throwError "normalize: no Y"
+
+/- 12. Single-layer transformer (L=1 unrolled, Option A). Nine equations flat (no scan),
+    from papers/transformer_example.md. Toy sizes: SEQ=2 (q,s tokens), D=2 (m model dim),
+    H=1 head, K=2 head dim, DFF=2 FFN dim. All weight matrices are identity, so Q=K=V=X;
+    the causal softmax for q=1 produces the same row as example 2: [e⁰,e¹]/(e⁰+e¹).
+    With identity FFN (no-op) the final output H equals A (attention residual+normalize):
+      H[0] = [1, 0]  (q=0: only s=0 unmasked → attention=X[0]; normalize([2,0])=[1,0])
+      H[1] ≈ [0.1345, 0.8655]  (q=1: softmax/2 and (1+softmax)/2, each row sums to 1)
+    normalize stands in for rmsnorm. -/
+run_cmd do
+  let env : HashMap String DenseTensor :=
+    ({} : HashMap String DenseTensor).insert "X" (tensorOf [2,2] [1,0, 0,1])
+  let env := env.insert "W_Q"   (tensorOf [1,2,2] [1,0, 0,1])
+  let env := env.insert "W_K"   (tensorOf [1,2,2] [1,0, 0,1])
+  let env := env.insert "W_V"   (tensorOf [1,2,2] [1,0, 0,1])
+  let env := env.insert "W_O"   (tensorOf [2,1,2] [1,0, 0,1])
+  let env := env.insert "W_in"  (tensorOf [2,2] [1,0, 0,1])
+  let env := env.insert "W_out" (tensorOf [2,2] [1,0, 0,1])
+  match TLProgram.eval (tlprog!{
+    Q[q, h, k]       := W_Q[h, k, m] · X[q, m]
+    K[s, h, k]       := W_K[h, k, m] · X[s, m]
+    V[s, h, k]       := W_V[h, k, m] · X[s, m]
+    tensor S : (h : ℝ, q : ℝ, s : norm)
+    S[h, q, s]       := softmax(where s ≤ q)(Q[q, h, k] · K[s, h, k])
+    AttnOut[q, h, k] := S[h, q, s] · V[s, h, k]
+    Attn[q, m]       := W_O[m, h, k] · AttnOut[q, h, k]
+    tensor A : (q : ℝ, m : norm)
+    A[q, m]          := normalize(Attn[q, m] + X[q, m])
+    F[q, d]          := relu(W_in[d, m] · A[q, m])
+    Y[q, m]          := W_out[m, d] · F[q, d]
+    tensor H : (q : ℝ, m : norm)
+    H[q, m]          := normalize(Y[q, m] + A[q, m])
+  }) env with
+  | .error e => throwError s!"transformer: {e}"
+  | .ok out => match out["H"]? with
+    | some H =>
+        -- each q-row of H must sum to 1 (normalize output)
+        let row0 := H.get! [0,0] + H.get! [0,1]
+        let row1 := H.get! [1,0] + H.get! [1,1]
+        unless Float.abs (row0 - 1.0) < 1e-5 && Float.abs (row1 - 1.0) < 1e-5 do
+          throwError s!"transformer: H rows ≠ 1: {repr H.data}"
+        -- numeric check: with identity weights, H[1] = [softmax(0,1)[0]/2, (1+softmax(0,1)[1])/2]
+        unless DenseTensor.approxEq H (tensorOf [2,2]
+            [1.0, 0.0,
+             0.13447071068499755, 0.8655292893150025]) do
+          throwError s!"transformer wrong: {repr H.data}"
+    | none => throwError "transformer: no H"
+
+/- 13. Two-layer transformer as a SCAN over the layer axis `l` (the scan-form of example 12).
+    The layer hidden state `H[q,m,l]` is the only scan state: H[·,·,0] = X (embeddings), and each
+    step recomputes the whole attention+FFN block (Q/K/V/S/AttnOut/Attn/A/F/Y — per-step
+    *intermediates*, recomputed from `H[·,·,l]`) before writing H[·,·,l+1]. The iteration count
+    L = 3 (layers 0,1,2) is sized by the `H` buffer's last dim, exactly as the coupled scan sizes
+    its time extent. Same identity weights and toy sizes as example 12, so:
+      H[·,·,0] = X = I₂                                      (base / embeddings)
+      H[·,·,1] = [[1,0],[0.13447,0.86553]]                  (= example 12's output)
+      H[·,·,2] = [[1,0],[0.28459,0.71541]]                  (a second, distinct layer)
+    The q=0 row is a fixed point [1,0] (causal mask ⇒ token 0 attends only to itself); the q=1 row
+    evolves layer-to-layer, proving the intermediates are recomputed each step. This exercises the
+    per-step-intermediate routing in `finalizeScans` and decls-based norm-axis resolution in the
+    scan evaluator (softmax over s; normalize over m), neither of which the coupled-scan reaches. -/
+run_cmd do
+  let env : HashMap String DenseTensor :=
+    ({} : HashMap String DenseTensor).insert "X" (tensorOf [2,2] [1,0, 0,1])
+  let env := env.insert "W_Q"   (tensorOf [1,2,2] [1,0, 0,1])
+  let env := env.insert "W_K"   (tensorOf [1,2,2] [1,0, 0,1])
+  let env := env.insert "W_V"   (tensorOf [1,2,2] [1,0, 0,1])
+  let env := env.insert "W_O"   (tensorOf [2,1,2] [1,0, 0,1])
+  let env := env.insert "W_in"  (tensorOf [2,2] [1,0, 0,1])
+  let env := env.insert "W_out" (tensorOf [2,2] [1,0, 0,1])
+  let env := env.insert "H"     (tensorOf [2,2,3] (List.replicate 12 0.0))  -- sizes L = 3
+  match TLProgram.eval (tlprog!{
+    tensor S : (h : ℝ, q : ℝ, s : norm)
+    tensor A : (q : ℝ, m : norm)
+    tensor H : (q : ℝ, m : norm, l : ℝ)
+    H[q, m, 0]       := X[q, m]
+    Q[q, h, k]       := W_Q[h, k, m] · H[q, m, l]
+    K[s, h, k]       := W_K[h, k, m] · H[s, m, l]
+    V[s, h, k]       := W_V[h, k, m] · H[s, m, l]
+    S[h, q, s]       := softmax(where s ≤ q)(Q[q, h, k] · K[s, h, k])
+    AttnOut[q, h, k] := S[h, q, s] · V[s, h, k]
+    Attn[q, m]       := W_O[m, h, k] · AttnOut[q, h, k]
+    A[q, m]          := normalize(Attn[q, m] + H[q, m, l])
+    F[q, d]          := relu(W_in[d, m] · A[q, m])
+    Y[q, m]          := W_out[m, d] · F[q, d]
+    H[q, m, l +1]    := normalize(Y[q, m] + A[q, m])
+  }) env with
+  | .error e => throwError s!"scan-transformer: {e}"
+  | .ok out => match out["H"]? with
+    | some H =>
+        -- every (q-row, layer) is a normalize output ⇒ sums to 1 over m
+        for q in [0,1] do
+          for l in [0,1,2] do
+            unless Float.abs ((H.get! [q,0,l] + H.get! [q,1,l]) - 1.0) < 1e-5 do
+              throwError s!"scan-transformer: row (q={q},l={l}) ≠ 1: {repr H.data}"
+        -- the q=0 token is a causal fixed point [1,0] at EVERY layer
+        for l in [0,1,2] do
+          unless H.get! [0,0,l] == 1.0 && H.get! [0,1,l] == 0.0 do
+            throwError s!"scan-transformer: q=0 not fixed at l={l}: {repr H.data}"
+        -- the q=1 token genuinely evolves between layers 1 and 2 (two distinct layers ran)
+        unless Float.abs (H.get! [1,0,2] - H.get! [1,0,1]) > 1e-3 do
+          throwError s!"scan-transformer: layer 2 did not change q=1: {repr H.data}"
+        -- full numeric check. Layer 0 = X; layer 1 = example 12's output (exact); layer 2 to 1e-5.
+        unless DenseTensor.approxEq H (tensorOf [2,2,3]
+            [1.0, 1.0, 1.0,
+             0.0, 0.0, 0.0,
+             0.0, 0.13447071068499755, 0.284591,
+             1.0, 0.8655292893150025, 0.715409]) 1e-5 do
+          throwError s!"scan-transformer wrong: {repr H.data}"
+    | none => throwError "scan-transformer: no H"
 
 end LeanNCD.Eval
