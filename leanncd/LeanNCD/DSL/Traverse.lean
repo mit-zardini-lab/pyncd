@@ -52,6 +52,7 @@ def RHSExpr.mapUID (f : UData → UData) (r : RHSExpr) : RHSExpr :=
 
 def LHSSlot.mapUID (f : UData → UData) : LHSSlot → LHSSlot
   | .free a     => .free (AxisSpec.mapUID f a)
+  | .freeNorm a => .freeNorm (AxisSpec.mapUID f a)
   | .iterAt a n => .iterAt (AxisSpec.mapUID f a) n
   | .iterNext a => .iterNext (AxisSpec.mapUID f a)
   | .affine e   => .affine (IdxExpr.mapUID f e)
@@ -60,6 +61,7 @@ def Decl.mapUID (f : UData → UData) : Decl → Decl
   | .tensor nm ax        => .tensor nm (ax.map (AxisSpec.mapUID f))
   | .predicate nm ax     => .predicate nm (ax.map (AxisSpec.mapUID f))
   | .linear nm i o b     => .linear nm (i.map (AxisSpec.mapUID f)) (o.map (AxisSpec.mapUID f)) b
+  | .axis ax n           => .axis (AxisSpec.mapUID f ax) n
 instance : TermTraversable Decl where traverseUID := Decl.mapUID
 
 def Stmt.mapUID (f : UData → UData) : Stmt → Stmt

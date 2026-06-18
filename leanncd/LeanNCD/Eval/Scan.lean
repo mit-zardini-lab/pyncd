@@ -21,20 +21,24 @@ def iterSlotPos (slots : List LHSSlot) : Option (UID × Nat) :=
     axis is pinned via `evalAssignSeeded`. Applies the RHS nonlin to the produced slice.
 
     The slice's axes are the NON-iteration free slots in slot order (see `evalAssignSeeded`), so the
-    softmax/normalize reduction axis is the position of the output's declared `norm` axis (resolved
-    from `decls` by UID — slot kinds never carry the flag) within that slice-axis list. This holds
-    uniformly whether or not the stmt is itself a scan-state (has an iteration slot); pinned by the
-    `· != iterUID` filter, which drops the iteration axis exactly as `evalAssignSeeded` does. -/
-def evalStmtSlice (decls : List Decl) (env : HashMap String DenseTensor) (sizes : HashMap UID Nat)
+    softmax/normalize reduction axis is the position of the output slot marked `m.` (the norm flag
+    lives on the output slot — see `normAxisUidOf`) within that slice-axis list. This holds uniformly
+    whether or not the stmt is itself a scan-state (has an iteration slot); pinned by the `· != iterUID`
+    filter, which drops the iteration axis exactly as `evalAssignSeeded` does. -/
+def evalStmtSlice (env : HashMap String DenseTensor) (sizes : HashMap UID Nat)
     (iterUID : UID) (l : Nat) (s : Stmt) : Except EvalError (String × DenseTensor) := do
   match s with
   | .assign nm slots rhs =>
       let seed : HashMap UID Int := ({} : HashMap UID Int).insert iterUID (Int.ofNat l)
       let (_, slice) ← evalAssignSeeded env sizes seed nm slots rhs
       let sliceUids := (slots.filterMap lhsAxisUID?).filter (· != iterUID)
-      let pos := match normAxisUID? decls nm with
-        | some nu => (sliceUids.findIdx? (· == nu)).getD 0
-        | none    => 0
+      let pos ← match rhs.nonlin with
+        | .identity | .relu => pure 0     -- pointwise: reduction axis irrelevant
+        | .softmax _ | .normalize _ => match normAxisUidOf slots with
+            | some nu => match sliceUids.findIdx? (· == nu) with
+                | some p => pure p
+                | none   => throw s!"evalStmtSlice: marked norm axis of {nm} is not among its slice axes"
+            | none    => throw s!"evalStmtSlice: {nm} applies softmax/normalize but no output axis is marked (·)"
       return (nm, applyNonlin rhs.nonlin pos sliceUids slice)
   | _ => throw "evalStmtSlice: only assign stmts are supported in scans"
 
@@ -62,7 +66,7 @@ def stateShape (sizes : HashMap UID Nat) (slots : List LHSSlot) (L : Nat) : List
         | none   => 0)
 
 /-- Evaluate a ScanStmt → the scanned state tensors. -/
-def evalScan (decls : List Decl) (env : HashMap String DenseTensor) (sizes : HashMap UID Nat) :
+def evalScan (env : HashMap String DenseTensor) (sizes : HashMap UID Nat) :
     ScanStmt → Except EvalError (List (String × DenseTensor))
   | .plain _      => .error "evalScan: plain handled by evalScheduled, not here"
   | .scanPre nm _ _ => .error s!"evalScan: scanPre (recurMorphism escape hatch) evaluation unsupported ({nm})"
@@ -84,7 +88,7 @@ def evalScan (decls : List Decl) (env : HashMap String DenseTensor) (sizes : Has
         | _ => throw "evalScan: base stmts must be assigns"
       -- 2. fill l=0 from base
       for s in base do
-        let (nm, slice) ← evalStmtSlice decls work sizes ax.uid 0 s
+        let (nm, slice) ← evalStmtSlice work sizes ax.uid 0 s
         let iterPos := (iterPosOf[nm]?).getD 0
         work := work.insert nm (writeSliceAt ((work[nm]?).getD (DenseTensor.zeros [])) iterPos 0 slice)
       -- 3. for l = 0 … L-2: run the recur list at fixed l; intermediates into the step env;
@@ -92,7 +96,7 @@ def evalScan (decls : List Decl) (env : HashMap String DenseTensor) (sizes : Has
       for l in List.range (L - 1) do
         let mut stepEnv := work
         for s in recur do
-          let (nm, slice) ← evalStmtSlice decls stepEnv sizes ax.uid l s
+          let (nm, slice) ← evalStmtSlice stepEnv sizes ax.uid l s
           match iterPosOf[nm]? with
           | some iterPos =>
               -- a state slice: write into the full state tensor at iteration l+1

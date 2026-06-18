@@ -4,19 +4,6 @@ import LeanNCD.DSL.Compile
 namespace LeanNCD.Eval
 open Std
 
-/-- Find the `norm`-axis position + the per-position axis-UID list for an output, from the decls,
-    so softmax/normalize know which axis to reduce. Returns (axisPos, axisUids) or none.
-
-    The decl's declared axes are positional with the output's LHS slots, so the `norm`-kind axis's
-    index in the decl is the slot position to reduce over; `axisUids` is the output tensor's
-    per-position axis UIDs taken from the slots. -/
-def normAxisInfo (decls : List Decl) (nm : String) (slots : List LHSSlot) : Option (Nat × List UID) := do
-  let d ← decls.find? (fun d => declName d == nm)
-  let axes := declAxes d
-  let pos ← axes.findIdx? (fun a => match a.kind with | .norm _ => true | _ => false)
-  let axisUids := slots.filterMap lhsAxisUID?
-  return (pos, axisUids)
-
 /-- The declared output shape for a scatter `nm[slots] := …`, computed from the inferred source
     axis sizes (`sizes`): each affine slot's output extent is its affine map applied to the source
     sizes — `c0 + Σ cᵢ·size(aᵢ)` for an `.affine`, `c·size(a)` for a `.scale` (e.g. upsample
@@ -41,7 +28,14 @@ def evalPlain (decls : List Decl) (env : HashMap String DenseTensor) (sizes : Ha
       let (_, pre) ← evalAssignDtyped decls env sizes nm slots rhs    -- contract (dtype-aware)
       if rhs.nonlin == Nonlin.identity then return (nm, pre)
       else
-        let (axisPos, axisUids) := (normAxisInfo decls nm slots).getD (0, [])
+        -- the reduction axis is the slot marked `m.` (norm flag now lives on the output slot).
+        let axisUids := slots.filterMap lhsAxisUID?
+        let axisPos ← match rhs.nonlin, normAxisUidOf slots with
+          | .relu, _   => pure 0     -- relu is pointwise: the axis is irrelevant
+          | _, some nu => match axisUids.findIdx? (· == nu) with
+              | some p => pure p
+              | none   => throw s!"evalPlain: marked norm axis of {nm} is not among its output axes"
+          | _, none    => throw s!"evalPlain: {nm} applies softmax/normalize but no output axis is marked (·)"
         return (nm, applyNonlin rhs.nonlin axisPos axisUids pre)
   | .scatter nm slots rhs opts =>
       let outShape := scatterOutShape sizes slots
@@ -54,7 +48,7 @@ def evalScheduled (sched : ScheduledProgram) (inputs : HashMap String DenseTenso
   -- gather ALL underlying stmts (plain + scan base/recur) to infer axis sizes from the inputs:
   let allStmts : List Stmt := sched.stmts.flatMap (fun
     | .plain s => [s] | .scan _ _ b r _ => b ++ r | .scanPre _ _ _ => [])
-  let sizes ← inferAxisSizes inputs allStmts
+  let sizes ← inferAxisSizes sched.explicitSizes inputs allStmts
   let mut env := inputs
   for sc in sched.stmts do
     match sc with
@@ -62,7 +56,7 @@ def evalScheduled (sched : ScheduledProgram) (inputs : HashMap String DenseTenso
         let (nm, t) ← evalPlain sched.decls env sizes s
         env := env.insert nm t
     | .scan .. =>
-        let outs ← evalScan sched.decls env sizes sc
+        let outs ← evalScan env sizes sc
         for (nm, t) in outs do env := env.insert nm t
     | .scanPre nm _ _ => throw s!"evalScheduled: scanPre unsupported ({nm})"
   return env

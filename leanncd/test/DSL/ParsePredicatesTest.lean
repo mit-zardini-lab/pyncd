@@ -25,7 +25,7 @@ private def Factor.isIverson : Factor → Bool | .iverson _ => true | _ => false
 -- `edge(i,j)` is a Bool-typed 5×5 adjacency predicate; it gates a doubly-contracted
 -- feature product, and every index is contracted (scalar `Result[]`).
 private def maskedAgg : TLProgram := tlprog!{
-  predicate edge : (i : ℕ, j : ℕ)
+  predicate edge : (i, j)
   Result[] := F[t, i] · F[t, j] · edge[i, j]
 }
 #guard maskedAgg.decls.length == 1

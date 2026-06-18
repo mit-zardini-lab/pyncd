@@ -101,21 +101,7 @@ def declName : Decl → String
   | .tensor n _      => n
   | .predicate n _   => n
   | .linear n _ _ _  => n
-
-/-- The declared axis specs of a `Decl` (positional, matching the output's LHS slots). -/
-def declAxes : Decl → List AxisSpec
-  | .tensor _ axes     => axes
-  | .predicate _ axes  => axes
-  | .linear _ _ out _  => out
-
-/-- The UID of the `norm`-kind axis declared for output `nm`, if any. The DSL records the
-    `norm` flag ONLY on the decl (LHS slots always parse as `.real`; see `Elab`/`resolveDecls`),
-    so softmax/normalize must resolve their reduction axis through the decls — by UID, since the
-    decl axis and the LHS slot share a UID after `unifyAxes`. -/
-def normAxisUID? (decls : List Decl) (nm : String) : Option UID := do
-  let d ← decls.find? (fun d => declName d == nm)
-  let a ← (declAxes d).find? (fun a => match a.kind with | .norm _ => true | _ => false)
-  return a.uid
+  | .axis ax _       => ax.name
 
 /-- Pick the `Combine` for an output name from the decls: `predicate` ⇒ bool, else real. -/
 def combineFor (decls : List Decl) (nm : String) : Combine :=

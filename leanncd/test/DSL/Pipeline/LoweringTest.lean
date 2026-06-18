@@ -58,7 +58,7 @@ run_cmd do
   let mm : Stmt := .assign "Y" [ .free i, .free j ]
     { body := { terms := [ { factors := [ .read "W" [.axis i, .axis k], .read "X" [.axis k, .axis j] ] } ] },
       nonlin := .identity }
-  let sp : ScheduledProgram := { decls := [], stmts := [ .plain mm ], env := {}, extNames := (insert "W" (insert "X" (∅ : Finset String))), ctx := { classes := [] } }
+  let sp : ScheduledProgram := { decls := [], stmts := [ .plain mm ], env := {}, extNames := (insert "W" (insert "X" (∅ : Finset String))), ctx := { classes := [] }, explicitSizes := {} }
   match route sp |>.run 0 with
   | .ok tc _ =>
       unless tc.nExternal == 2 do throwError s!"nExternal should be 2, got {tc.nExternal}"
@@ -78,7 +78,7 @@ run_cmd do
   let i := ax "i" 1
   let conv : Stmt := .assign "Y" [ .free i ]
     { body := { terms := [ { factors := [ .read "X" [ .scale 2 i ] ] } ] }, nonlin := .identity }
-  let sp : ScheduledProgram := { decls := [], stmts := [ .plain conv ], env := {}, extNames := (insert "X" (∅ : Finset String)), ctx := { classes := [] } }
+  let sp : ScheduledProgram := { decls := [], stmts := [ .plain conv ], env := {}, extNames := (insert "X" (∅ : Finset String)), ctx := { classes := [] }, explicitSizes := {} }
   match route sp |>.run 0 with
   | .ok tc _ =>
       let sm := tc.steps.head!.reindexings.head!

@@ -21,6 +21,7 @@ A stmt already at `.identity` is emitted unchanged. -/
     dropped here. -/
 def LHSSlot.toReadIdx : LHSSlot → Option IdxExpr
   | .free a     => some (.axis a)
+  | .freeNorm a => some (.axis a)
   | .iterAt a _ => some (.axis a)
   | .iterNext a => some (.axis a)
   | .affine _   => none      -- scatter outputs: skipped (no example needs nonlin-over-scatter)
@@ -108,7 +109,12 @@ def schedule (lp : LinearProgram) : FreshM ScheduledProgram := do
   let outputs  := if lastOut.isEmpty then produced.filter (fun n => ¬ read.contains n) else lastOut
   let live := liveFix lp.stmts outputs.eraseDups
   let liveStmts := lp.stmts.filter (fun sc => (sc.writes).any (fun w => live.contains w))
-  return { decls := lp.decls, stmts := liveStmts, env := lp.env, extNames := lp.extNames, ctx := lp.ctx }
+  -- collect the sizes pinned by `axis … = n` decls (UIDs are canonical by this phase).
+  let explicitSizes : Std.HashMap UID Nat := lp.decls.foldl (fun m d => match d with
+    | .axis ax (some n) => m.insert ax.uid n
+    | _                 => m) {}
+  return { decls := lp.decls, stmts := liveStmts, env := lp.env, extNames := lp.extNames,
+           ctx := lp.ctx, explicitSizes }
 
 /-! ## Phase 8 — `route`
 
@@ -152,6 +158,7 @@ def Stmt.lhsAxes : Stmt → List AxisSpec
   | .assign _ ls _ | .scatter _ ls _ _ =>
       ls.filterMap (fun
         | .free a     => some a
+        | .freeNorm a => some a
         | .iterAt a _ => some a
         | .iterNext a => some a
         | .affine _   => none)

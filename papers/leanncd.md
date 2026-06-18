@@ -958,15 +958,19 @@ Extends Domingos' tensor-logic notation (implicit Σ over contracted axes, Einst
 decl        ::= 'tensor'    name ':' shape
               | 'predicate' name ':' shape
               | 'linear'    name ':' in_shape '→' out_shape ['bias']
+              | 'axis'       name ':' axis_kind ['=' n]   -- declares an axis's dtype + optional pinned size
 
+-- A tensor's shape lists only its axis NAMES (and order). An axis's dtype/size lives in an
+-- `axis` declaration; the softmax/normalize reduction axis is marked on the output slot (`m.`).
 shape       ::= '(' ')'
               | '(' axis_spec (',' axis_spec)* ')'
 
-axis_spec   ::= name ':' axis_kind
+axis_spec   ::= name
 
 axis_kind   ::= 'ℝ'    ['[' size ']']   -- real axis;          bracket = size (else symbolic)
               | 'ℕ'    ['[' size ']']   -- discrete axis
-              | 'norm' ['[' size ']']   -- normalization axis (a ℝ axis flagged for softmax/normalize)
+-- An `axis l : ℕ = 3` declaration pins a concrete loop/iteration extent that no input tensor's
+-- shape would otherwise fix (it seeds size inference); omitting `= n` declares dtype only.
 
 -- A size is a symbolic dimension term. In the implemented front-end it elaborates to a
 -- computable `SizeExpr` (§13.3), the DSL mirror of `Numeric` (§2.1 / §7.2).
@@ -1025,14 +1029,18 @@ nonlin      ::= 'relu'
 -- Layer 5: Statements
 stmt        ::= assign | base_case | recur_step | scatter_write
 
-assign      ::= name '[' axis_name (',' axis_name)* ']' ':=' rhs
+assign      ::= name '[' out_slot (',' out_slot)* ']' ':=' rhs
+
+-- An output slot is an axis name, optionally suffixed `.` to mark it the softmax/normalize
+-- reduction axis (at most one per stmt; required when the RHS applies softmax/normalize).
+out_slot    ::= axis_name | axis_name '.'
 
 -- l+1 and 0 may appear in any slot position; the iteration axis l is identified by the l+1 slot
 base_case   ::= name '[' base_slot_list ']'  ':=' rhs
 recur_step  ::= name '[' recur_slot_list ']' ':=' rhs
 
-base_slot_list  ::= (axis_name ',')* n (',' axis_name)*
-recur_slot_list ::= (axis_name ',')* axis_name '+' '1' (',' axis_name)*
+base_slot_list  ::= (out_slot ',')* n (',' out_slot)*
+recur_slot_list ::= (out_slot ',')* axis_name '+' '1' (',' out_slot)*
 
 -- Affine LHS: every slot is a (possibly affine) output coordinate
 scatter_write ::= name '[' affine_slot (',' affine_slot)* ']' ':=' rhs
@@ -1064,9 +1072,9 @@ program     ::= decl* stmt+
 -- Matmul (Domingos base: k is contracted)
 Y[i,j] := W[i,k] · X[k,j]
 
--- Causal masked attention (norm axis + Iverson mask)
-tensor A : (q : ℝ, s : norm)
-A[q,s] := softmax(where s ≤ q)(Q[q,d] · K[s,d])
+-- Causal masked attention (norm axis marked `s.` + Iverson mask)
+tensor A : (q, s)
+A[q,s.] := softmax(where s ≤ q)(Q[q,d] · K[s,d])
 
 -- Strided convolution (affine Reindex reads). NOTE: a symbolic stride `s*j` needs an ident
 -- coefficient, which integer-coefficient IdxExpr cannot carry (§13.3); the parsed form uses a
@@ -1074,7 +1082,7 @@ A[q,s] := softmax(where s ≤ q)(Q[q,d] · K[s,d])
 Y[i,j] := W[p,r] · X[i+p, s*j+r]
 
 -- Upsample 2× (affine Scatter write)
-tensor Out : (i : ℝ[2*m], j : ℝ[2*n])
+tensor Out : (i, j)
 Out[2*i, 2*j] := X[i,j]
 
 -- Coupled scan: G and H share iteration axis l (coupled Scan, n_states=2)
@@ -1085,7 +1093,7 @@ H[j, l+1] := relu(H[j,l] · W_H[j,k] + G[j,l] · V[j,k])
 
 -- Predicate declaration + masked aggregation: edge(i,j) is a Bool-typed adjacency
 -- predicate gating a doubly-contracted feature product (all indices contracted → scalar)
-predicate edge : (i : ℕ, j : ℕ)
+predicate edge : (i, j)
 Result[] := F[t,i] · F[t,j] · edge[i,j]
 
 -- Iverson-bracket predicate: a tridiagonal band mask via |·| (integer absolute value)
@@ -1099,36 +1107,39 @@ Band[i,j] := A[i,j] · [|i − j| ≤ 1]
 Q[q, h, k]       := W_Q[h, k, m] · X[q, m]
 K[s, h, k]       := W_K[h, k, m] · X[s, m]
 V[s, h, k]       := W_V[h, k, m] · X[s, m]
-tensor S : (h : ℝ, q : ℝ, s : norm)
-S[h, q, s]       := softmax(where s ≤ q)(Q[q, h, k] · K[s, h, k])
+tensor S : (h, q, s)
+S[h, q, s.]      := softmax(where s ≤ q)(Q[q, h, k] · K[s, h, k])
 AttnOut[q, h, k] := S[h, q, s] · V[s, h, k]
 Attn[q, m]       := W_O[m, h, k] · AttnOut[q, h, k]
-tensor A : (q : ℝ, m : norm)
-A[q, m]          := normalize(Attn[q, m] + X[q, m])
+tensor A : (q, m)
+A[q, m.]         := normalize(Attn[q, m] + X[q, m])
 F[q, d]          := relu(W_in[d, m] · A[q, m])
 Y[q, m]          := W_out[m, d] · F[q, d]
-tensor H : (q : ℝ, m : norm)
-H[q, m]          := normalize(Y[q, m] + A[q, m])
+tensor H : (q, m)
+H[q, m.]         := normalize(Y[q, m] + A[q, m])
 
 -- Multi-layer transformer as a SCAN over the layer axis l. The layer hidden state H[q,m,l] is
 -- the only scan state (base = embeddings); the attention+FFN block becomes per-step
 -- INTERMEDIATES, recomputed from H[·,·,l] each step. `finalizeScans` routes any non-iteration
--- stmt that transitively reads a scan state into the recurrence body (in source order); the
--- iteration count L is the extent of the H buffer's l axis. (norm axes resolve through the decls.)
-tensor S : (h : ℝ, q : ℝ, s : norm)
-tensor A : (q : ℝ, m : norm)
-tensor H : (q : ℝ, m : norm, l : ℝ)
+-- stmt that transitively reads a scan state into the recurrence body (in source order). The loop
+-- extent L and the key-position extent s are pinned by `axis` decls (since H is now produced, not
+-- an input, no tensor shape fixes them); norm axes are marked on the output slot (`s.`, `m.`).
+axis l : ℕ = 3
+axis s : ℕ = 2
+tensor S : (h, q, s)
+tensor A : (q, m)
+tensor H : (q, m, l)
 H[q, m, 0]       := X[q, m]                              -- base case: layer 0 = embeddings
 Q[q, h, k]       := W_Q[h, k, m] · H[q, m, l]           -- per-step intermediate (reads state at l)
 K[s, h, k]       := W_K[h, k, m] · H[s, m, l]
 V[s, h, k]       := W_V[h, k, m] · H[s, m, l]
-S[h, q, s]       := softmax(where s ≤ q)(Q[q, h, k] · K[s, h, k])
+S[h, q, s.]      := softmax(where s ≤ q)(Q[q, h, k] · K[s, h, k])
 AttnOut[q, h, k] := S[h, q, s] · V[s, h, k]
 Attn[q, m]       := W_O[m, h, k] · AttnOut[q, h, k]
-A[q, m]          := normalize(Attn[q, m] + H[q, m, l])
+A[q, m.]         := normalize(Attn[q, m] + H[q, m, l])
 F[q, d]          := relu(W_in[d, m] · A[q, m])
 Y[q, m]          := W_out[m, d] · F[q, d]
-H[q, m, l+1]     := normalize(Y[q, m] + A[q, m])         -- state recurrence: writes layer l+1
+H[q, m., l+1]    := normalize(Y[q, m] + A[q, m])         -- state recurrence: writes layer l+1
 ```
 
 ### 13.3 Abstract syntax
@@ -1160,13 +1171,13 @@ noncomputable def SizeExpr.toNumeric : SizeExpr → Numeric   -- proof-side brid
 inductive AxisKind
   | real   : Option SizeExpr → AxisKind  -- ℝ axis; coordinate DType.reals (§2.3)
   | nat    : Option SizeExpr → AxisKind  -- ℕ axis; coordinate DType.nat   (§2.3)
-  | norm   : Option SizeExpr → AxisKind  -- a ℝ axis additionally flagged for softmax/normalize
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
 -- The `Option SizeExpr` is the axis SIZE (Axis.size, §2.2): `some s` concrete, `none` a fresh
 -- generator minted in Stage 2 (§7.2). The real/nat tag is the §2.3 DType of coordinates along
--- the axis (fixing the assembled array's `ArrayType.dtype`). `norm` carries no new datatype — it
--- is a `real` axis marked as the contraction dimension of a normalization nonlinearity, consumed
--- by `splitNonlins` (§13.5) and realized in the Algebra into the target actegory (§8).
+-- the axis (fixing the assembled array's `ArrayType.dtype`). The softmax/normalize reduction
+-- axis is NO LONGER an AxisKind: it is marked on the output slot (`LHSSlot.freeNorm`, below) and
+-- consumed by the evaluator / `splitNonlins` (§13.5) directly — a per-statement property, not an
+-- intrinsic axis kind (the same axis can be a softmax axis in one stmt and a contraction in another).
 
 structure AxisSpec where
   name : String
@@ -1174,9 +1185,10 @@ structure AxisSpec where
   kind : AxisKind
 
 inductive Decl
-  | tensor    : String → List AxisSpec → Decl
+  | tensor    : String → List AxisSpec → Decl   -- a tensor's axes are NAMES only; dtype/size live on `axis`
   | predicate : String → List AxisSpec → Decl   -- Boolean-valued: R = Bool target semiring (§8)
   | linear    : String → (inAxes outAxes : List AxisSpec) → (bias : Bool) → Decl
+  | axis      : AxisSpec → Option Nat → Decl    -- `axis l : ℕ = 3`: an axis's dtype + optional pinned size
 ```
 
 ```lean
@@ -1235,6 +1247,7 @@ structure RHSExpr  where body : SumExpr; nonlin : Nonlin
 -- Layer 5
 inductive LHSSlot
   | free     : AxisSpec → LHSSlot                       -- ordinary free axis
+  | freeNorm : AxisSpec → LHSSlot                       -- free axis marked `m.` = softmax/normalize axis
   | iterAt   : AxisSpec → ℤ → LHSSlot                  -- l = n  (base case)
   | iterNext : AxisSpec → LHSSlot                       -- l + 1  (recurrence step)
   | affine   : IdxExpr → LHSSlot                        -- affine output slot (Scatter)
@@ -1311,16 +1324,16 @@ syntax "ℝ"                   : tl_axis_kind
 syntax "ℝ[" tl_size "]"      : tl_axis_kind
 syntax "ℕ"                   : tl_axis_kind
 syntax "ℕ[" tl_size "]"      : tl_axis_kind
-syntax "norm"                : tl_axis_kind
-syntax "norm[" tl_size "]"   : tl_axis_kind
 
-syntax ident ":" tl_axis_kind : tl_axis_spec
+syntax ident : tl_axis_spec               -- a tensor shape lists axis NAMES only
 syntax "(" tl_axis_spec,* ")" : tl_shape
 
 syntax "tensor"    ident ":" tl_shape                      : tl_decl
 syntax "predicate" ident ":" tl_shape                      : tl_decl
 syntax "linear"    ident ":" tl_shape "→" tl_shape         : tl_decl
 syntax "linear"    ident ":" tl_shape "→" tl_shape " bias" : tl_decl
+syntax "axis"      ident ":" tl_axis_kind                  : tl_decl   -- dtype only
+syntax "axis"      ident ":" tl_axis_kind "=" num          : tl_decl   -- dtype + pinned size
 
 -- Layer 2: index expressions — GENERALIZED to general integer-affine sums (the AST's
 -- IdxExpr.affine carries a full `List (ℤ × AxisSpec)`, so the grammar must reach it).
@@ -1383,6 +1396,7 @@ syntax tl_sum_expr                      : tl_rhs
 -- Layer 5: statements
 syntax ident "[" tl_lhs_slot,* "]" ":=" tl_rhs : tl_stmt
 syntax ident                 : tl_lhs_slot
+syntax ident "."             : tl_lhs_slot   -- norm marker: the softmax/normalize reduction axis
 syntax num                   : tl_lhs_slot
 syntax ident "+1"            : tl_lhs_slot
 syntax num "*" ident         : tl_lhs_slot
@@ -1572,7 +1586,7 @@ TLProgram
 | **unifyAxes** | The [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) UID coequalizer, computed in batch. Collects the `(uid_a, uid_b)` identifications from axis occurrences sharing a name within program scope (Domingos' name-binding, [§13.2](#132-bnf-grammar)), feeds them to `Context.merge`, and applies the result with `Context.apply`. The canonical representative is the **largest UID** — the universal cocone vertex of [§7.3](#73-composition-as-pushout) — so a DSL-built morphism and a CSV-built one agree on axis identity on the nose. The whole program is known statically, so this runs once rather than incrementally (Python's `Context.append_iter`), but it is the *same* coequalizer with the *same* representative rule. | Pure (`ResolvedProgram → CanonicalProgram`); lifted to `FreshM` by `pure`; `Context` / `EqClass` ([§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer)) |
 | **lowerArith** | `IdxExpr.const` reads → fresh `Slice` intermediate; `IdxExpr.affine` reads → fresh `Reindex` intermediate; affine `LHSSlot`s → `Scatter` (injectivity checked; `reduce = some "sum"` required for non-injective maps). Each is a `BrBase` ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) whose `reindexings` field carries the affine map as an `St` stride matrix `StMat` — the locus where `St` lives inside `Br`. Non-zero fill prepends a fill-initialization stmt. Auxiliary stmts are stored in `LoweredProgram.auxStmts : Array Stmt`, not a global. | `FreshM`; `freshUData` mints UIDs for synthetic intermediates; auxiliary stmts in output type, not a writer monad |
 | **finalizeScans** | Groups stmts by name + iteration axis UID; pairs `iterAt`/`iterNext` slots into `Scan` nodes; stmts sharing the same iteration-axis UID across names form a coupled `Scan` (`n_states > 1`). Each `Scan` is the `cata(step)` of the `TemporalGraded` mixin ([§6.1](#61-temporalgraded--scan)) over the iteration axis as temporal object `L`; the prefix-restriction and batching laws it obeys are Props 8.7–8.8. `Stmt.recurMorphism` supplies the step morphism directly, bypassing equation lowering for that scan state. Validates: every `recur_step` has a matching `base_case`; `l+1` absent from RHS for the iteration axis. | `FreshM`; pure grouping; `throw` on missing base case |
-| **splitNonlins** | Lifts `relu`/`softmax`/`normalize` out of `RHSExpr.nonlin` into a separate composed step. These are genuinely nonlinear, so they are not reindexings (`StMat` is affine); each becomes a `BrBase` op ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) whose numeric semantics are supplied by the Algebra functor `F : C → V` into the target actegory ([§8](#8-algebras-and-construct)). For `softmax`/`normalize` the `norm`-flagged axis ([§13.3](#133-abstract-syntax)) is the contraction dimension; masked variants emit an alignment-permutation step computed from the `where` mask. | `FreshM`; `freshUData` mints UIDs for nonlin step intermediates |
+| **splitNonlins** | Lifts `relu`/`softmax`/`normalize` out of `RHSExpr.nonlin` into a separate composed step. These are genuinely nonlinear, so they are not reindexings (`StMat` is affine); each becomes a `BrBase` op ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) whose numeric semantics are supplied by the Algebra functor `F : C → V` into the target actegory ([§8](#8-algebras-and-construct)). For `softmax`/`normalize` the reduction dimension is the output slot marked `m.` (`LHSSlot.freeNorm`, [§13.3](#133-abstract-syntax)); masked variants emit an alignment-permutation step computed from the `where` mask. | `FreshM`; `freshUData` mints UIDs for nonlin step intermediates |
 | **schedule** | Backward reachability BFS from the output name simultaneously determines liveness (DCE) and produces a valid reverse-topological order. Two passes in Python; one here because the BFS visit order is already a reverse topo order. | Pure (`String → List ScanStmt → List ScanStmt`); lifted to `FreshM` by `pure` |
 | **route** | Detects contracted axes (present in a `ProdTerm` but absent from the LHS) and builds one `BrBase` ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) per stmt, carrying the `tensor`/`predicate` tag from `DeclEnv`. The contraction *arithmetic* is not fixed here but at evaluation, by the Algebra's value semiring `R` ([§8](#8-algebras-and-construct)): `R = ℝ` (×, then Σ) for `tensor` outputs, `R = Bool` (∧, then ∃) for `predicate` outputs — the ∃/∧-vs-Σ split is exactly that choice of `R`. Assigns index slots; builds `ThreadedComposed.routing` and `n_external`. Automatic associative-scan detection (nonlinearity-free recurrence, flagged in `finalizeScans`) tags the routed step `op="scan_affine"` — the `ScanAffine` case where the step algebra factors through a monoid, i.e. Prop 8.7's `O(log N)` parallel prefix; a `recurMorphism` step is tagged `op="scan_pre"`. | Pure (`List ScanStmt → DeclEnv → Context → ThreadedComposed`); lifted to `FreshM` by `pure` |
 

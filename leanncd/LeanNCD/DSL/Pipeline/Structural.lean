@@ -36,11 +36,13 @@ private def axNamesRHS (r : RHSExpr) : List String :=
   (r.body.terms.flatMap (fun t => t.factors.flatMap axNamesFactor)) ++ axNamesNonlin r.nonlin
 
 private def axNamesLHS : LHSSlot → List String
-  | .free a => [a.name] | .iterAt a _ => [a.name] | .iterNext a => [a.name] | .affine e => axNamesIdx e
+  | .free a => [a.name] | .freeNorm a => [a.name]
+  | .iterAt a _ => [a.name] | .iterNext a => [a.name] | .affine e => axNamesIdx e
 
 private def axNamesDecl : Decl → List String
   | .tensor _ ax => ax.map (·.name) | .predicate _ ax => ax.map (·.name)
   | .linear _ i o _ => i.map (·.name) ++ o.map (·.name)
+  | .axis ax _ => [ax.name]
 
 private def axNamesStmt : Stmt → List String
   | .assign _ ls r => ls.flatMap axNamesLHS ++ axNamesRHS r
@@ -75,7 +77,8 @@ private def uidsRHS (r : RHSExpr) : List UID :=
   (r.body.terms.flatMap (fun t => t.factors.flatMap uidsFactor)) ++ uidsNonlin r.nonlin
 
 private def uidsLHS : LHSSlot → List UID
-  | .free a => [a.uid] | .iterAt a _ => [a.uid] | .iterNext a => [a.uid] | .affine e => uidsIdx e
+  | .free a => [a.uid] | .freeNorm a => [a.uid]
+  | .iterAt a _ => [a.uid] | .iterNext a => [a.uid] | .affine e => uidsIdx e
 
 /-- Every `AxisSpec.uid` reachable in a statement, in program order. -/
 def Stmt.uids : Stmt → List UID
@@ -114,9 +117,10 @@ Per the §12.1 contract this phase is purely constructive: §12.1 example progra
 `W`, `X`, `Q`, `K` with no `tensor` declaration, so an undeclared read is an external input — not
 an error. `resolveDecls` therefore NEVER throws. -/
 
-/-- The declaration's tensor name. -/
+/-- The declaration's tensor name. (`axis` decls name an AXIS, not a tensor; `resolveDecls`
+    skips them when building the tensor-keyed `DeclEnv`.) -/
 def Decl.name : Decl → String
-  | .tensor n _ => n | .predicate n _ => n | .linear n _ _ _ => n
+  | .tensor n _ => n | .predicate n _ => n | .linear n _ _ _ => n | .axis ax _ => ax.name
 
 /-- The tensor name a stmt writes to (its LHS). -/
 def Stmt.lhsName : Stmt → String
@@ -135,7 +139,9 @@ def Stmt.readNames : Stmt → List String
     `extraStmts := #[]`: bias materialization for `linear … bias := true` is deferred — none of
     the five §12.1 examples declare a `linear` weight, so it is unexercised here. Never throws. -/
 def resolveDecls (lp : LabeledProgram) : FreshM ResolvedProgram := do
-  let env : DeclEnv := lp.decls.foldl (fun m d => m.insert d.name d) {}
+  let env : DeclEnv := lp.decls.foldl (fun m d => match d with
+    | .axis _ _ => m                  -- axis decls name an axis, not a tensor: keep them out of the env
+    | _         => m.insert d.name d) {}
   let produced : List String := lp.stmts.map Stmt.lhsName
   let reads    : List String := lp.stmts.flatMap Stmt.readNames
   let extNames : Finset String :=
@@ -176,13 +182,14 @@ private def axNameUIDRHS (r : RHSExpr) : List (String × UID) :=
   (r.body.terms.flatMap (fun t => t.factors.flatMap axNameUIDFactor)) ++ axNameUIDNonlin r.nonlin
 
 private def axNameUIDLHS : LHSSlot → List (String × UID)
-  | .free a => [(a.name, a.uid)] | .iterAt a _ => [(a.name, a.uid)]
+  | .free a => [(a.name, a.uid)] | .freeNorm a => [(a.name, a.uid)] | .iterAt a _ => [(a.name, a.uid)]
   | .iterNext a => [(a.name, a.uid)] | .affine e => axNameUIDIdx e
 
 private def axNameUIDDecl : Decl → List (String × UID)
   | .tensor _ ax => ax.map (fun a => (a.name, a.uid))
   | .predicate _ ax => ax.map (fun a => (a.name, a.uid))
   | .linear _ i o _ => i.map (fun a => (a.name, a.uid)) ++ o.map (fun a => (a.name, a.uid))
+  | .axis ax _ => [(ax.name, ax.uid)]
 
 private def axNameUIDStmt : Stmt → List (String × UID)
   | .assign _ ls r => ls.flatMap axNameUIDLHS ++ axNameUIDRHS r
@@ -226,6 +233,7 @@ and so needs `reduce sum`; strided coords like upsample `2*i` are injective). -/
 def LHSSlot.isAffine : LHSSlot → Bool
   | .affine _   => true
   | .free _     => false
+  | .freeNorm _ => false
   | .iterAt _ _ => false
   | .iterNext _ => false
 

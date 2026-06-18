@@ -6,6 +6,7 @@ open Std
 def lhsSlotIdx : LHSSlot → IdxExpr
   | .affine e   => e
   | .free a     => .axis a
+  | .freeNorm a => .axis a
   | .iterAt _ n => .const n
   | .iterNext a => .shift a 1
 

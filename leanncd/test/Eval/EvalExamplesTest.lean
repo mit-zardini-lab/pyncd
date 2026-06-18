@@ -38,8 +38,8 @@ run_cmd do
   let env : HashMap String DenseTensor :=
     (({} : HashMap String DenseTensor).insert "Q" (tensorOf [2,2] [1,0, 0,1])).insert "K" (tensorOf [2,2] [1,0, 0,1])
   match TLProgram.eval (tlprog!{
-    tensor A : (q : ℝ, s : norm)
-    A[q, s] := softmax(where s ≤ q)(Q[q, d] · K[s, d])
+    tensor A : (q, s)
+    A[q, s.] := softmax(where s ≤ q)(Q[q, d] · K[s, d])
   }) env with
   | .error e => throwError s!"attn: {e}"
   | .ok out => match out["A"]? with
@@ -76,7 +76,7 @@ run_cmd do
   let env : HashMap String DenseTensor :=
     ({} : HashMap String DenseTensor).insert "X" (tensorOf [2,2] [1,2, 3,4])
   match TLProgram.eval (tlprog!{
-    tensor Out : (i : ℝ[2 * m], j : ℝ[2 * n])
+    tensor Out : (i, j)
     Out[2 * i, 2 * j] := X[i, j]
   }) env with
   | .error e => throwError s!"upsample: {e}"
@@ -87,16 +87,16 @@ run_cmd do
     | none => throwError "upsample: no Out"
 
 /- 5. Coupled scan (G, H share the iteration axis `l`). All weights = 1, one feature.
-    The iteration count L is supplied as the time-extent of the `G` state buffer passed
-    in `inputs` (L is a runtime parameter, not present in the program text; sized here
-    via the input shape `[1,L]`). Steps: G₀=1,H₀=2; G₁=relu(1+2)=3,H₁=relu(2+1)=3;
+    The iteration count L = 3 is pinned by the explicit `axis l : ℕ = 3` declaration (no
+    input tensor's shape would otherwise fix the loop axis). Steps: G₀=1,H₀=2; G₁=relu(1+2)=3,H₁=relu(2+1)=3;
     G₂=relu(3+3)=6,H₂=6 ⇒ G=[1,3,6], H=[2,3,6]. Asserts the first two steps. -/
 run_cmd do
   let e0 : HashMap String DenseTensor := {}
-  let env := ((((((e0.insert "X" (tensorOf [1] [1.0])).insert "Y" (tensorOf [1] [2.0])).insert "W_G"
+  let env := (((((e0.insert "X" (tensorOf [1] [1.0])).insert "Y" (tensorOf [1] [2.0])).insert "W_G"
       (tensorOf [1,1] [1.0])).insert "U" (tensorOf [1,1] [1.0])).insert "W_H"
-      (tensorOf [1,1] [1.0])).insert "V" (tensorOf [1,1] [1.0])).insert "G" (tensorOf [1,3] [0,0,0])
+      (tensorOf [1,1] [1.0])).insert "V" (tensorOf [1,1] [1.0])
   match TLProgram.eval (tlprog!{
+    axis l : ℕ = 3
     G[j, 0]    := X[j]
     G[j, l +1] := relu(G[j, l] · W_G[j, k] + H[j, l] · U[j, k])
     H[j, 0]    := Y[j]
@@ -118,7 +118,7 @@ run_cmd do
   let env : HashMap String DenseTensor :=
     (({} : HashMap String DenseTensor).insert "F" (tensorOf [2,2] [1,2, 3,4])).insert "edge" (tensorOf [2,2] [0,1, 1,0])
   match TLProgram.eval (tlprog!{
-    predicate edge : (i : ℕ, j : ℕ)
+    predicate edge : (i, j)
     Result[] := F[t, i] · F[t, j] · edge[i, j]
   }) env with
   | .error e => throwError s!"maskedAgg: {e}"
@@ -182,8 +182,8 @@ run_cmd do
   let env : HashMap String DenseTensor :=
     ({} : HashMap String DenseTensor).insert "A" (tensorOf [2,2] [1,3, 2,2])
   match TLProgram.eval (tlprog!{
-    tensor Y : (q : ℝ, s : norm)
-    Y[q, s] := normalize(A[q, s])
+    tensor Y : (q, s)
+    Y[q, s.] := normalize(A[q, s])
   }) env with
   | .error e => throwError s!"normalize: {e}"
   | .ok out => match out["Y"]? with
@@ -215,16 +215,16 @@ run_cmd do
     Q[q, h, k]       := W_Q[h, k, m] · X[q, m]
     K[s, h, k]       := W_K[h, k, m] · X[s, m]
     V[s, h, k]       := W_V[h, k, m] · X[s, m]
-    tensor S : (h : ℝ, q : ℝ, s : norm)
-    S[h, q, s]       := softmax(where s ≤ q)(Q[q, h, k] · K[s, h, k])
+    tensor S : (h, q, s)
+    S[h, q, s.]      := softmax(where s ≤ q)(Q[q, h, k] · K[s, h, k])
     AttnOut[q, h, k] := S[h, q, s] · V[s, h, k]
     Attn[q, m]       := W_O[m, h, k] · AttnOut[q, h, k]
-    tensor A : (q : ℝ, m : norm)
-    A[q, m]          := normalize(Attn[q, m] + X[q, m])
+    tensor A : (q, m)
+    A[q, m.]         := normalize(Attn[q, m] + X[q, m])
     F[q, d]          := relu(W_in[d, m] · A[q, m])
     Y[q, m]          := W_out[m, d] · F[q, d]
-    tensor H : (q : ℝ, m : norm)
-    H[q, m]          := normalize(Y[q, m] + A[q, m])
+    tensor H : (q, m)
+    H[q, m.]         := normalize(Y[q, m] + A[q, m])
   }) env with
   | .error e => throwError s!"transformer: {e}"
   | .ok out => match out["H"]? with
@@ -245,15 +245,16 @@ run_cmd do
     The layer hidden state `H[q,m,l]` is the only scan state: H[·,·,0] = X (embeddings), and each
     step recomputes the whole attention+FFN block (Q/K/V/S/AttnOut/Attn/A/F/Y — per-step
     *intermediates*, recomputed from `H[·,·,l]`) before writing H[·,·,l+1]. The iteration count
-    L = 3 (layers 0,1,2) is sized by the `H` buffer's last dim, exactly as the coupled scan sizes
-    its time extent. Same identity weights and toy sizes as example 12, so:
+    L = 3 (layers 0,1,2) is pinned by the explicit `axis l : ℕ = 3` declaration. Same identity
+    weights and toy sizes as example 12, so:
       H[·,·,0] = X = I₂                                      (base / embeddings)
       H[·,·,1] = [[1,0],[0.13447,0.86553]]                  (= example 12's output)
       H[·,·,2] = [[1,0],[0.28459,0.71541]]                  (a second, distinct layer)
     The q=0 row is a fixed point [1,0] (causal mask ⇒ token 0 attends only to itself); the q=1 row
     evolves layer-to-layer, proving the intermediates are recomputed each step. This exercises the
-    per-step-intermediate routing in `finalizeScans` and decls-based norm-axis resolution in the
-    scan evaluator (softmax over s; normalize over m), neither of which the coupled-scan reaches. -/
+    per-step-intermediate routing in `finalizeScans` and marker-based norm-axis resolution in the
+    scan evaluator (softmax over the marked `s.`; normalize over the marked `m.`), neither of which
+    the coupled-scan reaches. -/
 run_cmd do
   let env : HashMap String DenseTensor :=
     ({} : HashMap String DenseTensor).insert "X" (tensorOf [2,2] [1,0, 0,1])
@@ -263,22 +264,23 @@ run_cmd do
   let env := env.insert "W_O"   (tensorOf [2,1,2] [1,0, 0,1])
   let env := env.insert "W_in"  (tensorOf [2,2] [1,0, 0,1])
   let env := env.insert "W_out" (tensorOf [2,2] [1,0, 0,1])
-  let env := env.insert "H"     (tensorOf [2,2,3] (List.replicate 12 0.0))  -- sizes L = 3
   match TLProgram.eval (tlprog!{
-    tensor S : (h : ℝ, q : ℝ, s : norm)
-    tensor A : (q : ℝ, m : norm)
-    tensor H : (q : ℝ, m : norm, l : ℝ)
+    axis l : ℕ = 3
+    axis s : ℕ = 2          -- key/sequence position; no input tensor sizes it once H is purely produced
+    tensor S : (h, q, s)
+    tensor A : (q, m)
+    tensor H : (q, m, l)
     H[q, m, 0]       := X[q, m]
     Q[q, h, k]       := W_Q[h, k, m] · H[q, m, l]
     K[s, h, k]       := W_K[h, k, m] · H[s, m, l]
     V[s, h, k]       := W_V[h, k, m] · H[s, m, l]
-    S[h, q, s]       := softmax(where s ≤ q)(Q[q, h, k] · K[s, h, k])
+    S[h, q, s.]      := softmax(where s ≤ q)(Q[q, h, k] · K[s, h, k])
     AttnOut[q, h, k] := S[h, q, s] · V[s, h, k]
     Attn[q, m]       := W_O[m, h, k] · AttnOut[q, h, k]
-    A[q, m]          := normalize(Attn[q, m] + H[q, m, l])
+    A[q, m.]         := normalize(Attn[q, m] + H[q, m, l])
     F[q, d]          := relu(W_in[d, m] · A[q, m])
     Y[q, m]          := W_out[m, d] · F[q, d]
-    H[q, m, l +1]    := normalize(Y[q, m] + A[q, m])
+    H[q, m., l +1]   := normalize(Y[q, m] + A[q, m])
   }) env with
   | .error e => throwError s!"scan-transformer: {e}"
   | .ok out => match out["H"]? with

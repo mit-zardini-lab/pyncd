@@ -7,7 +7,6 @@ namespace LeanNCD
 inductive AxisKind
   | real : Option SizeExpr → AxisKind
   | nat  : Option SizeExpr → AxisKind
-  | norm : Option SizeExpr → AxisKind
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
 
 structure AxisSpec where
@@ -20,6 +19,7 @@ inductive Decl
   | tensor    : String → List AxisSpec → Decl
   | predicate : String → List AxisSpec → Decl
   | linear    : String → (inAxes outAxes : List AxisSpec) → (bias : Bool) → Decl
+  | axis      : AxisSpec → Option Nat → Decl   -- `axis l : ℕ = 3`: declares an axis's dtype + optional pinned size
   deriving DecidableEq, Repr, Lean.ToExpr
 
 inductive IdxExpr
@@ -70,6 +70,7 @@ structure RHSExpr  where
 
 inductive LHSSlot
   | free     : AxisSpec → LHSSlot
+  | freeNorm : AxisSpec → LHSSlot   -- a free output axis marked (`m.`) as the softmax/normalize reduction axis
   | iterAt   : AxisSpec → Int → LHSSlot
   | iterNext : AxisSpec → LHSSlot
   | affine   : IdxExpr → LHSSlot

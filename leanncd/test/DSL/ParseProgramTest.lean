@@ -4,8 +4,8 @@ namespace LeanNCD
 
 -- The term macro: parse a whole program into a TLProgram value (embedded via ToExpr).
 private def prog : TLProgram := tlprog!{
-  tensor A : (q : ℝ, s : norm)
-  A[q, s] := softmax(where s ≤ q)(Q[q, d] · K[s, d])
+  tensor A : (q, s)
+  A[q, s.] := softmax(where s ≤ q)(Q[q, d] · K[s, d])
 }
 
 #guard prog.decls.length == 1

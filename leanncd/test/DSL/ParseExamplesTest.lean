@@ -7,10 +7,10 @@ private def matmul : TLProgram := tlprog!{ Y[i, j] := W[i, k] · X[k, j] }
 #guard matmul.decls.length == 0
 #guard matmul.stmts.length == 1
 
--- 2. Causal masked attention (norm axis + Iverson mask via softmax-where)
+-- 2. Causal masked attention (norm axis marked `s.` + Iverson mask via softmax-where)
 private def attn : TLProgram := tlprog!{
-  tensor A : (q : ℝ, s : norm)
-  A[q, s] := softmax(where s ≤ q)(Q[q, d] · K[s, d])
+  tensor A : (q, s)
+  A[q, s.] := softmax(where s ≤ q)(Q[q, d] · K[s, d])
 }
 #guard attn.decls.length == 1
 #guard attn.stmts.length == 1
@@ -21,7 +21,7 @@ private def conv : TLProgram := tlprog!{ Y[i, j] := W[p, r] · X[i + p, 2 * j + 
 
 -- 4. Upsample 2× (affine scatter write — parsed as assign in E1; E2 reclassifies)
 private def upsample : TLProgram := tlprog!{
-  tensor Out : (i : ℝ[2 * m], j : ℝ[2 * n])
+  tensor Out : (i, j)
   Out[2 * i, 2 * j] := X[i, j]
 }
 #guard upsample.decls.length == 1

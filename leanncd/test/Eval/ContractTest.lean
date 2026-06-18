@@ -13,7 +13,7 @@ run_cmd do
   let env : HashMap String DenseTensor := (({} : HashMap String DenseTensor).insert "W" W).insert "X" X
   let mm : Stmt := .assign "Y" [.free i, .free j]
     { body := { terms := [{ factors := [.read "W" [.axis i, .axis k], .read "X" [.axis k, .axis j]] }] }, nonlin := .identity }
-  match inferAxisSizes env [mm] with
+  match inferAxisSizes {} env [mm] with
   | .error e => throwError e
   | .ok sizes =>
     match evalAssign env sizes "Y" [.free i, .free j] { body := { terms := [{ factors := [.read "W" [.axis i, .axis k], .read "X" [.axis k, .axis j]] }] }, nonlin := .identity } with
@@ -28,7 +28,7 @@ run_cmd do
   let A := tensorOf [3] [1,2,3]; let B := tensorOf [3] [10,20,30]
   let env : HashMap String DenseTensor := (({} : HashMap String DenseTensor).insert "A" A).insert "B" B
   let rhs : RHSExpr := { body := { terms := [{ factors := [.read "A" [.axis i]] }, { factors := [.read "B" [.axis i]] }] }, nonlin := .identity }
-  match inferAxisSizes env [.assign "Z" [.free i] rhs] with
+  match inferAxisSizes {} env [.assign "Z" [.free i] rhs] with
   | .error e => throwError e
   | .ok sizes => match evalAssign env sizes "Z" [.free i] rhs with
     | .error e => throwError e
@@ -54,7 +54,7 @@ run_cmd do
   let edge := tensorOf [2,2] [1,0, 0,1]
   let env : HashMap String DenseTensor := (({} : HashMap String DenseTensor).insert "F" F).insert "edge" edge
   let rhs : RHSExpr := { body := { terms := [{ factors := [.read "F" [.axis t, .axis i], .read "F" [.axis t, .axis j], .read "edge" [.axis i, .axis j]] }] }, nonlin := .identity }
-  match inferAxisSizes env [.assign "Result" [] rhs] with
+  match inferAxisSizes {} env [.assign "Result" [] rhs] with
   | .error e => throwError e
   | .ok sizes =>
     -- ℝ (tensor) reading ⇒ scalar 2.0

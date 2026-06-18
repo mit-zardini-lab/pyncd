@@ -49,16 +49,20 @@ syntax "ℝ"                   : tl_axis_kind
 syntax "ℝ[" tl_size "]"      : tl_axis_kind
 syntax "ℕ"                   : tl_axis_kind
 syntax "ℕ[" tl_size "]"      : tl_axis_kind
-syntax "norm"                : tl_axis_kind
-syntax "norm[" tl_size "]"   : tl_axis_kind
 
-syntax ident ":" tl_axis_kind : tl_axis_spec
+-- A tensor's shape lists only its axis NAMES (and order); an axis's dtype/size lives in an
+-- `axis` declaration, and the softmax/normalize reduction axis is marked on the output slot (`m.`).
+syntax ident : tl_axis_spec
 syntax "(" tl_axis_spec,* ")" : tl_shape
 
 syntax "tensor"    ident ":" tl_shape                      : tl_decl
 syntax "predicate" ident ":" tl_shape                      : tl_decl
 syntax "linear"    ident ":" tl_shape "→" tl_shape         : tl_decl
 syntax "linear"    ident ":" tl_shape "→" tl_shape " bias" : tl_decl
+-- `axis l : ℕ` declares an axis's dtype; `axis l : ℕ = 3` also pins its concrete size
+-- (used to size a scan/iteration axis that no input tensor's shape would otherwise fix).
+syntax "axis"      ident ":" tl_axis_kind                  : tl_decl
+syntax "axis"      ident ":" tl_axis_kind "=" num          : tl_decl
 
 -- Layer 2: index expressions — GENERALIZED to general integer-affine sums (E1.3).
 -- A `tl_idx_expr` is a left-associative `+`/`-` sum of terms, where each term is a
@@ -127,6 +131,7 @@ syntax:55 num "*" ident         : tl_lhs_slot
 syntax:55 ident "+1"            : tl_lhs_slot
 syntax:55 ident "+" num         : tl_lhs_slot
 syntax:max ident                : tl_lhs_slot
+syntax:max ident "."            : tl_lhs_slot   -- norm marker: the softmax/normalize reduction axis
 syntax:max num                  : tl_lhs_slot
 
 -- Layer 6

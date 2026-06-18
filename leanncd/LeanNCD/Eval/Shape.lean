@@ -39,8 +39,10 @@ def idxAffineForm : IdxExpr → Int × List (Int × UID)
     and look-back examples size their purely-affine output axes.)
     A position with ≥2 still-unknown axes is left for a later fixpoint pass.
     Conflicting sizes for one UID ⇒ error. We iterate to a fixpoint so inference order
-    (e.g. a kernel axis sizing before the dotted output axis) does not matter. -/
-def inferAxisSizes (env : HashMap String DenseTensor)
+    (e.g. a kernel axis sizing before the dotted output axis) does not matter.
+    `seed` pre-binds axes pinned by `axis … = n` decls; inference treats them as already
+    known (and a later read implying a different size conflicts, as for any bound UID). -/
+def inferAxisSizes (seed : HashMap UID Nat) (env : HashMap String DenseTensor)
     (stmts : List Stmt) : Except EvalError (HashMap UID Nat) := do
   -- collect every (affine-form, dim) read position once
   let positions : List ((Int × List (Int × UID)) × Nat) := stmts.flatMap (fun s =>
@@ -48,7 +50,7 @@ def inferAxisSizes (env : HashMap String DenseTensor)
       match env[nm]? with
       | none   => []
       | some t => (es.zip t.shape).map (fun (e, d) => (idxAffineForm e, d))))
-  let mut sizes : HashMap UID Nat := {}
+  let mut sizes : HashMap UID Nat := seed
   -- fixpoint: repeat passes until no new UID is bound (bounded by #positions iterations)
   for _ in List.range (positions.length + 1) do
     let mut changed := false
@@ -84,9 +86,16 @@ def inferAxisSizes (env : HashMap String DenseTensor)
 /-- The axis UID of an LHS slot, if it has one (`affine` slots do not). -/
 def lhsAxisUID? : LHSSlot → Option UID
   | .free a     => some a.uid
+  | .freeNorm a => some a.uid
   | .iterAt a _ => some a.uid
   | .iterNext a => some a.uid
   | .affine _   => none
+
+/-- The UID of the slot marked (`m.`) as the softmax/normalize reduction axis, if any.
+    This is how the reduction axis is identified for a stmt (the norm flag moved off the
+    tensor decl onto the output slot); `none` means no axis was marked. -/
+def normAxisUidOf (slots : List LHSSlot) : Option UID :=
+  slots.findSome? (fun | .freeNorm a => some a.uid | _ => none)
 
 /-- The output shape: the size of each LHS slot's axis (free/iterAt/iterNext), in slot order.
     `affine` slots (scatter) are handled in Task 6 — `0` placeholder here. -/

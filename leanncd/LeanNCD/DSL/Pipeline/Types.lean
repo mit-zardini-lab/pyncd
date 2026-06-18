@@ -64,6 +64,7 @@ structure ScheduledProgram where
   env      : DeclEnv
   extNames : Finset String
   ctx      : Context AxisSpec
+  explicitSizes : HashMap UID Nat  -- axis sizes pinned by `axis … = n` decls (seed for inferAxisSizes)
 
 example : ScanStmt := .plain (.assign "x" [] { body := { terms := [] }, nonlin := .identity })
 

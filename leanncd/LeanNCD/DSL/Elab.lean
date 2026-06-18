@@ -28,13 +28,11 @@ partial def elabTLAxisKind : Syntax → MetaM AxisKind
   | `(tl_axis_kind| ℝ[ $s ])    => return .real (some (← elabTLSize s))
   | `(tl_axis_kind| ℕ)          => return .nat none
   | `(tl_axis_kind| ℕ[ $s ])    => return .nat (some (← elabTLSize s))
-  | `(tl_axis_kind| norm)       => return .norm none
-  | `(tl_axis_kind| norm[ $s ]) => return .norm (some (← elabTLSize s))
   | _                           => throwUnsupportedSyntax
 
 partial def elabTLAxisSpec : Syntax → MetaM AxisSpec
-  | `(tl_axis_spec| $x:ident : $k:tl_axis_kind) =>
-      return { name := x.getId.eraseMacroScopes.getString!, uid := 0, kind := (← elabTLAxisKind k) }
+  | `(tl_axis_spec| $x:ident) =>
+      return { name := x.getId.eraseMacroScopes.getString!, uid := 0, kind := .real none }
   | _ => throwUnsupportedSyntax
 
 partial def elabTLShape : Syntax → MetaM (List AxisSpec)
@@ -48,6 +46,10 @@ partial def elabTLDecl : Syntax → MetaM Decl
       return .linear x.getId.eraseMacroScopes.getString! (← elabTLShape i) (← elabTLShape o) false
   | `(tl_decl| linear $x:ident : $i:tl_shape → $o:tl_shape bias) =>
       return .linear x.getId.eraseMacroScopes.getString! (← elabTLShape i) (← elabTLShape o) true
+  | `(tl_decl| axis $x:ident : $k:tl_axis_kind) =>
+      return .axis { name := x.getId.eraseMacroScopes.getString!, uid := 0, kind := (← elabTLAxisKind k) } none
+  | `(tl_decl| axis $x:ident : $k:tl_axis_kind = $n:num) =>
+      return .axis { name := x.getId.eraseMacroScopes.getString!, uid := 0, kind := (← elabTLAxisKind k) } (some n.getNat)
   | _ => throwUnsupportedSyntax
 
 /-- A placeholder `AxisSpec` for an index-expression axis reference.
@@ -157,6 +159,7 @@ partial def elabTLRHS : Syntax → MetaM RHSExpr
 /-- Elaborate a single `tl_lhs_slot` into an `LHSSlot`.
 
     * `x`          → `.free` (a free output axis);
+    * `x .`        → `.freeNorm` (a free axis marked as the softmax/normalize reduction axis);
     * `n`          → `.iterAt … n` — a scan *base case* `l = n`.  The iteration
       axis cannot be named at parse time (it is recovered from the matching
       `iterNext` slot during E2's lowering), so we use a placeholder name `""`
@@ -165,6 +168,8 @@ partial def elabTLRHS : Syntax → MetaM RHSExpr
     * `n*x`, `x+n`, `n*x+n` → `.affine` of the corresponding integer-affine
       `IdxExpr`, built directly from the slot's pieces. -/
 partial def elabTLLHSSlot : Syntax → MetaM LHSSlot
+  | `(tl_lhs_slot| $x:ident .) =>
+      return .freeNorm (idxAxis x.getId.eraseMacroScopes.getString!)
   | `(tl_lhs_slot| $x:ident) =>
       return .free (idxAxis x.getId.eraseMacroScopes.getString!)
   | `(tl_lhs_slot| $n:num) =>

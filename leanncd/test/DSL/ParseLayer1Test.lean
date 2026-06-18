@@ -4,7 +4,7 @@ namespace LeanNCD
 open Lean Elab
 
 run_cmd do
-  let d ← Command.liftTermElabM <| LeanNCD.elabTLDecl (← `(tl_decl| tensor A : (i : ℝ[2 * m])))
+  let d ← Command.liftTermElabM <| LeanNCD.elabTLDecl (← `(tl_decl| tensor A : (i)))
   match d with
   | .tensor name axes =>
       unless name == "A" do throwError "decl name"
