@@ -52,11 +52,12 @@ appear on both sides and are retained.
 
 ### 2. Lean DSL
 
-No declarations needed — all axis sizes infer from the input tensor shapes. Contracted
-axes (`x`, `y`, `w`, `z`) appear only on the right; retained axes appear on both sides.
+`tensor` declarations record each factor's axis names and order. Contracted axes (`x`,
+`y`, `w`, `z`) appear only on the right; retained axes appear on both sides.
 
 ```lean
 tlprog!{
+  tensor A(a, x), B(x, y, w), C(y, c1, c2), D(y, w, z), E(z, e)
   Result[a, c1, c2, e] := A[a, x] · B[x, y, w] · C[y, c1, c2] · D[y, w, z] · E[z, e]
 }
 ```
@@ -184,12 +185,14 @@ The Iverson bracket $[\text{edge}(i,j)]$ restricts the sum to pairs where an edg
 
 ### 2. Lean DSL
 
-The `predicate` declaration marks `edge` as Bool-typed. The empty subscript `[]` on the
-LHS declares `Result` as a scalar (zero free axes). `F` is read twice under different
-index names — the DSL treats them as two independent reads of the same tensor.
+`tensor F(t, n)` records the axis names of `F`. `predicate edge(i, j)` marks `edge` as
+Bool-typed. The empty subscript `[]` on the LHS declares `Result` as a scalar (zero free
+axes). `F` is read twice under different index names — the DSL treats them as two
+independent reads of the same tensor.
 
 ```lean
 tlprog!{
+  tensor F(t, n)
   predicate edge(i, j)
   Result[] := F[t, i] · F[t, j] · edge[i, j]
 }
@@ -303,15 +306,17 @@ read from axis (UID) identity, never written as an explicit `Σ`.
 
 ### 2. Lean DSL
 
-No declarations needed; axis sizes infer from the input tensor shapes of `W_in`, `W_out`,
-and `X`. For learned-parameter semantics (weights as module parameters rather than caller
-inputs), add `linear W_in : (d) → (dff)` and `linear W_out : (dff) → (d)` declarations
-— the explicit-weight form below is equivalent when the weights are supplied as inputs.
+`linear W : (in) → (out)` declares the axis mapping of a weight; the Lean evaluator
+treats the weight as a caller-supplied input tensor (unlike the Python DSL which tracks
+it as a learned `nn.Parameter`). The `→` separates contracted input axes from free output
+axes.
 
 ```lean
 tlprog!{
-  H[q, dff]  := relu(W_in[dff, d] · X[q, d])
-  Out[q, d]  := W_out[d, dff] · H[q, dff]
+  linear W_in  : (d) → (dff)
+  linear W_out : (dff) → (d)
+  H[q, dff]    := relu(W_in[dff, d] · X[q, d])
+  Out[q, d]    := W_out[d, dff] · H[q, dff]
 }
 ```
 
@@ -479,6 +484,8 @@ read `h[q, dh, 3]` extracts the final hidden state via an integer literal in the
 ```lean
 tlprog!{
   axis l : ℕ = 3
+  linear W_in  : (d0) → (dh)
+  linear W_out : (dh) → (c)
   h[q, dh, 0]    := W_in[dh, d0] · x[q, d0]
   h[q, dh, l +1] := relu(W[l, dh_in, dh] · h[q, dh_in, l])
   y[q, c.]        := softmax(W_out[c, dh] · h[q, dh, 3])
@@ -701,6 +708,7 @@ the padded spatial axes). The concrete stride `2` in `2 * xo + px` is a numeric 
 
 ```lean
 tlprog!{
+  tensor Filter(dx, dy, ch), Image(xi, yi, ch), Features(x, y)
   Features[x, y]  := relu(Filter[dx, dy, ch] · Image[x + dx, y + dy, ch])
   Pooled[xo, yo]  := Features[2 * xo + px, 2 * yo + py]
 }
