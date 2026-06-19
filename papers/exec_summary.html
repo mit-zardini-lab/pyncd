@@ -31,7 +31,7 @@
     padding: 0 0 80px;
   }
 
-  /* ── HERO ── */
+  /* ─────── HERO ─────── */
   .hero {
     background: linear-gradient(135deg, #0d1526 0%, #111827 60%, #0e1620 100%);
     border-bottom: 1px solid var(--border);
@@ -70,14 +70,14 @@
     line-height: 1.6;
   }
 
-  /* ── LAYOUT ── */
+  /* ────── LAYOUT ────── */
   .container {
     max-width: 900px;
     margin: 0 auto;
     padding: 0 48px;
   }
 
-  /* ── SECTION ── */
+  /* ───── SECTION ────── */
   section {
     margin-top: 56px;
   }
@@ -122,7 +122,7 @@
 
   strong { color: var(--heading); font-weight: 600; }
 
-  /* ── CODE ── */
+  /* ─────── CODE ─────── */
   pre {
     background: var(--code-bg);
     border: 1px solid var(--border);
@@ -149,7 +149,7 @@
 
   pre code { background: none; border: none; padding: 0; font-size: inherit; color: inherit; }
 
-  /* ── CALLOUT ── */
+  /* ───── CALLOUT ────── */
   .callout {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -160,7 +160,7 @@
   }
   .callout p { margin: 0; font-size: 14px; }
 
-  /* ── TABLE ── */
+  /* ────── TABLE ─────── */
   .table-wrap { overflow-x: auto; margin: 16px 0; }
 
   table {
@@ -192,7 +192,7 @@
 
   td:first-child { color: var(--accent); font-family: 'SF Mono', Consolas, monospace; font-size: 13px; font-weight: 500; }
 
-  /* ── NEXT STEPS ── */
+  /* ──── NEXT STEPS ──── */
   .next-steps-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -256,14 +256,14 @@
     font-weight: 500;
   }
 
-  /* ── DIVIDER ── */
+  /* ───── DIVIDER ────── */
   hr {
     border: none;
     border-top: 1px solid var(--border);
     margin: 40px 0;
   }
 
-  /* ── FOOTER ── */
+  /* ────── FOOTER ────── */
   .footer {
     max-width: 900px;
     margin: 60px auto 0;
@@ -303,7 +303,7 @@
   <section>
     <div class="section-label">
       <div class="section-num">1</div>
-      <h2>The Problem We Solve</h2>
+      <h2>The Problem Solved</h2>
     </div>
 
     <p>Modern deep learning research is bottlenecked by a translation gap. A researcher writes a model in clean mathematical notation — a few equations over named indices, then translates it by hand into hundreds of lines of PyTorch, where the mathematical structure is invisible. Bugs hide in that translation. Architectural variants require rewriting large swaths of imperative code. Formal reasoning about the model is impossible.</p>
@@ -345,23 +345,23 @@ Attn[h, q, x.] <span class="kw">:=</span> <span class="fn">softmax</span>(Q[q, h
 
     <h3>Two-layer MLP</h3>
 
-    <pre><code><span class="kw">linear</span> W_in(f, d), W_out(d, f)       <span class="cmt">-- learned weights; roles inferred from equations</span>
-H[q, f]   <span class="kw">:=</span> <span class="fn">relu</span>(W_in[f, d] · X[q, d])   <span class="cmt">-- d contracted → hidden layer</span>
+    <pre><code><span class="kw">linear</span> W_in(f, d), W_out(d, f)             <span class="cmt">-- learned weights; roles inferred from equations</span>
+H[q, f]   <span class="kw">:=</span> <span class="fn">relu</span>(W_in[f, d] · X[q, d])    <span class="cmt">-- d contracted → hidden layer</span>
 Out[q, d] <span class="kw">:=</span> W_out[d, f] · H[q, f]         <span class="cmt">-- f contracted → output projection</span></code></pre>
 
     <p>Three lines compile to a two-layer module with learned weights, a ReLU activation folded into the first layer, and automatic threading of the intermediate tensor <code>H</code>. The <code>linear</code> keyword is the only signal needed to make a weight trainable; axis roles are read from the equations.</p>
 
     <div class="callout">
-      <p><strong>PyRel translation.</strong> Every tensor-logic program has a mechanical translation to <a href="https://docs.relational.ai" style="color: var(--accent)">PyRel</a> (Relational AI's Datalog extension), where tensors become relations and contraction becomes <code>sum(product).per(output_indices)</code>. The MLP above becomes two <code>where(…).define(…)</code> rules, one per equation, that can be evaluated, queried, and composed like any other relational program. This translation is documented and tested for all worked examples.</p>
+      <p><strong><a href="tensor_logic_in_pyrel.md" style="color: var(--heading); text-decoration: none; border-bottom: 1px solid #555;">PyRel translation.</a></strong> Every tensor-logic program has a mechanical translation to <a href="https://docs.relational.ai" style="color: var(--accent)">PyRel</a> (Relational AI's Datalog extension), where tensors become relations and contraction becomes <code>sum(product).per(output_indices)</code>. The MLP above becomes two <code>where(…).define(…)</code> rules, one per equation, that can be evaluated, queried, and composed like any other relational program. This translation is documented and tested for all worked examples.</p>
     </div>
 
     <h3>Deep MLP with recurrence</h3>
 
-    <pre><code><span class="kw">axis</span> l : ℕ = <span class="num">3</span>                           <span class="cmt">-- scan depth; l runs 0..2</span>
-<span class="kw">linear</span> W_in(dh, d0), W_out(c, dh)
+    <pre><code><span class="kw">axis</span> l : ℕ = <span class="num">3</span>                                               <span class="cmt">-- scan depth; l runs 0..2</span>
+<span class="kw">linear</span> W_in(dh, d0), W_out(c, dh), W(l, dh_in, dh)
 h[q, dh, <span class="num">0</span>]    <span class="kw">:=</span> W_in[dh, d0] · x[q, d0]                    <span class="cmt">-- base case</span>
-h[q, dh, l +<span class="num">1</span>] <span class="kw">:=</span> <span class="fn">relu</span>(W[l, dh_in, dh] · h[q, dh_in, l])   <span class="cmt">-- recurrence step</span>
-y[q, c.]       <span class="kw">:=</span> <span class="fn">softmax</span>(W_out[c, dh] · h[q, dh, <span class="num">3</span>])       <span class="cmt">-- output projection</span></code></pre>
+h[q, dh, l +<span class="num">1</span>] <span class="kw">:=</span> <span class="fn">relu</span>(W[l, dh_in, dh] · h[q, dh_in, l])     <span class="cmt">-- recurrence step</span>
+y[q, c.]       <span class="kw">:=</span> <span class="fn">softmax</span>(W_out[c, dh] · h[q, dh, <span class="num">3</span>])        <span class="cmt">-- output projection</span></code></pre>
 
     <p>The compiler detects the scan from the <code>l +1</code> / <code>l</code> pattern, constructs a scan module, and, when the recurrence is affine in the state, automatically lowers it to a parallel prefix scan for GPU efficiency. Reading a fixed step (<code>h[q, dh, 3]</code>) is validated at build time.</p>
 
@@ -374,14 +374,99 @@ Pooled[xo, yo] <span class="kw">:=</span> Features[<span class="num">2</span> * 
     <p>The affine index expressions <code>x + dx</code>, <code>y + dy</code>, <code>2 * xo + px</code> compile to reindexing morphisms ("St morphisms") composed around the einsum core. Gather bounds are validated at build time, eliminating runtime out-of-range errors.</p>
   </section>
 
-  <!-- ─── ACCOMPLISHMENTS ─── -->
+
+  <!-- ─── PIPELINE ARCHITECTURE ─── -->
   <section>
     <div class="section-label">
       <div class="section-num">3</div>
+      <h2>How the Compiler Works</h2>
+    </div>
+
+    <p>Every tensor-logic program moves through a three-stage pipeline. Each stage is a mathematically precise transformation (on categories), which is what makes the system correct by construction rather than by convention.</p>
+
+    <!-- Pipeline diagram -->
+    <div style="overflow-x: auto; margin: 2rem 0;">
+      <div style="display: flex; align-items: stretch; gap: 0; min-width: 560px; font-size: 0.85rem;">
+
+        <!-- Node 1: TL program -->
+        <div style="flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 8px 0 0 8px; padding: 1rem 1.1rem; text-align: center;">
+          <div style="font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.4rem;">Input</div>
+          <div style="font-weight: 700; color: var(--heading); margin-bottom: 0.3rem;">TL program</div>
+          <div style="color: var(--muted); font-size: 0.8rem;">equations written<br>by the ML practitioner</div>
+        </div>
+
+        <!-- Arrow 1 -->
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 0.2rem; min-width: 90px;">
+          <div style="color: var(--muted); font-size: 0.72rem; font-style: italic; text-align: center; margin-bottom: 0.25rem;">parse &amp; axis<br>unification</div>
+          <div style="color: var(--accent); font-size: 1.3rem; line-height: 1;">&#8594;</div>
+        </div>
+
+        <!-- Node 2: Structural skeleton -->
+        <div style="flex: 1; background: #1a2035; border: 1px solid #3a4a70; border-radius: 8px 0 0 8px; padding: 1rem 1.1rem; text-align: center; border-radius: 0;">
+          <div style="font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.4rem;">Stage 1</div>
+          <div style="font-weight: 700; color: var(--accent); margin-bottom: 0.3rem;"><em>C</em><sup style="font-size:0.65em">♯</sup> &mdash; skeleton</div>
+          <div style="color: var(--muted); font-size: 0.8rem;">which axes exist,<br>what connects what</div>
+        </div>
+
+        <!-- Arrow 2 -->
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 0.2rem; min-width: 90px;">
+          <div style="color: var(--muted); font-size: 0.72rem; font-style: italic; text-align: center; margin-bottom: 0.25rem;">attach sizes<br>&amp; weights</div>
+          <div style="color: var(--accent); font-size: 1.3rem; line-height: 1;">&#8594;</div>
+        </div>
+
+        <!-- Node 3: Data-filled morphism -->
+        <div style="flex: 1; background: #0e1e2a; border: 1px solid #2a5060; padding: 1rem 1.1rem; text-align: center; border-radius: 0;">
+          <div style="font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.4rem;">Stage 2</div>
+          <div style="font-weight: 700; color: var(--accent2); margin-bottom: 0.3rem;">&#x222B;<em>D</em> &mdash; parameterized</div>
+          <div style="color: var(--muted); font-size: 0.8rem;">skeleton + sizes,<br>datatypes, weights</div>
+        </div>
+
+        <!-- Arrow 3 -->
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 0.2rem; min-width: 90px;">
+          <div style="color: var(--muted); font-size: 0.72rem; font-style: italic; text-align: center; margin-bottom: 0.25rem;"><code style="font-size:0.72rem;">construct()</code><br>Para functor</div>
+          <div style="color: var(--accent); font-size: 1.3rem; line-height: 1;">&#8594;</div>
+        </div>
+
+        <!-- Node 4: PyTorch -->
+        <div style="flex: 1; background: #1a1530; border: 1px solid #4a3a70; border-radius: 0 8px 8px 0; padding: 1rem 1.1rem; text-align: center;">
+          <div style="font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.4rem;">Output</div>
+          <div style="font-weight: 700; color: #a090e0; margin-bottom: 0.3rem;">PyTorch module</div>
+          <div style="color: var(--muted); font-size: 0.8rem;">executable <code style="font-size:0.8rem;">nn.Module</code>,<br>ready to train</div>
+        </div>
+
+      </div>
+    </div>
+
+    <p><strong><em>C</em><sup>♯</sup> — the schema</strong> defines the structure of the computation: which axes (dimensions) exist, which tensors they belong to, which axes are contracted versus broadcast, and in what order operators compose. Think of it as a database schema: no sizes, no weights, no numerical content — just the shape of the computation.</p>
+
+    <p><strong>&#x222B;<em>D</em> — the populated instance</strong> is that schema with data filled in: axis sizes, coefficient tensors, and learnable weight parameters. Continuing the database analogy, this is the schema with its rows populated — a fully concrete, queryable object. Every field the schema declared is now assigned a value.</p>
+
+    <p><strong><code>construct()</code></strong> maps this mathematical object to a runnable <code>nn.Module</code>. It is a functor in the categorical sense: it preserves the compositional structure, so a model built from correct pieces compiles to a correct whole. No part of the pipeline is ad-hoc.</p>
+
+    <p>One specification compiles to four backends with no additional translation — changing backends changes only the target of <code>construct()</code>; the two stages before it are identical:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Backend</th><th>Use</th></tr></thead>
+        <tbody>
+          <tr><td>PyTorch (pyncd)</td><td>Training and inference; executable nn.Module with learned parameters</td></tr>
+          <tr><td>Lean evaluator (leanncd)</td><td>Symbolic evaluation on Float tensors; ground for formal proofs</td></tr>
+          <tr><td>PyRel</td><td>Relational/Datalog execution for RAI workloads; query over model internals</td></tr>
+          <tr><td>String diagrams (tsncd)</td><td>Interactive browser visualization; static renders for papers and presentations</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The categorical structure guarantees semantic equivalence across backends — a proposition proven about the Lean representation holds for the PyTorch compiled module by construction of the compilation functor.</p>
+  </section>
+
+  <!-- ─── ACCOMPLISHMENTS ─── -->
+  <section>
+    <div class="section-label">
+      <div class="section-num">4</div>
       <h2>What Has Been Accomplished</h2>
     </div>
 
-    <h3>A complete Python DSL: <code>pyncd</code></h3>
+    <h3>A complete <a href="tensorLogicNCDIntegration.md" style="color: var(--accent); text-decoration: none; border-bottom: 1px solid #3a5a9a;">Python DSL</a></h3>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Capability</th><th>Status</th></tr></thead>
@@ -398,8 +483,12 @@ Pooled[xo, yo] <span class="kw">:=</span> Features[<span class="num">2</span> * 
       </table>
     </div>
 
-    <h3><a href="leanncd_view.html" style="color: var(--accent); text-decoration: none; border-bottom: 1px solid #3a5a9a;">A formal Lean 4 implementation</a>: <code>leanncd</code></h3>
-    <p>A parallel implementation in Lean 4, the leading interactive theorem-proving language. The DSL is parsed by the Lean elaborator (as a <code>tlprog!{}</code> macro), type-checked, and evaluated on concrete <code>Float</code> tensors. This is not a simulation or a port — it is a native Lean development with its own structural pipeline, UID system, and evaluator. All <code>#guard</code> tests pass; <code>lake build Tests</code> is green.</p>
+    <h3><a href="leanncd.md" style="color: var(--accent); text-decoration: none; border-bottom: 1px solid #3a5a9a;">A Lean 4 implementation</a></h3>
+    <p>A parallel implementation in Lean 4. The DSL is parsed by the Lean elaborator (as a <code>tlprog!{}</code> macro), type-checked, and evaluated on concrete <code>Float</code> tensors. This is not a simulation or a port — it is a native Lean development with its own structural pipeline, UID system, and evaluator. Crucially, the mathematics underlying the system is directly represented and proved within Lean itself: the categorical structures are Lean types, and the correctness properties are Lean theorems. All <code>#guard</code> tests pass; <code>lake build Tests</code> is green.</p>
+
+    <div class="callout" style="border-left-color: var(--accent3);">
+      <p><strong>Lean ↔ Python interop.</strong> The two implementations share a common ground through a serialized relational representation of the data defining the graded colored PROP — the &#x222B;<em>D</em> instance described in the pipeline above. The structural objects (axis declarations, morphism trees, UID maps, etc) are expressed as typed relational tables that both Lean and Python can read and write. This means a model specified in one language can have its compiled structure inspected, extended, or verified in the other.</p>
+    </div>
 
     <h3>A clean, unified declaration API</h3>
     <p>Learnable weight declarations are syntactically identical to ordinary tensor declarations — a flat axis list, nothing more:</p>
@@ -409,18 +498,19 @@ Pooled[xo, yo] <span class="kw">:=</span> Features[<span class="num">2</span> * 
 
     <p>Which axes are contracted (shared with the activation) vs. produced (shared with the output) is fully determined by the equation, not the declaration. The compiler infers both roles and validates them — an axis that is ambiguous or floating raises a precise error at build time.</p>
 
-    <h3>A mathematical foundation</h3>
-    <p>The system is grounded in the <strong>D-graded colored PROP</strong> framework — a mathematical structure that spans the full stack, from high-level researcher intent (equations over named axes) through the structural algebra of tensor contractions, down to low-level GPU execution patterns (parallel prefix scans, fused reindexing, scatter/gather). Each level of that stack is a formal object in the framework, and transitions between levels are structure-preserving maps whose correctness is provable. The key ideas:</p>
+    <h3><a href="graded_prop.md" style="color: var(--accent); text-decoration: none; border-bottom: 1px solid #3a5a9a;">A mathematical foundation</a></h3>
+    <p>The system is grounded in a new <strong>D-graded colored PROP</strong> framework — a mathematical structure that spans the full stack, from high-level ml programmer intent (equations over named axes) through the structural algebra of tensor contractions, down to low-level GPU execution patterns (parallel prefix scans, fused reindexing, scatter/gather). Each level of that stack is a formal object in the framework, and transitions between levels are structure-preserving maps whose correctness is provable. The key ideas:</p>
 
     <div class="table-wrap">
       <table>
         <thead><tr><th>Mathematical concept</th><th>What it means in practice</th></tr></thead>
         <tbody>
-          <tr><td>Wires are typed</td><td>A tensor of shape (h, q, k) is a morphism typed by its axes — shapes are part of the structure, not an annotation</td></tr>
-          <tr><td>Contraction is composition</td><td>The shared axis k in Y[i,j] = W[i,k] * X[k,j] is a categorical boundary — composition is correct by construction</td></tr>
-          <tr><td>Weaves are cartesian lifts</td><td>Broadcasting over batch dimensions is not special-cased — it is the cartesian-lift datum of a grading fibration, generalizing to any affine reindexing</td></tr>
-          <tr><td>Compilation is a functor</td><td>construct() preserves composition and tensor product — a composed model is correct iff its pieces are correct</td></tr>
-          <tr><td>Diagrammatic representation</td><td>String diagrams are a graphical calculus for the PROP — morphisms compose by connecting wires, contraction is a loop, broadcasting is a crossing. These diagrams provide a visual unambiguous representation of code.</td></tr>
+          <tr><td>Tensors are wires (objects)</td><td>A tensor such as <code>Attn[h, q, k]</code> is a wire typed by its axes — it is an object in the PROP, not yet a computation. The wire is not atomic: it is the monoidal product <code>h ⊗ q ⊗ k</code> of axis objects, each of which carries its own morphisms (indexing arithmetic — strides, offsets, reorderings).</td></tr>
+          <tr><td>Equations are morphisms</td><td>Morphisms are the computations — an equation like <code>Y[i,j] = W[i,k] * X[k,j]</code> maps one group of typed wires to another. The full DSL program is a composition of such morphisms. Computations themselves have internal structure: capability mixins (scan laws, symmetries, attention patterns) attach parametrically to the morphism layer, so a model inherits new behaviour without changes to its equations.</td></tr>
+          <tr><td>Contraction is composition</td><td>The shared axis <code>k</code> is a categorical boundary being composed over — not an index to be summed by hand. Contraction is correct by construction.</td></tr>
+          <tr><td>Weaves are cartesian lifts</td><td>Broadcasting over batch dimensions is not special-cased — it is the cartesian-lift datum of a grading fibration, generalizing to any affine reindexing.</td></tr>
+          <tr><td>Compilation is a functor</td><td><code>construct()</code> preserves composition and tensor product — a composed model is correct if and only if its pieces are correct.</td></tr>
+          <tr><td>Diagrammatic representation</td><td>String diagrams are a graphical calculus for the PROP — morphisms compose by connecting wires, contraction is a loop, broadcasting is a crossing. They provide a visual, unambiguous representation of code.</td></tr>
         </tbody>
       </table>
     </div>
@@ -432,7 +522,7 @@ Pooled[xo, yo] <span class="kw">:=</span> Features[<span class="num">2</span> * 
 
     <p style="margin-top: 18px;">A significant property of this foundation is its <strong>modularity</strong>. The framework is a layered tower: a lightweight categorical base, a parametric core, and composable capability mixins. New capabilities attach as new mixin layers without touching the proven core; new execution targets are new typeclass instances. Correctness theorems proven at the core level are inherited automatically by every extension.</p>
 
-    <p>Extensions come in two directions:</p>
+    <p><a href="future_ideas.md#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles" style="color: var(--accent); text-decoration: none; border-bottom: 1px solid #3a5a9a;">Extensions</a> come in two directions:</p>
 
     <div class="table-wrap">
       <table>
@@ -451,6 +541,7 @@ Pooled[xo, yo] <span class="kw">:=</span> Features[<span class="num">2</span> * 
             <td><code>RouteStructure</code> — Routing <span style="color: var(--muted); font-size: 11px;">specified</span></td>
             <td>Mixture-of-experts gating — where a learned router selects which sub-model processes each input — becomes a morphism in the PROP rather than special-case imperative logic</td>
           </tr>
+          <tr><td colspan="3" style="padding: 0; border-top: 2px solid var(--border); background: var(--bg);"></td></tr>
           <tr>
             <td rowspan="2" style="color: var(--accent3); font-weight: 600; vertical-align: middle;">Vertical<br><span style="font-size: 11px; color: var(--muted); font-weight: 400;">new levels</span></td>
             <td>Operation level — <code>D=St, C=Br</code> <span style="color: var(--accent2); font-size: 11px; font-weight: 600;">current</span></td>
@@ -465,34 +556,11 @@ Pooled[xo, yo] <span class="kw">:=</span> Features[<span class="num">2</span> * 
     </div>
   </section>
 
-  <!-- ─── ARCHITECTURE ─── -->
-  <section>
-    <div class="section-label">
-      <div class="section-num">4</div>
-      <h2>System Architecture at a Glance</h2>
-    </div>
-
-    <p>One specification compiles to four backends with no additional translation:</p>
-
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Backend</th><th>Use</th></tr></thead>
-        <tbody>
-          <tr><td>PyTorch (pyncd)</td><td>Training and inference; executable nn.Module with learned parameters</td></tr>
-          <tr><td>Lean evaluator (leanncd)</td><td>Symbolic evaluation on Float tensors; ground for formal proofs</td></tr>
-          <tr><td>PyRel</td><td>Relational/Datalog execution for RAI workloads; query over model internals</td></tr>
-          <tr><td>String diagrams (tsncd)</td><td>Interactive browser visualization; static renders for papers and presentations</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <p>The categorical structure guarantees semantic equivalence across backends — a proposition proven about the Lean representation holds for the PyTorch compiled module by construction of the compilation functor.</p>
-  </section>
-
   <!-- ─── NEXT STEPS ─── -->
   <section>
     <div class="section-label">
       <div class="section-num">5</div>
-      <h2>Next Steps &amp; Accruing Benefits</h2>
+      <h2><a href="future_ideas.md" style="color: var(--heading); text-decoration: none; border-bottom: 1px solid #555;">Next Steps &amp; Accruing Benefits</a></h2>
     </div>
 
     <div class="next-steps-grid">
@@ -512,7 +580,14 @@ Pooled[xo, yo] <span class="kw">:=</span> Features[<span class="num">2</span> * 
       </div>
 
       <div class="next-card">
-        <div class="horizon">Near-term</div>
+        <div class="horizon">Medium-term</div>
+        <h3>RAI relational round-trip</h3>
+        <p>Complete the Acset → PyRel compiler so that the same model can be queried relationally without additional implementation. Example: "which attention heads activate most on long-range pairs?" answered by a declarative query over the model's evaluation.</p>
+        <span class="benefit-tag">Relational AI integration</span>
+      </div>
+
+      <div class="next-card">
+        <div class="horizon">Longer-term</div>
         <h3>GPU query optimization</h3>
         <p>The structural representation of a compiled model (a morphism in the PROP) is a query plan as much as an execution plan. Because contraction order, fusion opportunities, and reindexing steps are explicit in the morphism tree, an optimizer can rewrite them (e.g. fuse adjacent reindexings, reorder contractions for memory locality) without touching the source equations. The mathematical foundation guarantees that any rewrite preserving the morphism's semantics is correct.</p>
         <span class="benefit-tag">Performance</span>
@@ -520,16 +595,16 @@ Pooled[xo, yo] <span class="kw">:=</span> Features[<span class="num">2</span> * 
 
       <div class="next-card">
         <div class="horizon">Longer-term</div>
-        <h3>Automatic differentiability</h3>
-        <p>Because every compiled model is a morphism in a PROP with a known algebraic structure, automatic differentiation (backpropagation) can be derived as a functor rather than implemented imperatively. The chain rule becomes the compositional law of the PROP; each primitive operation contributes its derivative morphism. This would replace the current dependence on PyTorch's autograd with a provably correct, framework-independent differentiation pass derived directly from the mathematical foundation.</p>
-        <span class="benefit-tag">Framework independence</span>
+        <h3>Horizontal and vertical extensions</h3>
+        <p>The categorical foundation is designed to grow in two directions. Horizontally, new capability mixins extend what morphisms can express: <code>SymmetryGraded</code> (permutation equivariance for graph and set models) and ensemble methods (model-level vertical extension where entire architectures become first-class objects) are the likeliest first candidates — both reuse proven categorical laws by parametricity rather than requiring new proofs. Vertically, lifting the grading from operation level to model level makes meta-operations like layer stacking and architecture search first-class morphisms with the same correctness guarantees.</p>
+        <span class="benefit-tag">Parametric extensibility</span>
       </div>
 
       <div class="next-card">
-        <div class="horizon">Medium-term</div>
-        <h3>RAI relational round-trip</h3>
-        <p>Complete the Acset → PyRel compiler so that the same model can be queried relationally without additional implementation. Example: "which attention heads activate most on long-range pairs?" answered by a declarative query over the model's evaluation.</p>
-        <span class="benefit-tag">Relational AI integration</span>
+        <div class="horizon">Longer-term</div>
+        <h3>Automatic differentiability</h3>
+        <p>Because every compiled model is a morphism in a PROP with a known algebraic structure, automatic differentiation (backpropagation) can be derived as a functor rather than implemented imperatively. The chain rule becomes the compositional law of the PROP; each primitive operation contributes its derivative morphism. This would replace the current dependence on PyTorch's autograd with a provably correct, framework-independent differentiation pass derived directly from the mathematical foundation.</p>
+        <span class="benefit-tag">Framework independence</span>
       </div>
 
     </div>

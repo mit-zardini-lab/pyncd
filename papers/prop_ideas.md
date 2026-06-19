@@ -21,7 +21,7 @@
    - [The Bool Semiring and Interacting Hopf Algebras](#3-the-bool-semiring-and-interacting-hopf-algebras)
    - [Free Algebras and Architecture Initialization](#4-free-algebras-and-architecture-initialization)
    - [Model Compression as Approximate Algebra Morphisms](#5-model-compression-as-approximate-algebra-morphisms)
-7. [A Br Graph API](#a-br-graph-api)
+7. [A `BrGraph` API](#a-brgraph-api)
    - [Graph representation](#graph-representation)
    - [What the API unlocks immediately](#what-the-api-unlocks-immediately)
    - [Connection to the Creative Opportunities above](#connection-to-the-creative-opportunities-above)
@@ -282,11 +282,16 @@ The implementation requires: (1) a `Scan` class in `BroadcastedCategory` analogo
 strategy determines how `construct()` wraps it. The weight-tied variant (`tl.H.recur(...)`)
 maps directly to the `vmap` strategy since all steps share the same `Broadcasted` generators.
 
-*Partial implementation:* uncoupled Scans (`n_states=1`) now participate in the
+*Partial implementation (Python):* uncoupled Scans (`n_states=1`) now participate in the
 `ThreadedComposed` routing table — `_finalize_iter()` populates their `input_names` so
 external tensors are correctly threaded through the live pool. The abstract `Scan` node
 type in `BroadcastedCategory` and the strategy selection at `construct()` time remain
-aspirational.
+aspirational on the Python side.
+
+*Lean reference implementation (Milestone I, complete):* The `leanncd` evaluator handles
+sequential scans end-to-end via `iterAt`/`iterNext` primitives across all examples,
+including transformer depth stacks. This provides an executable formal reference semantics
+for the traced monoidal structure — any Python `Scan` strategy can be cross-verified against it.
 
 ### Normalization simplification via Markov laws
 
@@ -632,7 +637,7 @@ absorption). A formal presentation would make graph rewrites **provably sound** 
 analogous to how the ZX-calculus gives a complete rewriting system for quantum circuits.
 The `Composed` / `ProductOfMorphisms` normal form is already a step in this direction.
 The implementation substrate for this opportunity is the `BrGraph` API and `BrRewrite`
-library described in *A Br Graph API* below: each PROP equation becomes a named rewrite
+library described in *A `BrGraph` API* below: each PROP equation becomes a named rewrite
 rule, and the collection of rules constitutes a rewriting system over Br graphs.
 
 ### 3. The Bool Semiring and Interacting Hopf Algebras
@@ -672,7 +677,7 @@ typeful hierarchy of compression strategies.
 
 ---
 
-## A Br Graph API
+## A `BrGraph` API
 
 The existing Br data structures — `Composed`, `ProductOfMorphisms`, `Broadcasted`,
 `Rearrangement`, `Block` — record the structure of a compiled morphism but provide no
@@ -884,7 +889,9 @@ construction as a clean categorical account of training and gradient descent;
 nesting and interpreting the `ThreadedComposed` routing table — provides the common
 implementation substrate for most of the creative opportunities: architectural identity
 checking, diagrammatic rewriting, equivariance auditing, and compression morphism search
-all reduce to graph queries or rewrites over `BrGraph`. The Bool semiring / Interacting
+all reduce to graph queries or rewrites over `BrGraph`. The `leanncd` Lean evaluator (Milestone I) is now complete: all eleven examples — including causal self-attention, scans, and transformer stacks — evaluate end-to-end in Lean, with `lake build Tests` green. This provides a formal parallel implementation that cross-validates the Python compiler and grounds the TL-as-internal-language thesis in executable code on both sides. Lean ↔ Python interop is established via a serialized relational representation of the graded colored PROP, enabling offline analysis without the Python runtime. Several sorries in the St formal proofs have been discharged, advancing the formal verification roadmap.
+
+Bool semiring / Interacting
 Hopf Algebras connection remains the most mathematically surprising open candidate for
 new theory.
 

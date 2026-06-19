@@ -49,7 +49,7 @@ This document fuses three lines of thinking developed in [theory.md](theory.md) 
 
 ## 1. Bird's-Eye View: One Pipeline, Three Vocabularies
 
-pyncd compiles a tensor-logic (TL) program into an executable PyTorch module. The pipeline has three stages, and each of the three source documents describes the *same* three stages in a different mathematical language. The central insight of this document is that these are not three parallel theories — they are three coordinate systems on one manifold, and translating between them turns informal engineering claims into theorems.
+pyncd compiles a tensor-logic (TL) program into an executable PyTorch module. The pipeline has three stages, and each of the three source documents describes the *same* three stages in a different mathematical language. These are not three parallel theories: they are three coordinate systems on one manifold, and translating between them turns informal engineering claims into theorems.
 
 ### 1.1 The three-arrow pipeline
 
@@ -85,7 +85,7 @@ Each arrow has a name in each vocabulary. The first arrow (skeleton → data) is
 
 ### 1.2 The same object under three names
 
-The single most important observation across the three documents is that the structural skeleton appears in all three under different names, and the relationship `C = ∫D` appears in all three as different equations:
+The structural skeleton appears in all three documents under different names, and the relationship `C = ∫D` appears in all three as different equations:
 
 | Concept | `acset.md` | `theory.md` | `prop_ideas.md` |
 | --- | --- | --- | --- |
@@ -115,7 +115,7 @@ The remainder of the document is organized by **layer of the pipeline** rather t
 
 ## 2. Layer I — Structural Foundations
 
-This layer concerns `C♯` — the structural skeleton — and the operations that build and compose it. These are the foundations on which every later optimization and verification rests.
+This layer concerns `C♯` (the structural skeleton) and the operations that build and compose it. These are the foundations on which every later optimization and verification rests.
 
 ### 2.1 Autoalignment is the pushout is the cup morphism
 
@@ -165,7 +165,7 @@ A practical consequence: the structural skeleton can be extracted from any `Weav
 
 1. **Build `BrGraph.from_morphism()` by routing through the acset, not the display layer.** Rather than extending `UIDHypergraph` (which is optimized for spatial layout and misses `ThreadedComposed`), derive `BrGraph` from `from_tensor_program()`'s `SBrInstance`. The `Sample` table gives directed edges directly; `ThreadedComposed`'s routing table is reconstructed from `reindexing_slot` foreign keys. `Scan` becomes a nested scope keyed by a sub-instance. This sidesteps the entire gap `prop_ideas.md` flags.
 
-2. **Offline analysis becomes possible.** Because `SBrInstance` serializes to CSV (per `acset.md`'s `write_sbr`/`read_sbr`), every `BrGraph`-based analysis — equivariance audit, weight-tying check, fusion candidate detection — can run on the CSV form without the Python runtime or PyTorch. This is strictly more than `prop_ideas.md` envisions, where `BrGraph` is a runtime structure.
+2. **Offline analysis becomes possible.** Because `SBrInstance` serializes to CSV (per `acset.md`'s `write_sbr`/`read_sbr`), every `BrGraph`-based analysis — equivariance audit, weight-tying check, fusion candidate detection — can run on the CSV form without the Python runtime or PyTorch. The Lean ↔ Python interop established in June 2026 extends this further: the `D`-graded colored PROP structure is serialized as typed relational tables readable by both runtimes, so a model compiled in Lean can be analyzed by Python acset tooling and vice versa. This is strictly more than `prop_ideas.md` envisions, where `BrGraph` is a runtime structure.
 
 3. **Wire colors are `ArrayRow` attributes.** `BrGraph`'s wire-color requirement (`Array[Datatype, shape]` plus optional predicate) maps onto `ArrayRow`'s `datatype_tag`, the axis sizes via `ArrayAxisRow`/`axis_sizes`, and `iverson_expr` for Bool/masked wires. The graph API's `color(wire)` and `predicate(wire)` methods are projections of the acset tables.
 
@@ -279,7 +279,7 @@ No single document notes that the lifts come with these adjoints for free. The p
 
 ## 4. Layer III — Optimization Passes
 
-These are the concrete compiler wins. Each is grounded in a categorical law that guarantees soundness, and several are already implemented — the contribution here is to name the law and locate the cheapest route.
+These are the concrete compiler wins. Each is grounded in a categorical law that guarantees soundness; several are already implemented. This section names the law and locates the cheapest implementation route.
 
 ### 4.1 Fusion: one equation, three justifications
 
@@ -307,7 +307,7 @@ The soundness is the compact-closed equation; the detection is the acset query; 
 
 ### 4.2 Markov laws underwrite three existing features
 
-**The observation.** Three features now implemented in pyncd are *all consequences of a single Markov-category law* — shift invariance — and no document states that they share a root.
+**The observation.** Three features now implemented in pyncd are *all consequences of a single Markov-category law* (shift invariance):
 
 - **Norm-axis-invariant term dropping.** `prop_ideas.md` ([§Normalization simplification](prop_ideas.md#normalization-simplification-via-markov-laws)) gives the law `normalize(f + g) = normalize(f)` when `g` is constant along the normalization axis. This is implemented in `TL._register_entry()`: additive terms whose free-index set is disjoint from the `NormAxis` UID are dropped before `bc_signature()`. (See `tensorLogicNCDIntegration.md` for the implementation.)
 
@@ -393,7 +393,7 @@ These are correctness audits that run at `construct()` time, before training. Ea
 
 **Expansion — the required API change.** `prop_ideas.md`'s `BrGraph.predicate(wire)` is specified for Bool *input* wires only. The fused view requires it to cover *output* wires of masked operators. Since the predicate lives on the output `ArrayRow.iverson_expr` in the acset, building `BrGraph` from the acset ([§2.3](#23-brgraph-and-sbrinstance-are-dual-views-of-one-dag)) gets this for free — the predicate is an `ArrayRow` attribute regardless of `is_input`. This is a further argument for the acset-routed `BrGraph` construction: the display-layer `UIDHypergraph` has no notion of output-wire predicates, but the acset does.
 
-Note also (`acset.md`, [§Known limitations](acset.md#csv-serialization)) that `mask_alignments` — the compile-time permutation aligning the materialized mask with the score tensor — is *not* stored in the acset; it is recomputable from `_compute_mask_alignment(predicate, lhs_axes)`. So the acset is complete for *detection* (the predicate is present) but requires the term layer (or a recomputation) for *reconstruction* of the compiled operator. This is the dual-view pipeline's boundary made precise for masked operators: detection on the acset, reconstruction needs the recomputation step.
+`mask_alignments` (`acset.md`, [§Known limitations](acset.md#csv-serialization)) — the compile-time permutation aligning the materialized mask with the score tensor — is *not* stored in the acset; it is recomputable from `_compute_mask_alignment(predicate, lhs_axes)`. The acset is therefore complete for *detection* (the predicate is present) but requires the term layer (or a recomputation) for *reconstruction* of the compiled operator. This is the dual-view pipeline's boundary made precise for masked operators: detection on the acset, reconstruction needs the recomputation step.
 
 ---
 
@@ -452,7 +452,7 @@ These are the research-grade opportunities. They are less certain but, if they l
 Y[i, m] = Σ_e  g[i, e] · E_e( H[i, ·] )
 ```
 
-In graded-PROP terms: degree `P = (i, e)`; the input reindexing `η_H = ()` *deletes* `e`, so the same item's feature vector is delivered to every expert — exactly as `η = ()` broadcasts a shared input across a batch one level down. The expert axis `e` is **tiling** (looped by `P`); the gate contracts it in the output weave (a weighted `AdditionOp`). Point-evaluation holds — slicing the output at expert `e` equals running `E_e` then slicing — so **Eq. 3 is satisfied**: dense MoE *is* a weave over models.
+In `D`-graded-PROP terms: degree `P = (i, e)`; the input reindexing `η_H = ()` *deletes* `e`, so the same item's feature vector is delivered to every expert — exactly as `η = ()` broadcasts a shared input across a batch one level down. The expert axis `e` is **tiling** (looped by `P`); the gate contracts it in the output weave (a weighted `AdditionOp`). Point-evaluation holds — slicing the output at expert `e` equals running `E_e` then slicing — so **Eq. 3 is satisfied**: dense MoE *is* a weave over models.
 
 *Sparse (top-1) MoE — the obstruction.* Now route each item to the single expert chosen by the gate:
 
@@ -524,7 +524,7 @@ Two observations make this more than a list. First, **St is the translation inst
 
 Second, **one law cuts across every row**: a *structural / fixed* reindexing → a weave that inherits all passes; a *data-dependent* one → a `Route` generator; a *recurrent* one → `Scan`. CNN vs deformable conv, fixed-graph vs input-dependent-graph GNN, dense vs sparse MoE, reparameterized vs resampled stochastic layer — all the same split, one level apart, at different `D`.
 
-Honest scope: only St (and the translation/permutation fragment of the group row) is implemented; every other row is a conceptual instance, each needing its own reindexing layer — all gated on the same `D`-genericity refactor (roadmap 4.4) that unlocks MoE in §6.4. The claim is structural, not yet executable: GDL, GNNs, neural fields, pooling, and stochastic layers are not separate frameworks but the *same graded-PROP machinery at different `D`*. (What such a weave inherits — batching, fusion, and the per-pass cost a generator pays instead — is exactly as [§6.4](#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles) develops for `D = Br`.)
+Honest scope: only St (and the translation/permutation fragment of the group row) is implemented; every other row is a conceptual instance, each needing its own reindexing layer — all gated on the same `D`-genericity refactor (roadmap 4.4) that unlocks MoE in §6.4. The claim is structural, not yet executable: GDL, GNNs, neural fields, pooling, and stochastic layers are not separate frameworks but the *same `D`-graded-PROP machinery at different `D`*. (What such a weave inherits — batching, fusion, and the per-pass cost a generator pays instead — is exactly as [§6.4](#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles) develops for `D = Br`.)
 
 Each row of the table is unpacked in full — the colors, objects, and morphisms of both `D` and `C`, with the data-independent-vs-data-dependent subtleties — in [Appendix A](#appendix-a--index-categories-d-in-detail).
 
@@ -542,7 +542,7 @@ The honest boundary mirrors the ML reading: contraction is in scope, but the **d
 
 ## 7. The Deepest Structural Connection
 
-Stepping back, the three documents are three coordinate charts on a single three-stage pipeline. The pipeline is:
+The three documents are three coordinate charts on a single three-stage pipeline:
 
 ```mermaid
 %%{init: {'theme': 'default', 'themeVariables': {'edgeLabelBackground': '#ffffff00'}}}%%
@@ -586,6 +586,8 @@ The single sentence that captures the whole document: **pyncd compiles by extend
 ## 8. Prioritized Implementation Roadmap
 
 Ideas are ranked by **impact ÷ cost**, accounting for how much foundation already exists. Each entry states the win, the cost, the categorical justification, and the prerequisite.
+
+> **Baseline — June 2026.** The `leanncd` Lean evaluator (Milestone I) is complete: all eleven TL examples evaluate end-to-end in Lean, including causal self-attention, sequential scans, and transformer stacks (`lake build Tests` green). Several sorries in the St formal proofs have been discharged. Lean ↔ Python interop is established via a serialized relational representation of the graded colored PROP, enabling the offline acset analysis described in Tiers 1–2 to run against Lean-produced structures as well as Python-produced ones. The items below remain open on the Python side unless otherwise noted.
 
 ### Tier 1 — High impact, low cost, foundations exist
 
@@ -646,6 +648,7 @@ These deliver durable architectural capabilities but need real new machinery.
 *Cost:* moderate–high — a `Scan` class in `BroadcastedCategory`, a `strategy` arg on `construct()`, compile the body once. (Uncoupled Scans already thread through `ThreadedComposed`; coupled Scans remain unimplemented.)
 *Justification:* traced monoidal trace; strategy choice is a Para morphism on the resource fiber.
 *Prerequisite:* 1.1 (memory estimate drives the choice).
+*Lean baseline:* The `leanncd` evaluator evaluates sequential scans via `iterAt`/`iterNext` across all examples. This is the formal reference semantics; the Python abstract `Scan` node should produce numerically identical results.
 
 **3.2 — Architectural identity checking ([§5.1](#51-architectural-identity-as-schema-morphism-restriction)).**
 *Win:* decide whether two TL programs are the same architecture; certify architecture conformance.
@@ -654,7 +657,7 @@ These deliver durable architectural capabilities but need real new machinery.
 *Prerequisite:* 2.1.
 
 **3.3 — `BrRewrite` library / diagrammatic compilation ([§2.3](#23-brgraph-and-sbrinstance-are-dual-views-of-one-dag), prop_ideas Opp. 2).**
-*Win:* a sound rewriting system over Br graphs; each PROP equation a named rule; confluence/termination = provably sound optimization.
+*Win:* a sound rewriting system over `BrGraph`s; each PROP equation a named rule; confluence/termination = provably sound optimization.
 *Cost:* high — the rewrite engine, the rule library, the confluence analysis.
 *Justification:* PROP equations as graph rewrites; ZX-calculus analogy.
 *Prerequisite:* 2.1, 2.2 (fusion is the first rule).
@@ -813,8 +816,10 @@ This unpacks each row of the [§6.5](#65-swapping-the-index-d-as-a-dial-across-m
 
 The group enters two distinct ways; the §6.5 cell bundles them.
 
-- **Base — `D = BG`** (delooping of `G`, or the action groupoid on a homogeneous space `G/H`): colors = a single object (or the points of `G/H`); morphisms = group elements `g` (symmetry transports). `C`-colors = feature fields over the base; `C`-morphisms = **group convolution** — a base op broadcast over the orbit, reindexed by translation `x ↦ g·x`. The reindexing `g` is fixed structure → **weave**.
-- **Fibers — `D = Rep(G)`**: colors = irreps of `G` (`SO(3)`: `ℓ = 0, 1, 2, …`, dim `2ℓ+1`; `SO(2)`: angular frequencies; finite `G`: its irreducibles); objects = direct sums of irreps with multiplicities (steerable feature types, e3nn `Irreps`), monoidal product `⊕`; morphisms = intertwiners (`G`-equivariant linear maps, block-structured by irrep type via Schur — the learnable weights of a steerable linear layer). `C`-colors = steerable fields (fiber = a rep, `sh` = the fiber type, unzipping into irrep sub-wires); `C`-morphisms = steerable layers (equivariant convolution, Clebsch–Gordan tensor-product coupling, gated nonlinearity).
+- **`D = BG` (base):** colors = a single object (or the points of `G/H`); morphisms = group elements `g` (symmetry transports, i.e. translations on the orbit).
+- **`C` over `BG`:** colors = feature fields over the base; morphisms = **group convolution** — a base op broadcast over the orbit, reindexed by translation `x ↦ g·x`. The reindexing `g` is fixed structure → **weave**.
+- **`D = Rep(G)` (fibers):** colors = irreps of `G` (`SO(3)`: `ℓ = 0, 1, 2, …`, dim `2ℓ+1`; `SO(2)`: angular frequencies; finite `G`: its irreducibles); objects = direct sums of irreps with multiplicities (steerable feature types, e3nn `Irreps`), monoidal product `⊕`; morphisms = intertwiners (`G`-equivariant linear maps, block-structured by Schur's lemma — the learnable weights of a steerable linear layer).
+- **`C` over `Rep(G)`:** colors = steerable fields (fiber = a rep, `sh` = the fiber type, unzipping into irrep sub-wires); morphisms = steerable layers (equivariant convolution, Clebsch–Gordan tensor-product coupling, gated nonlinearity).
 - **Notes.** Juxtaposing wires is `⊕` (channel stacking), **not** `⊗`; the tensor product `⊗` is a *coupling operation* (a `C`-morphism), not the wire-bundling product. A full steerable CNN grades over both factors — `St_base ⋉ G` for space, `Rep(G)` for fibers. The fiber grading reads more as the *equivariance constraint* (Schur forces intertwiners) than a literal broadcast. This sharpens the [graded_prop.md Prop 8.4](graded_prop.md#8-propositions-the-synthesis-organizes) open question into three encodings — symmetry monad `T`, `BG`-grading, `Rep(G)`-grading — whose equivalence is open.
 
 ### A.3 `D =` graph / incidence category
@@ -849,4 +854,6 @@ The group enters two distinct ways; the §6.5 cell bundles them.
 
 ### A.8 `D = Br` (the vertical case)
 
-Covered concretely in [§6.4](#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles): colors = whole Br objects (arrays-with-operators, i.e. models); morphisms = routers / gates; `C`-colors = model-valued wires; `C`-morphisms = MoE / ensemble layers. Dense (fixed) routing → weave; sparse (data-dependent) routing → `Route`. See the worked example there.
+- **`D`:** colors = whole Br objects (arrays-with-operators, i.e. full models); morphisms = routers and gates.
+- **`C`:** colors = model-valued wires; morphisms = MoE and ensemble layers.
+- **Notes.** Dense (fixed) routing → **weave**; sparse (data-dependent) routing → **`Route`**. Covered in full, with the 2-expert worked example, in [§6.4](#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles).
