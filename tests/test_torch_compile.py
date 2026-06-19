@@ -1411,8 +1411,8 @@ def test_linear_declaration_two_layer_mlp():
     d = real_axis('d', 4)
     dff = real_axis('dff', 8)
     tl = TL()
-    tl.W_in.linear(out_axes=(dff,), in_axes=(d,), bias=False)
-    tl.W_out.linear(out_axes=(d,), in_axes=(dff,), bias=False)
+    tl.W_in.linear(dff, d)
+    tl.W_out.linear(d, dff)
     tl.H[q, dff]  = relu(tl.W_in[dff, d] * tl.X[q, d])
     tl.Out[q, d]  = tl.W_out[d, dff] * tl.H[q, dff]
     mod = ConstructedModule.construct(tl.to_morphism())
@@ -1423,6 +1423,7 @@ def test_linear_declaration_two_layer_mlp():
     assert shapes == [(4, 8), (8, 4)], shapes   # W_in (d->dff) and W_out (dff->d)
 
 
+
 def test_linear_multi_axis_output_projection():
     """W_Q[h,k,d] · X[q,d] -> Q[q,h,k]: one input feature (d), two output
     features (h, k). The weight is an internal (d -> h,k) parameter."""
@@ -1431,7 +1432,7 @@ def test_linear_multi_axis_output_projection():
     h = real_axis('h', 2)
     k = real_axis('k', 3)
     tl = TL()
-    tl.W_Q.linear(out_axes=(h, k), in_axes=(d,), bias=False)
+    tl.W_Q.linear(h, k, d)
     tl.Q[q, h, k] = tl.W_Q[h, k, d] * tl.X[q, d]
     mod = ConstructedModule.construct(tl.to_morphism())
     out = mod(torch.randn(2, 6))                 # only X
@@ -1449,7 +1450,7 @@ def test_linear_multi_axis_input_projection():
     h = real_axis('h', 2)
     k = real_axis('k', 3)
     tl = TL()
-    tl.W_O.linear(out_axes=(d,), in_axes=(h, k), bias=False)
+    tl.W_O.linear(d, h, k)
     tl.Out[q, d] = tl.W_O[d, h, k] * tl.Attn[q, h, k]
     mod = ConstructedModule.construct(tl.to_morphism())
     out = mod(torch.randn(2, 2, 3))              # only Attn
@@ -1459,16 +1460,16 @@ def test_linear_multi_axis_input_projection():
     assert shapes == [(2, 3, 6)], shapes
 
 
-def test_linear_rejects_weight_axes_mismatch():
-    """The weight's axes must be exactly out_axes ∪ in_axes (same arity, wrong axis)."""
+def test_linear_rejects_floating_weight_axis():
+    """A weight axis that appears in neither the activation nor the lhs is an error."""
     q = real_axis('q', 2)
     d = real_axis('d', 4)
     dff = real_axis('dff', 8)
     z = real_axis('z', 4)
     tl = TL()
-    tl.W.linear(out_axes=(dff,), in_axes=(d,), bias=False)   # declared {dff, d}
-    with pytest.raises(ValueError, match="do not match its declared"):
-        tl.H[q, dff] = tl.W[dff, z] * tl.X[q, d]             # used {dff, z}: z != d
+    tl.W.linear(dff, d, z)                                    # z appears nowhere in the eq
+    with pytest.raises(ValueError, match="appear in neither"):
+        tl.H[q, dff] = tl.W[dff, d, z] * tl.X[q, d]
 
 
 def test_linear_rejects_multiple_activations():
@@ -1477,7 +1478,7 @@ def test_linear_rejects_multiple_activations():
     d = real_axis('d', 4)
     dff = real_axis('dff', 8)
     tl = TL()
-    tl.W_in.linear(out_axes=(dff,), in_axes=(d,), bias=False)
+    tl.W_in.linear(dff, d)
     with pytest.raises(ValueError, match="exactly one activation"):
         tl.H[q, dff] = tl.W_in[dff, d] * tl.X[q, d] * tl.Y[q, d]
 
@@ -1488,7 +1489,7 @@ def test_linear_bias_true_adds_bias_parameter():
     d = real_axis('d', 4)
     dff = real_axis('dff', 8)
     tl = TL()
-    tl.W_in.linear(out_axes=(dff,), in_axes=(d,), bias=True)
+    tl.W_in.linear(dff, d, bias=True)
     tl.H[q, dff] = tl.W_in[dff, d] * tl.X[q, d]
     mod = ConstructedModule.construct(tl.to_morphism())
     out = mod(torch.randn(2, 4))
@@ -1498,27 +1499,27 @@ def test_linear_bias_true_adds_bias_parameter():
     assert (4, 8) in pshapes and (8,) in pshapes, pshapes   # weight (d,dff) + bias (dff,)
 
 
-def test_linear_rejects_in_axis_not_in_activation():
-    """Every in_axis must appear in the activation tensor."""
+def test_linear_rejects_floating_weight_axis_not_in_activation_or_lhs():
+    """A weight axis that appears in neither the activation nor the lhs is an error.
+    Here d is in the weight but the activation uses e instead."""
     q = real_axis('q', 2)
     d = real_axis('d', 4)
     dff = real_axis('dff', 8)
     e = real_axis('e', 4)
     tl = TL()
-    tl.W.linear(out_axes=(dff,), in_axes=(d,), bias=False)
-    with pytest.raises(ValueError, match="in_axes must all appear in the activation"):
-        tl.H[q, dff] = tl.W[dff, d] * tl.X[q, e]    # activation has e, not d
+    tl.W.linear(dff, d)
+    with pytest.raises(ValueError, match="appear in neither"):
+        tl.H[q, dff] = tl.W[dff, d] * tl.X[q, e]    # d is in neither X nor lhs
 
 
-def test_linear_rejects_out_axis_not_in_lhs():
-    """Every out_axis must appear in the lhs."""
+def test_linear_rejects_ambiguous_axis_in_activation_and_lhs():
+    """A weight axis that appears in both the activation and the lhs is ambiguous."""
     q = real_axis('q', 2)
     d = real_axis('d', 4)
-    dff = real_axis('dff', 8)
     tl = TL()
-    tl.W.linear(out_axes=(dff,), in_axes=(d,), bias=False)
-    with pytest.raises(ValueError, match="out_axes must all appear in the lhs"):
-        tl.H[q, d] = tl.W[dff, d] * tl.X[q, d]      # lhs lacks dff
+    tl.W.linear(d)
+    with pytest.raises(ValueError, match="appear in both"):
+        tl.H[q, d] = tl.W[d] * tl.X[q, d]           # d is in both X and lhs
 
 
 def test_constant_index_slice_read():
@@ -1616,7 +1617,7 @@ def test_linear_weight_inside_scan_is_internal():
     caller input (excluded from the scan's external inputs)."""
     q = real_axis('q', 4); d0 = real_axis('d0', 6); dh = real_axis('dh', 5); l = real_axis('l', 3)
     tl = TL()
-    tl.W_in.linear(out_axes=(dh,), in_axes=(d0,))
+    tl.W_in.linear(dh, d0)
     tl.h[q, dh, 0] = tl.W_in[dh, d0] * tl.x[q, d0]
     tl.h[q, dh, l + 1] = tl.h[q, dh, l] + tl.Delta[q, dh, l]
     tl.h.iteration_axis(l)
@@ -1641,8 +1642,8 @@ def test_example4_as_documented():
     q = real_axis('q', 8); d0 = real_axis('d0', 16); dh = real_axis('dh', 12)
     dh_in = real_axis('dh_in', 12); c = real_axis('c', 5); l = real_axis('l', 3)
     tl = TL()
-    tl.W_in.linear(out_axes=(dh,), in_axes=(d0,))
-    tl.W_out.linear(out_axes=(c,), in_axes=(dh,))
+    tl.W_in.linear(dh, d0)
+    tl.W_out.linear(c, dh)
     tl.h[q, dh, 0] = tl.W_in[dh, d0] * tl.x[q, d0]
     tl.h[q, dh, l + 1] = relu(tl.W[l, dh_in, dh] * tl.h[q, dh_in, l])
     tl.h.iteration_axis(l)

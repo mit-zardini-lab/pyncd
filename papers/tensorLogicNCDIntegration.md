@@ -574,10 +574,10 @@ For programs that need to inspect or re-process the underlying `TensorEquation` 
 ```python
 tl.W_in.tensor(real_axis('d_ff', 2048), real_axis('d', 512))
 tl.Mask.predicate(real_axis('q'), real_axis('x'))
-tl.Wq.linear(out_axes=(h, k), in_axes=(d,))
+tl.Wq.linear(h, k, d)
 ```
 
-Declarations are registered via `.tensor()`, `.predicate()`, `.linear()`, `.scatter()`, and `.iteration_axis()` on a `TensorProxy` and stored in `TL._declarations`. The first two have one effect at indexing time: **arity checking** (the number of indices must match the declared shape). PREDICATE tensors additionally carry `Bool` datatype metadata (used in `bc_signature()`). `.linear()` marks the tensor as a learned weight; when it multiplies an activation the contraction compiles to `ops.Linear` (an `L` box) rather than an einsum, with the weight as an internal parameter. Declarations are **entirely optional** — when absent, all existing behaviour (contraction detection, UID-based axis unification, `bc_signature()`, `to_morphism()`) is unchanged.
+Declarations are registered via `.tensor()`, `.predicate()`, `.linear()`, `.scatter()`, and `.iteration_axis()` on a `TensorProxy` and stored in `TL._declarations`. The first two have one effect at indexing time: **arity checking** (the number of indices must match the declared shape). PREDICATE tensors additionally carry `Bool` datatype metadata (used in `bc_signature()`). `.linear()` marks the tensor as a learned weight; when it multiplies an activation the contraction compiles to `ops.Linear` (an `L` box) rather than an einsum, with the weight as an internal parameter. The compiler infers which axes are contracted (shared with the activation) and which are produced (shared with the lhs) from the equation. Declarations are **entirely optional** — when absent, all existing behaviour (contraction detection, UID-based axis unification, `bc_signature()`, `to_morphism()`) is unchanged.
 
 **Axis constructors** accept an optional concrete size. `real_axis` and `nat_axis` both return `RawAxis` subclasses and carry no compiler-enforced datatype — datatypes live on `Weave` objects, not axes. The qualifiers are advisory labels for documentation: `real_axis` is a convenience wrapper for a named, optionally-sized `RawAxis`; `nat_axis` returns a `NatAxis` subclass that the compiler treats as a plain `RawAxis` for all morphism-building purposes, used only in acset serialisation metadata:
 
@@ -662,7 +662,7 @@ Each tensor is declared with a kind and a positional shape before it appears in 
 ```python
 tl.W_in.tensor(real_axis('d_ff', 2048), real_axis('d', 512))   # ℝ: sum over shared indices
 tl.Mask.predicate(real_axis('q'), real_axis('x'))               # 𝔹: existential over shared indices
-tl.Wq.linear(out_axes=(h, k), in_axes=(d,))                    # ℝ → ℝ: learned weight
+tl.Wq.linear(h, k, d)                                          # ℝ → ℝ: learned weight
 ```
 
 Kind and shape together record what the tensor *is* independently of how it appears in any equation, with size either concrete (`Integer(n)`) or left symbolic (`FreeNumeric`). At indexing time, declarations enforce arity. The kind distinction is carried through `bc_signature()` via the `array_datatypes` argument: PREDICATE tensor names are mapped to `bc.Bool()`, so the resulting `Weave` objects carry the correct datatype for downstream code generation.
@@ -671,7 +671,7 @@ Kind and shape together record what the tensor *is* independently of how it appe
 | --- | --- | --- |
 | `.tensor(...)` | contraction — sum over shared indices | `Reals` |
 | `.predicate(...)` | predicate — Bool-typed, existential over shared indices | `Bool` |
-| `.linear(out_axes, in_axes)` | learned weight — compiles to `ops.Linear` | `Reals` |
+| `.linear(*axes)` | learned weight — compiles to `ops.Linear` | `Reals` |
 
 **Embedding lookup.** pyncd encodes embedding lookups via `ops.Embedding.template(vocab_size)`, whose input weave has `Natural(vocab_size)` datatype. There is no `.selection()` declaration in the DSL; the distinction between a discrete token index (ℕ) and a summable weight (ℝ) is expressed at the operator level rather than at the declaration level. The design for a first-class DSL embedding equation is recorded in [dsl_embedding_lookup_extension.md](../docs/dsl_embedding_lookup_extension.md).
 

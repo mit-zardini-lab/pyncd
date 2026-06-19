@@ -62,15 +62,16 @@ syntax ident "(" tl_axis_spec,* ")" : tl_named_shape
 -- `l : ℕ` or `l : ℕ = 3` — a single axis declaration item (may appear in a comma group).
 syntax ident ":" tl_axis_kind         : tl_axis_decl_item
 syntax ident ":" tl_axis_kind "=" num : tl_axis_decl_item
--- `W(in) → (out)` or `W(in) → (out) bias` — a single linear layer item.
-syntax ident "(" tl_axis_spec,* ")" "→" "(" tl_axis_spec,* ")"        : tl_linear_item
-syntax ident "(" tl_axis_spec,* ")" "→" "(" tl_axis_spec,* ")" "bias" : tl_linear_item
+-- `W(a, b, c)` or `W(a, b, c) bias` — a single linear layer item.  The axis list mirrors
+-- tensor/predicate `tl_named_shape`; an optional trailing `bias` marks an affine layer.
+syntax ident "(" tl_axis_spec,* ")"        : tl_linear_item
+syntax ident "(" tl_axis_spec,* ")" "bias" : tl_linear_item
 
 -- `tensor A(q, m), B(x, y)` — one or more named shapes, comma-separated, no colon.
 syntax "tensor"    tl_named_shape,+                        : tl_decl
 -- `predicate edge(i, j)` — same grouped form.
 syntax "predicate" tl_named_shape,+                        : tl_decl
--- `linear W_in(d) → (dff), W_out(dff) → (d)` — one or more linear layer items.
+-- `linear W_in(dff, d), W_out(d, dff) bias` — one or more linear layer items.
 syntax "linear"    tl_linear_item,+                        : tl_decl
 -- `axis l : ℕ = 3, s : ℕ = 2` — one or more axis items, comma-separated.
 -- Each item may independently have or omit the `= size` pin.

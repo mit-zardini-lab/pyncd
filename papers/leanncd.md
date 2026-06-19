@@ -957,7 +957,7 @@ Extends Domingos' tensor-logic notation (implicit Σ over contracted axes, Einst
 -- Layer 1: Axis specifications and declarations
 decl        ::= 'tensor'    name ':' shape
               | 'predicate' name ':' shape
-              | 'linear'    name ':' in_shape '→' out_shape ['bias']
+              | 'linear'    name ':' shape ['bias']   -- flat axis list, as tensor/predicate
               | 'axis'       name ':' axis_kind ['=' n]   -- declares an axis's dtype + optional pinned size
 
 -- A tensor's shape lists only its axis NAMES (and order). An axis's dtype/size lives in an
@@ -1187,7 +1187,7 @@ structure AxisSpec where
 inductive Decl
   | tensor    : String → List AxisSpec → Decl   -- a tensor's axes are NAMES only; dtype/size live on `axis`
   | predicate : String → List AxisSpec → Decl   -- Boolean-valued: R = Bool target semiring (§8)
-  | linear    : String → (inAxes outAxes : List AxisSpec) → (bias : Bool) → Decl
+  | linear    : String → List AxisSpec → (bias : Bool) → Decl   -- flat axis list like tensor; roles read from equations
   | axis      : AxisSpec → Option Nat → Decl    -- `axis l : ℕ = 3`: an axis's dtype + optional pinned size
 ```
 
@@ -1332,13 +1332,13 @@ syntax ident : tl_axis_spec               -- an axis name (bare ident)
 syntax ident "(" tl_axis_spec,* ")" : tl_named_shape   -- `T(a, b, c)`
 syntax ident ":" tl_axis_kind         : tl_axis_decl_item  -- dtype only
 syntax ident ":" tl_axis_kind "=" num : tl_axis_decl_item  -- dtype + pinned size
-syntax ident "(" tl_axis_spec,* ")" "→" "(" tl_axis_spec,* ")"        : tl_linear_item  -- `W(d) → (dff)`
-syntax ident "(" tl_axis_spec,* ")" "→" "(" tl_axis_spec,* ")" "bias" : tl_linear_item  -- with bias
+syntax ident "(" tl_axis_spec,* ")"        : tl_linear_item  -- `W(dff, d)` — flat axis list
+syntax ident "(" tl_axis_spec,* ")" "bias" : tl_linear_item  -- with bias
 syntax "(" tl_axis_spec,* ")" : tl_shape   -- kept; no longer used by any tl_decl rule
 
 syntax "tensor"    tl_named_shape,+                        : tl_decl   -- `tensor A(q,m), B(x,y)`
 syntax "predicate" tl_named_shape,+                        : tl_decl   -- `predicate P(i,j)`
-syntax "linear"    tl_linear_item,+                        : tl_decl   -- `linear W(d) → (dff), V(dff) → (d)`
+syntax "linear"    tl_linear_item,+                        : tl_decl   -- `linear W(dff, d), V(d, dff) bias`
 syntax "axis"      tl_axis_decl_item,+                     : tl_decl   -- `axis l : ℕ = 3, s : ℕ = 2`
 
 -- Layer 2: index expressions — GENERALIZED to general integer-affine sums (the AST's
@@ -1613,7 +1613,7 @@ The result is a `ThreadedComposed` (a presentation of a `BrMorph`, [§2.3](#23-b
 | --- | --- | --- |
 | `tensor A(q, m), B(x, y)` | `tl.Name.tensor(*axes)` | grouped; no colon |
 | `predicate P(i, j)` | `tl.Name.predicate(*axes)` | Bool-typed; same form |
-| `linear Name : in → out [bias]` | `tl.Name.linear(out_axes=…, in_axes=…, bias=…)` | weight declaration |
+| `linear W(axes…) [bias]` | `tl.Name.linear(*axes, bias=…)` | weight decl; flat axis list |
 | `Name[i,j] := rhs` | `tl.Name[i,j] = rhs` | normal assignment |
 | `Name[0, j] := rhs` | `tl.Name[j, 0] = rhs` | scan base case |
 | `Name[l+1, j] := rhs` | `tl.Name[j, l+1] = rhs` | scan recurrence step |

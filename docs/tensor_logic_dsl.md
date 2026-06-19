@@ -157,20 +157,21 @@ i = real_axis('i', 64); k = real_axis('k', 64); j = real_axis('j', 64)
 tl = TL()
 tl.W.tensor(i, k)            # ordinary ℝ-valued tensor
 tl.Mask.predicate(i, j)      # 𝔹-valued predicate (output typed Bool)
-tl.Wq.linear(out_axes=(i,), in_axes=(k,))                    # a Linear layer weight
+tl.Wq.linear(i, k)                                           # a Linear layer weight
 ```
 
 - **`.tensor(*shape)`** — default contraction semantics, no promotion.
 - **`.predicate(*shape)`** — marks the name `Bool`-typed. When such a tensor is the
   *output* of an equation, the einsum result is demoted with the Heaviside step
   $H(x)=\mathbf 1[x>0]$ to `{0,1}` (∃/∧ semantics — see [§6](#6-normalisations-and-nonlinearities)). Axes are not promoted.
-- **`.linear(*, out_axes, in_axes, bias=False)`** — marks the name as the weight of a
-  **Linear/affine layer**. When it multiplies an activation in an equation, the
-  contraction compiles to an `ops.Linear` operator (an `L` box) instead of an einsum:
-  the weight becomes the layer's **internal parameter** (so it is *not* a caller
-  input — only the activation is), and `bias=True` makes it affine (`Wx + b`).
-  `out_axes`/`in_axes` are the output/input feature blocks and may each be multi-axis,
-  e.g. a QKV projection `tl.Wq.linear(out_axes=(h, k), in_axes=(d,))` used as
+- **`.linear(*shape, bias=False)`** — marks the name as the weight of a
+  **Linear/affine layer**. List the axes in the order they appear in the equations.
+  When it multiplies an activation in an equation, the contraction compiles to an
+  `ops.Linear` operator (an `L` box) instead of an einsum: the weight becomes the
+  layer's **internal parameter** (so it is *not* a caller input — only the activation
+  is), and `bias=True` makes it affine (`Wx + b`). The compiler infers which axes are
+  contracted (shared with the activation) and which are produced (shared with the lhs)
+  from the equation, e.g. `tl.Wq.linear(h, k, d)` used as
   `tl.Q[q, h, k] = tl.Wq[h, k, d] * tl.X[q, d]` maps `d → (h, k)`. See
   [dsl_examples.md](dsl_examples.md) Example 1 for an MLP built from `.linear()` layers.
 - **`.scatter(*, fill=0.0, reduce=None)`** — configures output behaviour for a tensor

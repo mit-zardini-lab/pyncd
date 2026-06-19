@@ -45,14 +45,12 @@ private def elabTLNamedShape : Syntax → MetaM (String × List AxisSpec)
   | _ => throwUnsupportedSyntax
 
 private def elabTLLinearItem : Syntax → MetaM Decl
-  | `(tl_linear_item| $x:ident ( $ins,* ) → ( $outs,* )) => do
+  | `(tl_linear_item| $x:ident ( $specs,* )) => do
       return .linear x.getId.eraseMacroScopes.getString!
-        (← ins.getElems.toList.mapM elabTLAxisSpec)
-        (← outs.getElems.toList.mapM elabTLAxisSpec) false
-  | `(tl_linear_item| $x:ident ( $ins,* ) → ( $outs,* ) bias) => do
+        (← specs.getElems.toList.mapM elabTLAxisSpec) false
+  | `(tl_linear_item| $x:ident ( $specs,* ) bias) => do
       return .linear x.getId.eraseMacroScopes.getString!
-        (← ins.getElems.toList.mapM elabTLAxisSpec)
-        (← outs.getElems.toList.mapM elabTLAxisSpec) true
+        (← specs.getElems.toList.mapM elabTLAxisSpec) true
   | _ => throwUnsupportedSyntax
 
 private def elabTLAxisDeclItem : Syntax → MetaM Decl

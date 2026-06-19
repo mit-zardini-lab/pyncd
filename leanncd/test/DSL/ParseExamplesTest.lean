@@ -36,4 +36,18 @@ private def coupled : TLProgram := tlprog!{
 }
 #guard coupled.stmts.length == 4
 
+-- 6. Linear weight declarations: flat axis list identical to tensor/predicate, with an
+-- optional trailing `bias`. Roles (contracted vs produced) are read from the equations.
+private def linmlp : TLProgram := tlprog!{
+  linear W_in(f, d), W_out(d, f) bias
+  H[q, f]   := relu(W_in[f, d] · X[q, d])
+  Out[q, d] := W_out[d, f] · H[q, f]
+}
+#guard linmlp.decls.length == 2
+#guard linmlp.stmts.length == 2
+-- W_in has no bias, W_out has bias
+#guard match linmlp.decls with
+  | [.linear "W_in" _ bi, .linear "W_out" _ bo] => bi == false && bo == true
+  | _ => false
+
 end LeanNCD

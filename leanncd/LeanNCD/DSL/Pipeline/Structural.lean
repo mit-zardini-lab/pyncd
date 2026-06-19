@@ -41,7 +41,7 @@ private def axNamesLHS : LHSSlot → List String
 
 private def axNamesDecl : Decl → List String
   | .tensor _ ax => ax.map (·.name) | .predicate _ ax => ax.map (·.name)
-  | .linear _ i o _ => i.map (·.name) ++ o.map (·.name)
+  | .linear _ ax _ => ax.map (·.name)
   | .axis ax _ => [ax.name]
 
 private def axNamesStmt : Stmt → List String
@@ -120,7 +120,7 @@ an error. `resolveDecls` therefore NEVER throws. -/
 /-- The declaration's tensor name. (`axis` decls name an AXIS, not a tensor; `resolveDecls`
     skips them when building the tensor-keyed `DeclEnv`.) -/
 def Decl.name : Decl → String
-  | .tensor n _ => n | .predicate n _ => n | .linear n _ _ _ => n | .axis ax _ => ax.name
+  | .tensor n _ => n | .predicate n _ => n | .linear n _ _ => n | .axis ax _ => ax.name
 
 /-- The tensor name a stmt writes to (its LHS). -/
 def Stmt.lhsName : Stmt → String
@@ -188,7 +188,7 @@ private def axNameUIDLHS : LHSSlot → List (String × UID)
 private def axNameUIDDecl : Decl → List (String × UID)
   | .tensor _ ax => ax.map (fun a => (a.name, a.uid))
   | .predicate _ ax => ax.map (fun a => (a.name, a.uid))
-  | .linear _ i o _ => i.map (fun a => (a.name, a.uid)) ++ o.map (fun a => (a.name, a.uid))
+  | .linear _ ax _ => ax.map (fun a => (a.name, a.uid))
   | .axis ax _ => [(ax.name, ax.uid)]
 
 private def axNameUIDStmt : Stmt → List (String × UID)

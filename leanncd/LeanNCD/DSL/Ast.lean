@@ -18,7 +18,7 @@ structure AxisSpec where
 inductive Decl
   | tensor    : String → List AxisSpec → Decl
   | predicate : String → List AxisSpec → Decl
-  | linear    : String → (inAxes outAxes : List AxisSpec) → (bias : Bool) → Decl
+  | linear    : String → List AxisSpec → (bias : Bool) → Decl
   | axis      : AxisSpec → Option Nat → Decl   -- `axis l : ℕ = 3`: declares an axis's dtype + optional pinned size
   deriving DecidableEq, Repr, Lean.ToExpr
 

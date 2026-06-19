@@ -100,7 +100,7 @@ def Combine.bool : Combine := ⟨min, max, 0.0⟩
 def declName : Decl → String
   | .tensor n _      => n
   | .predicate n _   => n
-  | .linear n _ _ _  => n
+  | .linear n _ _    => n
   | .axis ax _       => ax.name
 
 /-- Pick the `Combine` for an output name from the decls: `predicate` ⇒ bool, else real. -/

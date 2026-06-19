@@ -60,7 +60,7 @@ def LHSSlot.mapUID (f : UData → UData) : LHSSlot → LHSSlot
 def Decl.mapUID (f : UData → UData) : Decl → Decl
   | .tensor nm ax        => .tensor nm (ax.map (AxisSpec.mapUID f))
   | .predicate nm ax     => .predicate nm (ax.map (AxisSpec.mapUID f))
-  | .linear nm i o b     => .linear nm (i.map (AxisSpec.mapUID f)) (o.map (AxisSpec.mapUID f)) b
+  | .linear nm ax b      => .linear nm (ax.map (AxisSpec.mapUID f)) b
   | .axis ax n           => .axis (AxisSpec.mapUID f ax) n
 instance : TermTraversable Decl where traverseUID := Decl.mapUID
 

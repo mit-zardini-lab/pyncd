@@ -34,8 +34,6 @@ class TensorDeclaration:
     kind:  TensorKind
     shape: tuple[sc.RawAxis, ...]
     bias:  bool = False                          # LINEAR only: affine (Wx + b) vs linear
-    out_axes: tuple[sc.RawAxis, ...] = ()        # LINEAR only: output feature axes
-    in_axes:  tuple[sc.RawAxis, ...] = ()        # LINEAR only: input feature axes
 
 
 # ---------------------------------------------------------------------------
@@ -483,23 +481,23 @@ class TL:
             ),
             bias=decl.bias,
         )
-        # Use the declared feature blocks: in_axes are contracted from the
-        # activation, out_axes are produced into the lhs.  Both may be multi-axis.
-        in_uids  = {ax.uid for ax in decl.in_axes}
-        out_uids = {ax.uid for ax in decl.out_axes}
+        # Infer feature blocks from the equation: weight axes shared with the
+        # activation are contracted (in); weight axes shared with the lhs are
+        # produced (out).  Both sets may be multi-axis.
         w_uids   = {ax.uid for ax in W.axes}
-        if w_uids != (in_uids | out_uids):
+        x_uids   = {ax.uid for ax in X.axes}
+        lhs_uids = {ax.uid for ax in eq.lhs_indices}
+        in_uids  = w_uids & x_uids
+        out_uids = w_uids & lhs_uids
+        if in_uids & out_uids:
             raise ValueError(
-                f"LINEAR weight {wname!r} axes do not match its declared "
-                f"out_axes ∪ in_axes"
+                f"LINEAR weight {wname!r} has axes that appear in both the "
+                f"activation and the lhs; cannot infer in/out role"
             )
-        if not in_uids <= {ax.uid for ax in X.axes}:
+        if in_uids | out_uids != w_uids:
             raise ValueError(
-                f"LINEAR weight {wname!r} in_axes must all appear in the activation"
-            )
-        if not out_uids <= {ax.uid for ax in eq.lhs_indices}:
-            raise ValueError(
-                f"LINEAR weight {wname!r} out_axes must all appear in the lhs"
+                f"LINEAR weight {wname!r} has axes that appear in neither the "
+                f"activation nor the lhs"
             )
         # Build the Linear Broadcasted directly: feature axes concrete, batch
         # (activation axes that are not input features) TILED.  No identity
@@ -1717,36 +1715,26 @@ class TensorProxy:
         )
         return self
 
-    def linear(
-        self,
-        *,
-        out_axes: tuple[sc.RawAxis, ...],
-        in_axes: tuple[sc.RawAxis, ...],
-        bias: bool = False,
-    ) -> TensorProxy:
+    def linear(self, *shape: sc.RawAxis, bias: bool = False) -> TensorProxy:
         """Declare this tensor as a Linear/affine layer weight.
 
-        out_axes and in_axes name the weight's output- and input-feature axes
-        (each may be multi-axis).  When this weight multiplies an activation in an
-        equation, e.g.
+        List the weight's axes in the order they appear in the equations, e.g.
 
-            tl.W_Q.linear(out_axes=(h, k), in_axes=(d,))
-            tl.Q[q, h, k] = tl.W_Q[h, k, d] * tl.X[q, d]      # maps d -> (h, k)
+            tl.W_Q.linear(h, k, d)
+            tl.Q[q, h, k] = tl.W_Q[h, k, d] * tl.X[q, d]
 
-        the contraction compiles to an ops.Linear operator (drawn as an 'L' box)
+        The compiler infers which axes are contracted (shared with the activation)
+        and which are produced (shared with the lhs) from the equation.  The
+        contraction compiles to an ops.Linear operator (drawn as an 'L' box)
         instead of an einsum: the weight becomes the layer's internal parameter
         (dropped from caller inputs) and bias=True makes it affine (Wx + b).
         """
-        out_axes = tuple(out_axes)
-        in_axes = tuple(in_axes)
         self._registry._register_declaration(
             self._name,
             TensorDeclaration(
                 kind=TensorKind.LINEAR,
-                shape=out_axes + in_axes,
+                shape=shape,
                 bias=bias,
-                out_axes=out_axes,
-                in_axes=in_axes,
             ),
         )
         return self

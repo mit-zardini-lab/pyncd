@@ -314,16 +314,17 @@ read from axis (UID) identity, never written as an explicit `Σ`.
 
 ### 2. Lean DSL
 
-`linear W : (in) → (out)` declares the axis mapping of a weight; the Lean evaluator
-treats the weight as a caller-supplied input tensor (unlike the Python DSL which tracks
-it as a learned `nn.Parameter`). The `→` separates contracted input axes from free output
-axes.
+`linear W(axes…)` declares a weight with a flat axis list, identical in form to `tensor`
+and `predicate` (an optional trailing `bias` marks an affine layer). The role of each axis
+— contracted vs. produced — is read from the equations, not the declaration. The Lean
+evaluator treats the weight as a caller-supplied input tensor (unlike the Python DSL which
+tracks it as a learned `nn.Parameter`).
 
 ```lean
 tlprog!{
-  linear W_in(d) → (dff), W_out(dff) → (d)
-  H[q, dff]  := relu(W_in[dff, d] · X[q, d])
-  Out[q, d]  := W_out[d, dff] · H[q, dff]
+  linear W_in(f, d), W_out(d, f)
+  H[q, f]  := relu(W_in[f, d] · X[q, d])
+  Out[q, d]  := W_out[d, f] · H[q, f]
 }
 ```
 
@@ -366,20 +367,26 @@ We build it from `.linear()` layers (§4 of [tensor_logic_dsl.md](tensor_logic_d
 each weight is declared a Linear layer, so the weight-multiplies become `Linear`
 operators whose weights are the layers' **internal parameters** — you pass only `X`.
 
+`.linear(*axes)` lists the weight's axes (in the same order as they appear in the
+equation) and is what triggers the `L` (Linear) operator instead of a plain `Σ`
+(einsum), making the weight an internal `nn.Parameter` rather than a caller input.
+The roles of each axis — contracted (shared with the activation) vs. produced (shared
+with the lhs) — are inferred from the equation itself.
+
 ```python
 import torch
 from data_structure.TensorDSL import TL, real_axis, relu
 from torch_compile.torch_compile import ConstructedModule
 
-q   = real_axis('q', 2)      # batch / sequence position
-d   = real_axis('d', 4)      # model dimension
-dff = real_axis('dff', 8)    # hidden dimension
+q = real_axis('q', 2)      # batch / sequence position
+d = real_axis('d', 4)      # model dimension
+f = real_axis('f', 8)      # hidden dimension
 
 tl = TL()
-tl.W_in.linear(out_axes=(dff,), in_axes=(d,))     # Linear layer  d -> dff
-tl.W_out.linear(out_axes=(d,), in_axes=(dff,))    # Linear layer  dff -> d
-tl.H[q, dff] = relu(tl.W_in[dff, d] * tl.X[q, d])
-tl.Out[q, d] = tl.W_out[d, dff] * tl.H[q, dff]
+tl.W_in.linear(f, d)     # Linear layer  d -> f
+tl.W_out.linear(d, f)    # Linear layer  f -> d
+tl.H[q, f] = relu(tl.W_in[f, d] * tl.X[q, d])
+tl.Out[q, d] = tl.W_out[d, f] * tl.H[q, f]
 
 morph = tl.to_morphism()                  # ThreadedComposed (two layers, H threaded)
 module = ConstructedModule.construct(morph)
@@ -402,7 +409,7 @@ Read the diagram left-to-right. Wires are labelled `axis(size)` and carry tensor
 between boxes. **`L`** boxes (subscripted by weight name) are learned linear layers.
 **`▶relu▶`** is a pointwise nonlinearity. The
 upper wire (`q`) is the batch dimension, which passes through unchanged; the lower wire
-(`d`/`dff`) is the feature dimension transformed by each layer.
+(`d`/`f`) is the feature dimension transformed by each layer.
 
 ![MLP string diagram](mlp_render.png)
 
@@ -435,12 +442,13 @@ caller inputs — one per layer:
 
 ```python
 [(n, tuple(p.shape)) for n, p in module.named_parameters()]
-# [('chain.0.chain.0.module.weights.weight', (4, 8)),   # W_in : d -> dff
-#  ('chain.1.module.weights.weight',         (8, 4))]   # W_out: dff -> d
+# [('chain.0.chain.0.module.weights.weight', (4, 8)),   # W_in : d -> f
+#  ('chain.1.module.weights.weight',         (8, 4))]   # W_out: f -> d
 ```
 
 (`bias=True` on a `.linear()` declaration adds a matching bias parameter; multi-axis
-feature blocks like `out_axes=(h, k)` give a weight whose shape is `in_size + out_size`.)
+feature blocks are declared naturally, e.g. `tl.W_Q.linear(h, k, d)` for a weight
+that maps `d → (h, k)`.)
 
 ---
 
@@ -491,10 +499,10 @@ read `h[q, dh, 3]` extracts the final hidden state via an integer literal in the
 ```lean
 tlprog!{
   axis l : ℕ = 3
-  linear W_in(d0) → (dh), W_out(dh) → (c)
+  linear W_in(dh, d0), W_out(c, dh)
   h[q, dh, 0]    := W_in[dh, d0] · x[q, d0]
   h[q, dh, l +1] := relu(W[l, dh_in, dh] · h[q, dh_in, l])
-  y[q, c.]        := softmax(W_out[c, dh] · h[q, dh, 3])
+  y[q, c.]       := softmax(W_out[c, dh] · h[q, dh, 3])
 }
 ```
 
@@ -574,8 +582,8 @@ c     = real_axis('c',    10)
 l     = real_axis('l',     3)    # 3 recurrent steps
 
 tl = TL()
-tl.W_in.linear(out_axes=(dh,), in_axes=(d0,))
-tl.W_out.linear(out_axes=(c,), in_axes=(dh,))
+tl.W_in.linear(dh, d0)
+tl.W_out.linear(c, dh)
 
 tl.h[q, dh, 0]   = tl.W_in[dh, d0] * tl.x[q, d0]
 tl.h[q, dh, l+1] = relu(tl.W[l, dh_in, dh] * tl.h[q, dh_in, l])
