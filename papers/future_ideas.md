@@ -857,3 +857,37 @@ The group enters two distinct ways; the §6.5 cell bundles them.
 - **`D`:** colors = whole Br objects (arrays-with-operators, i.e. full models); morphisms = routers and gates.
 - **`C`:** colors = model-valued wires; morphisms = MoE and ensemble layers.
 - **Notes.** Dense (fixed) routing → **weave**; sparse (data-dependent) routing → **`Route`**. Covered in full, with the 2-expert worked example, in [§6.4](#64-stacking-levels-weaves-over-models-mixture-of-experts-ensembles).
+
+---
+
+## B. Neuro-Relational Programs (NRPs) — adjacency and gaps
+
+**Reference:** Soeteman, ten Cate, Funk, Kimelfeld, Lutz, Schönherr, "Neuro-Relational Programs: Unifying Queries and Neural Computation over Structured Data," arXiv:2606.11946, June 2026.
+
+NRPs are a declarative query language for databases where relational tuples carry vector embeddings. Rules are of three kinds: conjunction (join body atoms, combine embeddings via element-wise product, aggregate with sum), disjunction (aggregate over alternative derivations), and transformation (apply a differentiable map to each embedding). The semantics is homomorphism-counting: the embedding of a derived fact R(**a**) is the aggregate over all body homomorphisms that ground to **a**.
+
+### Where the approaches connect
+
+**`ev_p` is a homomorphism sum.** The NRP conjunction rule — aggregate over all homomorphisms from a pattern into the database — is precisely what `ev_p` computes in the PROP semantics. When a `BrMorph` is evaluated in `Mat ℝ`, the matrix contraction sums over all ways of grounding shared indices, which is the same operation. NRPs give a database-language name to what `ev_p` does categorically.
+
+**Conjunction rules are einsums.** `R(x,y) ∧ R(y,z) ∧ P(x,z)` with element-wise ⊙ and sum aggregation over `y` is an einsum. The leanncd DSL's `assign` statements implement exactly this, and `route` produces the `BrBaseP`/`Wire` structure that realizes it.
+
+**The DHN expressiveness hierarchy.** Zero-ary NRPs ↪ monadic NRPs ↪ frontier-guarded NRPs is a well-characterized expressiveness ladder. Theorem 5.3 (frontier-guarded → monadic via row-id normalization) shows that higher-arity relations reduce to unary computation, which is structurally analogous to the scheduling/routing step that eliminates high-arity intermediate tensors in the leanncd pipeline.
+
+**The potential correspondence theorem.** A precise bridge: a frontier-guarded NRP computes the same function as the `TLProgram` produced by compiling its conjunction/transformation rules through the leanncd pipeline. This is not stated in either paper but would be a natural statement to prove once the B+/G `Br`/`St` coherence sorries are discharged and `realize` is fully sorry-free.
+
+### Where NRPs fall short of the categorical approach
+
+**No monoidal/PROP structure.** NRPs have no notion of composing two programs as a categorical operation. Their "closure under composition" (Corollary 6.4) is proved via logical equivalence (FOCQ ≡ TC⁰), not via an explicit tensor product or sequential composition of programs. The leanncd approach provides the thing NRPs lack: a typed wiring calculus where programs compose via `Weave` and the PROP laws guarantee coherence.
+
+**No parameter algebra.** NRPs say "transformations μ are differentiable functions" and defer the parameter story to a compiler. leanncd has explicit `ParaAlgebra` and `weightTie` for the para-categorical handling of weights.
+
+**No grading, no scans.** NRPs are static/acyclic: a finite set of stratified rules evaluated to a fixed point over a fixed database. There is no temporal grading (`TemporalGraded`) and no sequential recurrence (`scan`). NRPs model graph-level computation; leanncd models sequence-over-graph computation.
+
+**"No semiring axioms required" is their freedom, our constraint.** NRPs treat aggregation and combination as arbitrary differentiable functions — no algebraic laws required. The categorical approach requires the monoidal laws (unitality, associativity, braiding axioms) to hold, which is what makes the PROP structure meaningful and what makes the `tensorHom`/`swap` coherence sorries hard. NRPs sidestep this entirely by working semantically. The tradeoff is real: NRPs get flexibility, leanncd gets compositionality and coherence proofs.
+
+**DType/predicate handling.** NRPs distinguish Boolean (classical relational) from real (embedded) computation through "acceptance policies" — Boolean combinations of inequalities gating the output. This is the query-language analog of the open `AxisKind`/`DType` obstruction in leanncd (the deferred predicate-vs-tensor issue in E2b). The NRP treatment is clean for the query case but does not generalize to internal predicate tensors inside scans.
+
+### Potential implementation idea
+
+Theorem 5.3's row-id normalization could inform leanncd's routing for higher-arity axes: normalizing to unary by introducing a row-id axis is a concrete strategy for cases where the current `BrBaseP` DType deferral blocks progress on binary or higher-arity predicate outputs.
