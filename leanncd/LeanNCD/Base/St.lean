@@ -15,7 +15,13 @@ abbrev StObj := List Axis
 /-- A stride morphism `dom → cod`: an affine coordinate transform stored as a coefficient
     matrix over `Coeff` plus a bias vector. Row `j` is the linear combination of input
     coordinates producing output coordinate `j`. The entries are `Coeff = MvPolynomial String ℤ`
-    (signed), NOT `Numeric` (the ℕ size type): reindexing offsets can be negative (look-back). -/
+    (signed), NOT `Numeric` (the ℕ size type): reindexing offsets can be negative (look-back).
+
+    The indices `Fin cod.length` / `Fin dom.length` count **axes**, not elements within an axis.
+    `Axis.size` is symbolic metadata (`Numeric`); the type of `StMat` does not enforce that
+    coordinate values stay within `[0, n)` for an axis of size `n`. That bound only becomes
+    operative at evaluation time (Milestone I / `DenseTensor`), where symbolic sizes are
+    instantiated to concrete `Nat`s. -/
 @[ext]       -- generate the extensionality lemma StMat.ext for St
 structure StMat (dom cod : StObj) where
   coeffs : Matrix (Fin cod.length) (Fin dom.length) Coeff
@@ -170,9 +176,12 @@ noncomputable instance St : ColoredPROP StObj where
   id_comp := StMat.id_comp
   comp_id := StMat.comp_id
   assoc   := StMat.comp_assoc
-  tensor_assoc  := by intro a b c; simp [List.append_assoc]
-  tensor_unit_l := by intro a; simp
-  tensor_unit_r := by intro a; simp [List.append_nil]
+  tensor_assoc  := by intro a b c  -- a b c : StObj
+                      simp [List.append_assoc]
+  tensor_unit_l := by intro a  -- a : StObj
+                      simp
+  tensor_unit_r := by intro a  -- a : StObj
+                      simp [List.append_nil]
   tensorHom {a b c d} f g :=                            -- block-diagonal product
     let eC : Fin (a ++ c).length ≃ Fin a.length ⊕ Fin c.length :=
       (finCongr (List.length_append (as := a) (bs := c))).trans finSumFinEquiv.symm
@@ -231,7 +240,7 @@ noncomputable instance St : ColoredPROP StObj where
       funext i
       simp [StMat.comp, StMat.id]
   swap_natural := by
-    intro a b c d f g
+    intro a b c d f g  -- a b c d : StObj; f : StMat a b; g : StMat c d
     apply StMat.ext
     · -- perm_{b,d} * blockdiag(f,g) = blockdiag(g,f) * perm_{a,c}
       -- Both sides: merge reindex into submatrix, fromBlocks multiply, then the
@@ -262,7 +271,7 @@ noncomputable instance St : ColoredPROP StObj where
   -- (the 9-case `fromBlocks`/`Fin.addCases` block-reassociation) and `StMatAux.bias_reassoc`, with
   -- the `finCongr`/`finSumFinEquiv` index casts bridged by the three `StMatAux.cast_*` lemmas.
   tensorHom_assoc := by
-    intro a₁ b₁ a₂ b₂ a₃ b₃ f g h
+    intro a₁ b₁ a₂ b₂ a₃ b₃ f g h  -- a₁ b₁ a₂ b₂ a₃ b₃ : StObj; f : StMat a₁ b₁; g : StMat a₂ b₂; h : StMat a₃ b₃
     apply StMat.hext _ _ (by simp [List.append_assoc]) (by simp [List.append_assoc])
     · -- Coefficients: the nested block-diagonal reindex reassociates (`StMatAux.block_reassoc`).
       apply StMatAux.matrix_hext _ _ (by simp) (by simp)
@@ -280,7 +289,7 @@ noncomputable instance St : ColoredPROP StObj where
   tensorHom_unit_l := by
     -- `tensor unit a = [] ++ a = a` definitionally, so this HEq is same-type; prove the
     -- underlying `StMat` equality `tensorHom (id []) f = f` componentwise.
-    intro a b f
+    intro a b f  -- a b : StObj; f : StMat a b
     apply heq_of_eq
     apply StMat.ext
     · -- Coefficients: `reindex (fromBlocks (id[]) 0 0 f.coeffs) = f.coeffs`. Flip via the reindex
@@ -316,7 +325,7 @@ noncomputable instance St : ColoredPROP StObj where
     -- Cross-type HEq across `a ++ [] = a` (`List.append_nil`): the right tensor factor `id []` has
     -- the empty `Fin 0` block, so `tensorHom f (id [])` is `f` reindexed back through the
     -- left-injection. Bridge concrete `StMat` cross-type equality to `HEq` via `StMat.hext`.
-    intro a b f
+    intro a b f  -- a b : StObj; f : StMat a b
     apply StMat.hext
     · show a ++ (id [] : StObj) = a; simp
     · show b ++ (id [] : StObj) = b; simp
@@ -355,7 +364,7 @@ noncomputable instance St : ColoredPROP StObj where
       funext i
       simpa [StMat.comp, dotProduct] using
         congrArg (fun m => StMat.bias m i) (h { coeffs := 0, bias := 0 })
-    -- Coefficients agree column-by-column: feed `x.bias = Pi.single k 1`.
+    -- Coefficients agree column-by-column: feed `x.bias = Pi.single k 1` (one-hot vector at k)
     refine StMat.ext ?_ hbias
     funext i k
     have hk := congrArg (fun m => StMat.bias m i) (h { coeffs := 0, bias := Pi.single k 1 })
