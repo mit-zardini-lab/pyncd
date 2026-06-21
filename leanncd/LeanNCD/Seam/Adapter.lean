@@ -29,6 +29,16 @@ private theorem tensorHom_id_eqToHom {O : Type} [ColoredPROP O] (a : O) {c d : O
       = eqToHom (show ColoredPROP.tensor a c = ColoredPROP.tensor a d by rw [h]) := by
   subst h; simp only [eqToHom_refl]; exact ColoredPROP.tensorHom_id a c
 
+/-- Naturality across `eqToHom` reduces to a heterogeneous equality: if `A ≍ B` and their
+    domains/codomains agree by the object equalities, the `eqToHom`-conjugated square commutes.
+    Used to discharge the strict `MonoidalCategory` associator/unitor naturalities from the
+    `ColoredPROP` `tensorHom_assoc`/`tensorHom_unit_*` `HEq` fields. -/
+private theorem natOfHEq {C : Type*} [Category C] {X Y X' Y' : C}
+    (A : X ⟶ Y) (B : X' ⟶ Y') (hX : X = X') (hY : Y = Y') (hAB : HEq A B) :
+    A ≫ eqToHom hY = eqToHom hX ≫ B := by
+  subst hX hY
+  rw [eqToHom_refl, eqToHom_refl, Category.comp_id, Category.id_comp, eq_of_heq hAB]
+
 /-- The §11 strictification seam: the strict monoidal structure on a `ColoredPROP`.
     Data are `ColoredPROP.tensor`/`tensorHom`/`swap`; the structural isos are `eqToIso` of
     the (strict) `tensor_*` laws proved in Milestone A, so the category is genuinely strict.
@@ -66,11 +76,17 @@ noncomputable instance instMonoidalOfColoredPROP {O : Type} [ColoredPROP O] :
   whiskerLeft_id := by intro X Y; exact ColoredPROP.tensorHom_id X Y
   id_whiskerRight := by intro X Y; exact ColoredPROP.tensorHom_id X Y
   associator_naturality := by
-    sorry -- SIGNATURE (§11): tensorHom-associativity coherence, not implied by the bifunctor/symmetry laws
+    intro X₁ X₂ X₃ Y₁ Y₂ Y₃ f₁ f₂ f₃
+    exact natOfHEq _ _ (ColoredPROP.tensor_assoc X₁ X₂ X₃) (ColoredPROP.tensor_assoc Y₁ Y₂ Y₃)
+      (ColoredPROP.tensorHom_assoc f₁ f₂ f₃)
   leftUnitor_naturality := by
-    sorry -- SIGNATURE (§11): tensorHom left-unit coherence, not implied by the bifunctor/symmetry laws
+    intro X Y f
+    exact natOfHEq _ _ (ColoredPROP.tensor_unit_l X) (ColoredPROP.tensor_unit_l Y)
+      (ColoredPROP.tensorHom_unit_l f)
   rightUnitor_naturality := by
-    sorry -- SIGNATURE (§11): tensorHom right-unit coherence, not implied by the bifunctor/symmetry laws
+    intro X Y f
+    exact natOfHEq _ _ (ColoredPROP.tensor_unit_r X) (ColoredPROP.tensor_unit_r Y)
+      (ColoredPROP.tensorHom_unit_r f)
   pentagon := by
     intro W X Y Z
     simp only [eqToIso.hom, tensorHom_eqToHom_id, tensorHom_id_eqToHom, eqToHom_trans]
@@ -95,13 +111,49 @@ noncomputable instance instSymmetricOfColoredPROP {O : Type} [ColoredPROP O] :
       inv_hom_id := ColoredPROP.swap_swap Y X
     }
   braiding_naturality_right := by
-    sorry -- SIGNATURE (§11): naturality of swap, not implied by swap_swap
+    intro X Y Z f
+    -- X ◁ f ≫ (β X Z).hom = (β X Y).hom ≫ f ▷ X  reduces to swap_natural (𝟙 X) f
+    exact ColoredPROP.swap_natural (𝟙 X) f
   braiding_naturality_left := by
-    sorry -- SIGNATURE (§11): naturality of swap, not implied by swap_swap
+    intro X Y f Z
+    -- f ▷ Z ≫ (β Y Z).hom = (β X Z).hom ≫ Z ◁ f  reduces to swap_natural f (𝟙 Z)
+    exact ColoredPROP.swap_natural f (𝟙 Z)
   hexagon_forward := by
-    sorry -- SIGNATURE (§11): hexagon identity for swap, not implied by swap_swap
+    intro X Y Z
+    have ha : ∀ A B C : O, (MonoidalCategoryStruct.associator A B C) =
+        eqToIso (ColoredPROP.tensor_assoc A B C) := fun A B C => rfl
+    have hb : ∀ A B C : O, (MonoidalCategoryStruct.associator A B C).hom =
+        eqToHom (ColoredPROP.tensor_assoc A B C) := fun A B C => (by rw [ha, eqToIso.hom])
+    have hc : ∀ {A B : O} (h : A = B), eqToHom h = SmCat.coh h := fun h => (by cases h; rfl)
+    have he : ∀ {A B : O} (f : SmallCategory.hom A B) (C : O),
+        MonoidalCategoryStruct.whiskerRight f C = ColoredPROP.tensorHom f (SmallCategory.id C) :=
+      by intros; rfl
+    have hf : ∀ (A : O) {B C : O} (f : SmallCategory.hom B C),
+        MonoidalCategoryStruct.whiskerLeft A f = ColoredPROP.tensorHom (SmallCategory.id A) f :=
+      by intros; rfl
+    have hg : ∀ {A B C : O} (f : A ⟶ B) (g : B ⟶ C),
+        f ≫ g = SmallCategory.comp f g := by intros; rfl
+    simp only [hb, hc, he, hf, hg]
+    rw [← SmallCategory.assoc, ← SmallCategory.assoc]
+    exact ColoredPROP.swap_hexagon_fwd X Y Z
   hexagon_reverse := by
-    sorry -- SIGNATURE (§11): hexagon identity for swap, not implied by swap_swap
+    intro X Y Z
+    have ha : ∀ A B C : O, (MonoidalCategoryStruct.associator A B C) =
+        eqToIso (ColoredPROP.tensor_assoc A B C) := fun A B C => rfl
+    have ha' : ∀ A B C : O, (MonoidalCategoryStruct.associator A B C).inv =
+        eqToHom (ColoredPROP.tensor_assoc A B C).symm := fun A B C => (by rw [ha, eqToIso.inv])
+    have hc : ∀ {A B : O} (h : A = B), eqToHom h = SmCat.coh h := fun h => (by cases h; rfl)
+    have he : ∀ {A B : O} (f : SmallCategory.hom A B) (C : O),
+        MonoidalCategoryStruct.whiskerRight f C = ColoredPROP.tensorHom f (SmallCategory.id C) :=
+      by intros; rfl
+    have hf : ∀ (A : O) {B C : O} (f : SmallCategory.hom B C),
+        MonoidalCategoryStruct.whiskerLeft A f = ColoredPROP.tensorHom (SmallCategory.id A) f :=
+      by intros; rfl
+    have hg : ∀ {A B C : O} (f : A ⟶ B) (g : B ⟶ C),
+        f ≫ g = SmallCategory.comp f g := by intros; rfl
+    simp only [ha', hc, he, hf, hg]
+    rw [← SmallCategory.assoc, ← SmallCategory.assoc]
+    exact ColoredPROP.swap_hexagon_rev X Y Z
   symmetry := by intro X Y; exact ColoredPROP.swap_swap X Y
 
 end LeanNCD
