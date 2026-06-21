@@ -17,10 +17,12 @@ theorem realize_fromThreadedComposed_agree (tc : ThreadedComposed) :
 /-- **Prop 8′ (axis identity on the nose, §7.4).** Both paths share the §7.4 UID coequalizer,
     so the realized domain objects coincide. -/
 theorem agree_dom (tc : ThreadedComposed) :
-    (realize tc).1 = (realizeSBr (fromThreadedComposed tc)).1 := sorry
+    (realize tc).1 = (realizeSBr (fromThreadedComposed tc)).1 :=
+  congr_arg (·.1) (realize_fromThreadedComposed_agree tc)
 
 /-- Prop 8′ (cod). -/
 theorem agree_cod (tc : ThreadedComposed) :
-    (realize tc).2.1 = (realizeSBr (fromThreadedComposed tc)).2.1 := sorry
+    (realize tc).2.1 = (realizeSBr (fromThreadedComposed tc)).2.1 :=
+  congr_arg (·.2.1) (realize_fromThreadedComposed_agree tc)
 
 end LeanNCD

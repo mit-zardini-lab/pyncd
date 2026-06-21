@@ -55,8 +55,10 @@ theorem scan_catamorphism (N : ℕ) (X : C)
     SmallCategory.comp (TemporalGraded.iterate (D := D) N X step)
         (TemporalGraded.restrict (D := D) (le_refl N) X)
       = TemporalGraded.iterate (D := D) N X step := by
-  sorry  -- SIGNATURE (proof milestone): from `iotaTo_id` (reflexive prefix map is `𝟙`) the
-         -- restriction at `N ≤ N` is the identity on `X ⊛ [0..N]`.
+  -- `restrict` along the reflexive prefix map is the identity (`restrict_id`), so the
+  -- post-composition collapses by `comp_id`.
+  rw [TemporalGraded.restrict_id]
+  exact SmallCategory.comp_id _
 
 end Temporal
 

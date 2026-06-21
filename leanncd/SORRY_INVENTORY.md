@@ -5,11 +5,11 @@ elides with `…`. They are discharged in later milestones (B+), not Milestone A
 
 `St.swap` and `St.elemental` have since been proved (see Milestone G notes below).
 
-| File | Field | Section |
-| --- | --- | --- |
-| `LeanNCD/Base/Br.lean` | `Br.swap` | §2.3 |
-| `LeanNCD/Base/Br.lean` | `Br.tensorHom` | §2.3 |
-| `LeanNCD/Base/Br.lean` | `Br.elemental` | §2.3 |
+| File | Field | Section | Status |
+| --- | --- | --- | --- |
+| `LeanNCD/Base/Br.lean` | `Br.swap` | §2.3 | **PROVED** (re-presentation) — `swap` is now the first-class `braid` generator of the free strict SMC |
+| `LeanNCD/Base/Br.lean` | `Br.tensorHom` | §2.3 | **PROVED** (re-presentation) — `tensorHom` is now the first-class `tensor` generator (no longer `extendRight`/`extendLeft`) |
+| `LeanNCD/Base/Br.lean` | `Br.elemental` | §2.3 | **REDUCED** — the quotient→raw-syntax reduction is proved sorry-free; the lone obligation is `brCancelPoint` (point left-cancellation = the normal-form milestone, see Keystone note) |
 
 ## Milestone G — `ColoredPROP` morphism-level symmetric-monoidal laws
 
@@ -23,9 +23,37 @@ five of these fields (plus `swap` and `elemental`) sorry-free. `Br`'s laws remai
 
 | File | Field | Note |
 | --- | --- | --- |
-| `LeanNCD/Base/Br.lean` | `Br.tensorHom_id` | depends on stubbed `Br.tensorHom` |
-| `LeanNCD/Base/Br.lean` | `Br.tensorHom_comp` | depends on stubbed `Br.tensorHom` |
-| `LeanNCD/Base/Br.lean` | `Br.swap_swap` | depends on stubbed `Br.swap` |
+| `LeanNCD/Base/Br.lean` | `Br.tensorHom_id` | **PROVED** (re-presentation) — `Quot.sound (Rel.tensor_id)` |
+| `LeanNCD/Base/Br.lean` | `Br.tensorHom_comp` | **PROVED** (re-presentation) — `Quot.sound (Rel.interchange)` |
+| `LeanNCD/Base/Br.lean` | `Br.swap_swap` | **PROVED** (re-presentation) — `Quot.sound (Rel.braid_involution)` |
+
+### Keystone re-presentation (2026-06-19) — `Br` as a free strict symmetric monoidal category
+
+The free-list `BrMorph` (`nil`/`cons`) could **never** satisfy `swap_swap`/`tensorHom_comp`
+(`swap a b ; swap b a` is a 2-element list ≠ `nil` by `noConfusion`), and §2.3 rules out a single
+concrete record. `Br` is now re-presented as the **free strict symmetric monoidal category** on
+`BrBase` generators: `Hom` (raw syntax: `id`/`gen`/`comp`/`tensor`/`braid`) quotiented by `Rel` (the
+congruence of the category laws + bifunctor `tensor_id`/interchange + `braid` involution). `BrMorph`
+is the quotient; `swap = braid`, `tensorHom = tensor` are first-class, so they no longer decompose
+into extended swaps. **`swap_swap`, `tensorHom_comp`, `tensorHom_id`** now hold by `Quot.sound`
+(`#print axioms` ⇒ `[propext, Quot.sound]`, no `sorryAx`).
+
+**Cost:** `Br.elemental` regressed from PROVED (cons-injectivity) to a single isolated obligation.
+The quotient→raw-syntax **reduction is proved sorry-free** (`elemental` ⟸ `brCancelPoint` via
+`Quotient.inductionOn₂` + a manufactured point `brPoint X : BrBase [] X`); ALL the hard content is
+localized in `brCancelPoint` (point left-cancellation on `Hom`). That lemma IS true (a generator
+participates in no `Rel` constructor, so a leading `gen (brPoint X)` cannot be rewritten away) but
+needs a `Rel`-respecting normal form: the `assoc`/`braid_involution` fragments are Spike-tractable
+(`scratchpad/Spike.lean`, retained), but **`interchange`-invariance** — the 2-D sliding of
+independent generators across monoidal layers, i.e. the strict-SMC word problem — is a dedicated
+several-hundred-line normalization, deferred as its own milestone. Net `Br` sorries: 2 → 1
+(`swap_swap` + `tensorHom_comp` cleared; `elemental` → `brCancelPoint`).
+
+**Symmetry coherences (Adapter):** `braid` naturality is now a `Rel` constructor (`braid_natural`)
+and a `ColoredPROP` field (`swap_natural`), discharging `Seam/Adapter.lean`'s two
+`braiding_naturality_*` sorries (see Milestone B). The *hexagon* (2 sorries) is still NOT in `Rel` —
+it carries `eqToHom` casts across `tensor_assoc`, so it needs the cast calculus; deferred with the
+3 unitor/associator naturalities.
 
 All category and strictness laws (`id_comp`, `comp_id`, `assoc`, `tensor_assoc`, `tensor_unit_l`,
 `tensor_unit_r`) for both `St` and `Br` are proved sorry-free (verified via `#print axioms`).
@@ -52,19 +80,32 @@ and `pentagon`, `triangle` (from functoriality-on-objects of `tensorHom`, via th
 The seam coherences that **remain** `-- SIGNATURE` `sorry` (they are independent symmetric-monoidal
 coherences of `tensorHom`/`swap` that the bifunctor + `swap_swap` laws do **not** imply):
 
+The seam coherence work proceeds by adding the missing symmetric-monoidal axioms as `ColoredPROP`
+fields (`HEq` for the cross-type ones) and discharging the generic Adapter goals from them via the
+`natOfHEq` bridge (naturality across `eqToHom` ⟺ `HEq`, `conj_eqToHom_iff_heq`).
+
+**PROVED (2026-06-19 / -20):**
+- `braiding_naturality_right`/`_left` — field `ColoredPROP.swap_natural`; sorry-free for `St`
+  (matrix identity) and `Br` (`Rel.braid_natural` → `Quot.sound`).
+- `leftUnitor_naturality` — field `tensorHom_unit_l` (`HEq (tensorHom (id unit) f) f`); sorry-free
+  for `St` (same-type, `[]++a = a` defeq) and `Br` (`Rel.tensor_unitl`).
+- `rightUnitor_naturality` — field `tensorHom_unit_r`; sorry-free for `St` (genuine cross-type `HEq`
+  across `append_nil`, via `StMat.hext`) and `Br` (`Rel.tensor_unitr` cast-constructor).
+
+- `associator_naturality` — **PROVED sorry-free** (2026-06-20). Field `tensorHom_assoc`
+  (`HEq ((f⊗g)⊗h) (f⊗(g⊗h))`), proved for `Br` (`Rel.tensor_assoc_coh`) and for `St` (cross-type
+  block-diagonal reassociation across `append_assoc`, via private `StMatAux.block_reassoc` /
+  `bias_reassoc` + three `Fin.cast`-`addCases` index-bridge lemmas, fed through `StMat.hext`).
+  **`St` is fully sorry-free again** (`#print axioms St` = `[propext, Classical.choice, Quot.sound]`).
+
+**Still SIGNATURE `sorry` (not yet attempted):**
+
 | File | Field | Note |
 | --- | --- | --- |
-| `LeanNCD/Seam/Adapter.lean` | `MonoidalCategory.associator_naturality` | tensorHom-associativity coherence |
-| `LeanNCD/Seam/Adapter.lean` | `MonoidalCategory.leftUnitor_naturality` | tensorHom left-unit coherence |
-| `LeanNCD/Seam/Adapter.lean` | `MonoidalCategory.rightUnitor_naturality` | tensorHom right-unit coherence |
-| `LeanNCD/Seam/Adapter.lean` | `SymmetricCategory.braiding_naturality_right` | naturality of swap |
-| `LeanNCD/Seam/Adapter.lean` | `SymmetricCategory.braiding_naturality_left` | naturality of swap |
-| `LeanNCD/Seam/Adapter.lean` | `SymmetricCategory.hexagon_forward` | hexagon identity for swap |
-| `LeanNCD/Seam/Adapter.lean` | `SymmetricCategory.hexagon_reverse` | hexagon identity for swap |
+| `LeanNCD/Seam/Adapter.lean` | `SymmetricCategory.hexagon_forward` | hexagon for swap (interleaved eqToHom-casts across `tensor_assoc` + swap-decomposition) |
+| `LeanNCD/Seam/Adapter.lean` | `SymmetricCategory.hexagon_reverse` | hexagon for swap |
 
-Note: `braiding_naturality_*`/`hexagon_*` previously "closed by `aesop_cat`" only because the
-then-`sorry` braiding inverse let the discharger ride on `sorry`; with the inverse now a real proof
-(`swap_swap`) they are honestly deferred. `Graded.lean` is fully sorry-free.
+`Graded.lean` is fully sorry-free.
 
 ## Milestone C — intentional `sorry` inventory
 
@@ -76,13 +117,13 @@ generic propositions, and the §10.1 flagship `St`/`Br` instance. The mixin clas
 
 | File | Field/term | Section | Note |
 | --- | --- | --- | --- |
-| `LeanNCD/Grothendieck/Split.lean` | `structuralCongruence.instCongruence.comp_left` | §7.1 | stable under precomposition |
-| `LeanNCD/Grothendieck/Split.lean` | `structuralCongruence.instCongruence.comp_right` | §7.1 | stable under postcomposition |
-| `LeanNCD/Grothendieck/Split.lean` | `structuralCongruence.instCongruence.equivalence` | §7.1 | reflexive + symmetric + transitive |
-| `LeanNCD/Grothendieck/Split.lean` | `Dat` | §7.1 / 8.3 | data functor (size-assignments over the structural skeleton) |
+| `LeanNCD/Grothendieck/Split.lean` | `structuralCongruence.instCongruence.comp_left` | §7.1 | **PROVED** — `True` stub is trivially stable under pre-composition |
+| `LeanNCD/Grothendieck/Split.lean` | `structuralCongruence.instCongruence.comp_right` | §7.1 | **PROVED** — `True` stub is trivially stable under post-composition |
+| `LeanNCD/Grothendieck/Split.lean` | `structuralCongruence.instCongruence.equivalence` | §7.1 | **PROVED** — `True` stub is trivially reflexive/symmetric/transitive |
+| `LeanNCD/Grothendieck/Split.lean` | `Dat` | §7.1 / 8.3 | **BODY FILLED** — Unit-constant functor (`obj _ := Unit`, `map _ := 𝟙 Unit`) under the `True` stub; real body awaits real structural congruence |
 | `LeanNCD/Grothendieck/Split.lean` | `grothendieck_split` | 8.3 | Prop 8.3: `C ≌ ∫Dat` (structure/data split) |
 | `LeanNCD/Algebra/Target.lean` | `TargetActegory StObj (Mat ℝ) ℝ` instance `actV` | §7.2 | appends ℝ-typed dimensions; composition = matrix multiply over ℝ |
-| `LeanNCD/Props/Generic.lean` | `scan_catamorphism` | 8.7 | scan-as-catamorphism (iterate stable under reflexive-prefix restriction) |
+| `LeanNCD/Props/Generic.lean` | `scan_catamorphism` | 8.7 | **PROVED** — needed a new `TemporalGraded.restrict_id` coherence field (the `restrict` analogue of `iotaTo_id`); then `rw [restrict_id]; comp_id`. `Props/Generic.lean` is now fully sorry-free. |
 | `LeanNCD/Instances/StBr.lean` | `instDGradedStBr.act` | §10.1 | batch lift + reindexing |
 | `LeanNCD/Instances/StBr.lean` | `instDGradedStBr.δ` | §10.1 | `[X ⊗ Y, P] ≅ [X,P] ⊗ [Y,P]` |
 | `LeanNCD/Instances/StBr.lean` | `instDGradedStBr.δ0` | §10.1 | `[I, P] ≅ I` |
@@ -294,6 +335,27 @@ B+/G `Br`/`St` coherence sorries.
 - **TargetActegory** (`Target.lean`): full actegory coherences in `V` (`υ_V`/`α_V`/`δ_V`/`δ0_V` +
   triangle/pentagon `act_unit_assoc_V`, `υ_nat_V`, `dist_coh_V`), over `[MonoidalCategory V]`,
   transposed from `DGradedColoredPROP`. The `Mat ℝ = FGModuleCat ℝ` instance fields are `sorry`.
+
+  **RECORDED OBSTRUCTION (why the `Mat ℝ` instance stays `sorry`, not a proof effort).** A
+  *faithful* `actV : (FGModuleCat ℝ × Stᵒᵖ) ⥤ FGModuleCat ℝ` — the intended "append ℝ-typed
+  dimensions," i.e. `dim(actV(M,P)) = dim(M) · |P|` with `|P|` the product of `P`'s axis sizes —
+  is **mathematically impossible** in `FGModuleCat ℝ`, on two independent grounds:
+  1. **Symbolic sizes have no finite dimension.** Axis sizes live in `Numeric = MvPolynomial String ℕ`
+     (symbolic, noncomputable); `FGModuleCat ℝ` objects carry a *concrete* finite dimension. There is
+     no ℝ-vector space of symbolic dimension `|P|`. (Same root cause as "Numeric is noncomputable",
+     here as "no finite-dim module of a symbolic dimension".)
+  2. **`δ_V` forces dimension-preservation.** In `FGModuleCat ℝ`, `X ≅ Y ⟺ dim X = dim Y` and `⊗`
+     *multiplies* dimension. `δ_V : actV(X⊗Y,P) ≅ actV(X,P) ⊗ actV(Y,P)` then demands
+     `dim∘actV` be multiplicative in the `V`-variable: a dimension-scaling lift `f(P)` must satisfy
+     `f(P) = f(P)²`, i.e. `f(P) = 1`. So any `actV` obeying `δ_V` preserves dimension; the only
+     ℕ-valued non-identity solutions are tensor-powers `M ↦ M^⊗(cᵏ)` keyed on *axis count* — unfaithful
+     artifacts, not size-product batching.
+  The fallback `actV = id` is **not** a benign stub either: with the intended evaluator
+  `F(X) =` free module on `X`'s coordinate space, `dim F(X⊛P) = dim(X)·|P| ≠ dim F(X)`, so the
+  `Algebra` equivariance `F(act(X,P)) ≅ actV(F X, P)` would FAIL for `actV = id`. A faithful ℝ-valued
+  actegory therefore requires **concrete** (`Nat`) sizes — exactly the regime of the Milestone I
+  `DenseTensor` evaluator — and does not belong in the symbolic math tower. Closing these 8 `sorry`s
+  is a target-category **redesign decision**, not a proof; deferred deliberately.
 - **R = Bool target obligation** (`Target.lean` note): the predicate (∧/∃) target needs the
   `(∨, ∧)` Boolean *semiring* (∨ has no additive inverse → genuinely not a ring). The wrinkle is
   semantic, NOT typechecking: Mathlib's `Bool` *type* is the Boolean *ring* (`+` = XOR, so

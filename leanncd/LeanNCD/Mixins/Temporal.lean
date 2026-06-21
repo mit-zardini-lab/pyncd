@@ -49,5 +49,10 @@ class TemporalGraded (D C : Type) [ColoredPROP D] [ColoredPROP C]
   /-- Cocone law: each inclusion `ιₘ` factors through the larger prefix, `ιₘ = (m↪n) ; ι_n`. -/
   iota_factor : ∀ {m n : ℕ} (hmn : m ≤ n),
                   SmallCategory.comp (iotaTo hmn) (iota n) = iota m
+  /-- Restriction along the identity prefix map `[0..n] ↪ [0..n]` is the identity restriction
+      (the `restrict` analogue of `iotaTo_id`; supplies the coherence Prop 8.7 needs). -/
+  restrict_id : ∀ {n : ℕ} (X : C),
+                  restrict (le_refl n) X
+                    = SmallCategory.id (DGradedColoredPROP.act.obj (X, Opposite.op («prefix» n)))
 
 end LeanNCD

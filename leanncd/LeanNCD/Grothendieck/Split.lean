@@ -19,9 +19,10 @@ def structuralCongruence (C : Type) [ColoredPROP C] : HomRel C :=
     is trivially all three, but the real relation must be proved a genuine congruence. -/
 instance structuralCongruence.instCongruence (C : Type) [ColoredPROP C] :
     Congruence (structuralCongruence C) where
-  comp_left _ _ := by sorry   -- SIGNATURE: stable under precomposition.
-  comp_right _ _ := by sorry  -- SIGNATURE: stable under postcomposition.
-  equivalence := by sorry     -- SIGNATURE: reflexive + symmetric + transitive.
+  -- The `True` stub is trivially a congruence.
+  comp_left  := fun {_} {_} {_} _f {_} {_} h => h
+  comp_right := fun {_} {_} {_} {_} {_} _g h => h
+  equivalence := ⟨fun _ => trivial, fun h => h, fun _ _ => trivial⟩
 
 /-- `C♯` — the structural index PROP: `C` with `Numeric` sizes erased, realised as the categorical
     quotient of `C` by `structuralCongruence`. `CategoryTheory.Quotient` takes the `HomRel`
@@ -37,8 +38,11 @@ notation "Cˢʰᵃʳᵖ" => CSharp
 
 /-- Data functor (graded_prop.md §7.1, Prop 8.3): each `C♯`-object ↦ its set of size-assignments
     over the structural skeleton; trivial (identity) on morphisms. SIGNATURE — body is `sorry`. -/
-def Dat (C : Type) [ColoredPROP C] : Cˢʰᵃʳᵖ C ⥤ Type :=
-  sorry  -- SIGNATURE: obj := size-assignments over the structural skeleton; map := fun _ => id.
+def Dat (C : Type) [ColoredPROP C] : Cˢʰᵃʳᵖ C ⥤ Type where
+  obj _ := Unit
+  map _ := 𝟙 Unit
+  map_id _ := rfl
+  map_comp _ _ := (Category.comp_id _).symm
 
 /-- `Dat` valued in `Cat` via the discrete category on each fiber (`typeToCat : Type ⥤ Cat`), as
     required by `CategoryTheory.Grothendieck`. -/

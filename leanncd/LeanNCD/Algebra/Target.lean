@@ -67,6 +67,14 @@ class TargetActegory (D : Type) (V : Type*) [ColoredPROP D] [Category V] [Monoid
 /-- The default target actegory: finitely-generated (finite-dimensional) `R`-modules (Mathlib). -/
 abbrev Mat (R : Type) [CommRing R] := FGModuleCat R
 
+-- RECORDED OBSTRUCTION (SORRY_INVENTORY Milestone H): these `sorry`s are NOT a proof effort —
+-- a faithful dimension-adding `actV` is mathematically impossible over `FGModuleCat ℝ`. Two walls:
+-- (1) axis sizes are symbolic (`Numeric = MvPolynomial String ℕ`), so there is no finite-dim module
+--     of dimension `|P|`; (2) `δ_V` forces `dim∘actV` multiplicative in the V-variable, i.e.
+--     `f(P) = f(P)² ⟹ f(P) = 1`, so any `δ_V`-respecting lift PRESERVES dimension. And `actV = id`
+--     is inconsistent with the intended evaluator `F` (equivariance `F(X⊛P) ≅ actV(F X, P)` would
+--     need `dim F(X⊛P) = dim F(X)`, false). A faithful ℝ-valued actegory needs CONCRETE (Nat) sizes
+--     (the Milestone I `DenseTensor` regime), not the symbolic math tower. Deferred by design.
 noncomputable instance : TargetActegory StObj (Mat ℝ) ℝ where
   actV := sorry  -- SIGNATURE: appends ℝ-typed dimensions; composition = matrix multiply over ℝ
   δ_V := sorry
