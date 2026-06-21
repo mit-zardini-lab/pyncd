@@ -98,12 +98,18 @@ fields (`HEq` for the cross-type ones) and discharging the generic Adapter goals
   `bias_reassoc` + three `Fin.cast`-`addCases` index-bridge lemmas, fed through `StMat.hext`).
   **`St` is fully sorry-free again** (`#print axioms St` = `[propext, Classical.choice, Quot.sound]`).
 
-**Still SIGNATURE `sorry` (not yet attempted):**
+**PROVED (2026-06-21):**
 
-| File | Field | Note |
-| --- | --- | --- |
-| `LeanNCD/Seam/Adapter.lean` | `SymmetricCategory.hexagon_forward` | hexagon for swap (interleaved eqToHom-casts across `tensor_assoc` + swap-decomposition) |
-| `LeanNCD/Seam/Adapter.lean` | `SymmetricCategory.hexagon_reverse` | hexagon for swap |
+- `hexagon_forward` / `hexagon_reverse` — discharged by bridging Mathlib projections
+  (`.hom`/`.inv`, `≫`, `whiskerRight/Left`) to `ColoredPROP` primitives (`SmCat.coh`,
+  `SmallCategory.comp`, `tensorHom`) via local `have` lemmas, simp-rewriting, then
+  `rw [← SmallCategory.assoc, ← SmallCategory.assoc]` to convert Mathlib's right-associated
+  `≫`-chain to the left-associated form of `swap_hexagon_fwd/rev`, closed by `exact`.
+  Key subtlety: `hg : f ≫ g = SmallCategory.comp f g` requires `f : A ⟶ B` (CategoryTheory `⟶`
+  notation, not `SmallCategory.hom`) for `rfl` to elaborate; `eqToHom h = SmCat.coh h` requires
+  `cases h; rfl` (not `rfl`—they differ in `Eq.rec` construction).
+
+`Seam/Adapter.lean` is now **fully sorry-free**.
 
 `Graded.lean` is fully sorry-free.
 
