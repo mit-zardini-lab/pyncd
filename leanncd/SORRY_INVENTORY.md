@@ -43,11 +43,29 @@ The quotient→raw-syntax **reduction is proved sorry-free** (`elemental` ⟸ `b
 `Quotient.inductionOn₂` + a manufactured point `brPoint X : BrBase [] X`); ALL the hard content is
 localized in `brCancelPoint` (point left-cancellation on `Hom`). That lemma IS true (a generator
 participates in no `Rel` constructor, so a leading `gen (brPoint X)` cannot be rewritten away) but
-needs a `Rel`-respecting normal form: the `assoc`/`braid_involution` fragments are Spike-tractable
-(`scratchpad/Spike.lean`, retained), but **`interchange`-invariance** — the 2-D sliding of
-independent generators across monoidal layers, i.e. the strict-SMC word problem — is a dedicated
-several-hundred-line normalization, deferred as its own milestone. Net `Br` sorries: 2 → 1
-(`swap_swap` + `tensorHom_comp` cleared; `elemental` → `brCancelPoint`).
+needs a `Rel`-respecting normal form.
+
+**Planned route — NbE / initiality (skeleton validated 2026-06-21).** Interpret `Hom` into a
+concrete canonical model `N a b` of free-strict-SMC morphisms (typed string diagrams: a
+generator-node set + a color-preserving wiring bijection, up to graph iso), with `eval : Hom → N`,
+`quote : N → Hom`, and discharge `brCancelPoint` from three lemmas: `sound` (`Rel f g → eval f =
+eval g`), `section_` (`Rel f (quote (eval f))`), and `eval_point_injective` (the empty-domain point
+is `N`'s unique input-less node, deletable). `sound` dissolves the congruence closure
+(`trans`/`comp_congr` become `Eq`); `section_` — any two node-set sequentializations are `Rel`-equal,
+i.e. the `interchange` + braid-naturality content — is the gating several-hundred-line bulk,
+alongside defining `N`. In `N`, `interchange`/`∘`-assoc/unit are structural and ALL braid laws
+(involution, naturality, hexagon) become `Equiv` facts on the wiring. The reduction
+`brCancelPoint ⟸ sound + section_ + eval_point_injective` is machine-checked; the three lemmas +
+`N`/`eval`/`quote` remain `sorry`.
+
+**Correction (supersedes earlier framing).** Direct induction on the `Rel` derivation does NOT work,
+and the wall is NOT `interchange` per se — it is the `trans` (congruence-closure) case: `trans`
+injects an unconstrained intermediate term that must itself be point-prefixed to chain the IHs, which
+is circular. The empty domain of `brPoint X` only tames base cases (the `interchange` base case, for
+one, is vacuous — a `tensor`-headed term cannot equal a point-prefixed `comp`); it is not a shortcut.
+(The old `scratchpad/Spike.lean` is gone; its `assoc`/`braid_involution` fragments were never the
+hard part.) Net `Br` sorries: 2 → 1 (`swap_swap` + `tensorHom_comp` cleared; `elemental` →
+`brCancelPoint`).
 
 **Symmetry coherences (Adapter):** `braid` naturality is now a `Rel` constructor (`braid_natural`)
 and a `ColoredPROP` field (`swap_natural`), discharging `Seam/Adapter.lean`'s two

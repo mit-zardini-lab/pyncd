@@ -73,7 +73,8 @@
       "Bash(lake exe *)",
       "Bash(lake build *)",
       "Bash(echo \"EXIT: $?\")",
-      "Bash(lake env *)"
+      "Bash(lake env *)",
+      "mcp__lean-lsp__lean_diagnostic_messages"
     ],
     "additionalDirectories": [
       "/tmp"
