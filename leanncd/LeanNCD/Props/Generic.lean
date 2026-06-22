@@ -28,8 +28,9 @@ theorem lift_functorial {X Y Z : C} (f : SmallCategory.hom X Y) (g : SmallCatego
   · rfl
   · simp
 
-/-- Prop 8.2: weave uniqueness (re-export of §5). -/
-theorem weave_subsingleton {X Y : C} (g : SmallCategory.hom X Y) :
+/-- Prop 8.2: weave uniqueness (re-export of §5). Needs `[Elemental C]` — elementality is the opt-in
+    mixin (not a base `ColoredPROP` field); for `C = Br` it reduces to `brCancelPoint`. -/
+theorem weave_subsingleton [Elemental C] {X Y : C} (g : SmallCategory.hom X Y) :
     Subsingleton (Weave (D := D) g) :=
   weave_unique (D := D) g
 

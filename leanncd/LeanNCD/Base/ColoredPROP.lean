@@ -52,11 +52,24 @@ class ColoredPROP (ob : Type) extends SmallCategory ob where
                       HEq (tensorHom (tensorHom f g) h) (tensorHom f (tensorHom g h))
   tensorHom_unit_l : ∀ {a b : ob} (f : hom a b), HEq (tensorHom (id unit) f) f
   tensorHom_unit_r : ∀ {a b : ob} (f : hom a b), HEq (tensorHom f (id unit)) f
-  elemental : ∀ {X Y} (f g : hom X Y),
-                (∀ x : hom unit X, comp x f = comp x g) → f = g
 
--- TEST: the class and its key field resolve at the expected types.
+/-- Elementality (the **(Elem)** axiom) as an opt-in mixin: points separate parallel morphisms —
+    `(∀ x : unit ⟶ X, x ; f = x ; g) → f = g`.
+
+    DEMOTED from a `ColoredPROP` field (2026-06-22). Rationale: its only consumer is `weave_unique`
+    (Prop 8.2, `Core/Weave.lean`), itself a `sorry` double-gated on `broadcast_gen`; as a mandatory
+    field it forced `Br : ColoredPROP` to carry the deep `brCancelPoint` free-strict-SMC normal-form
+    proof that no proved/executable result needs. The executable target's tensor-slice extraction
+    uses **`St`** elementality (proved, `St.elemental`), not `Br`'s — a `Br` slice is a reindexing
+    built from `St` elements (shape coordinates). See leanncd.md §2 / graded_prop.md §3.2. As a mixin,
+    `Br : ColoredPROP` is sorry-free while `instance : Elemental BrObj` keeps the deferred proof. -/
+class Elemental (ob : Type) [ColoredPROP ob] where
+  elemental : ∀ {X Y : ob} (f g : SmallCategory.hom X Y),
+                (∀ x : SmallCategory.hom (ColoredPROP.unit : ob) X,
+                  SmallCategory.comp x f = SmallCategory.comp x g) → f = g
+
+-- TEST: the classes and the mixin field resolve at the expected types.
 #check (ColoredPROP : Type → Type 1)
-#check @ColoredPROP.elemental
+#check @Elemental.elemental
 
 end LeanNCD

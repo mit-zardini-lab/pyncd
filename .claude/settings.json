@@ -74,7 +74,16 @@
       "Bash(lake build *)",
       "Bash(echo \"EXIT: $?\")",
       "Bash(lake env *)",
-      "mcp__lean-lsp__lean_diagnostic_messages"
+      "mcp__lean-lsp__lean_diagnostic_messages",
+      "mcp__lean-lsp__lean_loogle",
+      "mcp__lean-lsp__lean_leansearch",
+      "mcp__lean-lsp__lean_multi_attempt",
+      "Bash(~/.elan/bin/lake env *)",
+      "Bash(echo \"EXIT=$?\")",
+      "mcp__lean-lsp__lean_goal",
+      "mcp__lean-lsp__lean_run_code",
+      "Bash(~/.elan/bin/lake build *)",
+      "mcp__lean-lsp__lean_build"
     ],
     "additionalDirectories": [
       "/tmp"

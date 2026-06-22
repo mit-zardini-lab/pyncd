@@ -221,6 +221,15 @@ def brPoint (X : BrObj) : BrBase [] X where
 
 /-- The hard content of `elemental`, isolated on raw syntax: **left-cancellation of a point**.
 
+    LOAD-BEARING? — note before investing. This proves `Br` elementality (points of `Br` separate
+    `Br` morphisms). Its ONLY consumer is `weave_unique` (Prop 8.2, `Core/Weave.lean`) — itself a
+    `sorry`, double-gated on `broadcast_gen`, consumed by nothing. The executable target's tensor-
+    SLICE extraction does NOT use this: a slice (`x[i,:,j]`) is a `Br` reindexing built from `St`
+    elements (shape coordinates), so it rests on `St` elementality — which is proved sorry-free
+    (`St.elemental`). See graded_prop.md §3.2 "Which elementality slices use — St, not Br".
+    So `brCancelPoint` buys weave-uniqueness reasoning, not slicing; it is needed here only because
+    `elemental` is a mandatory `ColoredPROP` field (demoting it to an opt-in mixin would retire this).
+
     OBLIGATION (`sorry`) — the strict-SMC normal-form milestone. With the chosen `Rel`,
     `(Hom, comp, tensor, id, braid)` is the free strict *symmetric* monoidal category on the
     `BrBase` generators. This lemma is TRUE — `gen (brPoint X)` participates in no `Rel`
@@ -356,10 +365,21 @@ instance Br : ColoredPROP BrObj where
   tensorHom_assoc := fun f g h => BrMorph.tensor_assoc_heq f g h  -- cast-Rel, by Quot.sound + HEq
   tensorHom_unit_l := fun f => heq_of_eq (BrMorph.tensor_unitl f)
   tensorHom_unit_r := fun f => BrMorph.tensor_unitr_heq f         -- cast-Rel, by Quot.sound + HEq
+
+/-- Br elementality — the **(Elem)** mixin. Demoted from a `ColoredPROP` field (2026-06-22) so that
+    `instance Br : ColoredPROP` above is sorry-free; this opt-in instance carries the deferred proof.
+    The reduction to raw-syntax point-cancellation is sorry-free — ALL the hard content is isolated
+    in `brCancelPoint` (the free-strict-SMC normal-form milestone, whose only consumer is
+    `weave_unique`/Prop 8.2). Machinery (`brPoint`, `brCancelPoint`, this reduction) is fully kept so
+    the proof is resumable; see the `brCancelPoint` doc-comment for the route and resume pointer. -/
+instance : Elemental BrObj where
   elemental := by
     -- Points separate quotient morphisms. The reduction to raw-syntax point-cancellation is
     -- sorry-free; ALL the hard content is isolated in `brCancelPoint` (the normal-form milestone).
     intro X Y f g h
+    -- Re-type `h` from `SmallCategory.comp` to `BrMorph.comp` (defeq for the `Br` instance), so the
+    -- `BrMorph.comp` simp lemma fires now that `elemental` is a separate `Elemental` instance.
+    have h : ∀ x : BrMorph [] X, BrMorph.comp x f = BrMorph.comp x g := h
     refine Quotient.inductionOn₂ f g (fun f g h => ?_) h
     have hpt := h (BrMorph.mk (.gen (brPoint X)))
     simp only [BrMorph.comp, BrMorph.mk, Quotient.lift₂_mk] at hpt

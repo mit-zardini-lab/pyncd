@@ -40,11 +40,14 @@ declare_syntax_cat tl_stmt
 declare_syntax_cat tl_program
 
 -- Layer 1: sizes (bracket holds a tl_size term elaborating to Numeric, §2.1)
--- `*` (prec 70) binds tighter than `+` (prec 65); both left-associative.
+-- `*`/`/` (prec 70) bind tighter than `+`/`-` (prec 65); all left-associative.
+-- `/` requires a literal `num` divisor (floor-div by a variable is not polynomial).
 syntax:max num                       : tl_size
 syntax:max ident                     : tl_size
 syntax:70 tl_size:70 " * " tl_size:71 : tl_size
+syntax:70 tl_size:70 " / " num        : tl_size
 syntax:65 tl_size:65 " + " tl_size:66 : tl_size
+syntax:65 tl_size:65 " - " tl_size:66 : tl_size
 syntax:max "(" tl_size ")"           : tl_size
 
 -- Layer 1: axis kinds

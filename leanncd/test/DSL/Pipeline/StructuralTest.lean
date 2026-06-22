@@ -141,4 +141,115 @@ run_cmd do
   | .error (.missingBaseCase "S") _ => pure ()
   | .error e _ => throwError s!"wrong error: {repr e}"
   | .ok _ _ => throwError "expected missingBaseCase for orphan recurrence"
+-- checkReadRanks: declared tensor read with matching rank passes through.
+run_cmd do
+  let ax (nm : String) : AxisSpec := { name := nm, uid := 0, kind := .real none }
+  let p : TLProgram := {
+    decls := [.tensor "W" [ax "i", ax "k"]],
+    stmts := [.assign "Y" [.free (ax "i")]
+      { body := { terms := [{ factors := [
+            .read "W" [.axis (ax "i"), .axis (ax "k")] ] }] },
+        nonlin := .identity }] }
+  match (assignUIDs p >>= resolveDecls >>= checkReadRanks) |>.run 0 with
+  | .ok _ _    => pure ()
+  | .error e _ => throwError s!"should not error on correct rank: {repr e}"
+
+-- checkReadRanks: declared tensor read with wrong rank ⇒ rankMismatch.
+run_cmd do
+  let ax (nm : String) : AxisSpec := { name := nm, uid := 0, kind := .real none }
+  let p : TLProgram := {
+    decls := [.tensor "W" [ax "i", ax "k"]],   -- declared rank 2
+    stmts := [.assign "Y" [.free (ax "i")]
+      { body := { terms := [{ factors := [
+            .read "W" [.axis (ax "i")] ] }] },  -- read rank 1
+        nonlin := .identity }] }
+  match (assignUIDs p >>= resolveDecls >>= checkReadRanks) |>.run 0 with
+  | .error (.rankMismatch "W" 2 1) _ => pure ()
+  | .error e _                       => throwError s!"wrong error: {repr e}"
+  | .ok _ _                          => throwError "expected rankMismatch for wrong-rank read"
+
+-- checkReadRanks: external tensor with consistent read arity passes through.
+run_cmd do
+  let ax : AxisSpec := { name := "i", uid := 1, kind := .real none }
+  let readX n : Factor := .read "X" (List.replicate n (.axis ax))
+  let mkStmt (nm : String) (n : Nat) : Stmt :=
+    .assign nm [] { body := { terms := [{ factors := [readX n] }] }, nonlin := .identity }
+  let rp : ResolvedProgram := {
+    decls := [], env := {}, extNames := insert "X" ∅,
+    stmts := [mkStmt "A" 2, mkStmt "B" 2],
+    extraStmts := #[] }
+  match checkReadRanks rp |>.run 0 with
+  | .ok _ _    => pure ()
+  | .error e _ => throwError s!"consistent external reads should not error: {repr e}"
+
+-- checkReadRanks: external tensor with conflicting read arities ⇒ rankMismatch.
+run_cmd do
+  let ax : AxisSpec := { name := "i", uid := 1, kind := .real none }
+  let readX n : Factor := .read "X" (List.replicate n (.axis ax))
+  let mkStmt (nm : String) (n : Nat) : Stmt :=
+    .assign nm [] { body := { terms := [{ factors := [readX n] }] }, nonlin := .identity }
+  let rp : ResolvedProgram := {
+    decls := [], env := {}, extNames := insert "X" ∅,
+    stmts := [mkStmt "A" 2, mkStmt "B" 1],   -- first read rank 2, second rank 1
+    extraStmts := #[] }
+  match checkReadRanks rp |>.run 0 with
+  | .error (.rankMismatch "X" 2 1) _ => pure ()
+  | .error e _                       => throwError s!"wrong error: {repr e}"
+  | .ok _ _                          => throwError "expected rankMismatch for inconsistent external reads"
+
+-- checkDtypes: real-kinded axis in iterAt slot ⇒ iterAxisNotNat.
+run_cmd do
+  let l : AxisSpec := { name := "l", uid := 1, kind := .real none }  -- ← real, not nat
+  let s : Stmt := .assign "H" [.iterAt l 0]
+    { body := { terms := [] }, nonlin := .identity }
+  let rp : ResolvedProgram := { decls := [], env := {}, extNames := ∅, stmts := [s], extraStmts := #[] }
+  match checkDtypes rp |>.run 0 with
+  | .error (.iterAxisNotNat "l") _ => pure ()
+  | .error e _                     => throwError s!"wrong error: {repr e}"
+  | .ok _ _                        => throwError "expected iterAxisNotNat for real-kinded iterAt axis"
+
+-- checkDtypes: nat-kinded axis in iterAt slot passes through.
+run_cmd do
+  let l : AxisSpec := { name := "l", uid := 1, kind := .nat none }
+  let s : Stmt := .assign "H" [.iterAt l 0]
+    { body := { terms := [] }, nonlin := .identity }
+  let rp : ResolvedProgram := { decls := [], env := {}, extNames := ∅, stmts := [s], extraStmts := #[] }
+  match checkDtypes rp |>.run 0 with
+  | .ok _ _    => pure ()
+  | .error e _ => throwError s!"nat iterAt should not error: {repr e}"
+
+-- checkDtypes: nat-kinded axis in freeNorm slot ⇒ normAxisNotReal.
+run_cmd do
+  let m : AxisSpec := { name := "m", uid := 2, kind := .nat none }  -- ← nat, not real
+  let s : Stmt := .assign "S" [.freeNorm m]
+    { body := { terms := [] }, nonlin := .softmax none }
+  let rp : ResolvedProgram := { decls := [], env := {}, extNames := ∅, stmts := [s], extraStmts := #[] }
+  match checkDtypes rp |>.run 0 with
+  | .error (.normAxisNotReal "m") _ => pure ()
+  | .error e _                      => throwError s!"wrong error: {repr e}"
+  | .ok _ _                         => throwError "expected normAxisNotReal for nat-kinded freeNorm axis"
+
+-- checkDtypes: predicate tensor with non-identity nonlin ⇒ predicateNonlin.
+run_cmd do
+  let ax : AxisSpec := { name := "i", uid := 1, kind := .real none }
+  let s : Stmt := .assign "P" [.free ax]
+    { body := { terms := [] }, nonlin := .relu }  -- ← relu on a predicate
+  let env : DeclEnv := ({} : Std.HashMap String Decl).insert "P" (.predicate "P" [ax])
+  let rp : ResolvedProgram := { decls := [], env, extNames := ∅, stmts := [s], extraStmts := #[] }
+  match checkDtypes rp |>.run 0 with
+  | .error (.predicateNonlin "P") _ => pure ()
+  | .error e _                      => throwError s!"wrong error: {repr e}"
+  | .ok _ _                         => throwError "expected predicateNonlin for relu on predicate output"
+
+-- checkDtypes: predicate tensor with identity nonlin passes through.
+run_cmd do
+  let ax : AxisSpec := { name := "i", uid := 1, kind := .real none }
+  let s : Stmt := .assign "P" [.free ax]
+    { body := { terms := [] }, nonlin := .identity }
+  let env : DeclEnv := ({} : Std.HashMap String Decl).insert "P" (.predicate "P" [ax])
+  let rp : ResolvedProgram := { decls := [], env, extNames := ∅, stmts := [s], extraStmts := #[] }
+  match checkDtypes rp |>.run 0 with
+  | .ok _ _    => pure ()
+  | .error e _ => throwError s!"predicate with identity should not error: {repr e}"
+
 end LeanNCD

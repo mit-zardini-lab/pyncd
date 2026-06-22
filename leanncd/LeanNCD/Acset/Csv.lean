@@ -68,7 +68,9 @@ def encodeSize : SizeExpr → Except CsvError String
   | .lit n => .ok (toString n)
   | .var v => .ok ("?" ++ v)
   | .add _ _ => .error "encodeSize: compound SizeExpr (add) is not serializable"
+  | .sub _ _ => .error "encodeSize: compound SizeExpr (sub) is not serializable"
   | .mul _ _ => .error "encodeSize: compound SizeExpr (mul) is not serializable"
+  | .div _ _ => .error "encodeSize: compound SizeExpr (div) is not serializable"
 
 /-- Leading `?` ⇒ `.var` (free numeric); else `.lit` of the parsed Nat. -/
 def decodeSize (s : String) : Except CsvError SizeExpr :=

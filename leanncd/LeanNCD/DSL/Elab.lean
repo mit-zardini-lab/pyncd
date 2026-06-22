@@ -19,7 +19,11 @@ partial def elabTLSize : Syntax → MetaM SizeExpr
   | `(tl_size| $n:num)          => return .lit n.getNat
   | `(tl_size| $x:ident)        => return .var x.getId.eraseMacroScopes.getString!
   | `(tl_size| $a:tl_size * $b) => return .mul (← elabTLSize a) (← elabTLSize b)
+  | `(tl_size| $a:tl_size / $n:num) => do
+      if n.getNat == 0 then throwError "division by zero in size expression"
+      return .div (← elabTLSize a) n.getNat
   | `(tl_size| $a:tl_size + $b) => return .add (← elabTLSize a) (← elabTLSize b)
+  | `(tl_size| $a:tl_size - $b) => return .sub (← elabTLSize a) (← elabTLSize b)
   | `(tl_size| ($a:tl_size))    => elabTLSize a
   | _                           => throwUnsupportedSyntax
 
@@ -77,6 +81,11 @@ partial def elabTLDecl : Syntax → MetaM (List Decl)
     `uid` is assigned in Stage 2 (E2's `resolveDecls`); `kind` is resolved there too. -/
 private def idxAxis (name : String) : AxisSpec :=
   { name := name, uid := 0, kind := .real none }
+
+/-- A placeholder `AxisSpec` for a scan-axis reference (`iterAt`/`iterNext`).
+    Scan axes iterate over discrete integer indices, so their kind is `.nat`. -/
+private def scanAxis (name : String) : AxisSpec :=
+  { name := name, uid := 0, kind := .nat none }
 
 /-- An accumulated integer-affine read: a constant plus a list of `(coeff, axis)` terms. -/
 private structure AffineAcc where
@@ -194,9 +203,9 @@ partial def elabTLLHSSlot : Syntax → MetaM LHSSlot
   | `(tl_lhs_slot| $x:ident) =>
       return .free (idxAxis x.getId.eraseMacroScopes.getString!)
   | `(tl_lhs_slot| $n:num) =>
-      return .iterAt (idxAxis "") (Int.ofNat n.getNat)
+      return .iterAt (scanAxis "") (Int.ofNat n.getNat)
   | `(tl_lhs_slot| $x:ident +1) =>
-      return .iterNext (idxAxis x.getId.eraseMacroScopes.getString!)
+      return .iterNext (scanAxis x.getId.eraseMacroScopes.getString!)
   | `(tl_lhs_slot| $n:num * $x:ident + $m:num) =>
       return .affine (.affine (Int.ofNat m.getNat)
         [(Int.ofNat n.getNat, idxAxis x.getId.eraseMacroScopes.getString!)])

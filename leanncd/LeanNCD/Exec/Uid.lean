@@ -22,6 +22,10 @@ inductive CompileError
   | overlappingScatter   : String → CompileError            -- non-injective scatter w/o reduce sum
   | linearWeightAmbiguous : String → CompileError           -- linear weight in ≠1 product factors
   | undeclaredName       : String → CompileError            -- name used but not declared
+  | rankMismatch         : String → Nat → Nat → CompileError -- tensor name, expected rank, actual rank
+  | iterAxisNotNat       : String → CompileError            -- axis used in iterAt/iterNext but kind is ℝ
+  | normAxisNotReal      : String → CompileError            -- axis used in freeNorm but kind is ℕ
+  | predicateNonlin      : String → CompileError            -- predicate tensor with non-identity nonlin
   deriving Repr, DecidableEq
 
 /-- Combined error + UID-counter monad (`EStateM ε σ α = σ → Result ε σ α`, Lean core). Mints fresh

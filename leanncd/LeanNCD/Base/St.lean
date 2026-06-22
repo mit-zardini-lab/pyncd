@@ -357,8 +357,17 @@ noncomputable instance St : ColoredPROP StObj where
         simp only [finSumFinEquiv_apply_left, finCongr_apply, Fin.val_castAdd, Fin.val_cast] at hv
         exact hv
       · exact k.elim0
+
+/-- St elementality — the **(Elem)** mixin, proved sorry-free: a stride matrix is determined by its
+    action on points (global elements). Moved out of the `ColoredPROP` instance in the 2026-06-22
+    `elemental`→mixin demotion (see `Base/ColoredPROP.lean`); the proof is unchanged. -/
+instance : Elemental StObj where
   elemental := by                       -- points (§2.2) separate parallel stride matrices
-    intro X Y f g h  -- X Y : StObj; f g : StMat X Y; h : ∀ point x : StMat [] X, x ≫ f = x ≫ g
+    intro X Y f g h  -- X Y : StObj; f g : StMat X Y; h : ∀ point x, x ≫ f = x ≫ g
+    -- Re-type `h` from `SmallCategory.comp` to `StMat.comp` (defeq for the `St` instance), so the
+    -- `StMat.comp` simp lemmas fire (they no longer match the bare `SmallCategory.comp` projection
+    -- now that `elemental` is a separate `Elemental` instance rather than a `ColoredPROP` field).
+    have h : ∀ x : StMat [] X, StMat.comp x f = StMat.comp x g := h
     -- Bias agrees: feed the zero point `x = 0`, whose dot products vanish.
     have hbias : f.bias = g.bias := by
       funext i

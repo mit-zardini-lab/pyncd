@@ -149,6 +149,84 @@ def resolveDecls (lp : LabeledProgram) : FreshM ResolvedProgram := do
   return { decls := lp.decls, stmts := lp.stmts, env,
            extNames, extraStmts := #[] }
 
+/-! ## The `checkReadRanks` phase
+
+Validates that every `read nm idxExprs` in the program uses a number of index positions consistent
+with `nm`'s declaration. Two cases:
+- **Declared tensors** (`nm ∈ env`): `idxExprs.length` must equal the decl's axis count.
+- **External tensors** (`nm ∈ extNames`): no declaration exists, so we check internal consistency —
+  all reads of the same external name must agree on arity (first read wins as the expected rank).
+
+`recurMorphism` stmts are invisible here (their `readsOf` returns `[]`), consistent with how the
+rest of the pipeline treats that escape hatch. -/
+
+private def Decl.axisCount : Decl → Nat
+  | .tensor _ ax | .predicate _ ax | .linear _ ax _ => ax.length
+  | .axis _ _ => 0   -- axis decls are excluded from DeclEnv; never reached via env lookup
+
+private def stmtReads (s : Stmt) : List (String × Nat) :=
+  match s with
+  | .assign _ _ r | .scatter _ _ r _ =>
+      r.body.terms.flatMap (fun t => t.factors.filterMap (fun
+        | .read nm es => some (nm, es.length)
+        | .iverson _  => none))
+  | .recurMorphism _ _ _ => []
+
+def checkReadRanks (rp : ResolvedProgram) : FreshM ResolvedProgram := do
+  let reads : List (String × Nat) := rp.stmts.flatMap stmtReads
+  -- declared tensors: check against DeclEnv
+  for (nm, arity) in reads do
+    if let some decl := rp.env[nm]? then
+      let expected := decl.axisCount
+      if arity != expected then throw (.rankMismatch nm expected arity)
+  -- external tensors: check internal consistency (first read site establishes expected rank)
+  let mut extRanks : HashMap String Nat := {}
+  for (nm, arity) in reads do
+    if nm ∈ rp.extNames then
+      match extRanks[nm]? with
+      | none   => extRanks := extRanks.insert nm arity
+      | some r => if arity != r then throw (.rankMismatch nm r arity)
+  return rp
+
+/-! ## The `checkDtypes` phase
+
+Two dtype invariants enforced after `checkReadRanks`:
+
+**A — Axis-kind on LHS slots.**
+- `iterAt`/`iterNext` slots must use a `nat`-kinded axis (scans iterate over discrete indices).
+- `freeNorm` slots (the `m.`-marked softmax/normalize reduction axis) must use a `real`-kinded axis.
+
+**B — Predicate outputs must have `identity` nonlinearity.**
+A stmt writing to a `predicate`-declared tensor carries {0,1} values; applying relu/softmax/normalize
+to such an output is a semantic error. Reading a predicate tensor on the RHS is intentionally valid
+(the indicator-function pattern); only the output-nonlin combination is rejected.
+
+`recurMorphism` stmts and `.affine`/`.free` slots are unconstrained and pass through. -/
+
+private def isNat : AxisKind → Bool | .nat _ => true | _ => false
+private def isReal : AxisKind → Bool | .real _ => true | _ => false
+
+def checkDtypes (rp : ResolvedProgram) : FreshM ResolvedProgram := do
+  for s in rp.stmts do
+    -- Check A: axis kinds on LHS slots
+    let slots : List LHSSlot := match s with
+      | .assign _ ls _ | .scatter _ ls _ _ => ls
+      | .recurMorphism _ _ _ => []
+    for slot in slots do
+      match slot with
+      | .iterAt a _ | .iterNext a =>
+          unless isNat a.kind do throw (.iterAxisNotNat a.name)
+      | .freeNorm a =>
+          unless isReal a.kind do throw (.normAxisNotReal a.name)
+      | _ => pure ()
+    -- Check B: predicate outputs must have identity nonlinearity
+    match s with
+    | .assign nm _ rhs | .scatter nm _ rhs _ =>
+        if let some (.predicate _ _) := rp.env[nm]? then
+          unless rhs.nonlin == .identity do throw (.predicateNonlin nm)
+    | .recurMorphism _ _ _ => pure ()
+  return rp
+
 /-! ## The `unifyAxes` phase (§7.4 UID coequalizer)
 
 Groups every axis occurrence sharing a NAME within program scope, picks the largest UID as the

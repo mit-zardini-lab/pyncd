@@ -5,6 +5,7 @@ import LeanNCD.Base.Numeric
 import LeanNCD.Base.ColoredPROP
 import LeanNCD.Base.St
 import LeanNCD.Base.Br
+import LeanNCD.Base.BrNF   -- WIP: NbE model for `brCancelPoint` (off critical path; carries deferred sorries)
 import LeanNCD.Seam.Adapter
 import LeanNCD.Core.Graded
 import LeanNCD.Core.Weave
