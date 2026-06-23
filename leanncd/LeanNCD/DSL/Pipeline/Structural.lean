@@ -219,11 +219,12 @@ def checkDtypes (rp : ResolvedProgram) : FreshM ResolvedProgram := do
       | .freeNorm a =>
           unless isReal a.kind do throw (.normAxisNotReal a.name)
       | _ => pure ()
-    -- Check B: predicate outputs must have identity nonlinearity
+    -- Check B: predicate outputs must have identity nonlinearity and sum aggregation
     match s with
     | .assign nm _ rhs | .scatter nm _ rhs _ =>
         if let some (.predicate _ _) := rp.env[nm]? then
           unless rhs.nonlin == .identity do throw (.predicateNonlin nm)
+          unless rhs.agg   == .sum       do throw (.predicateAgg nm)
     | .recurMorphism _ _ _ => pure ()
   return rp
 
@@ -330,7 +331,7 @@ def lowerArith (cp : CanonicalProgram) : FreshM LoweredProgram := do
           if slots.any LHSSlot.collapses then throw (CompileError.overlappingScatter nm)
           else return Stmt.scatter nm slots rhs { fill := 0, reduce := none }
         else return s
-    | .scatter nm slots rhs opts =>
+    | .scatter nm slots _ opts =>
         if (slots.any LHSSlot.collapses) && opts.reduce ≠ some "sum" then
           throw (CompileError.overlappingScatter nm)
         else return s

@@ -54,6 +54,10 @@ inductive Nonlin
   | normalize : Option BoolExpr → Nonlin
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
 
+-- Reduction operation for contraction (sum is standard; max is tropical).
+inductive AggOp | sum | max
+  deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
+
 inductive Factor
   | read    : String → List IdxExpr → Factor
   | iverson : BoolExpr → Factor
@@ -66,6 +70,7 @@ structure SumExpr  where terms   : List ProdTerm
 structure RHSExpr  where
   body   : SumExpr
   nonlin : Nonlin
+  agg    : AggOp := .sum   -- contraction operation (sum = standard; max = tropical)
   deriving DecidableEq, Repr, Lean.ToExpr
 
 inductive LHSSlot

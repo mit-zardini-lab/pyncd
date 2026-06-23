@@ -48,7 +48,7 @@ def ProdTerm.mapUID (f : UData → UData) (p : ProdTerm) : ProdTerm :=
 def SumExpr.mapUID (f : UData → UData) (s : SumExpr) : SumExpr :=
   { terms := s.terms.map (ProdTerm.mapUID f) }
 def RHSExpr.mapUID (f : UData → UData) (r : RHSExpr) : RHSExpr :=
-  { body := SumExpr.mapUID f r.body, nonlin := Nonlin.mapUID f r.nonlin }
+  { body := SumExpr.mapUID f r.body, nonlin := Nonlin.mapUID f r.nonlin, agg := r.agg }
 
 def LHSSlot.mapUID (f : UData → UData) : LHSSlot → LHSSlot
   | .free a     => .free (AxisSpec.mapUID f a)

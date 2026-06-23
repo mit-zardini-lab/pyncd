@@ -96,6 +96,10 @@ def Combine.real : Combine := ⟨(· * ·), (· + ·), 0.0⟩
 /-- The Boolean contraction `(∧, ∃)` on 0/1 Floats: `min` factors (∧), `max` terms (∃). -/
 def Combine.bool : Combine := ⟨min, max, 0.0⟩
 
+/-- The tropical max contraction `(×, max, −∞)`: multiply factors within a term, then take max
+    across terms and contracted axes. Identity is `−∞` so all-negative inputs reduce correctly. -/
+def Combine.max : Combine := ⟨(· * ·), fun (a b : Float) => Max.max a b, -1.0 / 0.0⟩
+
 /-- The declared name of a `Decl`. -/
 def declName : Decl → String
   | .tensor n _      => n
@@ -103,20 +107,24 @@ def declName : Decl → String
   | .linear n _ _    => n
   | .axis ax _       => ax.name
 
-/-- Pick the `Combine` for an output name from the decls: `predicate` ⇒ bool, else real. -/
-def combineFor (decls : List Decl) (nm : String) : Combine :=
-  match decls.find? (fun d => declName d == nm) with
-  | some (.predicate _ _) => Combine.bool
-  | _                     => Combine.real
+/-- Pick the `Combine` for an output given its decl and the RHS aggregation op.
+    Priority: `agg = .max` ⇒ tropical max; `predicate` ⇒ bool; else real. -/
+def combineFor (decls : List Decl) (nm : String) (agg : AggOp) : Combine :=
+  match agg with
+  | .max => Combine.max
+  | .sum => match decls.find? (fun d => declName d == nm) with
+      | some (.predicate _ _) => Combine.bool
+      | _                     => Combine.real
 
-/-- dtype-aware assign: choose the `Combine` from the decls, then evaluate.
-    A `predicate` output contracts in `(∧, ∃)` (min/max on 0/1) computing a Boolean result;
-    every other (or unknown) output contracts in the ℝ default `(×, Σ)`. -/
+/-- dtype-aware assign: choose the `Combine` from the decls and `rhs.agg`, then evaluate.
+    `agg = .max` ⇒ tropical `(×, max, −∞)`;
+    `predicate` ⇒ Boolean `(∧, ∃)`;
+    else ℝ `(×, Σ, 0)`. -/
 def evalAssignDtyped (decls : List Decl)
     (env : HashMap String DenseTensor) (sizes : HashMap UID Nat)
     (nm : String) (slots : List LHSSlot) (rhs : RHSExpr) :
     Except EvalError (String × DenseTensor) :=
-  let c := combineFor decls nm
+  let c := combineFor decls nm rhs.agg
   evalAssignWith c.mul c.combine c.unit0 env sizes nm slots rhs
 
 /-- Like `evalAssign`, but with a `seed : HashMap UID Int` of axis-UIDs pinned to fixed values

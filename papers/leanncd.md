@@ -6,9 +6,6 @@ Cross-scan coupling is a hard wall. Two coupled recurrences over the same axis (
 
 The realize bridge is formally broken. ThreadedComposed → BrMorph in Bridge/Realize.lean is a sorry citing tensorHom/swap as B+ obligations. Until those close, there's no formal path from a compiled program to a Br morphism — the categorical model and the executable layer are disconnected at the proof level. This is the single biggest gap for the project's core claim (formalizability, not just execution).
 
-op : String has no type-checked interface. Base operations are uninterpreted strings. Nothing verifies that an op called with inputs of rank 3 and dtype nat is actually defined for that signature. A typed operation registry — even just an Except-returning lookup at resolveDecls time — would catch misuse before evaluation.
-
-Scatter reductions beyond sum. Only reduce sum is recognized for overlapping scatters. Max-pooling (reduce max) and attention softmax renormalization (reduce max then reduce sum) are natural to express but currently require the recurMorphism escape hatch.
 
 
 # Lean 4 Encoding of the `D`-Graded Colored PROP Framework
@@ -620,6 +617,7 @@ inductive CompileError
   | iterAxisNotNat        : String → CompileError            -- axis in iterAt/iterNext slot is not ℕ-kinded
   | normAxisNotReal       : String → CompileError            -- axis in freeNorm slot is not ℝ-kinded
   | predicateNonlin       : String → CompileError            -- predicate tensor with non-identity nonlin
+  | predicateAgg          : String → CompileError            -- predicate tensor with non-sum aggregation
   deriving Repr, DecidableEq
 
 /-- Typeclass for types whose UID references can be traversed and substituted.
@@ -1098,6 +1096,7 @@ rel_op      ::= '<' | '≤' | '=' | '≠' | '>' | '≥'
 
 -- Layer 4: RHS expressions
 rhs         ::= nonlin '(' sum_expr ')'
+              | agg    '(' sum_expr ')'
               | sum_expr
 
 sum_expr    ::= prod_term ('+' prod_term)*
@@ -1112,6 +1111,8 @@ nonlin      ::= 'relu'
               | 'softmax'   '(' 'where' bool_expr ')'
               | 'normalize'
               | 'normalize' '(' 'where' bool_expr ')'
+
+agg         ::= 'maxreduce'
 
 -- Layer 5: Statements
 stmt        ::= assign | base_case | recur_step | scatter_write
@@ -1337,13 +1338,16 @@ inductive Nonlin
   | softmax   : Option BoolExpr → Nonlin
   | normalize : Option BoolExpr → Nonlin
 
+inductive AggOp | sum | max   -- contraction reduction: sum = standard ℝ; max = (×, max, −∞)
+  deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
+
 inductive Factor
   | read    : String → List IdxExpr → Factor            -- name[e₁,...,eₙ]
   | iverson : BoolExpr → Factor                         -- [P]
 
 structure ProdTerm where factors : List Factor
 structure SumExpr  where terms   : List ProdTerm
-structure RHSExpr  where body : SumExpr; nonlin : Nonlin
+structure RHSExpr  where body : SumExpr; nonlin : Nonlin; agg : AggOp := .sum
 ```
 
 ```lean
@@ -1407,6 +1411,7 @@ declare_syntax_cat tl_pred_term
 declare_syntax_cat tl_rel_op
 declare_syntax_cat tl_bool_expr
 declare_syntax_cat tl_nonlin
+declare_syntax_cat tl_agg
 declare_syntax_cat tl_factor
 declare_syntax_cat tl_prod_term
 declare_syntax_cat tl_sum_expr
@@ -1499,7 +1504,10 @@ syntax "softmax"   atomic("(" "where") tl_bool_expr ")" : tl_nonlin
 syntax "normalize"                                      : tl_nonlin
 syntax "normalize" atomic("(" "where") tl_bool_expr ")" : tl_nonlin
 
+syntax "maxreduce" : tl_agg
+
 syntax tl_nonlin "(" tl_sum_expr ")"   : tl_rhs
+syntax tl_agg    "(" tl_sum_expr ")"   : tl_rhs
 syntax tl_sum_expr                      : tl_rhs
 
 -- Layer 5: statements
@@ -1636,8 +1644,11 @@ abbrev StObjP := List AxisP
 inductive WeaveSlotP | fixed : AxisP → WeaveSlotP | tiled : WeaveSlotP
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
 abbrev WeaveShapeP := List WeaveSlotP
+inductive BrOp                                   -- typed op tag; replaces op : String
+  | contract | maxreduce | scatter | relu | softmax | normalize | scan | scanAffine | scanPre
+  deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
 structure BrBaseP where                          -- presentation of BrBase (§2.3): Fin-functions → Lists
-  op : String; degree : StObjP
+  op : BrOp; degree : StObjP
   inputWeaves outputWeaves : List WeaveShapeP
   reindexings : List StMatP
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
@@ -1695,24 +1706,24 @@ TLProgram
 | --- | --- | --- |
 | **assignUIDs** | Traverses `decls` and `stmts`; mints a fresh UID for each `AxisSpec` via `freshUData` ([§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer)). | `FreshM`; `List.mapM freshUData` traverses declarations |
 | **checkReadRanks** | For every `Factor.read nm idxExprs`, checks that `idxExprs.length` matches the declared axis count of `nm`. Two sub-cases: (a) for tensors in `DeclEnv`, expected rank comes from the declaration; (b) for external tensors (no declaration), the first read establishes the expected rank and subsequent reads must agree. Throws `rankMismatch` on violation. `recurMorphism` stmts are invisible (their reads are not introspected). | `FreshM`; iterates reads collected from `stmtReads`; `Std.HashMap` for external arity tracking |
-| **checkDtypes** | Two dtype invariants: (A) `iterAt`/`iterNext` LHS slots must carry a `nat`-kinded axis (`iterAxisNotNat` otherwise); `freeNorm` slots must carry a `real`-kinded axis (`normAxisNotReal` otherwise). (B) A stmt writing to a `predicate`-declared tensor must have `nonlin = identity` (`predicateNonlin` otherwise) — applying relu/softmax to {0,1} values is a semantic error. Reading a predicate tensor on the RHS is valid (the indicator-function pattern). | `FreshM`; `isNat`/`isReal` helpers; `DeclEnv` lookup for Check B |
+| **checkDtypes** | Two dtype invariants: (A) `iterAt`/`iterNext` LHS slots must carry a `nat`-kinded axis (`iterAxisNotNat` otherwise); `freeNorm` slots must carry a `real`-kinded axis (`normAxisNotReal` otherwise). (B) A stmt writing to a `predicate`-declared tensor must have `nonlin = identity` (`predicateNonlin` otherwise) and `agg = .sum` (`predicateAgg` otherwise) — applying relu/softmax or a non-sum aggregation to {0,1} values is a semantic error. Reading a predicate tensor on the RHS is valid (the indicator-function pattern). | `FreshM`; `isNat`/`isReal` helpers; `DeclEnv` lookup for Check B |
 | **resolveDecls** | Builds `DeclEnv : Std.HashMap String Decl` (`Std.Data.HashMap`; `String` has `BEq` and `Hashable`). Validates: `linear` weight appears in exactly one product factor; every declared name has a consistent shape across stmts; throws `CompileError` on violation. `linear ... bias:=true` appends a bias-add stmt to the returned `ResolvedProgram`. Marks each name as external (declared) or internal (produced by a stmt) — drives routing. Predicate-typed names are tagged here; the tag tells the Algebra ([§8](#8-algebras-and-construct)) to evaluate that output in the Boolean value semiring `R = Bool` rather than `R = ℝ`. | `FreshM`; validation errors via `throw`; bias stmts accumulated in `ResolvedProgram.extraStmts : Array Stmt` |
 | **unifyAxes** | The [§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer) UID coequalizer, computed in batch. Collects the `(uid_a, uid_b)` identifications from axis occurrences sharing a name within program scope (Domingos' name-binding, [§14.2](#142-bnf-grammar)), feeds them to `Context.merge`, and applies the result with `Context.apply`. The canonical representative is the **largest UID** — the universal cocone vertex of [§7.3](#73-composition-as-pushout) — so a DSL-built morphism and a CSV-built one agree on axis identity on the nose. The whole program is known statically, so this runs once rather than incrementally (Python's `Context.append_iter`), but it is the *same* coequalizer with the *same* representative rule. | Pure (`ResolvedProgram → CanonicalProgram`); lifted to `FreshM` by `pure`; `Context` / `EqClass` ([§7.4](#74-the-seam-concrete-union-find-realizes-the-coequalizer)) |
 | **lowerArith** | `IdxExpr.const` reads → fresh `Slice` intermediate; `IdxExpr.affine` reads → fresh `Reindex` intermediate; affine `LHSSlot`s → `Scatter` (injectivity checked; `reduce = some "sum"` required for non-injective maps). Each is a `BrBase` ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) whose `reindexings` field carries the affine map as an `St` stride matrix `StMat` — the locus where `St` lives inside `Br`. Non-zero fill prepends a fill-initialization stmt. Auxiliary stmts are stored in `LoweredProgram.auxStmts : Array Stmt`, not a global. | `FreshM`; `freshUData` mints UIDs for synthetic intermediates; auxiliary stmts in output type, not a writer monad |
 | **finalizeScans** | Groups stmts by name + iteration axis UID; pairs `iterAt`/`iterNext` slots into `Scan` nodes; stmts sharing the same iteration-axis UID across names form a coupled `Scan` (`n_states > 1`). Each `Scan` is the `cata(step)` of the `TemporalGraded` mixin ([§6.1](#61-temporalgraded--scan)) over the iteration axis as temporal object `L`; the prefix-restriction and batching laws it obeys are Props 8.7–8.8. `Stmt.recurMorphism` supplies the step morphism directly, bypassing equation lowering for that scan state. Validates: every `recur_step` has a matching `base_case`; `l+1` absent from RHS for the iteration axis. | `FreshM`; pure grouping; `throw` on missing base case |
-| **splitNonlins** | Lifts `relu`/`softmax`/`normalize` out of `RHSExpr.nonlin` into a separate composed step. These are genuinely nonlinear, so they are not reindexings (`StMat` is affine); each becomes a `BrBase` op ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) whose numeric semantics are supplied by the Algebra functor `F : C → V` into the target actegory ([§8](#8-algebras-and-construct)). For `softmax`/`normalize` the reduction dimension is the output slot marked `m.` (`LHSSlot.freeNorm`, [§14.3](#143-abstract-syntax)); masked variants emit an alignment-permutation step computed from the `where` mask. | `FreshM`; `freshUData` mints UIDs for nonlin step intermediates |
+| **splitNonlins** | Lifts `relu`/`softmax`/`normalize` out of `RHSExpr.nonlin` into a separate composed step. These are genuinely nonlinear, so they are not reindexings (`StMat` is affine); each becomes a `BrBase` op ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) whose numeric semantics are supplied by the Algebra functor `F : C → V` into the target actegory ([§8](#8-algebras-and-construct)). For `softmax`/`normalize` the reduction dimension is the output slot marked `m.` (`LHSSlot.freeNorm`, [§14.3](#143-abstract-syntax)); masked variants emit an alignment-permutation step computed from the `where` mask. Stmts with `agg = .max` (`maxreduce`) have `nonlin = identity` by construction, so `splitNonlins` is a no-op for them; the `agg` field passes through unchanged to `route`. | `FreshM`; `freshUData` mints UIDs for nonlin step intermediates |
 | **schedule** | Backward reachability BFS from the output name simultaneously determines liveness (DCE) and produces a valid reverse-topological order. Two passes in Python; one here because the BFS visit order is already a reverse topo order. | Pure (`String → List ScanStmt → List ScanStmt`); lifted to `FreshM` by `pure` |
-| **route** | Detects contracted axes (present in a `ProdTerm` but absent from the LHS) and builds one `BrBase` ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) per stmt, carrying the `tensor`/`predicate` tag from `DeclEnv`. The contraction *arithmetic* is not fixed here but at evaluation, by the Algebra's value semiring `R` ([§8](#8-algebras-and-construct)): `R = ℝ` (×, then Σ) for `tensor` outputs, `R = Bool` (∧, then ∃) for `predicate` outputs — the ∃/∧-vs-Σ split is exactly that choice of `R`. Assigns index slots; builds `ThreadedComposed.routing` and `n_external`. Automatic associative-scan detection (nonlinearity-free recurrence, flagged in `finalizeScans`) tags the routed step `op="scan_affine"` — the `ScanAffine` case where the step algebra factors through a monoid, i.e. Prop 8.7's `O(log N)` parallel prefix; a `recurMorphism` step is tagged `op="scan_pre"`. | Pure (`List ScanStmt → DeclEnv → Context → ThreadedComposed`); lifted to `FreshM` by `pure` |
+| **route** | Detects contracted axes (present in a `ProdTerm` but absent from the LHS) and builds one `BrBase` ([§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) per stmt,·  carrying the `tensor`/`predicate` tag from `DeclEnv`. The contraction *arithmetic* is not fixed here but at evaluation, by the Algebra's value semiring `R` ([§8](#8-algebras-and-construct)): `R = ℝ` (×, then Σ) for `tensor` outputs, `R = Bool` (∧, then ∃) for `predicate` outputs — the ∃/∧-vs-Σ split is exactly that choice of `R`. `agg = .max` stmts are assigned `op="maxreduce"` (overriding the default `"contract"` for assign stmts); the reduction `(×, max, −∞·)` is then selected at eval time. *Note: this is not the tropical semiring, but supports max contraction often used in deep learning.* Assigns index slots; builds `ThreadedComposed.routing` and `n_external`. Automatic associative-scan detection (nonlinearity-free recurrence, flagged in `finalizeScans`) tags the routed step `op="scan_affine"` — the `ScanAffine` case where the step algebra factors through a monoid, i.e. Prop 8.7's `O(log N)` parallel prefix; a `recurMorphism` step is tagged `op="scan_pre"`. | Pure (`List ScanStmt → DeclEnv → Context → ThreadedComposed`); lifted to `FreshM` by `pure` |
 
 **Implementation notes.** The phase-table rows above describe the full design; the implemented pipeline simplifies several rows (all `sorry`-free):
 
-- **checkReadRanks** and **checkDtypes** are two validation-only passes that take and return `ResolvedProgram` unchanged. `checkReadRanks` uses a private `stmtReads : Stmt → List (String × Nat)` helper (reads only `assign`/`scatter`; `recurMorphism` returns `[]`). `checkDtypes` uses private `isNat`/`isReal` helpers on `AxisKind`. The elaborator (`elabTLLHSSlot`) sets `kind := .nat none` for both `iterAt` (the placeholder `""` axis) and `iterNext` axes, so well-formed programs parsed from surface syntax always pass Check A without annotation. The `freeNorm` check (`normAxisNotReal`) only fires for programmatically constructed programs that explicitly supply a `nat`-kinded axis there.
+- **checkReadRanks** and **checkDtypes** are two validation-only passes that take and return `ResolvedProgram` unchanged. `checkReadRanks` uses a private `stmtReads : Stmt → List (String × Nat)` helper (reads only `assign`/`scatter`; `recurMorphism` returns `[]`). `checkDtypes` uses private `isNat`/`isReal` helpers on `AxisKind`. The elaborator (`elabTLLHSSlot`) sets `kind := .nat none` for both `iterAt` (the placeholder `""` axis) and `iterNext` axes, so well-formed programs parsed from surface syntax always pass Check A without annotation. The `freeNorm` check (`normAxisNotReal`) only fires for programmatically constructed programs that explicitly supply a `nat`-kinded axis there. The `predicateAgg` check rejects `agg ≠ .sum` on predicate outputs (Check B is two `unless` guards: one for `nonlin`, one for `agg`).
 - **assignUIDs** binds by axis *name* (the parser emits `uid := 0` for every axis), reusing the [§14.4](#144-concrete-syntax-and-elaboration) `traverseUID`; a `freshNonZero` guard skips the sentinel `0`.
 - **resolveDecls** is purely constructive (it never throws): an undeclared read name is an *external input* (the [§14.2](#142-bnf-grammar) examples read `W`/`X`/`Q`/`K` with no `tensor` decl), so `extNames` = read-not-produced. `linear`-weight arity, shape consistency, and bias materialization are deferred (no example declares a `linear` weight); `extraStmts := #[]`. The `tensor`/`predicate` value-semiring tagging is an [§8](#8-algebras-and-construct) *semantic* concern deferred to the bridge, not carried in the presentation.
 - **lowerArith** reclassifies affine-LHS assigns to `Stmt.scatter` with a conservative injectivity guard (`overlappingScatter` on a dimension-collapsing constant coordinate); affine *reads* are left in place and folded into the consuming step's `reindexings` at `route` (which is exactly where `St` lives inside `BrBase`, [§2.3](#23-br--free-category-over-broadcasted-base-morphisms)) rather than emitted as separate Slice/Reindex steps; `auxStmts := #[]`.
 - **finalizeScans** groups by iteration-axis UID into (coupled) `Scan` nodes; a pre-pass makes each base case adopt a same-named recurrence's iteration axis (the parser emits scan base cases with a placeholder iteration-axis name); `missingBaseCase`/`causalityViolation` guards fire; a `recurMorphism` stmt becomes `ScanStmt.scanPre`, and the `isAffine` flag on `ScanStmt.scan` is set here (before `splitNonlins`) when the recurrence is nonlinearity-free.
 - **schedule** does backward-reachability DCE; the output root is the last stmt's written name(s) (single-result-at-tail — a genuine multi-output-not-at-tail program would need an explicit outputs field).
-- **route** builds one `BrBaseP` per stmt with contracted axes (read axes absent from the LHS) as `tiled` weave slots; each read's affine `IdxExpr` becomes an integer-coefficient `StMatP` via an `idxToRow` translation; inputs are wired to their producer step or to the external sentinel (`step = nExternal`). The `ScanAffine` fast path is implemented as an `op` tag — `op="scan_affine"` when the recurrence is nonlinearity-free, `op="scan_pre"` for a `recurMorphism` step, else `op="scan"` (so routed scan steps carry `op ∈ {scan, scan_affine, scan_pre}`); the value-semiring contraction arithmetic is deferred to the bridge.
+- **route** builds one `BrBaseP` per stmt with contracted axes (read axes absent from the LHS) as `tiled` weave slots; each read's affine `IdxExpr` becomes an integer-coefficient `StMatP` via an `idxToRow` translation; inputs are wired to their producer step or to the external sentinel (`step = nExternal`). The `ScanAffine` fast path is implemented as an `op` tag — `op="scan_affine"` when the recurrence is nonlinearity-free, `op="scan_pre"` for a `recurMorphism` step, else `op="scan"` (so routed scan steps carry `op ∈ {scan, scan_affine, scan_pre}`); the value-semiring contraction arithmetic is deferred to the bridge. For non-scan assign stmts, `op` is `"contract"` by default and `"maxreduce"` when `rhs.agg = .max`; for scatter stmts the op string is unaffected by `agg` (scatter uses `opts.reduce` instead).
 
 **Static validation summary.** The pipeline enforces the following checks at compile time, throwing a `CompileError` on the first violation in each phase:
 
@@ -1727,6 +1738,7 @@ TLProgram
 | `iterAt`/`iterNext` LHS slots carry a `ℕ`-kinded axis | checkDtypes | `iterAxisNotNat` |
 | `freeNorm` LHS slots carry a `ℝ`-kinded axis | checkDtypes | `normAxisNotReal` |
 | `predicate`-declared output tensor has `identity` nonlinearity | checkDtypes | `predicateNonlin` |
+| `predicate`-declared output tensor has `sum` aggregation | checkDtypes | `predicateAgg` |
 
 What the compiler does **not** check statically: read-name existence (external tensors have no rank declaration; shape mismatches surface at eval time via `inferAxisSizes`), value-dtype compatibility on the RHS (reading a `predicate` tensor in an arithmetic expression is intentionally valid — the indicator-function pattern), and axis-kind consistency across all occurrences of the same UID (a cross-occurrence check would require collecting kinds by UID after `unifyAxes`, analogous to size-conflict detection in `inferAxisSizes`).
 
@@ -1767,11 +1779,18 @@ and `sorry`-free.
 The evaluator interprets the **pre-route `ScheduledProgram`** rather than the routed
 `ThreadedComposed` of [§14.5](#145-semantic-compilation): the routed presentation keeps only a scan's
 representative recurrence step (it is lossy for scans), whereas the `ScheduledProgram` retains the full
-`base`/`recur` stmt lists, so coupled and base cases evaluate. The output **dtype** — tensor vs
-predicate, i.e. the `(Σ, ×)` vs `(∃, ∧)` contraction — is read from the decls (a `predicate` output
-contracts in `(max, min)` on 0/1 Floats), which sidesteps the deferred `BrBaseP` dtype gap. All eleven
+`base`/`recur` stmt lists, so coupled and base cases evaluate. The output **dtype** (tensor vs
+predicate) is read from the decls and the `RHSExpr.agg` field via a `Combine` structure
+`{ mul, combine, unit0 }` that packages the three semiring operators:
+
+- **`Combine.real`** `(×, Σ, 0)` — standard tensor contraction (`R = ℝ`)
+- **`Combine.bool`** `(min, max, 0.0)` — Boolean `(∧, ∃)` contraction on 0/1 Floats (`R = Bool`); selected for `predicate`-declared outputs
+- **`Combine.max`** `(×, max, −∞)` — max contraction (not tropical semiring); selected when `agg = .max` (`maxreduce`). Identity `−∞` (IEEE 754 `−1.0/0.0`) ensures all-negative inputs reduce to the true maximum rather than `0`.
+
+`combineFor` chooses: `agg = .max` → `Combine.max`; else `predicate` → `Combine.bool`; else `Combine.real`. This sidesteps the deferred `BrBaseP` dtype gap. All eleven
 example programs (the seven §14.2/predicate examples plus look-back, outer product, contraction+relu,
-and normalize) evaluate with hand-checked numeric assertions in `test/Eval/EvalExamplesTest.lean`.
+and normalize) evaluate with hand-checked numeric assertions in `test/Eval/EvalExamplesTest.lean`;
+max-reduction programs are tested in `test/DSL/MaxReduceTest.lean`.
 Symbolic-size evaluation and the `scanPre`/`recurMorphism` escape hatches are out of scope (they raise
 an `EvalError`).
 

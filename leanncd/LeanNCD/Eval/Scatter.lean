@@ -46,7 +46,10 @@ def evalScatter (env : HashMap String DenseTensor) (sizes : HashMap UID Nat)
     if (outCoordZ.zip outShape).all (fun (z, d) => 0 ≤ z && z < (d : Int)) then
       let oc := outCoordZ.map Int.toNat
       let prev := out.get! oc
-      let new := if opts.reduce == some "sum" then prev + val else val
+      let new := match opts.reduce with
+        | some "sum" => prev + val
+        | some "max" => Max.max prev val
+        | _          => val
       out := out.set! oc new
   return (nm, out)
 

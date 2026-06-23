@@ -5,7 +5,7 @@ open Lean
 -- ToExpr round-trip + DecidableEq are the point: these must be first-order.
 run_cmd do
   let tc : ThreadedComposed :=
-    { steps := [{ op := "matmul", degree := [],
+    { steps := [{ op := BrOp.contract, degree := [],
                   inputWeaves := [[.tiled]], outputWeaves := [[.tiled]],
                   reindexings := [{ domLen := 1, codLen := 1, coeffs := [[1]], bias := [0] }] }],
       routing := [[⟨0, 0⟩]], nExternal := 1 }

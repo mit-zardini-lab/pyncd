@@ -50,7 +50,7 @@ noncomputable def realizeBrBaseP (b : BrBaseP) : Σ (dom cod : BrObj), BrBase do
   let dom : BrObj := b.inputWeaves.map weaveToArrayType
   let cod : BrObj := b.outputWeaves.map weaveToArrayType
   ⟨dom, cod, {
-    op := b.op
+    op := b.op.toString
     degree := realizeStObj b.degree
     inputWeaves  := fun i => realizeWeaveShape (b.inputWeaves.getD i.val [])
     outputWeaves := fun i => realizeWeaveShape (b.outputWeaves.getD i.val [])

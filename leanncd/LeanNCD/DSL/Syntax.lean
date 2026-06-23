@@ -30,6 +30,7 @@ declare_syntax_cat tl_idx_expr
 declare_syntax_cat tl_pred_term
 declare_syntax_cat tl_rel_op
 declare_syntax_cat tl_bool_expr
+declare_syntax_cat tl_agg
 declare_syntax_cat tl_nonlin
 declare_syntax_cat tl_factor
 declare_syntax_cat tl_prod_term
@@ -136,7 +137,11 @@ syntax "softmax"   atomic("(" "where") tl_bool_expr ")" : tl_nonlin
 syntax "normalize"                                      : tl_nonlin
 syntax "normalize" atomic("(" "where") tl_bool_expr ")" : tl_nonlin
 
+-- Aggregation operations: change the contraction from sum to another reduction.
+syntax "maxreduce" : tl_agg
+
 syntax tl_nonlin "(" tl_sum_expr ")"   : tl_rhs
+syntax tl_agg    "(" tl_sum_expr ")"   : tl_rhs
 syntax tl_sum_expr                      : tl_rhs
 
 -- Layer 5: statements

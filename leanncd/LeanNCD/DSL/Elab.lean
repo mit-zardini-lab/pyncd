@@ -177,9 +177,15 @@ partial def sumTerms : Syntax → MetaM (List ProdTerm)
 partial def elabTLSumExpr (stx : Syntax) : MetaM SumExpr :=
   return { terms := (← sumTerms stx) }
 
+def elabTLAgg : Syntax → MetaM AggOp
+  | `(tl_agg| maxreduce) => return .max
+  | _ => throwUnsupportedSyntax
+
 partial def elabTLRHS : Syntax → MetaM RHSExpr
   | `(tl_rhs| $nl:tl_nonlin ( $s:tl_sum_expr )) =>
       return { body := (← elabTLSumExpr s), nonlin := (← elabTLNonlin nl) }
+  | `(tl_rhs| $ag:tl_agg ( $s:tl_sum_expr )) =>
+      return { body := (← elabTLSumExpr s), nonlin := .identity, agg := (← elabTLAgg ag) }
   | `(tl_rhs| $s:tl_sum_expr) =>
       return { body := (← elabTLSumExpr s), nonlin := .identity }
   | _ => throwUnsupportedSyntax

@@ -27,7 +27,7 @@ and each `#guard` asserts a structural fact calibrated to what the pipeline actu
     tensor A(q, s)
     A[q, s.] := softmax(where s ≤ q)(Q[q, d] · K[s, d])
   }
-  tc.steps.any (fun s => s.op == "softmax")
+  tc.steps.any (fun s => s.op == BrOp.softmax)
 
 -- 3. Strided convolution `Y[i,j] := W[p,r] · X[i+p, 2*j+r]`. The stride 2 is absorbed into the
 --    read's reindexing matrix: some step has a coeff row containing `2`.
@@ -42,7 +42,7 @@ and each `#guard` asserts a structural fact calibrated to what the pipeline actu
     tensor Out(i, j)
     Out[2 * i, 2 * j] := X[i, j]
   }
-  tc.steps.any (fun s => s.op == "scatter")
+  tc.steps.any (fun s => s.op == BrOp.scatter)
 
 -- 5. Coupled scan: G and H recur over the shared iteration axis `l` ⇒ ONE coupled scan step
 --    (`op == "scan"`), and X,Y,W_G,U,W_H,V are the six external inputs.
@@ -53,7 +53,7 @@ and each `#guard` asserts a structural fact calibrated to what the pipeline actu
     H[j, 0]    := Y[j]
     H[j, l +1] := relu(H[j, l] · W_H[j, k] + G[j, l] · V[j, k])
   }
-  tc.steps.any (fun s => "scan".isPrefixOf s.op)
+  tc.steps.any (fun s => s.op == BrOp.scan || s.op == BrOp.scanAffine)
 #guard
   let tc := tl!{
     G[j, 0]    := X[j]

@@ -133,8 +133,7 @@ The executable back-end's final phase: turn the scheduled statements into a `Thr
    * Contracted axes = read axes whose `uid` is NOT among the LHS axis uids.
    * `degree` = (LHS ++ contracted) de-duplicated by uid; each → `AxisP (some name) (var name)`
      (symbolic size — sizes aren't load-bearing in E2a). LHS axes first, then contracted.
-   * `op` = relu/softmax/normalize from `rhs.nonlin`, else "scatter" for a `.scatter` stmt,
-     else "contract"; a `.scan` node uses "scan".
+   * `op` = `BrOp` constructor from `rhs.nonlin`/`rhs.agg`/stmt kind; scan nodes use scan variants.
    * `inputWeaves` = one shape per read factor; `outputWeaves` = one shape; each over `degree`,
      mapping contracted axes (by uid) to `.tiled`, retained axes to `.fixed a`.
    * `reindexings` = one `StMatP` per read factor; `idxToRow` expresses each read coordinate as
@@ -168,6 +167,11 @@ def Stmt.lhsAxes : Stmt → List AxisSpec
 def Stmt.nonlin : Stmt → Nonlin
   | .assign _ _ r | .scatter _ _ r _ => r.nonlin
   | .recurMorphism _ _ _ => .identity
+
+/-- The `RHSExpr.agg` of a stmt. -/
+def Stmt.agg : Stmt → AggOp
+  | .assign _ _ r | .scatter _ _ r _ => r.agg
+  | .recurMorphism _ _ _ => .sum
 
 /-- Every `AxisSpec` appearing in a single read index expression. -/
 def idxAxes : IdxExpr → List AxisSpec
@@ -257,17 +261,19 @@ def route (sp : ScheduledProgram) : FreshM ThreadedComposed := do
       let rows := rf.2.map (idxToRow degUids)
       { domLen := degUids.length, codLen := rf.2.length,
         coeffs := rows.map (·.1), bias := rows.map (·.2) })
-    let op : String :=
-      if sc.isScanPre then "scan_pre"   -- Task 3 refines/validates the step morphism
-      else if sc.isScan then (if sc.isAffineScan then "scan_affine" else "scan")  -- Prop 8.7
+    let op : BrOp :=
+      if sc.isScanPre then .scanPre
+      else if sc.isScan then (if sc.isAffineScan then .scanAffine else .scan)
       else match s.nonlin with
-        | .relu        => "relu"
-        | .softmax _   => "softmax"
-        | .normalize _ => "normalize"
+        | .relu        => .relu
+        | .softmax _   => .softmax
+        | .normalize _ => .normalize
         | .identity    => match s with
-            | .scatter .. => "scatter"
-            | .assign ..  => "contract"
-            | .recurMorphism .. => "contract"   -- unreachable: scanPre handled above
+            | .scatter .. => .scatter
+            | .assign ..  => match s.agg with
+                | .max => .maxreduce
+                | .sum => .contract
+            | .recurMorphism .. => .contract   -- unreachable: scanPre handled above
     let step : BrBaseP := { op, degree, inputWeaves, outputWeaves, reindexings }
     let wires : List Wire := readFactors.map (fun rf =>
       match nameToStep[rf.1]? with
