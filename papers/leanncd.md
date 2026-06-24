@@ -1799,13 +1799,6 @@ the input width (from `X`'s shape), via two coupled constraints. An outer-produc
 `Y[i,j] := X[i+j] + U[i+2j]` must solve a 2×2 linear system over the free axes `i` and `j`.
 Neither is determined by any single tensor dimension in isolation.
 
-The earlier approach used a one-unknown fast-path: if exactly one axis appeared in a read position,
-its size was floored from the dimension and recorded immediately. This failed silently in two ways.
-First, multi-axis reads with two or more unsized axes were deferred but never converged — the
-fixpoint stalled and the program threw a generic error. Second, the fast-path floored a single
-variable prematurely, then passed the floored (non-integral) value into the multi-variable
-sub-system, producing spurious "non-integral" errors even for well-determined programs.
-
 `evalScheduled` therefore calls
 `inferAxisSizes : HashMap UID Nat → HashMap String DenseTensor → List Stmt → Except EvalError (HashMap UID Nat × List String)`
 (in `leanncd/LeanNCD/Eval/Shape.lean`) to derive the concrete size of every free axis from the
@@ -1822,8 +1815,7 @@ of non-fatal warnings. The solver works in three stages:
 
 2. **Unified RREF solver (`solveSizeConstraints`).** All read positions with at least one unsized
    axis are collected as `SizeConstraint` records and passed to a single Gaussian elimination over
-   `Rat`. The fast-path is gone; one and multi-variable reads are handled identically. The
-   constraint RHS follows the *maximal-extent convention*: for a read `T[c₀ + Σ cᵢ·aᵢ]` against
+   `Rat`. The constraint RHS follows the *maximal-extent convention*: for a read `T[c₀ + Σ cᵢ·aᵢ]` against
    a tensor of dimension `d`, the constraint is
    `Σ_{cᵢ>0} cᵢ · size(aᵢ) = d − c₀ + Σ_{cᵢ>0} cᵢ − 1`,
    which places the maximum index exactly at `d − 1` (tight fit). Non-integral RREF solutions are
@@ -1854,18 +1846,16 @@ of non-fatal warnings. The solver works in three stages:
 | `Y[h] := W[k] · X[2h+k-1]` | W:[3], X:[8] | k=3, h=4 (solve `k=3`, `2h+k=11`) |
 | `Y[h] := W[k] · X[2h+k-1]` | W:[3], X:[7] | k=3, h=3 (floor: `2h+k=10`, h=3.5→3; verify 6+3=9≤10 ✓) |
 | `Y[i,j,k] := X[2i+j+3k] · U[3k] · V[i+2j]` | X:[14], U:[8], V:[10] | i=2, j=5, k=3 (joint RREF then floor k=10/3→3; verify all ✓) |
+| `Y[i] := X[i+2]` | X:[8] | i=6 (solve `i = 8−2+1−1 = 6`; max-index 2+5=7=8−1 ✓) |
 | `Y[i,j] := X[i+j]` | X:[7] | **error**: underdetermined (rank 1, 2 unknowns) |
+| `Y[i,j] := X[i+j]` (with `axis i = 3`) | X:[7] | i=3 (seed), j=5 (seed resolves underdetermined case) |
+| `Y[i] := A[i] + B[i]` | A:[4], B:[6] | **error**: conflict (i=4 from A, i=6 from B) |
 | `Y[i] := X[3-i]` | X:[5] | **error**: axis i purely negatively constrained |
 | `Y[i] := X[3-i]` (with `axis i = 4`) | X:[5] | i=4 (seed bypasses solver) |
 
-The fourth row is the regression case that broke the old fast-path: the old code floored `k`
-from `U[3k]` to `k=3` first, then handed `k=3` to a two-variable sub-system `2i+j=10`,
-`i+2j=12`, which has no integral solution (`3i=8`). The unified route solves all three variables
-jointly, floors `k` last, and succeeds.
-
 `inferAxisSizes` is tested in `test/Eval/AffineShapeSolverTest.lean` (multi-equation, conv-like,
 non-integral floor, signed-affine, 2D/3D padded-window, mixed-path, redundant-equality,
-purely-negatively-constrained, seeded, fast-path regression, padded-access warning) and the
+purely-negatively-constrained, seeded, three-variable joint-solve, padded-access warning) and the
 corresponding semantics are documented in
 `docs/lean_affine_shape_solver_max_padded_semantics.md`.
 
