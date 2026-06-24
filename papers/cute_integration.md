@@ -72,24 +72,60 @@ The core recommendation is **hybrid integration**:
 
 ## 2. CUTE layouts: compact background
 
-At a high level, CUTE treats a layout as a compositional map from coordinates to offsets/data locations:
+**Prerequisite: HTuples.** An `HTuple(T)` is defined recursively: either a scalar element of `T`, or a finite ordered list (a `Tuple`) of `HTuple(T)`s. For an HTuple `X`:
 
-- hierarchical shapes (`HTuple`) and hierarchical strides,
-- layout as composition of shape and stride maps,
-- an algebra of transformations:
-  - composition,
-  - coalesce/refine,
-  - complement,
-  - inverse (left/right/full when admissible),
-  - logical division and logical product,
-  - by-mode composition via tilers.
+- **Rank** `rank(X)`: the number of top-level elements — length of `X` if it is a Tuple, 1 if it is a scalar.
+- **Depth** `depth(X)`: 0 for a scalar; `1 + max(depth(X₀), …)` for a Tuple.
+- **Size** `|X|` (when entries are positive integers): product of all scalar entries at every level.
+- **Congruence** `S ~ D`: S and D have the same recursive structure — both scalars, or both Tuples of the same rank with pairwise congruent elements.
 
-The categorical foundations paper shows a tractable fragment represented by morphisms in categories (`Tuple`, `Nest`) and proves compatibility theorems:
+Two coordinate systems exist for a shape `S ∈ HTuple(ℤ⁺)`:
 
-- morphism composition corresponds to layout composition,
-- morphism coalesce corresponds to layout coalesce,
-- morphism complement corresponds to layout complement,
-- morphism division/product correspond to layout division/product (under admissibility).
+- **Integral coordinate** `c̄ ∈ ℤ_{|S|} = {0, …, |S|-1}`: a single flat integer ranging over all `|S|` elements.
+- **Natural coordinate** `c̃ ∈ ℤ_S`: an HTuple *congruent to S*, with each component bounded by the corresponding mode size.
+
+The bijection `idx2crd : ℤ_{|S|} → ℤ_S` converts integral → natural via colexicographic (mixed-radix) enumeration — the *first* component varies fastest; its inverse is `crd2idx`.
+
+*Example.* For shape `S = (2, 3)`, size `|S| = 6`:
+
+```text
+Integral c̄  │  Natural c̃ = idx2crd(c̄)
+─────────────┼──────────────────────────
+      0      │  (0, 0)
+      1      │  (1, 0)   ← first component cycles fastest
+      2      │  (0, 1)
+      3      │  (1, 1)
+      4      │  (0, 2)
+      5      │  (1, 2)
+```
+
+For a hierarchical shape such as `S = (2, (2, 3))`, size `|S| = 12`, natural coordinates have the form `(i, (j, k))` with `i ∈ {0,1}`, `j ∈ {0,1}`, `k ∈ {0,1,2}`; the integral coordinate is still a plain integer in `{0,…,11}`, with `idx2crd` unwrapping it into the nested structure. The layout stride map `D(c̃) = Σᵢ cᵢ dᵢ` is a simple dot product of the natural coordinate against the stride HTuple — it is *not* a simple function of the integral index `c̄` directly.
+
+---
+
+A CUTE **layout** `L = D ∘ S` is a function mapping a coordinate domain `ℤ(S)` to an offset codomain (typically `ℤ`), built from two congruent HTuples:
+
+- **Shape** `S ∈ HTuple(ℤ⁺)`: defines the domain extents. Its size `|S| = ∏ₖ |Sₖ|`. Because S is an HTuple, it supports multi-level indexing: `(M, (N₀, N₁))` has rank 2 (two top-level modes) and admits both a 2D natural coordinate `(m, (n₀, n₁))` and a flat integral coordinate for the N₀·N₁-element combined second mode.
+- **Stride** `D ∈ HTuple` with `S ~ D`: defines a linear inner-product map on natural coordinates: `D(c̃) = Σᵢ cᵢ dᵢ = D c̃` (a generalized matrix-vector product).
+- **Semi-linearity**: `L(c) = D(S(c)) = d · c̃` is linear in the *natural* coordinates `c̃ ∈ ℤˢ`, but nonlinear in arbitrary coordinates `c ∈ ℤ(S)` because `idx2crd` is not linear. This semi-linearity is the key algebraic property: layouts are essentially generalized affine maps and their operations have algebraic closure.
+
+The **layout algebra** provides operations that produce new CUTE layouts:
+
+- **Concatenation**: `(L₀, …, Lₙ)` with `L(c) = Σᵢ Lᵢ(cᵢ)` — expresses a layout as a tuple of per-mode sublayouts.
+- **Coalesce**: collapse a hierarchical layout to a shallower functionally equivalent one by merging adjacent modes with compatible (divisibility) strides.
+- **Composition**: `B ∘ A` maps A-domain coordinates through A then B; requires A's cosize to divide into B's domain structure (admissibility).
+- **Complement**: `comp(A, N) = A*` is a layout covering the `N/|A|` offsets in the ambient space of size N *not* reached by A.
+- **Logical division**: `A ⊘ B` when B divides A; yields C such that `coalesce(C ∘ B) = coalesce(A)`. This is the primary operation for *deriving* tiled layouts from a flat layout and a tile shape.
+- **Logical product**: `A ⊗ B = (A, A* ∘ B)` — tiles A over a grid described by B, using A's complement to compute per-tile offset shifts.
+- **By-mode composition (tilers)**: `A ⋆ ⟨B, C⟩ = ⟨A₀ ⋆ B, A₁ ⋆ C⟩` — simultaneous per-mode tiling of each logical dimension independently.
+
+Carlisle et al. (arXiv:2601.05972) identify a **tractable** fragment closed under all these operations. Their category **Nest** has objects = nested tuples of positive integers and morphisms `f : S → T` encoded as *diagrams of divisibility arrows* between the mode sizes of `S` and `T`. Non-degenerate tractable layouts correspond bijectively to **Nest**-morphisms of standard form (Theorem A), and every algebra operation has a proved morphism-level counterpart:
+
+- `L_{g ∘ f} = L_g ∘ L_f` for composable f, g (Theorem B),
+- `L_{coal(f)} = coal(L_f)` (Theorem C),
+- `coal(L_{f^c}) = comp(L_f, N)` for injective f (Theorem D),
+- `coal(L_{f ⊘ g}) = coal(L_f ⊘ L_g)` when g divides f (Theorem E),
+- `L_{f ⊗ g} = L_f ⊗ L_g` when f, g are product-admissible (Theorem F).
 
 ### Tiny examples
 
@@ -99,7 +135,7 @@ The categorical foundations paper shows a tractable fragment represented by morp
 (M, N) : (N, 1)
 ```
 
-Tensor shape/rank: `M x N` (rank-2 tensor).
+CUTE shape `(M, N)` has rank 2 and size M·N.
 
 Access pattern (logical coordinate → linear offset):
 
@@ -130,7 +166,7 @@ So adjacent `j` entries are contiguous; stepping `i` jumps by `N`.
 (M, N) : (1, M)
 ```
 
-Tensor shape/rank: `M x N` (rank-2 tensor).
+CUTE shape `(M, N)` has rank 2 and size M·N.
 
 Access pattern (logical coordinate → linear offset):
 
@@ -161,7 +197,7 @@ So adjacent `i` entries are contiguous; stepping `j` jumps by `M`.
 (M, (N0, N1)) : (sM, (sN0, sN1))
 ```
 
-Tensor shape/rank: `M x N0 x N1` (rank-3 logical tensor, with folded second mode).
+CUTE shape `(M, (N0, N1))` has **rank 2** (two top-level modes) and size M·N0·N1. The second mode is itself an HTuple of depth 2, admitting both the 2D natural coordinate `(n0, n1)` and a flat 1D integral coordinate for the N0·N1 combined elements.
 
 Folded-coordinate access pattern:
 
@@ -209,40 +245,23 @@ L^{tiled} =
 [  5,  7, 13, 15, 21, 23, 29, 31 ]
 ```
 
-4. **Composition with a tiler**
+4. **Logical division: deriving a tiled layout**
+
+Logical division `A ⊘ B` yields `C` such that `coalesce(C ∘ B) = coalesce(A)` when B *divides* A (B's extents evenly partition A's modes). Given a flat parent layout and a tile shape, logical division derives the tiled representation automatically — this is the primary CUTE tiling operation.
 
 ```text
-L_sub = L ◦ T
+L^{col}   = (4, 8) : (1, 4)            # column-major 4×8 matrix (Example 2)
+T         = (2, 2) : (1, 4)            # 2×2 tile, column-major strides
+L^{tiled} = L^{col} ⊘ T               # tiled result
+           = ((2, 2), (2, 4)) : ((1, 4), (2, 8))
 ```
 
-where `T` picks/partitions modes by construction, then can be sliced by thread/value coordinates.
+Access pattern: `L^{tiled}((r_in, c_in), (r_tile, c_tile)) = r_in + 4·c_in + 2·r_tile + 8·c_tile`
 
-Tensor shape/rank: induced by `domain(T)`; typically a tiled/partitioned rank-2 or rank-3 view (for matrix examples, e.g. `Mt x Nt`).
+- First mode `(2,2):(1,4)` = coordinates *within* a tile (identical to T).
+- Second mode `(2,4):(2,8)` = tile-grid (2 tile-rows × 4 tile-cols), with strides equal to T's per-mode extents multiplied by L^{col}'s corresponding strides (2×1 = 2 and 2×4 = 8).
 
-Access pattern:
-
-```text
-addr_sub(t, v) = L(T(t, v))
-```
-
-Index-layout example:
-
-```text
-L      = (8, 16) : (16, 1)
-T      = (4, 8) : (1, 1)      # pick top-left 4x8 block
-L_sub  = L ◦ T = (4, 8) : (16, 1)
-```
-
-`L_sub` grid of offsets:
-
-```text
-[  0,  1,  2,  3,  4,  5,  6,  7 ]
-[ 16, 17, 18, 19, 20, 21, 22, 23 ]
-[ 32, 33, 34, 35, 36, 37, 38, 39 ]
-[ 48, 49, 50, 51, 52, 53, 54, 55 ]
-```
-
-`T` maps thread/value coordinates `(t,v)` into coordinates of `L`; composition then gives offsets directly in the parent layout.
+Logical *product* `A ⊗ B = (A, A* ∘ B)` is the complementary operation: it tiles A over an independently specified grid layout B, computing shifts via A's complement rather than deriving them from a parent layout.
 
 5. **Logical product (tile over grid)**
 
@@ -250,9 +269,9 @@ L_sub  = L ◦ T = (4, 8) : (16, 1)
 A ⊗ B = (A, A* ◦ B)
 ```
 
-with `A*` the complement of `A`.
+where `A* = comp(A, |A|·|B|)` is the **complement** of A with respect to ambient size `|A|·|B|`. For compact A (image = `{0, …, |A|-1}`), A* has stride `|A|`, so `A*(k) = |A|·k` — it shifts each copy of A by A's own size. The composition `A* ◦ B` applies this shift at each grid coordinate, so tiles do not overlap.
 
-Tensor shape/rank: tile-shape `shape(A)` over grid-shape `shape(B)`; for matrix tile/grid this is typically rank-4 before optional blocked/raked coalescing.
+The result `A ⊗ B` has rank rank(A) + rank(B) (concatenation of two sublayouts); for rank-2 A and B the output is rank-4 before optional coalescing.
 
 Access pattern (tile coordinate `a`, grid coordinate `b`):
 
@@ -593,7 +612,7 @@ Y[token,hidden] = E@StaticAssign[token,expert,hidden] * X[token,hidden]
 
 ### 8.1 CUTE categories as index semantics
 
-From the `D`-graded perspective, the clean move is to treat CUTE’s tractable layout fragment (as presented via `Tuple`/`Nest` morphisms) as a richer index category:
+From the `D`-graded perspective, the clean move is to treat CUTE’s **tractable layout fragment** — the **Nest**-morphism encoding of Carlisle et al. — as a richer index category:
 
 ```text
 D_aff  ⊆  D_layout
@@ -601,12 +620,12 @@ D_aff  ⊆  D_layout
 
 where:
 
-- `D_aff` is the current affine-reindexing fragment (`St_aff`),
-- `D_layout` includes hierarchical shape/stride morphisms and CUTE algebraic operators (composition/coalesce/complement/division/product under admissibility).
+- `D_aff` is the current affine-reindexing fragment (`St_aff`), corresponding to flat-stride `StrideMorphism`-style morphisms;
+- `D_layout` is the full tractable layout fragment. By Theorem A of Carlisle et al., non-degenerate tractable layouts are in bijection with **Nest**-morphisms of standard form, so `D_layout` inherits the complete CUTE algebra — composition, coalesce, complement, logical division, logical product — with admissibility conditions appearing as morphism-level structural constraints (Theorems B–F). A **Nest**-morphism `f : S → T` is concretely a diagram of divisibility arrows between the mode sizes of S and T; this makes admissibility structurally explicit rather than a run-time precondition.
 
-Then existing pyncd semantics is recovered by restricting to `D_aff`.
+Existing pyncd semantics is recovered by restricting to `D_aff ⊆ D_layout`.
 
-From a typing viewpoint, this is a refinement of index types: `D_layout` carries stricter, constraint-rich layout judgments over the same underlying tensor equations.
+From a typing viewpoint, this is a *refinement* of index types: `D_layout` carries stricter, constraint-rich layout judgments over the same underlying tensor equations.
 
 ### 8.2 Action of `D` on `C` with layout morphisms
 
@@ -616,34 +635,65 @@ The graded framework uses a right action:
 act : C × D^op → C
 ```
 
-If `D = D_layout`, CUTE compatibility theorems (operations on morphisms commute with operations on realized layouts) become reusable coherence facts for this action:
+If `D = D_layout`, the Carlisle et al. Theorems B–F (morphism-level operations commute with realized layout operations) become reusable coherence facts for this action:
 
-- composition compatibility supports functoriality of reindexing composition,
-- coalesce/refinement compatibility supports normalization lemmas,
-- complement/division/product compatibility supports structured factorization/rewrite lemmas.
+- Theorem B (composition) supports functoriality of reindexing composition,
+- Theorem C (coalesce) supports normalization lemmas,
+- Theorems D–F (complement/division/product) support structured factorization and rewrite lemmas.
 
 So the `D`-action laws do not change in form; they gain a stronger library of admissible rewrites.
 
 ### 8.3 Weaves as internal factorizations
 
-Current representation stores:
+**Current representation** for each input port `i`:
 
-1. mask-style weave (`TILED` vs local),
-2. reindexing map from degree.
+1. **Weave mask** `Weave._shape = (w₁, …, wₙ)` — each `wⱼ` is either a concrete `Axis` (local to the base op) or `WeaveMode.TILED` (filled from the broadcast degree).
+2. **Reindexing** `η_i : P → Q_i` — maps the shared degree P to the *subset* of degree axes that input `i` actually uses (`Q_i` = tiling shape, one axis per TILED slot in the weave).
 
-Categorically enriched representation uses one map per port:
+These two pieces together specify where each coordinate of operand `i` comes from at every point in the broadcast loop.
+
+**Translation to a single CUTE layout** `λ_i` over the combined domain `P × T_i`:
+
+Let `L_i` be the base CUTE layout of the raw tensor for input `i` (encoding its memory strides). The combined-domain layout `λ_i` is assembled axis by axis:
+
+- For each degree axis `p_k ∈ P`:
+  - If `η_i` routes `p_k` to TILED slot `j` of the weave: **stride of `p_k` in `λ_i` = stride of position `j` in `L_i`** (the memory stride at that slot).
+  - If `η_i` does *not* use `p_k` for this input: **stride = 0** (CUTE's broadcast convention — the tensor value does not change as `p_k` varies).
+- For each local axis `t_l ∈ T_i`: **stride of `t_l` in `λ_i` = stride of the corresponding concrete-axis position in `L_i`**.
+
+The shape of `λ_i` is the concatenation `(P_shape, T_i_shape)`.
+
+**Worked example: matrix multiply `Y[i,j] = W[i,k] * X[k,j]`**
+
+Degree `P = (i, j)`. Concrete shapes (row-major): `W` has layout `L_W = (I,K):(K,1)` and `X` has layout `L_X = (K,J):(J,1)`.
+
+| Field | `W` | `X` |
+| --- | --- | --- |
+| Weave `_shape` | `(TILED, k)` | `(k, TILED)` |
+| Reindexing `η` | `(i,j) → (i,)` | `(i,j) → (j,)` |
+| Local axes `T_i` | `(k)` | `(k)` |
+
+Applying the rule to build `λ_W` over domain `(I, J, K)`:
+
+- `i` → maps to TILED slot 0 → stride = K (row stride of W)
+- `j` → not used by W → stride = **0** (broadcast)
+- `k` (local) → concrete slot 1 in weave → stride = 1 (column stride of W)
 
 ```text
-λ_i : P × T_i → A_i   (in D_layout)
+λ_W = (I, J, K) : (K, 0, 1)
 ```
 
-with factorization:
+Applying the rule to build `λ_X` over the same domain `(I, J, K)`:
 
-- `P` = degree/broadcast coordinates,
-- `T_i` = local coordinates seen by base op,
-- `A_i` = full operand coordinates.
+- `i` → not used by X → stride = **0** (broadcast)
+- `j` → maps to TILED slot 1 → stride = 1 (column stride of X)
+- `k` (local) → concrete slot 0 in weave → stride = J (row stride of X)
 
-The old mask+reindexing view is derived from the factorization, rather than stored as separate primitives. This makes “weave data” internal to index morphism structure.
+```text
+λ_X = (I, J, K) : (0, 1, J)
+```
+
+**Recovering the old view.** The mask is the sign pattern of strides: TILED slots have non-zero stride (they vary with degree), concrete slots have their own stride, and zero strides identify projected-out degree axes. The reindexing `η_i` is recovered as the restriction of `λ_i` to the non-zero-stride degree axes. The factorization thus contains strictly more information (explicit strides, CUTE admissibility conditions) while making the mask+reindexing derivable rather than stored separately.
 
 ### 8.4 Relationship to `C ≅ ∫Dat` and Para
 
