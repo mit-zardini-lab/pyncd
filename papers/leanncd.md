@@ -773,7 +773,7 @@ V being a symmetric monoidal category is not required for the executable pipelin
 ### 9.4 Milestone dependency summary
 
 | Milestone | What it closes | Gates |
-|---|---|---|
+| --- | --- | --- |
 | `brCancelPoint` normal form (§2) | `Br.elemental`; `BrMorph` is the free strict SMC | `realize` uniqueness |
 | `TargetActegory Mat ℝ` instance (§8) | `actV` concretely defined; D-equivariance of `F` | `Algebra` instance |
 | Flagship `Algebra` instance (§8) | `F : BrMorph → Mat ℝ` concretely defined | agreement theorem |
@@ -1790,47 +1790,82 @@ max-reduction programs are tested in `test/DSL/MaxReduceTest.lean`.
 Symbolic-size evaluation and the `scanPre`/`recurMorphism` escape hatches are out of scope (they raise
 an `EvalError`).
 
-**Axis size inference.** Before any statement is executed, `evalScheduled` calls
+**Axis size inference.** The evaluator needs concrete sizes for every free axis before it can
+allocate output tensors or index into inputs. The naive approach — requiring users to declare every
+axis size explicitly — breaks ML programs where the output shape is a derived consequence of the
+input shapes and the affine read pattern. A strided convolution `Y[h] := W[k] · X[2h+k-1]` has
+no fixed output size: `h` depends jointly on the kernel width (`k`, inferred from `W`'s shape) and
+the input width (from `X`'s shape), via two coupled constraints. An outer-product program
+`Y[i,j] := X[i+j] + U[i+2j]` must solve a 2×2 linear system over the free axes `i` and `j`.
+Neither is determined by any single tensor dimension in isolation.
+
+The earlier approach used a one-unknown fast-path: if exactly one axis appeared in a read position,
+its size was floored from the dimension and recorded immediately. This failed silently in two ways.
+First, multi-axis reads with two or more unsized axes were deferred but never converged — the
+fixpoint stalled and the program threw a generic error. Second, the fast-path floored a single
+variable prematurely, then passed the floored (non-integral) value into the multi-variable
+sub-system, producing spurious "non-integral" errors even for well-determined programs.
+
+`evalScheduled` therefore calls
 `inferAxisSizes : HashMap UID Nat → HashMap String DenseTensor → List Stmt → Except EvalError (HashMap UID Nat × List String)`
 (in `leanncd/LeanNCD/Eval/Shape.lean`) to derive the concrete size of every free axis from the
 shapes of the supplied input tensors. The return type is a pair of the solved size map and a list
 of non-fatal warnings. The solver works in three stages:
 
-1. **Upper-envelope projection.** Each affine read position `pos` (an `AffinePosition` carrying the
+1. **Upper-envelope projection.** Each affine read position (an `AffinePosition` carrying the
    tensor name, dimension, constant offset, and coefficient list) is filtered to its
    *upper-envelope coefficients*: only the positive-coefficient terms can reach their axis maximum
-   under padded semantics, so only those terms contribute to the constraint derivation. Negative
-   coefficients are dropped from the size equation (though they remain valid for evaluation).
+   under padded semantics, so only those terms constrain the size. Negative coefficients are
+   dropped from the size equation (they remain valid for evaluation — e.g. the `−i` in `X[3−i]`
+   never reaches a maximum along `i`). A bare read `X[3−i]` with only a negative coefficient on
+   `i` is flagged after fixpoint as *purely negatively constrained* (see stage 3).
 
 2. **Unified RREF solver (`solveSizeConstraints`).** All read positions with at least one unsized
-   axis are collected as `SizeConstraint` records (`coeffs : List (Int × UID)`, `rhs : Int`) and
-   passed to a single Gaussian elimination over `Rat`. The constraint RHS follows the
-   *maximal-extent convention*: for a read `T[c₀ + Σ cᵢ·aᵢ]` against a tensor of dimension `d`,
-   the constraint is `Σ_{cᵢ>0} cᵢ · size(aᵢ) = d − c₀ + Σ_{cᵢ>0} cᵢ − 1`, placing the maximum
-   index exactly at `d − 1`. Non-integral RREF solutions are floored independently
-   (*floor-then-verify*): after flooring, every original constraint is checked as an inequality
-   (`lhs ≤ rhs`); a violation throws a descriptive `EvalError`. This handles padded-access programs
-   such as strided convolution, where the exact system is non-integral but the floor still
-   satisfies the inequality. Previously a fast-path handled the one-unknown case separately and
-   contaminated the multi-variable solver with a pre-floored value; the unified route eliminates
-   that class of error.
+   axis are collected as `SizeConstraint` records and passed to a single Gaussian elimination over
+   `Rat`. The fast-path is gone; one and multi-variable reads are handled identically. The
+   constraint RHS follows the *maximal-extent convention*: for a read `T[c₀ + Σ cᵢ·aᵢ]` against
+   a tensor of dimension `d`, the constraint is
+   `Σ_{cᵢ>0} cᵢ · size(aᵢ) = d − c₀ + Σ_{cᵢ>0} cᵢ − 1`,
+   which places the maximum index exactly at `d − 1` (tight fit). Non-integral RREF solutions are
+   floored independently (*floor-then-verify*): after flooring, every original constraint is
+   re-checked as an inequality (`lhs ≤ rhs`); a violation throws a descriptive `EvalError`. This
+   handles padded-access programs such as strided convolution, where the exact system is
+   non-integral but the floored solution still satisfies the inequality bounds.
 
 3. **Fixpoint + diagnostics.** The solver iterates until no new size is discovered. After
    convergence, two checks run:
-   - *Issue D (fail-loud):* any axis whose upper-envelope coefficient is non-positive in every
-     read — meaning no constraint can bound it from above — throws an `EvalError` citing the axis
-     UID and source positions. Such axes must be declared explicitly (`axis a = n`).
-   - *Issue H (padded-access warning):* any fully-known multi-term read (all axes already sized)
-     whose maximum index meets or exceeds the tensor dimension emits a `"padded-access warning"`
-     in the returned `List String`. Under padded semantics out-of-range reads return zero and are
-     valid, but the warning flags the access as surprising. Warnings are forwarded to stderr via
-     `dbg_trace` in `evalScheduled`. Note: this warning fires only when axis sizes arrive via the
-     explicit seed (the `HashMap UID Nat` first argument), because solver-derived sizes are
-     tight-fit by construction (max-index = dim − 1) and never trigger it.
+   - *Purely negatively constrained axes (fail-loud):* any axis whose upper-envelope coefficient
+     is non-positive in every read — meaning no constraint can bound it from above — throws an
+     `EvalError` citing the axis UID and source positions. Such axes must be declared explicitly
+     (`axis a = n`).
+   - *Padded-access warning:* any fully-known multi-term read (all axes already sized) whose
+     maximum index meets or exceeds the tensor dimension emits a `"padded-access warning"` in the
+     returned `List String`. Under padded semantics out-of-range reads return zero and are valid,
+     but the warning flags the access as potentially surprising. Warnings are forwarded to stderr
+     via `dbg_trace` in `evalScheduled`. This warning fires only when axis sizes arrive via the
+     explicit seed argument, because solver-derived sizes are tight-fit by construction
+     (max-index = dim − 1) and can never trigger it.
+
+**What the solver infers.** A few representative cases:
+
+| Program | Inputs | Inferred |
+| --- | --- | --- |
+| `Y[i,j] := X[i+j] + U[i+2j]` | X:[7], U:[9] | i=5, j=3 (solve `i+j=8`, `i+2j=11`) |
+| `Y[h] := W[k] · X[2h+k-1]` | W:[3], X:[8] | k=3, h=4 (solve `k=3`, `2h+k=11`) |
+| `Y[h] := W[k] · X[2h+k-1]` | W:[3], X:[7] | k=3, h=3 (floor: `2h+k=10`, h=3.5→3; verify 6+3=9≤10 ✓) |
+| `Y[i,j,k] := X[2i+j+3k] · U[3k] · V[i+2j]` | X:[14], U:[8], V:[10] | i=2, j=5, k=3 (joint RREF then floor k=10/3→3; verify all ✓) |
+| `Y[i,j] := X[i+j]` | X:[7] | **error**: underdetermined (rank 1, 2 unknowns) |
+| `Y[i] := X[3-i]` | X:[5] | **error**: axis i purely negatively constrained |
+| `Y[i] := X[3-i]` (with `axis i = 4`) | X:[5] | i=4 (seed bypasses solver) |
+
+The fourth row is the regression case that broke the old fast-path: the old code floored `k`
+from `U[3k]` to `k=3` first, then handed `k=3` to a two-variable sub-system `2i+j=10`,
+`i+2j=12`, which has no integral solution (`3i=8`). The unified route solves all three variables
+jointly, floors `k` last, and succeeds.
 
 `inferAxisSizes` is tested in `test/Eval/AffineShapeSolverTest.lean` (multi-equation, conv-like,
 non-integral floor, signed-affine, 2D/3D padded-window, mixed-path, redundant-equality,
-Issue D fail-loud, Issue D seeded, Issue A regression, Issue H seeded warning) and the
+purely-negatively-constrained, seeded, fast-path regression, padded-access warning) and the
 corresponding semantics are documented in
 `docs/lean_affine_shape_solver_max_padded_semantics.md`.
 
