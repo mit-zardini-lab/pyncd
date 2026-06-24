@@ -275,10 +275,16 @@ def route (sp : ScheduledProgram) : FreshM ThreadedComposed := do
                 | .sum => .contract
             | .recurMorphism .. => .contract   -- unreachable: scanPre handled above
     let step : BrBaseP := { op, degree, inputWeaves, outputWeaves, reindexings }
-    let wires : List Wire := readFactors.map (fun rf =>
+    -- Route each read to its producer step, else to the external sentinel. A name that is
+    -- neither produced nor declared external is an unresolved read: FAIL LOUD rather than
+    -- silently defaulting to external slot 0 (which masks upstream dataflow errors).
+    let wires ← readFactors.mapM (fun rf =>
       match nameToStep[rf.1]? with
-      | some j => Wire.mk j 0
-      | none   => Wire.mk nExternal ((extIndex[rf.1]?).getD 0))
+      | some j => pure (Wire.mk j 0)
+      | none   =>
+        match extIndex[rf.1]? with
+        | some k => pure (Wire.mk nExternal k)
+        | none   => throw (CompileError.undeclaredName rf.1))
     steps := steps ++ [ step ]
     routing := routing ++ [ wires ]
   return { steps, routing, nExternal }

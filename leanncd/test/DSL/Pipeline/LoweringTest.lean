@@ -84,4 +84,18 @@ run_cmd do
       let sm := tc.steps.head!.reindexings.head!
       unless sm.coeffs == [[2]] do throwError s!"expected strided coeff [[2]], got {sm.coeffs}"
   | .error e _ => throwError s!"route errored: {repr e}"
+
+-- Unresolved read: `Ghost` is neither produced by a step nor declared external ⇒ `route` must
+-- FAIL LOUD with `undeclaredName`, not silently route it to external slot 0 (the former
+-- `(extIndex …).getD 0` fallback, which masked upstream dataflow errors).
+run_cmd do
+  let ax (nm : String) (u : Nat) : AxisSpec := { name := nm, uid := u, kind := .real none }
+  let i := ax "i" 1
+  let s : Stmt := .assign "Y" [ .free i ]
+    { body := { terms := [ { factors := [ .read "Ghost" [ .axis i ] ] } ] }, nonlin := .identity }
+  let sp : ScheduledProgram := { decls := [], stmts := [ .plain s ], env := {}, extNames := (∅ : Finset String), ctx := { classes := [] }, explicitSizes := {} }
+  match route sp |>.run 0 with
+  | .ok tc _ => throwError s!"expected route to reject unresolved read, got {tc.steps.length} step(s)"
+  | .error (.undeclaredName nm) _ => unless nm == "Ghost" do throwError s!"wrong undeclared name: {nm}"
+  | .error e _ => throwError s!"expected undeclaredName, got {repr e}"
 end LeanNCD

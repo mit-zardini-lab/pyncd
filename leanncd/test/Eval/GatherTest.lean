@@ -20,4 +20,18 @@ run_cmd do
   match gather env (coordOf [(1,0)]) (.read "X" [.shift (ax 1) (-1)]) with | .ok v => unless v == 0.0 do throwError "pad" | .error e => throwError e
   -- iverson [i ≤ 2] at i=1 ⇒ 1.0
   match gather env (coordOf [(1,1)]) (.iverson (.rel .le (.embed (.axis (ax 1))) (.embed (.const 2)))) with | .ok v => unless v == 1.0 do throwError "iverson" | .error e => throwError e
+
+-- `.ieq` semantics (the DSL's intended *modular* equality, currently APPROXIMATED by structural
+-- Int `==`; see `evalBool` in Gather.lean). These lock in the actual behavior so a future switch
+-- to faithful modular equality is a conscious, test-breaking change rather than silent drift.
+-- equal values ⇒ true:
+#guard   evalBool (coordOf [(1,3),(2,3)]) (.ieq (.embed (.axis (ax 1))) (.embed (.axis (ax 2))))
+-- unequal values ⇒ false:
+#guard ! evalBool (coordOf [(1,3),(2,4)]) (.ieq (.embed (.axis (ax 1))) (.embed (.axis (ax 2))))
+-- APPROXIMATION BOUNDARY: 256 and 0 are equal mod 256 but not structurally; current Int-`==`
+-- semantics ⇒ FALSE. A faithful modular `.ieq` would make this TRUE — that change must flip this guard.
+#guard ! evalBool (coordOf [(1,256),(2,0)]) (.ieq (.embed (.axis (ax 1))) (.embed (.axis (ax 2))))
+-- `.ieq` currently coincides with `.rel .eq` on non-wrapping values:
+#guard (evalBool (coordOf [(1,5),(2,5)]) (.ieq (.embed (.axis (ax 1))) (.embed (.axis (ax 2))))
+        == evalBool (coordOf [(1,5),(2,5)]) (.rel .eq (.embed (.axis (ax 1))) (.embed (.axis (ax 2)))))
 end LeanNCD.Eval

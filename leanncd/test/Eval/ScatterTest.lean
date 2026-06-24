@@ -35,4 +35,17 @@ run_cmd do
   | .ok (_, Out) =>
       unless Out.get! [0,0] == 10.0 do throwError s!"reduce sum wrong: {repr Out.data}"
 
+-- FAIL-LOUD: an unsized source axis (here `j`, uid 2, missing from `sizes`) must error rather
+-- than silently iterating it once (the former `.getD 1`), which would drop source coordinates.
+run_cmd do
+  let i := ax "i" 1; let j := ax "j" 2
+  let X := tensorOf [2,2] [1,2, 3,4]
+  let env : HashMap String DenseTensor := ({} : HashMap String DenseTensor).insert "X" X
+  let slots : List LHSSlot := [.affine (.scale 2 i), .affine (.scale 2 j)]
+  let rhs : RHSExpr := { body := { terms := [{ factors := [.read "X" [.axis i, .axis j]] }] }, nonlin := .identity }
+  let sizes := ({} : HashMap UID Nat).insert 1 2          -- i↦2, but j (uid 2) deliberately unsized
+  match evalScatter env sizes "Out" slots rhs { fill := 0, reduce := none } [4,4] with
+  | .error _ => pure ()                                   -- expected
+  | .ok _    => throwError "expected evalScatter to reject an unsized source axis"
+
 end LeanNCD.Eval

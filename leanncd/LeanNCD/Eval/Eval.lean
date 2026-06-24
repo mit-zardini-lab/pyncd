@@ -9,16 +9,22 @@ open Std
     sizes — `c0 + Σ cᵢ·size(aᵢ)` for an `.affine`, `c·size(a)` for a `.scale` (e.g. upsample
     `Out[2·i]` ⇒ `2·size(i)`), `size(a)+c` for a `.shift`, `n+1` for a `.const n`, `size(a)` for a
     bare axis. (`sizes[u]` defaults to 0 for an unseen UID.) -/
-def scatterOutShape (sizes : HashMap UID Nat) (slots : List LHSSlot) : List Nat :=
-  slots.map (fun sl =>
-    let idx := lhsSlotIdx sl
-    match idx with
-    | .axis a      => (sizes[a.uid]?).getD 0
-    | .const n     => (n + 1).toNat
-    | .scale c a   => (c * Int.ofNat ((sizes[a.uid]?).getD 0)).toNat
-    | .shift a c   => (Int.ofNat ((sizes[a.uid]?).getD 0) + c).toNat
-    | .affine c0 xs =>
-        (xs.foldl (fun acc (c, a) => acc + c * Int.ofNat ((sizes[a.uid]?).getD 0)) c0).toNat)
+def scatterOutShape (sizes : HashMap UID Nat) (slots : List LHSSlot) : Except EvalError (List Nat) := do
+  -- Every axis in a scatter output coordinate must have an inferred size. An unsized axis means
+  -- it is unbound by any read (an upstream sizing gap), so FAIL LOUD rather than defaulting its
+  -- size to 0 (which would silently produce a wrong-shaped, usually empty, output tensor).
+  let sz (u : UID) : Except EvalError Nat := match sizes[u]? with
+    | some n => pure n
+    | none   => throw s!"scatterOutShape: unsized axis uid {u} in scatter output coordinate"
+  slots.mapM (fun sl => do
+    match lhsSlotIdx sl with
+    | .axis a      => sz a.uid
+    | .const n     => pure (n + 1).toNat
+    | .scale c a   => pure (c * Int.ofNat (← sz a.uid)).toNat
+    | .shift a c   => pure (Int.ofNat (← sz a.uid) + c).toNat
+    | .affine c0 xs => do
+        let contribs ← xs.mapM (fun (c, a) => do pure (c * Int.ofNat (← sz a.uid)))
+        pure (contribs.foldl (· + ·) c0).toNat)
 
 /-- Evaluate one `.plain` stmt → (name, tensor). -/
 def evalPlain (decls : List Decl) (env : HashMap String DenseTensor) (sizes : HashMap UID Nat)
@@ -38,7 +44,7 @@ def evalPlain (decls : List Decl) (env : HashMap String DenseTensor) (sizes : Ha
           | _, none    => throw s!"evalPlain: {nm} applies softmax/normalize but no output axis is marked (·)"
         return (nm, applyNonlin rhs.nonlin axisPos axisUids pre)
   | .scatter nm slots rhs opts =>
-      let outShape := scatterOutShape sizes slots
+      let outShape ← scatterOutShape sizes slots
       evalScatter env sizes nm slots rhs opts outShape
   | .recurMorphism nm _ _ => .error s!"evalPlain: recurMorphism (escape hatch) unsupported ({nm})"
 

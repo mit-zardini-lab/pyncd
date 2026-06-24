@@ -303,4 +303,17 @@ run_cmd do
           throwError s!"scan-transformer wrong: {repr H.data}"
     | none => throwError "scan-transformer: no H"
 
+-- FAIL-LOUD: `scatterOutShape` must reject an output coordinate over an unsized axis (uid 9 here,
+-- absent from `sizes`) instead of defaulting its extent to 0 (a silently wrong, empty output dim).
+-- A sized axis still computes normally (`.scale 2` over size 2 ⇒ extent 4).
+run_cmd do
+  let a : AxisSpec := { name := "a", uid := 9, kind := .real none }
+  match scatterOutShape ({} : HashMap UID Nat) [.affine (.axis a)] with
+  | .error _ => pure ()                       -- expected: unsized axis
+  | .ok s    => throwError s!"expected scatterOutShape to reject unsized axis, got {repr s}"
+  match scatterOutShape (({} : HashMap UID Nat).insert 9 2) [.affine (.scale 2 a)] with
+  | .ok [4]  => pure ()                        -- sized axis ⇒ normal computation
+  | .ok s    => throwError s!"scatterOutShape sized case wrong: {repr s}"
+  | .error e => throwError e
+
 end LeanNCD.Eval

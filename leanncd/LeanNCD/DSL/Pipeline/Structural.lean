@@ -7,84 +7,61 @@ import Std.Data.HashMap
 namespace LeanNCD
 open Std
 
-/-! ## Axis-name collectors
+/-! ## Axis collectors
 
 Axis identity in tensor logic is name-based within program scope (§12.1): a name appearing
-in multiple places denotes the same axis. These collectors gather every source axis name in
-program order; `TLProgram.axisNames` de-duplicates. Exhaustive structural recursion (Lean's
-totality check forces every constructor) guarantees no axis name is silently dropped. -/
+in multiple places denotes the same axis. The `specs*` family gathers every source `AxisSpec`
+in program order via exhaustive structural recursion (Lean's totality check forces every
+constructor, so nothing is silently dropped). The three public collectors below are thin
+projections of one traversal: by name (`TLProgram.axisNames`, de-duplicated), by uid
+(`Stmt.uids`), or both (`collectAxisNameUID`). -/
 
-private def axNamesIdx : IdxExpr → List String
-  | .axis a => [a.name] | .const _ => [] | .scale _ a => [a.name]
-  | .shift a _ => [a.name] | .affine _ xs => xs.map (fun p => p.2.name)
+private def specsIdx : IdxExpr → List AxisSpec
+  | .axis a => [a] | .const _ => [] | .scale _ a => [a]
+  | .shift a _ => [a] | .affine _ xs => xs.map (·.2)
 
-private def axNamesPred : PredArith → List String
-  | .embed e => axNamesIdx e | .mul a b => axNamesPred a ++ axNamesPred b | .iabs a => axNamesPred a
+private def specsPred : PredArith → List AxisSpec
+  | .embed e => specsIdx e | .mul a b => specsPred a ++ specsPred b | .iabs a => specsPred a
 
-private def axNamesBool : BoolExpr → List String
-  | .rel _ a b => axNamesPred a ++ axNamesPred b
-  | .and a b => axNamesBool a ++ axNamesBool b | .or a b => axNamesBool a ++ axNamesBool b
-  | .not a => axNamesBool a | .ieq a b => axNamesPred a ++ axNamesPred b
+private def specsBool : BoolExpr → List AxisSpec
+  | .rel _ a b => specsPred a ++ specsPred b
+  | .and a b => specsBool a ++ specsBool b | .or a b => specsBool a ++ specsBool b
+  | .not a => specsBool a | .ieq a b => specsPred a ++ specsPred b
 
-private def axNamesNonlin : Nonlin → List String
-  | .softmax (some m) => axNamesBool m | .normalize (some m) => axNamesBool m | _ => []
+private def specsNonlin : Nonlin → List AxisSpec
+  | .softmax (some m) => specsBool m | .normalize (some m) => specsBool m | _ => []
 
-private def axNamesFactor : Factor → List String
-  | .read _ es => es.flatMap axNamesIdx | .iverson b => axNamesBool b
+private def specsFactor : Factor → List AxisSpec
+  | .read _ es => es.flatMap specsIdx | .iverson b => specsBool b
 
-private def axNamesRHS (r : RHSExpr) : List String :=
-  (r.body.terms.flatMap (fun t => t.factors.flatMap axNamesFactor)) ++ axNamesNonlin r.nonlin
+private def specsRHS (r : RHSExpr) : List AxisSpec :=
+  (r.body.terms.flatMap (fun t => t.factors.flatMap specsFactor)) ++ specsNonlin r.nonlin
 
-private def axNamesLHS : LHSSlot → List String
-  | .free a => [a.name] | .freeNorm a => [a.name]
-  | .iterAt a _ => [a.name] | .iterNext a => [a.name] | .affine e => axNamesIdx e
+private def specsLHS : LHSSlot → List AxisSpec
+  | .free a => [a] | .freeNorm a => [a]
+  | .iterAt a _ => [a] | .iterNext a => [a] | .affine e => specsIdx e
 
-private def axNamesDecl : Decl → List String
-  | .tensor _ ax => ax.map (·.name) | .predicate _ ax => ax.map (·.name)
-  | .linear _ ax _ => ax.map (·.name)
-  | .axis ax _ => [ax.name]
+private def specsDecl : Decl → List AxisSpec
+  | .tensor _ ax => ax | .predicate _ ax => ax | .linear _ ax _ => ax
+  | .axis ax _ => [ax]
 
-private def axNamesStmt : Stmt → List String
-  | .assign _ ls r => ls.flatMap axNamesLHS ++ axNamesRHS r
-  | .scatter _ ls r _ => ls.flatMap axNamesLHS ++ axNamesRHS r
-  | .recurMorphism _ ax _ => [ax.name]
+private def specsStmt : Stmt → List AxisSpec
+  | .assign _ ls r => ls.flatMap specsLHS ++ specsRHS r
+  | .scatter _ ls r _ => ls.flatMap specsLHS ++ specsRHS r
+  | .recurMorphism _ ax _ => [ax]
+
+/-- Every `AxisSpec` occurring anywhere in the program, in program order (decls then stmts). -/
+private def TLProgram.axisSpecs (p : TLProgram) : List AxisSpec :=
+  p.decls.flatMap specsDecl ++ p.stmts.flatMap specsStmt
 
 /-- The ordered, de-duplicated list of axis names occurring anywhere in the program. -/
 def TLProgram.axisNames (p : TLProgram) : List String :=
-  (p.decls.flatMap axNamesDecl ++ p.stmts.flatMap axNamesStmt).eraseDups
+  (p.axisSpecs.map (·.name)).eraseDups
 
 /-! ## UID collectors (public — for tests and later phases) -/
 
-private def uidsIdx : IdxExpr → List UID
-  | .axis a => [a.uid] | .const _ => [] | .scale _ a => [a.uid]
-  | .shift a _ => [a.uid] | .affine _ xs => xs.map (fun p => p.2.uid)
-
-private def uidsPred : PredArith → List UID
-  | .embed e => uidsIdx e | .mul a b => uidsPred a ++ uidsPred b | .iabs a => uidsPred a
-
-private def uidsBool : BoolExpr → List UID
-  | .rel _ a b => uidsPred a ++ uidsPred b
-  | .and a b => uidsBool a ++ uidsBool b | .or a b => uidsBool a ++ uidsBool b
-  | .not a => uidsBool a | .ieq a b => uidsPred a ++ uidsPred b
-
-private def uidsNonlin : Nonlin → List UID
-  | .softmax (some m) => uidsBool m | .normalize (some m) => uidsBool m | _ => []
-
-private def uidsFactor : Factor → List UID
-  | .read _ es => es.flatMap uidsIdx | .iverson b => uidsBool b
-
-private def uidsRHS (r : RHSExpr) : List UID :=
-  (r.body.terms.flatMap (fun t => t.factors.flatMap uidsFactor)) ++ uidsNonlin r.nonlin
-
-private def uidsLHS : LHSSlot → List UID
-  | .free a => [a.uid] | .freeNorm a => [a.uid]
-  | .iterAt a _ => [a.uid] | .iterNext a => [a.uid] | .affine e => uidsIdx e
-
 /-- Every `AxisSpec.uid` reachable in a statement, in program order. -/
-def Stmt.uids : Stmt → List UID
-  | .assign _ ls r => ls.flatMap uidsLHS ++ uidsRHS r
-  | .scatter _ ls r _ => ls.flatMap uidsLHS ++ uidsRHS r
-  | .recurMorphism _ ax _ => [ax.uid]
+def Stmt.uids (s : Stmt) : List UID := (specsStmt s).map (·.uid)
 
 /-! ## The `assignUIDs` phase -/
 
@@ -235,49 +212,11 @@ canonical representative (the §7.3 cocone vertex), and substitutes it throughou
 the full pipeline `assignUIDs` already binds each name to one UID, so this is effectively identity
 there; the standalone test feeds DISTINCT UIDs for one name to genuinely exercise the merge. -/
 
-/-- Pair each axis name with its `AxisSpec.uid`. Mirrors `TLProgram.axisNames` exactly, but keeps
-    the uid alongside the name. Exhaustive structural recursion (every constructor) ⇒ nothing
-    dropped. Public: the test reads it back to assert post-unification UIDs. -/
-private def axNameUIDIdx : IdxExpr → List (String × UID)
-  | .axis a => [(a.name, a.uid)] | .const _ => [] | .scale _ a => [(a.name, a.uid)]
-  | .shift a _ => [(a.name, a.uid)] | .affine _ xs => xs.map (fun p => (p.2.name, p.2.uid))
-
-private def axNameUIDPred : PredArith → List (String × UID)
-  | .embed e => axNameUIDIdx e | .mul a b => axNameUIDPred a ++ axNameUIDPred b
-  | .iabs a => axNameUIDPred a
-
-private def axNameUIDBool : BoolExpr → List (String × UID)
-  | .rel _ a b => axNameUIDPred a ++ axNameUIDPred b
-  | .and a b => axNameUIDBool a ++ axNameUIDBool b | .or a b => axNameUIDBool a ++ axNameUIDBool b
-  | .not a => axNameUIDBool a | .ieq a b => axNameUIDPred a ++ axNameUIDPred b
-
-private def axNameUIDNonlin : Nonlin → List (String × UID)
-  | .softmax (some m) => axNameUIDBool m | .normalize (some m) => axNameUIDBool m | _ => []
-
-private def axNameUIDFactor : Factor → List (String × UID)
-  | .read _ es => es.flatMap axNameUIDIdx | .iverson b => axNameUIDBool b
-
-private def axNameUIDRHS (r : RHSExpr) : List (String × UID) :=
-  (r.body.terms.flatMap (fun t => t.factors.flatMap axNameUIDFactor)) ++ axNameUIDNonlin r.nonlin
-
-private def axNameUIDLHS : LHSSlot → List (String × UID)
-  | .free a => [(a.name, a.uid)] | .freeNorm a => [(a.name, a.uid)] | .iterAt a _ => [(a.name, a.uid)]
-  | .iterNext a => [(a.name, a.uid)] | .affine e => axNameUIDIdx e
-
-private def axNameUIDDecl : Decl → List (String × UID)
-  | .tensor _ ax => ax.map (fun a => (a.name, a.uid))
-  | .predicate _ ax => ax.map (fun a => (a.name, a.uid))
-  | .linear _ ax _ => ax.map (fun a => (a.name, a.uid))
-  | .axis ax _ => [(ax.name, ax.uid)]
-
-private def axNameUIDStmt : Stmt → List (String × UID)
-  | .assign _ ls r => ls.flatMap axNameUIDLHS ++ axNameUIDRHS r
-  | .scatter _ ls r _ => ls.flatMap axNameUIDLHS ++ axNameUIDRHS r
-  | .recurMorphism _ ax _ => [(ax.name, ax.uid)]
-
-/-- Every (axis-name, axis-uid) pair occurring anywhere in the program, in program order. -/
+/-- Every (axis-name, axis-uid) pair occurring anywhere in the program, in program order.
+    Mirrors `TLProgram.axisNames` exactly but keeps the uid alongside the name; the test reads
+    it back to assert post-unification UIDs. -/
 def collectAxisNameUID (p : TLProgram) : List (String × UID) :=
-  p.decls.flatMap axNameUIDDecl ++ p.stmts.flatMap axNameUIDStmt
+  p.axisSpecs.map (fun a => (a.name, a.uid))
 
 /-- Realize the §7.4 UID coequalizer: group UIDs by axis name, canonical = largest UID per name,
     substitute throughout. Pure inside; lifted via `return`. Identity when each name has one UID. -/

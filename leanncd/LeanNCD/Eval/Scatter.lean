@@ -28,7 +28,11 @@ def evalScatter (env : HashMap String DenseTensor) (sizes : HashMap UID Nat)
     if !(env.contains rn) then
       throw s!"evalScatter: unknown tensor {rn}"
   let srcAxes := scatterSourceAxes slots rhs
-  let srcSizes := srcAxes.map (fun u => (sizes[u]?).getD 1)
+  -- Every source axis must have an inferred size; an unsized one is an upstream sizing gap, so
+  -- fail loud rather than silently iterating it once (`.getD 1`), which drops source coordinates.
+  let srcSizes ← srcAxes.mapM (fun u => match sizes[u]? with
+    | some n => pure n
+    | none   => throw s!"evalScatter: unsized source axis uid {u}")
   let mut out := DenseTensor.ofFn outShape (fun _ => Float.ofInt opts.fill)
   for sc in cartesian srcSizes do
     let coord : HashMap UID Int := (srcAxes.zip sc).foldl (fun m (u, v) => m.insert u (Int.ofNat v)) {}
