@@ -2,11 +2,7 @@ to do:
 
 Cross-scan coupling is a hard wall. Two coupled recurrences over the same axis (G and H both recur over l) are handled. But per-step intermediates depending on more than one scan axis throw a shapeMismatch error rather than attempting to schedule them. Coupled differential equations or multi-scale recurrences hit this. This is the hardest gap — it requires expressing coupled recurrences as a single morphism, which pushes into the weave structure.
 
-≥2 unknown axes in affine size inference stalls. The fixpoint defers positions with multiple unknown axes to the next pass, but if the system of equations genuinely needs simultaneous solving (e.g. X[i+j] where both i and j are unsized), it never converges. A lightweight affine equation solver over the UID variables would handle these without a fixpoint.
-
 The realize bridge is formally broken. ThreadedComposed → BrMorph in Bridge/Realize.lean is a sorry citing tensorHom/swap as B+ obligations. Until those close, there's no formal path from a compiled program to a Br morphism — the categorical model and the executable layer are disconnected at the proof level. This is the single biggest gap for the project's core claim (formalizability, not just execution).
-
-
 
 # Lean 4 Encoding of the `D`-Graded Colored PROP Framework
 
@@ -1793,6 +1789,50 @@ and normalize) evaluate with hand-checked numeric assertions in `test/Eval/EvalE
 max-reduction programs are tested in `test/DSL/MaxReduceTest.lean`.
 Symbolic-size evaluation and the `scanPre`/`recurMorphism` escape hatches are out of scope (they raise
 an `EvalError`).
+
+**Axis size inference.** Before any statement is executed, `evalScheduled` calls
+`inferAxisSizes : HashMap UID Nat → HashMap String DenseTensor → List Stmt → Except EvalError (HashMap UID Nat × List String)`
+(in `leanncd/LeanNCD/Eval/Shape.lean`) to derive the concrete size of every free axis from the
+shapes of the supplied input tensors. The return type is a pair of the solved size map and a list
+of non-fatal warnings. The solver works in three stages:
+
+1. **Upper-envelope projection.** Each affine read position `pos` (an `AffinePosition` carrying the
+   tensor name, dimension, constant offset, and coefficient list) is filtered to its
+   *upper-envelope coefficients*: only the positive-coefficient terms can reach their axis maximum
+   under padded semantics, so only those terms contribute to the constraint derivation. Negative
+   coefficients are dropped from the size equation (though they remain valid for evaluation).
+
+2. **Unified RREF solver (`solveSizeConstraints`).** All read positions with at least one unsized
+   axis are collected as `SizeConstraint` records (`coeffs : List (Int × UID)`, `rhs : Int`) and
+   passed to a single Gaussian elimination over `Rat`. The constraint RHS follows the
+   *maximal-extent convention*: for a read `T[c₀ + Σ cᵢ·aᵢ]` against a tensor of dimension `d`,
+   the constraint is `Σ_{cᵢ>0} cᵢ · size(aᵢ) = d − c₀ + Σ_{cᵢ>0} cᵢ − 1`, placing the maximum
+   index exactly at `d − 1`. Non-integral RREF solutions are floored independently
+   (*floor-then-verify*): after flooring, every original constraint is checked as an inequality
+   (`lhs ≤ rhs`); a violation throws a descriptive `EvalError`. This handles padded-access programs
+   such as strided convolution, where the exact system is non-integral but the floor still
+   satisfies the inequality. Previously a fast-path handled the one-unknown case separately and
+   contaminated the multi-variable solver with a pre-floored value; the unified route eliminates
+   that class of error.
+
+3. **Fixpoint + diagnostics.** The solver iterates until no new size is discovered. After
+   convergence, two checks run:
+   - *Issue D (fail-loud):* any axis whose upper-envelope coefficient is non-positive in every
+     read — meaning no constraint can bound it from above — throws an `EvalError` citing the axis
+     UID and source positions. Such axes must be declared explicitly (`axis a = n`).
+   - *Issue H (padded-access warning):* any fully-known multi-term read (all axes already sized)
+     whose maximum index meets or exceeds the tensor dimension emits a `"padded-access warning"`
+     in the returned `List String`. Under padded semantics out-of-range reads return zero and are
+     valid, but the warning flags the access as surprising. Warnings are forwarded to stderr via
+     `dbg_trace` in `evalScheduled`. Note: this warning fires only when axis sizes arrive via the
+     explicit seed (the `HashMap UID Nat` first argument), because solver-derived sizes are
+     tight-fit by construction (max-index = dim − 1) and never trigger it.
+
+`inferAxisSizes` is tested in `test/Eval/AffineShapeSolverTest.lean` (multi-equation, conv-like,
+non-integral floor, signed-affine, 2D/3D padded-window, mixed-path, redundant-equality,
+Issue D fail-loud, Issue D seeded, Issue A regression, Issue H seeded warning) and the
+corresponding semantics are documented in
+`docs/lean_affine_shape_solver_max_padded_semantics.md`.
 
 ## 15. Appendix: out of scope
 
