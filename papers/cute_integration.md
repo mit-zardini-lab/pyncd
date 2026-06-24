@@ -355,11 +355,20 @@ With layout enrichment, represent each port by one structured map/factorization,
 λ_i : P × T_i → A_i
 ```
 
-where:
+where `i` ranges over **input operands** — one per input tensor (port) of the operation (e.g. `W` and `X` in a matmul) — and:
 
-- `P` = shared degree (broadcast space),
-- `T_i` = local/target coordinates for operand `i`,
-- `A_i` = full operand coordinates.
+- `P` = shared degree (broadcast space): the axes appearing in the output, shared across all operands.
+- `T_i` = local axes of operand `i`: axes it is indexed by that are *not* in `P` — typically the contracted/reduction axes.
+- `A_i` = full coordinate space of operand `i`: all axes it is indexed by, i.e. the degree axes it uses plus its local axes.
+
+*Matmul example* `Y[i,j] = W[i,k] * X[k,j]`:
+
+| Operand | `P` axes used | `T_i` (local) | `A_i` (full) | `λ_i` domain → codomain |
+| ------- | ------------- | ------------- | ------------ | ------------------------ |
+| `W`     | `i`           | `k`           | `(i, k)`     | `(i,j,k) → (i,k)`       |
+| `X`     | `j`           | `k`           | `(k, j)`     | `(i,j,k) → (k,j)`       |
+
+`j` does not appear in `A_W` (W does not depend on `j`); the corresponding stride in `λ_W` is 0 (CUTE's broadcast convention).
 
 This single `λ_i` carries both old pieces (mask + reindexing).
 
@@ -422,6 +431,25 @@ Likely costs:
 - optimizer/search-space engineering required to realize performance gains,
 - compatibility pressure from existing APIs/tests centered on `Weave` + `reindexings`.
 
+#### Where `λ_i` belongs in the Python code
+
+Unlike the Lean case, the case for adopting `λ_i` at the Python level is strong — `Broadcasted` is already concrete (specific to `Br + St`), so there is no generality to protect.
+
+Currently, per input operand `i`, the data is split across two fields of `Broadcasted`:
+
+- `input_weaves[i]._shape` — the structural mask (`TILED` vs concrete `Axis` slots),
+- `reindexings[i]` — the `StrideCategory` morphism `P → Q_i` (which degree axes operand `i` uses).
+
+These two pieces are `λ_i` in disguise. Every method on `Weave` — `imprint_to_degree`, `select_degree`, `select_target` — reconstructs what `λ_i` would give directly. The compilation pipeline (`bcast.py`, `materialise.py`) already has to hold both pieces together to do anything useful.
+
+The migration has two natural levels:
+
+1. **Structural `λ_i`** (no strides): replace `(weave, reindexing)` per port with a single object that names `P`, `T_i`, `A_i` explicitly. No CUTE dependency; achievable now. Simplifies `Broadcasted` construction and the compilation pipeline.
+
+2. **Stride-carrying `λ_i`** (full CUTE): adds concrete stride integers, enabling admissibility checks and the full layout algebra. Requires `St_layout` to exist first.
+
+Level 1 is a self-contained cleanup. Level 2 is the longer-term CUTE integration.
+
 ### 6.2 Lean
 
 Likely simplifications:
@@ -436,6 +464,21 @@ Likely costs:
 - hierarchical typing obligations can increase local proof overhead.
 
 Overall: **global simplification with localized side-condition burden**. Best practice is to centralize admissibility lemmas in `St_layout` and reuse throughout `Br`.
+
+#### Where `λ_i` belongs in the Lean code
+
+The impact of the `λ_i : P × T_i → A_i` representation is layer-dependent.
+
+**Abstract `Weave` structure** (currently `LeanNCD/Core/Weave.lean`): no change needed. The `lam` field already plays the role of `λ_i` — it is the boundary map from the input object `X` into the graded action `act (X', P)`. The abstract `Weave` is generic over any `D` and `C`, which is the right level of generality; replacing it with an explicit `λ_i` would be a specialisation to `Br + St`, not an improvement.
+
+**Concrete `SBrInstance` → `realizeSBr` bridge** (`LeanNCD/Acset/SBrInstance.lean`, `LeanNCD/Bridge/SBr.lean`): this is where `λ_i` would genuinely help. Currently the per-operand weave data is scattered across three tables:
+
+- `ArrayAxisRow.isTarget` — encodes the weave mask (TILED vs local axis),
+- `SampleRow` coeff/offset pairs — encodes the affine reindexing per axis pair.
+
+A per-operand `λ_i` layout structure would consolidate these, making `realizeSBr` structurally cleaner and admissibility checks statically expressible rather than reconstructed from table lookups.
+
+**Blockers**: this bridge-level refactor requires (1) `St_layout` Lean types (hierarchical layout morphisms from §3.2) to exist, and (2) the current live `Br` work (`brCancelPoint` / `BrNF`) to stabilise first. It is a later-milestone change.
 
 ---
 
