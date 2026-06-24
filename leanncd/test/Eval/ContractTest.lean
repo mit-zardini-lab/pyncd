@@ -15,7 +15,7 @@ run_cmd do
     { body := { terms := [{ factors := [.read "W" [.axis i, .axis k], .read "X" [.axis k, .axis j]] }] }, nonlin := .identity }
   match inferAxisSizes {} env [mm] with
   | .error e => throwError e
-  | .ok sizes =>
+  | .ok (sizes, _) =>
     match evalAssign env sizes "Y" [.free i, .free j] { body := { terms := [{ factors := [.read "W" [.axis i, .axis k], .read "X" [.axis k, .axis j]] }] }, nonlin := .identity } with
     | .error e => throwError e
     | .ok (_, Y) =>
@@ -30,7 +30,7 @@ run_cmd do
   let rhs : RHSExpr := { body := { terms := [{ factors := [.read "A" [.axis i]] }, { factors := [.read "B" [.axis i]] }] }, nonlin := .identity }
   match inferAxisSizes {} env [.assign "Z" [.free i] rhs] with
   | .error e => throwError e
-  | .ok sizes => match evalAssign env sizes "Z" [.free i] rhs with
+  | .ok (sizes, _) => match evalAssign env sizes "Z" [.free i] rhs with
     | .error e => throwError e
     | .ok (_, Z) => unless DenseTensor.approxEq Z (tensorOf [3] [11,22,33]) do throwError "sum wrong"
 
@@ -56,7 +56,7 @@ run_cmd do
   let rhs : RHSExpr := { body := { terms := [{ factors := [.read "F" [.axis t, .axis i], .read "F" [.axis t, .axis j], .read "edge" [.axis i, .axis j]] }] }, nonlin := .identity }
   match inferAxisSizes {} env [.assign "Result" [] rhs] with
   | .error e => throwError e
-  | .ok sizes =>
+  | .ok (sizes, _) =>
     -- ℝ (tensor) reading ⇒ scalar 2.0
     match evalAssignDtyped [.tensor "Result" []] env sizes "Result" [] rhs with
     | .error e => throwError e

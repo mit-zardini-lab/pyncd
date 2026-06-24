@@ -48,7 +48,8 @@ def evalScheduled (sched : ScheduledProgram) (inputs : HashMap String DenseTenso
   -- gather ALL underlying stmts (plain + scan base/recur) to infer axis sizes from the inputs:
   let allStmts : List Stmt := sched.stmts.flatMap (fun
     | .plain s => [s] | .scan _ _ b r _ => b ++ r | .scanPre _ _ _ => [])
-  let sizes ← inferAxisSizes sched.explicitSizes inputs allStmts
+  let (sizes, warns) ← inferAxisSizes sched.explicitSizes inputs allStmts
+  for w in warns do dbg_trace w
   let mut env := inputs
   for sc in sched.stmts do
     match sc with

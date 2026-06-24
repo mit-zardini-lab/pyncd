@@ -62,7 +62,7 @@ run_cmd do
   let stmt := Stmt.assign "C" [.free i] rhs
   match inferAxisSizes {} env [stmt] with
   | .error e => throwError e
-  | .ok sizes =>
+  | .ok (sizes, _) =>
     match evalAssignWith (· * ·) floatMax negInf env sizes "C" [.free i] rhs with
     | .error e => throwError e
     | .ok (_, C) =>
@@ -79,7 +79,7 @@ run_cmd do
                           nonlin := .identity, agg := .max }
   match inferAxisSizes {} env [Stmt.assign "C" [.free i] rhs] with
   | .error e => throwError e
-  | .ok sizes =>
+  | .ok (sizes, _) =>
     match evalAssignWith (· * ·) floatMax negInf env sizes "C" [.free i] rhs with
     | .error e => throwError e
     | .ok (_, C) =>
@@ -100,7 +100,7 @@ run_cmd do
       nonlin := .identity, agg := .max }
   match inferAxisSizes {} env [Stmt.assign "C" [.free i] rhs] with
   | .error e => throwError e
-  | .ok sizes =>
+  | .ok (sizes, _) =>
     match evalAssignWith (· * ·) floatMax negInf env sizes "C" [.free i] rhs with
     | .error e => throwError e
     | .ok (_, C) =>

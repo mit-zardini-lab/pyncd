@@ -13,7 +13,7 @@ run_cmd do
     { body := { terms := [{ factors := [.read "W" [.axis i, .axis k], .read "X" [.axis k, .axis j]] }] }, nonlin := .identity }
   match inferAxisSizes {} env [mm] with
   | .error e => throwError e
-  | .ok sizes =>
+  | .ok (sizes, _) =>
       unless sizes[1]? == some 2 && sizes[2]? == some 3 && sizes[3]? == some 4 do
         throwError s!"wrong sizes: {sizes[1]?},{sizes[2]?},{sizes[3]?}"
       unless outputShape sizes (Stmt.lhsSlots mm) == [2,4] do throwError "wrong output shape"
@@ -37,7 +37,7 @@ run_cmd do
     { body := { terms := [{ factors := [.read "Tmp" [.axis i]] }] }, nonlin := .identity }
   match inferAxisSizes {} env [s] with
   | .error e => throwError e
-  | .ok sizes =>
+  | .ok (sizes, _) =>
       unless outputShape sizes (Stmt.lhsSlots s) == [0] do throwError "expected [0] for unpinned axis"
 
 end LeanNCD.Eval

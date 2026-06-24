@@ -40,4 +40,5 @@ globs = ["Base.NumericTest", "Base.StTest", "Base.BrTest",
          "Acset.FixtureTest",
          "Eval.TensorTest", "Eval.ShapeTest", "Eval.GatherTest",
          "Eval.ContractTest", "Eval.NonlinTest", "Eval.ScatterTest",
+         "Eval.AffineShapeSolverTest",
          "Eval.ScanTest", "Eval.EvalExamplesTest"]
