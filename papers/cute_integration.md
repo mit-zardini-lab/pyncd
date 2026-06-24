@@ -8,6 +8,44 @@ The core recommendation is **hybrid integration**:
 - add a **layout-enriched index layer** (CUTE-style hierarchical layouts and algebra) underneath `St`/reindexing,
 - optionally expose this enriched layer in the DSL as explicit layout annotations.
 
+## Contents
+
+1. [References](#1-references)
+2. [CUTE layouts: compact background](#2-cute-layouts-compact-background)
+3. [Integration with the `D`-graded colored PROP](#3-integration-with-the-d-graded-colored-prop)
+   - [3.1 What should stay unchanged](#31-what-should-stay-unchanged)
+   - [3.2 What changes in `St`](#32-what-changes-in-st)
+   - [3.3 What changes in `Br`](#33-what-changes-in-br)
+4. [What this unlocks (and what it does not)](#4-what-this-unlocks-and-what-it-does-not)
+5. [Data interchange implications (pyncd/leanncd)](#5-data-interchange-implications-pyncdleanncd)
+6. [Impact: simplifications and costs](#6-impact-simplifications-and-costs)
+   - [6.1 Python](#61-python)
+   - [6.2 Lean](#62-lean)
+7. [DSL-level support](#7-dsl-level-support)
+   - [7.0 What changes for me as a user?](#70-what-changes-for-me-as-a-user)
+   - [7.1 No annotations (current inference style)](#71-no-annotations-current-inference-style)
+   - [7.2 Flat annotations equivalent to current behavior](#72-flat-annotations-equivalent-to-current-behavior)
+   - [7.3 Hierarchical tiled batched matmul](#73-hierarchical-tiled-batched-matmul)
+   - [7.4 Transpose + blocked copy pattern](#74-transpose--blocked-copy-pattern)
+   - [7.5 Convolution-like patch extraction (im2col-style)](#75-convolution-like-patch-extraction-im2col-style)
+   - [7.6 Attention-style partitioning](#76-attention-style-partitioning)
+   - [7.7 Expert routing (static table, not dynamic `Route`)](#77-expert-routing-static-table-not-dynamic-route)
+8. [Categorical integration details](#8-categorical-integration-details)
+   - [8.1 CUTE categories as index semantics](#81-cute-categories-as-index-semantics)
+   - [8.2 Action of `D` on `C` with layout morphisms](#82-action-of-d-on-c-with-layout-morphisms)
+   - [8.3 Weaves as internal factorizations](#83-weaves-as-internal-factorizations)
+   - [8.4 Relationship to `C ≅ ∫Dat` and Para](#84-relationship-to-c--dat-and-para)
+   - [8.5 Scope boundary: what CUTE cannot absorb](#85-scope-boundary-what-cute-cannot-absorb)
+9. [Cost-based optimization perspective](#9-cost-based-optimization-perspective)
+   - [9.1 Why the database analogy is strong](#91-why-the-database-analogy-is-strong)
+   - [9.2 End-to-end walkthrough: Tensor Logic to optimized plan](#92-end-to-end-walkthrough-tensor-logic-to-optimized-plan)
+   - [9.3 Optimizer architecture for Tensor Logic + CUTE](#93-optimizer-architecture-for-tensor-logic--cute)
+   - [9.4 Cost model ingredients (GPU)](#94-cost-model-ingredients-gpu)
+   - [9.5 Feasibility constraints from layout algebra](#95-feasibility-constraints-from-layout-algebra)
+   - [9.6 Background material that is directly relevant](#96-background-material-that-is-directly-relevant)
+10. [Minimal migration plan](#10-minimal-migration-plan)
+11. [Bottom line](#11-bottom-line)
+
 ---
 
 ## 1. References
@@ -61,13 +99,117 @@ The categorical foundations paper shows a tractable fragment represented by morp
 (M, N) : (N, 1)
 ```
 
-2. **Hierarchical fold of an axis**
+Tensor shape/rank: `M x N` (rank-2 tensor).
+
+Access pattern (logical coordinate → linear offset):
+
+```text
+addr(i, j) = i*N + j,   0 <= i < M, 0 <= j < N
+```
+
+Index-layout example (as in CUTE notation):
+
+```text
+L^{row} = (4, 8) : (8, 1)
+```
+
+Grid of offsets:
+
+```text
+[  0,  1,  2,  3,  4,  5,  6,  7 ]
+[  8,  9, 10, 11, 12, 13, 14, 15 ]
+[ 16, 17, 18, 19, 20, 21, 22, 23 ]
+[ 24, 25, 26, 27, 28, 29, 30, 31 ]
+```
+
+So adjacent `j` entries are contiguous; stepping `i` jumps by `N`.
+
+2. **Flat column-major matrix layout**
+
+```text
+(M, N) : (1, M)
+```
+
+Tensor shape/rank: `M x N` (rank-2 tensor).
+
+Access pattern (logical coordinate → linear offset):
+
+```text
+addr(i, j) = i + j*M,   0 <= i < M, 0 <= j < N
+```
+
+Index-layout example:
+
+```text
+L^{col} = (4, 8) : (1, 4)
+```
+
+Grid of offsets:
+
+```text
+[  0,  4,  8, 12, 16, 20, 24, 28 ]
+[  1,  5,  9, 13, 17, 21, 25, 29 ]
+[  2,  6, 10, 14, 18, 22, 26, 30 ]
+[  3,  7, 11, 15, 19, 23, 27, 31 ]
+```
+
+So adjacent `i` entries are contiguous; stepping `j` jumps by `M`.
+
+3. **Hierarchical fold of an axis**
 
 ```text
 (M, (N0, N1)) : (sM, (sN0, sN1))
 ```
 
-3. **Composition with a tiler**
+Tensor shape/rank: `M x N0 x N1` (rank-3 logical tensor, with folded second mode).
+
+Folded-coordinate access pattern:
+
+```text
+addr(i, (n0, n1)) = i*sM + n0*sN0 + n1*sN1
+```
+
+Equivalent flattened view (when `j = n0*N1 + n1`):
+
+```text
+addr(i, j) = addr(i, (floor(j/N1), j mod N1))
+```
+
+Small fold illustration (`2 x (2 x 2)`):
+
+```text
+L^{fold,small} = (2, (2, 2)) : (8, (4, 1))
+
+[ 0, 1, 4, 5 ]
+[ 8, 9,12,13 ]
+```
+
+These are **offsets** (addresses), not logical element labels; this layout is non-compact, so offsets are not restricted to `0..7`.
+
+Same idea at full `4 x 8` scale:
+
+```text
+L^{row,fold} = (4, (2, 4)) : (8, (4, 1))
+
+[  0,  1,  2,  3,  4,  5,  6,  7 ]
+[  8,  9, 10, 11, 12, 13, 14, 15 ]
+[ 16, 17, 18, 19, 20, 21, 22, 23 ]
+[ 24, 25, 26, 27, 28, 29, 30, 31 ]
+```
+
+For comparison, an interleaved tiled view over the same 32 elements is:
+
+```text
+L^{tiled} =
+((2,2),(4,2)) : ((4,1),(8,2))
+
+[  0,  2,  8, 10, 16, 18, 24, 26 ]
+[  1,  3,  9, 11, 17, 19, 25, 27 ]
+[  4,  6, 12, 14, 20, 22, 28, 30 ]
+[  5,  7, 13, 15, 21, 23, 29, 31 ]
+```
+
+4. **Composition with a tiler**
 
 ```text
 L_sub = L ◦ T
@@ -75,7 +217,34 @@ L_sub = L ◦ T
 
 where `T` picks/partitions modes by construction, then can be sliced by thread/value coordinates.
 
-4. **Logical product (tile over grid)**
+Tensor shape/rank: induced by `domain(T)`; typically a tiled/partitioned rank-2 or rank-3 view (for matrix examples, e.g. `Mt x Nt`).
+
+Access pattern:
+
+```text
+addr_sub(t, v) = L(T(t, v))
+```
+
+Index-layout example:
+
+```text
+L      = (8, 16) : (16, 1)
+T      = (4, 8) : (1, 1)      # pick top-left 4x8 block
+L_sub  = L ◦ T = (4, 8) : (16, 1)
+```
+
+`L_sub` grid of offsets:
+
+```text
+[  0,  1,  2,  3,  4,  5,  6,  7 ]
+[ 16, 17, 18, 19, 20, 21, 22, 23 ]
+[ 32, 33, 34, 35, 36, 37, 38, 39 ]
+[ 48, 49, 50, 51, 52, 53, 54, 55 ]
+```
+
+`T` maps thread/value coordinates `(t,v)` into coordinates of `L`; composition then gives offsets directly in the parent layout.
+
+5. **Logical product (tile over grid)**
 
 ```text
 A ⊗ B = (A, A* ◦ B)
@@ -83,11 +252,45 @@ A ⊗ B = (A, A* ◦ B)
 
 with `A*` the complement of `A`.
 
+Tensor shape/rank: tile-shape `shape(A)` over grid-shape `shape(B)`; for matrix tile/grid this is typically rank-4 before optional blocked/raked coalescing.
+
+Access pattern (tile coordinate `a`, grid coordinate `b`):
+
+```text
+addr(a, b) = A(a) + A*(B(b))
+```
+
+Index-layout example:
+
+```text
+A = (3, 4) : (4, 1)
+B = (2, 5) : (1, 2)
+A ⊗ B = ((3,4),(2,5)) : ((4,1),(12,24))
+```
+
+One tile (`b=(0,0)`) is the `A` grid:
+
+```text
+[ 0, 1, 2, 3 ]
+[ 4, 5, 6, 7 ]
+[ 8, 9,10,11 ]
+```
+
+Next tile in grid order (`b=(1,0)`) is shifted by `12`:
+
+```text
+[12,13,14,15]
+[16,17,18,19]
+[20,21,22,23]
+```
+
+Interpretation: each `b` selects a shifted copy of tile `A`; `A* ◦ B` provides the per-grid shift so tiles do not collide.
+
 ---
 
 ## 3. Integration with the `D`-graded colored PROP
 
-## 3.1 What should stay unchanged
+### 3.1 What should stay unchanged
 
 These are semantic invariants and should be preserved:
 
@@ -99,14 +302,14 @@ These are semantic invariants and should be preserved:
 
 In short, CUTE should enrich index/layout representation, not replace `D`-graded semantics.
 
-## 3.2 What changes in `St`
+### 3.2 What changes in `St`
 
-Current `St` already gives useful affine canonicalization. CUTE integration extends it from mostly flat affine maps to hierarchical layout algebra.
+Current `St` already gives useful affine canonicalization. CUTE integration extends it from affine reindexings over product axes (without first-class hierarchical layout algebra) to explicit hierarchical layout algebra.
 
 Practical split:
 
-- `St_aff` (existing fragment): current `StrideMorphism`-style behavior.
-- `St_layout` (new fragment): layout morphisms with hierarchical shape/stride and CUTE algebra operations.
+- `St_aff` (**proposed label in this note**, not an existing module/type name): the current affine fragment (`StrideMorphism`-style behavior).
+- `St_layout` (**proposed label in this note**, not an existing module/type name): a future layout-enriched fragment with hierarchical shape/stride and CUTE algebra operations.
 
 Then provide:
 
@@ -120,7 +323,7 @@ Then provide:
 - principled modewise tiling/partition derivation,
 - reusable inversion/complement/division lemmas for analysis/compilation.
 
-## 3.3 What changes in `Br`
+### 3.3 What changes in `Br`
 
 Today each input port effectively stores:
 
@@ -182,15 +385,33 @@ This is especially useful for Lean/Python roundtrip: one shared layout-normal fo
 
 ---
 
-## 6. Lean impact: likely simplifications and costs
+## 6. Impact: simplifications and costs
 
-### Likely simpler
+### 6.1 Python
+
+Likely simplifications:
+
+- cleaner internal representation (single per-port layout factorization instead of mask+reindexing split),
+- better rewrite/optimization surface from first-class layout algebra operations,
+- stronger static validation via admissibility/divisibility checks in compilation passes,
+- more reusable lowering pipeline through shared layout normalization.
+
+Likely costs:
+
+- migration complexity while supporting old/new representations in parallel,
+- richer IR objects increase debugging and tooling complexity,
+- optimizer/search-space engineering required to realize performance gains,
+- compatibility pressure from existing APIs/tests centered on `Weave` + `reindexings`.
+
+### 6.2 Lean
+
+Likely simplifications:
 
 - proofs about index map composition/coalesce/complement can use dedicated layout lemmas,
 - fewer ad hoc positional rewrites in morphism-level proofs,
 - better proof reuse between backend code and formal model.
 
-### Likely harder
+Likely costs:
 
 - additional side conditions (admissibility/divisibility/refinement) appear in many statements,
 - hierarchical typing obligations can increase local proof overhead.
@@ -202,6 +423,29 @@ Overall: **global simplification with localized side-condition burden**. Best pr
 ## 7. DSL-level support
 
 The equation language can stay mostly unchanged, with optional layout annotations for explicit control.
+
+### 7.0 What changes for me as a user?
+
+Use layout annotations when:
+
+- you care about concrete tiling/partitioning strategy (e.g., attention/blocking choices),
+- you need stable lowering behavior across hardware backends,
+- you want compiler-visible intent for layout-sensitive optimization.
+
+Defaults are usually enough when:
+
+- expressions are simple einsum-style contractions and broadcasts,
+- no special memory-layout constraints are needed,
+- performance is already acceptable without manual layout steering.
+
+Typical new compiler diagnostics in a layout-enriched system:
+
+- **admissibility/divisibility errors** (invalid composition/division under current shape factors),
+- **hardware-legality errors** (tile/layout incompatible with target MMA/copy instruction requirements),
+- **normalization/coalescing warnings** (annotation is legal but redundant or canonicalizes to an existing form),
+- **cost-model hints** (annotation legal but predicted slower than an equivalent candidate).
+
+Mental model: layouts behave like a **refinement (pseudo-)type system** for Tensor Logic. Base TL typing checks algebraic/index correctness; layout typing refines this with admissibility, coordinate-structure, and hardware-legality constraints.
 
 ### 7.1 No annotations (current inference style)
 
@@ -237,9 +481,28 @@ Y[b, i=(io,ii), j=(jo,ji)] =
   W@W_deg[i,k] * X@X_deg[b,k,j]
 ```
 
+Here `(io,ii)` and `(jo,ji)` are split/tiled coordinates:
+
+- `i = i_outer * I_inner + i_inner`, with `io = i_outer`, `ii = i_inner`,
+- `j = j_outer * J_inner + j_inner`, with `jo = j_outer`, `ji = j_inner`.
+
+So `io`/`jo` index tiles, while `ii`/`ji` index positions inside each tile.
+
 The math is unchanged; annotations make tiling/folding explicit.
 
 ### 7.4 Transpose + blocked copy pattern
+
+Context (equivalent plain Tensor Logic):
+
+```tl
+# transpose only
+Z[j,i] = A[i,j]
+
+# transpose + explicit blocking (i = io*Ti + ii, j = jo*Tj + ji)
+Z[jo,ji,io,ii] = A[io,ii,jo,ji]
+```
+
+The layout-annotated form below expresses the same semantics, but keeps transpose and blocking as explicit layout morphisms for legality checks and lowering.
 
 ```tl
 layout Src = shape((i,j))
@@ -252,6 +515,18 @@ Z = copy( A@compose(Tr, Tile) )
 This exposes by-mode composition explicitly for lowering and legality checks.
 
 ### 7.5 Convolution-like patch extraction (im2col-style)
+
+Context (equivalent plain Tensor Logic):
+
+```tl
+# Conceptually gather a local window around each output location:
+Xpatch[b,oh,ow,kh,kw,c] = X[b, oh*sh + kh*dh, ow*sw + kw*dw, c]
+
+# Then contract against kernel:
+Y[b,oh,ow,co] = K[kh,kw,c,co] * Xpatch[b,oh,ow,kh,kw,c]
+```
+
+The layout-annotated form below makes that gather (`X → Xpatch`) explicit as a layout morphism.
 
 ```tl
 layout ImgDeg = shape((b,oh,ow,c))
@@ -267,6 +542,19 @@ The key benefit is first-class expression of patch layout as an index morphism.
 
 ### 7.6 Attention-style partitioning
 
+Context (equivalent plain Tensor Logic):
+
+```tl
+# Baseline score contraction:
+S[b,h,q,k] = Q[b,h,q,d] * K[b,h,k,d]
+
+# Partitioned form conceptually reindexes q,k into outer/inner tiles:
+S[b,h,qo,qi,ko,ki] =
+  Q[b,h,qo,qi,d] * K[b,h,ko,ki,d]
+```
+
+The layout-annotated form below expresses the same partitioning intent as explicit coordinate transforms.
+
 ```tl
 layout QP = shape((b,h,q,d))
 layout KP = shape((b,h,k,d))
@@ -279,6 +567,17 @@ Partition intent is explicit and can be validated/canonicalized before lowering.
 
 ### 7.7 Expert routing (static table, not dynamic `Route`)
 
+Context (equivalent plain Tensor Logic):
+
+```tl
+# Static assignment matrix/table A[token,expert] is known at compile time.
+# A one-hot case is a selector; weighted case is weighted combination.
+Y[token,hidden] =
+  A[token,expert] * E[expert,hidden] * X[token,hidden]   # sum over expert
+```
+
+Because `A` is compile-time/static here, this remains in the weave-compatible/static-reindexing fragment.
+
 ```tl
 layout P = shape((token, expert))
 layout StaticAssign = table_layout(assign_table)  # compile-time constant
@@ -286,17 +585,238 @@ layout StaticAssign = table_layout(assign_table)  # compile-time constant
 Y[token,hidden] = E@StaticAssign[token,expert,hidden] * X[token,hidden]
 ```
 
-This remains weave-compatible if assignment is static; dynamic assignment still belongs to `Route`.
+`expert` is the contracted index (sum over experts). Static assignment is weave-compatible; dynamic assignment still belongs to `Route`.
 
 ---
 
-## 8. Minimal migration plan
+## 8. Categorical integration details
+
+### 8.1 CUTE categories as index semantics
+
+From the `D`-graded perspective, the clean move is to treat CUTE’s tractable layout fragment (as presented via `Tuple`/`Nest` morphisms) as a richer index category:
+
+```text
+D_aff  ⊆  D_layout
+```
+
+where:
+
+- `D_aff` is the current affine-reindexing fragment (`St_aff`),
+- `D_layout` includes hierarchical shape/stride morphisms and CUTE algebraic operators (composition/coalesce/complement/division/product under admissibility).
+
+Then existing pyncd semantics is recovered by restricting to `D_aff`.
+
+From a typing viewpoint, this is a refinement of index types: `D_layout` carries stricter, constraint-rich layout judgments over the same underlying tensor equations.
+
+### 8.2 Action of `D` on `C` with layout morphisms
+
+The graded framework uses a right action:
+
+```text
+act : C × D^op → C
+```
+
+If `D = D_layout`, CUTE compatibility theorems (operations on morphisms commute with operations on realized layouts) become reusable coherence facts for this action:
+
+- composition compatibility supports functoriality of reindexing composition,
+- coalesce/refinement compatibility supports normalization lemmas,
+- complement/division/product compatibility supports structured factorization/rewrite lemmas.
+
+So the `D`-action laws do not change in form; they gain a stronger library of admissible rewrites.
+
+### 8.3 Weaves as internal factorizations
+
+Current representation stores:
+
+1. mask-style weave (`TILED` vs local),
+2. reindexing map from degree.
+
+Categorically enriched representation uses one map per port:
+
+```text
+λ_i : P × T_i → A_i   (in D_layout)
+```
+
+with factorization:
+
+- `P` = degree/broadcast coordinates,
+- `T_i` = local coordinates seen by base op,
+- `A_i` = full operand coordinates.
+
+The old mask+reindexing view is derived from the factorization, rather than stored as separate primitives. This makes “weave data” internal to index morphism structure.
+
+### 8.4 Relationship to `C ≅ ∫Dat` and Para
+
+This integration does **not** require changing the structure/data split:
+
+```text
+C ≅ ∫Dat
+```
+
+still holds. What changes is the structure-side index morphism language (richer `D`). Data payloads (sizes/params/dtypes) remain in `Dat`.
+
+Likewise, Para semantics (`construct()` as parameter-carrying algebra) remains the same at the architectural level; CUTE enrichment improves legality/canonicalization of index transformations before lowering.
+
+### 8.5 Scope boundary: what CUTE cannot absorb
+
+CUTE layout algebra strengthens the weave-compatible fragment, but does not absorb semantic operators whose obstruction is not layout expressivity:
+
+- `Scan`: temporal coupling / failure of pointwise independence,
+- `Route`: value-dependent runtime indexing.
+
+So CUTE belongs in the index layer (`D`), while the non-weave generator boundary from `scan_route.md` remains essential.
+
+---
+
+## 9. Cost-based optimization perspective
+
+### 9.1 Why the database analogy is strong
+
+There is a direct analogy between Tensor Logic + CUTE and classical query optimization:
+
+- **logical plan**: tensor equation + layout expression (including tiling/partitioning),
+- **equivalence rules**: layout algebra rewrites (compose/coalesce/refine/divide/product under admissibility),
+- **physical plan**: specific kernel schedule + memory layout + thread mapping,
+- **optimizer objective**: minimize predicted runtime subject to correctness and hardware constraints.
+
+This is especially natural once layout transforms are first-class morphisms rather than implicit codegen heuristics.
+
+### 9.2 End-to-end walkthrough: Tensor Logic to optimized plan
+
+Start from a plain Tensor Logic score contraction:
+
+```tl
+S[b,h,q,k] = Q[b,h,q,d] * K[b,h,k,d]
+```
+
+`d` is contracted (summed) because it appears on the RHS but not on the LHS.
+
+Lift to explicit layout intent:
+
+```tl
+layout QP = shape((b,h,q,d))
+layout KP = shape((b,h,k,d))
+layout Tile = tiler((b,h,qo,ko,qi,ki))
+
+S[b,h,q,k] =
+  Q@compose(QP, Tile)[b,h,q,d] * K@compose(KP, Tile)[b,h,k,d]
+```
+
+Semantics are unchanged; only partitioning/layout intent is made explicit.
+
+Generate equivalent candidate plans:
+
+1. **Plan A (baseline contiguous)**: no explicit tiling.
+
+```tl
+layout QA = shape((b,h,q,d))
+layout KA = shape((b,h,k,d))
+layout SA = shape((b,h,q,k))
+```
+
+2. **Plan B (blocked tiling)**: block tiles `(Tq, Tk)` with shared-memory staging.
+
+```tl
+# q = qo*Tq + qi,  k = ko*Tk + ki
+layout QB = compose(shape((b,h,q,d)), tile_q((qo,qi), Tq))
+layout KB = compose(shape((b,h,k,d)), tile_k((ko,ki), Tk))
+layout SB = shape((b,h,qo,ko,qi,ki))
+```
+
+3. **Plan C (blocked + interleaved tile)**: same contraction as B, but with an in-tile swizzle/permutation.
+
+```tl
+layout QC = compose(QB, swizzle_qi_d)   # e.g. interleave qi with d lanes
+layout KC = compose(KB, swizzle_ki_d)   # e.g. interleave ki with d lanes
+layout SC = SB                          # same logical score shape as B
+```
+
+So A/B/C differ only in layout/schedule choice (contiguous vs blocked vs blocked+swizzled), not in tensor algebra semantics.
+
+Prune by legality:
+
+- layout admissibility/divisibility,
+- instruction-shape constraints,
+- memory footprint limits.
+
+Score remaining candidates (illustrative numbers):
+
+| Plan | HBM bytes (est.) | Tensor-core eligible | Occupancy (est.) | Penalties | Score (lower better) |
+| --- | ---: | --- | ---: | --- | ---: |
+| A | 1.00x | Partial | High | high HBM traffic | 1.00 |
+| B | 0.62x | Yes | Medium | sync overhead | 0.73 |
+| C | 0.58x | Yes | Medium | lower coalescing penalty | 0.68 |
+
+Pick best physical plan and emit kernel:
+
+- chosen plan: **C**,
+- emitted program preserves TL semantics by equivalence rewrites + legality checks,
+- performance gain comes from lower predicted cost on the same mathematical computation.
+
+This is exactly query-optimizer structure: equivalence-class search plus constrained cost minimization.
+
+### 9.3 Optimizer architecture for Tensor Logic + CUTE
+
+A practical architecture mirrors Cascades/Volcano-style systems:
+
+1. **Normalize** expression into a canonical IR (`Br` morphism + explicit layout morphisms).
+2. **Enumerate equivalent candidates** using legal rewrite rules (memoized e-classes or memo groups).
+3. **Attach physical properties** to candidates (tile shapes, memory space, vector width, warp mapping).
+4. **Prune by feasibility** (instruction constraints, divisibility/admissibility, memory limits).
+5. **Score candidates** with a GPU cost model (analytic and/or learned).
+6. **Emit best plan** and optionally keep top-K alternatives for autotuning.
+
+In this setup, CUTE algebra gives the legal search space; the cost model selects among legal options.
+
+### 9.4 Cost model ingredients (GPU)
+
+A useful first-pass cost model should combine:
+
+- **memory traffic terms**: bytes moved across HBM/shared/register levels,
+- **compute terms**: FLOPs and tensor-core eligibility/utilization,
+- **parallelism terms**: occupancy, warp efficiency, launch geometry,
+- **synchronization terms**: barriers, staging overhead, pipeline bubbles,
+- **access quality terms**: coalescing, bank conflicts, stride/pathological patterns.
+
+A roofline-style bound (compute- vs memory-bound) is a good backbone, refined by architecture-specific penalties.
+
+### 9.5 Feasibility constraints from layout algebra
+
+Cost alone is insufficient; many candidates are invalid. CUTE-style admissibility conditions become hard constraints:
+
+- divisibility requirements for composition/division,
+- compatibility/refinement conditions for folded/blocked transforms,
+- instruction-shape legality (e.g., MMA operand layout requirements),
+- static memory footprint constraints for staging tiles.
+
+So optimization is naturally:
+
+```text
+argmin_plan Cost(plan)
+subject to  LayoutAdmissible(plan) and HardwareLegal(plan)
+```
+
+### 9.6 Background material that is directly relevant
+
+The most relevant prior threads are:
+
+- **query optimization**: Selinger-style cost-based planning; Volcano/Cascades memo rewrite frameworks,
+- **tensor contraction optimization**: einsum contraction-path search (`opt_einsum`) as a direct analogue,
+- **GPU performance modeling**: roofline, occupancy analysis, memory-hierarchy models,
+- **schedule/autotune compilers**: Halide/TVM/Triton/MLIR Linalg-style logical-to-physical lowering,
+- **IO-aware deep learning kernels**: FlashAttention-style traffic minimization as proof that layout/schedule rewrites + cost reasoning produce large wins.
+
+In this document’s context: CUTE supplies the rewrite algebra; pyncd/leanncd `D`-graded semantics supply correctness; a GPU cost model closes the loop.
+
+---
+
+## 10. Minimal migration plan
 
 1. **Add layout-enriched `St_layout` alongside existing `St_aff`**.
 2. **Teach `Broadcasted` construction to accept explicit per-port layout maps** while retaining current weave/reindexing API.
 3. **Add derivation adapters both ways**:
-   - old `(weave,reindexing) -> λ_i`,
-   - new `λ_i -> (weave,reindexing)` for compatibility.
+   - old `(weave,reindexing) → λ_i`,
+   - new `λ_i → (weave,reindexing)` for compatibility.
 4. **Expose optional DSL annotations** (`layout`, `compose`, `proj`, `tiler`, etc.) with current inference as default.
 5. **Incrementally prove Lean lemmas**:
    - layout composition compatibility,
@@ -307,7 +827,7 @@ This yields immediate practical value without breaking existing models or proofs
 
 ---
 
-## 9. Bottom line
+## 11. Bottom line
 
 CUTE is best integrated as a **layout algebra substrate for the index layer**, not as a replacement for the `D`-graded semantics.
 
