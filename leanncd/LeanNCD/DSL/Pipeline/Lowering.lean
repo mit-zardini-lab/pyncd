@@ -230,10 +230,16 @@ def idxAxes : IdxExpr → List AxisSpec
     stmt (a `scanPre` node). Named so `buildStep`/`buildNameToType` share one definition. -/
 def emptyStmt : Stmt := .assign "" [] { body := { terms := [] }, nonlin := .identity }
 
-/-- A stmt's published (retained) output axes, in LHS order — what a producer emits and a
-    consumer receives. -/
+/-- Deduplicate axis specs by uid, keeping the first occurrence in order. Shared by `buildStep`'s
+    `degAxes` and `tensorAxes` so producer (output weave) and consumer (input weave) derive a wire's
+    axes the SAME way — making conjunct 2 hold even for repeated-LHS programs (e.g. `Y[i,i]`). -/
+def dedupByUid (as : List AxisSpec) : List AxisSpec :=
+  as.foldl (fun acc a => if acc.any (fun b => b.uid == a.uid) then acc else acc ++ [a]) []
+
+/-- A stmt's published (retained) output axes, in LHS order (deduplicated by uid) — what a producer
+    emits and a consumer receives. -/
 def tensorAxes (s : Stmt) : List AxisP :=
-  s.lhsAxes.map (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name))
+  (dedupByUid s.lhsAxes).map (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name))
 
 /-- One representative axis per READ POSITION, for external reads (no producer to publish a type). -/
 def readPosAxis : IdxExpr → AxisP
@@ -319,9 +325,7 @@ def buildStep (nameToStep : Std.HashMap String Nat) (extIndex : Std.HashMap Stri
   let readAxes := readFactors.flatMap (fun rf => rf.2.flatMap idxAxes)
   let contracted := readAxes.filter (fun a => !lhsUids.contains a.uid)
   -- degree = LHS axes ++ contracted, de-duplicated by uid (LHS first).
-  let degAxes : List AxisSpec :=
-    (lhsAxes ++ contracted).foldl (fun acc a =>
-      if acc.any (fun b => b.uid == a.uid) then acc else acc ++ [a]) []
+  let degAxes : List AxisSpec := dedupByUid (lhsAxes ++ contracted)
   let contractedUids : List UID := contracted.map (·.uid)
   let degree : StObjP := degAxes.map (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name))
   -- weave per degree axis: contracted ⇒ tiled, else fixed.
