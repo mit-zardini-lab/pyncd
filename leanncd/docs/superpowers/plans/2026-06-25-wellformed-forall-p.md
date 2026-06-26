@@ -328,6 +328,31 @@ git commit -m "feat(routespec): structural characterization lemmas for routeCore
 >   topological order — meaty induction) via `nameToStep`; external `k < nExternal` needs the
 >   `extIndex` value bound (`k < extCount ≤ extNames.card`).
 >
+> **Concrete lemma names + sketches found 2026-06-26 (so next session skips re-research):**
+> - `Std.HashMap.getElem?_insert : (m.insert k v)[a]? = if (k == a) then some v else m[a]?`
+>   (needs `[EquivBEq α] [LawfulHashable α]` — `String`/`Nat` have them).
+> - `Std.HashMap.getElem?_empty : (∅)[a]? = none`.
+> - `List.snd_lt_of_mem_zipIdx : x ∈ l.zipIdx k → x.2 < l.length + k` (with `k = 0`, gives `< l.length`).
+> - **`buildNameToStep_lt`** (`(buildNameToStep stmts)[nm]? = some j → j < stmts.length`) via two helpers
+>   in `RouteSpec.lean`:
+>   - `foldl_insert_const_value (i) (names) (m) : (names.foldl (·.insert · i) m)[nm]? = some j → m[nm]? = some j ∨ j = i`
+>     — induction on `names` + `getElem?_insert` (`by_cases (a == nm) = true`).
+>   - `buildNameToStep_value_lt` — induction on the `stmts.zipIdx` fold: invariant "all map values
+>     `< stmts.length`", preserved by each inner write-fold (inserts value `p.2 < length` via
+>     `snd_lt_of_mem_zipIdx`); base `∅` vacuous via `getElem?_empty`.
+> - **buildStep field-extraction** for `wf_typeMatch`: after `routeCore_getD hrc i hi'` gives
+>   `buildStep … (sp.stmts.getD i default) = .ok (tc.steps.getD i default, tc.routing.getD i [])`, need the
+>   built step's `inputWeaves`/wires as the parallel `readFactors.map _` lists. Reuse the
+>   `unfold buildStep; cases sc; bind_pure_pair_ok`-style extraction from `buildStep_output_fixedAxes`
+>   (which already extracts `b = step`); add lemmas `buildStep_inputWeaves = readFactors.map weaveOf` and
+>   `(routing) = readFactors.map wireOf`. Then `List.map`-pointwise; internal-wire case applies
+>   `routeCore_getD` at `j` (using `buildNameToStep_lt` for `j < length`) + `buildStep_output_fixedAxes`
+>   + `weaveToArrayType_congr` (the last two already proven).
+> - **Plumbing facts already proven & reusable:** `compile = compileToScheduled >>= route` via
+>   `simp only [TLProgram.compile, TLProgram.compileToScheduled, Bind.kleisliRight, bind_assoc]`;
+>   peel with `EStateM.run_bind`; `route` error-branch contradiction via
+>   `simp [EStateM.run, throw, throwThe, MonadExceptOf.throw, EStateM.throw]`.
+>
 > ---
 > **Historical (the Task 3.2 decision, now landed) — dedup `tensorAxes` by uid (Step 0, done).** Investigating the
 > ∀ p conjunct-2 proof revealed it is *literally false* for repeated-LHS-axis programs (e.g. a
