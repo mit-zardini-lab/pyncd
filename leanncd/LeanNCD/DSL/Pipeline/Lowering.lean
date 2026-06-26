@@ -214,79 +214,94 @@ def ScanStmt.isAffineScan : ScanStmt → Bool
   | .scan _ _ _ _ isAff => isAff
   | _                   => false
 
+/-- PASS-1 helper: assign external-name indices `0,1,…` in first-seen order over reads.
+    Iterates `stmts` in order, then each stmt's `ScanStmt.reads` in order; assigns the next
+    integer the first time a name that `∈ extNames` is seen. -/
+def buildExtIndex (extNames : Finset String) (stmts : List ScanStmt)
+    : Std.HashMap String Nat :=
+  (stmts.foldl (fun (acc : Std.HashMap String Nat × Nat) sc =>
+    sc.reads.foldl (fun (m, cnt) nm =>
+      if decide (nm ∈ extNames) && !m.contains nm then
+        (m.insert nm cnt, cnt + 1)
+      else (m, cnt)) acc) ({}, 0)).1
+
+/-- Build one `BrBaseP` step and its routing wires for `sc`, given the precomputed maps.
+    Returns `CompileError.shapeMismatch` for an empty-step `scanPre`, or
+    `CompileError.undeclaredName` for an unresolved read. -/
+def buildStep (nameToStep : Std.HashMap String Nat) (extIndex : Std.HashMap String Nat)
+    (sc : ScanStmt) : Except CompileError (BrBaseP × List Wire) := do
+  -- Validate a pre-built (escape-hatch) morphism: its step list must be non-empty.
+  match sc with
+  | .scanPre nm _ tc =>
+      if tc.steps.isEmpty then
+        throw (CompileError.shapeMismatch s!"recurMorphism {nm}: empty step morphism" "non-empty ThreadedComposed")
+  | _ => pure ()
+  let s := sc.repStmt.getD (.assign "" [] { body := { terms := [] }, nonlin := .identity })
+  let lhsAxes := s.lhsAxes
+  let lhsUids := lhsAxes.map (·.uid)
+  let readFactors := s.readFactors
+  let readAxes := readFactors.flatMap (fun rf => rf.2.flatMap idxAxes)
+  let contracted := readAxes.filter (fun a => !lhsUids.contains a.uid)
+  -- degree = LHS axes ++ contracted, de-duplicated by uid (LHS first).
+  let degAxes : List AxisSpec :=
+    (lhsAxes ++ contracted).foldl (fun acc a =>
+      if acc.any (fun b => b.uid == a.uid) then acc else acc ++ [a]) []
+  let contractedUids : List UID := contracted.map (·.uid)
+  let degree : StObjP := degAxes.map (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name))
+  -- weave per degree axis: contracted ⇒ tiled, else fixed.
+  let mkWeave : List WeaveSlotP :=
+    degAxes.map (fun a => if contractedUids.contains a.uid then WeaveSlotP.tiled else WeaveSlotP.fixed (AxisP.mk (some a.name) (SizeExpr.var a.name)))
+  let inputWeaves : List WeaveShapeP := readFactors.map (fun _ => mkWeave)
+  let outputWeaves : List WeaveShapeP := [ mkWeave ]
+  let degUids : List UID := degAxes.map (·.uid)
+  let reindexings : List StMatP := readFactors.map (fun rf =>
+    let rows := rf.2.map (idxToRow degUids)
+    { domLen := degUids.length, codLen := rf.2.length,
+      coeffs := rows.map (·.1), bias := rows.map (·.2) })
+  let op : BrOp :=
+    if sc.isScanPre then .scanPre
+    else if sc.isScan then (if sc.isAffineScan then .scanAffine else .scan)
+    else match s.nonlin with
+      | .relu        => .relu
+      | .softmax _   => .softmax
+      | .normalize _ => .normalize
+      | .identity    => match s with
+          | .scatter .. => .scatter
+          | .assign ..  => match s.agg with
+              | .max => .maxreduce
+              | .sum => .contract
+          | .recurMorphism .. => .contract   -- unreachable: scanPre handled above
+  let step : BrBaseP := { op, degree, inputWeaves, outputWeaves, reindexings }
+  -- Route each read to its producer step, else to the external sentinel. A name that is
+  -- neither produced nor declared external is an unresolved read: FAIL LOUD rather than
+  -- silently defaulting to external slot 0 (which masks upstream dataflow errors).
+  let wires ← readFactors.mapM (fun rf =>
+    match nameToStep[rf.1]? with
+    | some j => pure (Wire.internal j 0)
+    | none   =>
+      match extIndex[rf.1]? with
+      | some k => pure (Wire.external k)
+      | none   => throw (CompileError.undeclaredName rf.1))
+  return (step, wires)
+
+/-- Pure core of Phase 8: compute the step list and routing table from a `ScheduledProgram`.
+    Computes `nameToStep` and `extIndex` once (PASS 1), then folds `buildStep` over `stmts`
+    (PASS 2). -/
+def routeCore (sp : ScheduledProgram) : Except CompileError (List BrBaseP × List (List Wire)) := do
+  -- PASS 1: step indices, name→step map, external-name numbering.
+  let nameToStep : Std.HashMap String Nat :=
+    sp.stmts.zipIdx.foldl (fun m (sc, i) =>
+      sc.writes.foldl (fun m' nm => m'.insert nm i) m) {}
+  let extIndex := buildExtIndex sp.extNames sp.stmts
+  -- PASS 2: fold buildStep over all stmts.
+  let pairs ← sp.stmts.mapM (buildStep nameToStep extIndex)
+  return (pairs.map (·.1), pairs.map (·.2))
+
 /-- Phase 8: route the scheduled statements into a `ThreadedComposed`. -/
 def route (sp : ScheduledProgram) : FreshM ThreadedComposed := do
-  -- PASS 1: step indices, name→step map, external-name numbering.
-  let mut nameToStep : Std.HashMap String Nat := {}
-  for (sc, i) in sp.stmts.zipIdx do
-    for nm in sc.writes do
-      nameToStep := nameToStep.insert nm i
   let nExternal := sp.extNames.card
-  let mut extIndex : Std.HashMap String Nat := {}
-  let mut extCount : Nat := 0
-  for sc in sp.stmts do
-    for nm in sc.reads do
-      if decide (nm ∈ sp.extNames) && !extIndex.contains nm then
-        extIndex := extIndex.insert nm extCount
-        extCount := extCount + 1
-  -- PASS 2: build one step + its routing per ScanStmt.
-  let mut steps : List BrBaseP := []
-  let mut routing : List (List Wire) := []
-  for sc in sp.stmts do
-    -- Validate a pre-built (escape-hatch) morphism: its step list must be non-empty.
-    match sc with
-    | .scanPre nm _ tc =>
-        if tc.steps.isEmpty then
-          throw (CompileError.shapeMismatch s!"recurMorphism {nm}: empty step morphism" "non-empty ThreadedComposed")
-    | _ => pure ()
-    let s := sc.repStmt.getD (.assign "" [] { body := { terms := [] }, nonlin := .identity })
-    let lhsAxes := s.lhsAxes
-    let lhsUids := lhsAxes.map (·.uid)
-    let readFactors := s.readFactors
-    let readAxes := readFactors.flatMap (fun rf => rf.2.flatMap idxAxes)
-    let contracted := readAxes.filter (fun a => !lhsUids.contains a.uid)
-    -- degree = LHS axes ++ contracted, de-duplicated by uid (LHS first).
-    let degAxes : List AxisSpec :=
-      (lhsAxes ++ contracted).foldl (fun acc a =>
-        if acc.any (fun b => b.uid == a.uid) then acc else acc ++ [a]) []
-    let contractedUids : List UID := contracted.map (·.uid)
-    let degree : StObjP := degAxes.map (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name))
-    -- weave per degree axis: contracted ⇒ tiled, else fixed.
-    let mkWeave : List WeaveSlotP :=
-      degAxes.map (fun a => if contractedUids.contains a.uid then WeaveSlotP.tiled else WeaveSlotP.fixed (AxisP.mk (some a.name) (SizeExpr.var a.name)))
-    let inputWeaves : List WeaveShapeP := readFactors.map (fun _ => mkWeave)
-    let outputWeaves : List WeaveShapeP := [ mkWeave ]
-    let degUids : List UID := degAxes.map (·.uid)
-    let reindexings : List StMatP := readFactors.map (fun rf =>
-      let rows := rf.2.map (idxToRow degUids)
-      { domLen := degUids.length, codLen := rf.2.length,
-        coeffs := rows.map (·.1), bias := rows.map (·.2) })
-    let op : BrOp :=
-      if sc.isScanPre then .scanPre
-      else if sc.isScan then (if sc.isAffineScan then .scanAffine else .scan)
-      else match s.nonlin with
-        | .relu        => .relu
-        | .softmax _   => .softmax
-        | .normalize _ => .normalize
-        | .identity    => match s with
-            | .scatter .. => .scatter
-            | .assign ..  => match s.agg with
-                | .max => .maxreduce
-                | .sum => .contract
-            | .recurMorphism .. => .contract   -- unreachable: scanPre handled above
-    let step : BrBaseP := { op, degree, inputWeaves, outputWeaves, reindexings }
-    -- Route each read to its producer step, else to the external sentinel. A name that is
-    -- neither produced nor declared external is an unresolved read: FAIL LOUD rather than
-    -- silently defaulting to external slot 0 (which masks upstream dataflow errors).
-    let wires ← readFactors.mapM (fun rf =>
-      match nameToStep[rf.1]? with
-      | some j => pure (Wire.internal j 0)
-      | none   =>
-        match extIndex[rf.1]? with
-        | some k => pure (Wire.external k)
-        | none   => throw (CompileError.undeclaredName rf.1))
-    steps := steps ++ [ step ]
-    routing := routing ++ [ wires ]
-  return { steps, routing, nExternal }
+  match routeCore sp with
+  | .ok (steps, routing) => return { steps, routing, nExternal }
+  | .error e             => throw e
 
 end LeanNCD
