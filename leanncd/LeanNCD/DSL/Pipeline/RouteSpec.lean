@@ -261,4 +261,269 @@ theorem buildStep_output_fixedAxes
   intro a ha
   simpa [List.contains_eq_mem] using (List.mem_filter.mp ha).2
 
+/-! ## Lemma 5: `buildNameToStep` value bound -/
+
+private lemma foldl_insert_val_lt {n i : Nat} (hi : i < n)
+    {writes : List String} {m : Std.HashMap String Nat}
+    (hm : ∀ k : String, ∀ v : Nat, m[k]? = some v → v < n) :
+    ∀ k : String, ∀ v : Nat, (writes.foldl (fun m' nm => m'.insert nm i) m)[k]? = some v → v < n := by
+  induction writes generalizing m with
+  | nil => exact hm
+  | cons nm t ih =>
+      simp only [List.foldl_cons]
+      apply ih
+      intro (k' : String) (v' : Nat) hk'v'
+      simp only [HashMap.getElem?_insert] at hk'v'
+      split at hk'v'
+      · cases hk'v'; exact hi
+      · exact hm k' v' hk'v'
+
+private lemma foldl_zipIdx_val_lt {n : Nat}
+    {stmts_zip : List (ScanStmt × Nat)}
+    (hbound : ∀ sc i, (sc, i) ∈ stmts_zip → i < n)
+    {m : Std.HashMap String Nat}
+    (hm : ∀ k : String, ∀ v : Nat, m[k]? = some v → v < n) :
+    ∀ k : String, ∀ v : Nat,
+      (stmts_zip.foldl (fun m' (sc, i) => sc.writes.foldl (fun m'' nm => m''.insert nm i) m') m)[k]? = some v → v < n := by
+  induction stmts_zip generalizing m with
+  | nil => exact hm
+  | cons sci t ih =>
+      simp only [List.foldl_cons]
+      obtain ⟨sc, i⟩ := sci
+      apply ih (fun sc' i' h => hbound sc' i' (List.mem_cons_of_mem _ h))
+      exact foldl_insert_val_lt (hbound sc i (List.mem_cons.mpr (Or.inl rfl))) hm
+
+/-- Every value in `buildNameToStep stmts` is a valid step index `< stmts.length`. -/
+theorem buildNameToStep_lt {stmts : List ScanStmt} {nm : String} {j : Nat}
+    (h : (buildNameToStep stmts)[nm]? = some j) : j < stmts.length := by
+  unfold buildNameToStep at h
+  apply foldl_zipIdx_val_lt _ (fun k v hkv => by simp at hkv) nm j h
+  intro sc i hmem
+  have := (List.mem_zipIdx hmem).2.1
+  omega
+
+/-! ## Lemma 6: `buildStep` field-extraction -/
+
+/-- The second component of a successful `(B >>= fun x => pure (s, x)) = .ok (b, w)` is `B = .ok w`. -/
+private theorem bind_pure_pair_ok_snd {ε γ δ : Type} {B : Except ε γ} {s b : δ} {w : γ}
+    (h : (B >>= fun x => pure (s, x)) = Except.ok (b, w)) : B = .ok w := by
+  cases hB : B with
+  | error e => rw [hB] at h; simp [bind, Except.bind] at h
+  | ok v =>
+      simp only [hB, bind, Except.bind, pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+      exact congrArg Except.ok h.2
+
+/-- The `inputWeaves` of a built step equal the per-read-factor map from `buildStep`. -/
+theorem buildStep_inputWeaves
+    {ns ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
+    (h : buildStep ns ext stmts sc = .ok (b, w)) :
+    b.inputWeaves = (sc.repStmt.getD emptyStmt).readFactors.map (fun rf =>
+      match ns[rf.1]? with
+      | some j => (tensorAxes ((stmts.getD j default).repStmt.getD emptyStmt)).map
+                    (fun a => WeaveSlotP.fixed a)
+      | none   => (List.range rf.2.length).map (fun pos =>
+                    WeaveSlotP.fixed (AxisP.mk (some (rf.1 ++ "_" ++ toString pos))
+                      (SizeExpr.var (rf.1 ++ "_" ++ toString pos))))) := by
+  unfold buildStep at h
+  cases sc with
+  | plain s => simp only [pure_bind] at h; rw [bind_pure_pair_ok h]; rfl
+  | scan nm ax bs rs aff => simp only [pure_bind] at h; rw [bind_pure_pair_ok h]; rfl
+  | scanPre nm ax tc =>
+      by_cases he : tc.steps.isEmpty = true
+      · simp [he, bind, Except.bind] at h
+      · simp only [he, pure_bind] at h; rw [bind_pure_pair_ok h]; rfl
+
+/-- The wires from a successful `buildStep` equal the `mapM` of the per-read-factor wire builder. -/
+theorem buildStep_wires_mapM
+    {ns ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
+    (h : buildStep ns ext stmts sc = .ok (b, w)) :
+    (sc.repStmt.getD emptyStmt).readFactors.mapM (fun rf =>
+      match ns[rf.1]? with
+      | some j => Except.ok (Wire.internal j 0)
+      | none   => match ext[rf.1]? with
+        | some k => Except.ok (Wire.external k)
+        | none   => Except.error (CompileError.undeclaredName rf.1)) = .ok w := by
+  unfold buildStep at h
+  cases sc with
+  | plain s => simp only [pure_bind] at h; exact bind_pure_pair_ok_snd h
+  | scan nm ax bs rs aff => simp only [pure_bind] at h; exact bind_pure_pair_ok_snd h
+  | scanPre nm ax tc =>
+      by_cases he : tc.steps.isEmpty = true
+      · simp [he, bind, Except.bind] at h
+      · simp only [he, pure_bind] at h; exact bind_pure_pair_ok_snd h
+
+/-! ## Lemma 7: buildExtIndex injectivity -/
+
+private def goodExtState (m : Std.HashMap String Nat) (cnt : Nat) : Prop :=
+  (∀ nm : String, ∀ v : Nat, m[nm]? = some v → v < cnt) ∧
+  (∀ nm₁ nm₂ : String, ∀ v : Nat, m[nm₁]? = some v → m[nm₂]? = some v → nm₁ = nm₂)
+
+private lemma goodExtState_step (extNames : Finset String) (nm : String)
+    {state : Std.HashMap String Nat × Nat}
+    (hgood : goodExtState state.1 state.2) :
+    goodExtState (if decide (nm ∈ extNames) && !state.1.contains nm
+                  then (state.1.insert nm state.2, state.2 + 1)
+                  else state).1
+                 (if decide (nm ∈ extNames) && !state.1.contains nm
+                  then (state.1.insert nm state.2, state.2 + 1)
+                  else state).2 := by
+  by_cases h : decide (nm ∈ extNames) && !state.1.contains nm
+  · simp only [h, ite_true]
+    refine ⟨fun (nm' : String) (v : Nat) hv => ?_, fun (nm₁ nm₂ : String) (v : Nat) hv₁ hv₂ => ?_⟩
+    · simp only [HashMap.getElem?_insert] at hv; split at hv
+      · cases hv; omega
+      · exact Nat.lt_succ_of_lt (hgood.1 nm' v hv)
+    · simp only [HashMap.getElem?_insert] at hv₁ hv₂
+      split at hv₁ <;> split at hv₂
+      · simp_all
+      · cases hv₁; exact absurd (hgood.1 nm₂ _ hv₂) (by omega)
+      · cases hv₂; exact absurd (hgood.1 nm₁ _ hv₁) (by omega)
+      · exact hgood.2 nm₁ nm₂ v hv₁ hv₂
+  · simp only [h]; exact hgood
+
+private lemma goodExtState_foldl_reads (extNames : Finset String) (reads : List String)
+    {state : Std.HashMap String Nat × Nat}
+    (hgood : goodExtState state.1 state.2) :
+    goodExtState (reads.foldl (fun (m, cnt) nm =>
+      if decide (nm ∈ extNames) && !m.contains nm then
+        (m.insert nm cnt, cnt + 1)
+      else (m, cnt)) state).1
+      (reads.foldl (fun (m, cnt) nm =>
+        if decide (nm ∈ extNames) && !m.contains nm then
+          (m.insert nm cnt, cnt + 1)
+        else (m, cnt)) state).2 := by
+  induction reads generalizing state with
+  | nil => exact hgood
+  | cons nm t ih =>
+      simp only [List.foldl_cons]
+      exact ih (goodExtState_step extNames nm hgood)
+
+private lemma goodExtState_foldl_stmts (extNames : Finset String) (stmts : List ScanStmt)
+    {state : Std.HashMap String Nat × Nat}
+    (hgood : goodExtState state.1 state.2) :
+    goodExtState (stmts.foldl (fun (acc : Std.HashMap String Nat × Nat) sc =>
+      sc.reads.foldl (fun (m, cnt) nm =>
+        if decide (nm ∈ extNames) && !m.contains nm then
+          (m.insert nm cnt, cnt + 1)
+        else (m, cnt)) acc) state).1
+      (stmts.foldl (fun (acc : Std.HashMap String Nat × Nat) sc =>
+        sc.reads.foldl (fun (m, cnt) nm =>
+          if decide (nm ∈ extNames) && !m.contains nm then
+            (m.insert nm cnt, cnt + 1)
+          else (m, cnt)) acc) state).2 := by
+  induction stmts generalizing state with
+  | nil => exact hgood
+  | cons sc t ih =>
+      simp only [List.foldl_cons]
+      exact ih (goodExtState_foldl_reads extNames sc.reads hgood)
+
+theorem buildExtIndex_injective {extNames : Finset String} {stmts : List ScanStmt}
+    {nm₁ nm₂ : String} {k : Nat}
+    (h₁ : (buildExtIndex extNames stmts)[nm₁]? = some k)
+    (h₂ : (buildExtIndex extNames stmts)[nm₂]? = some k) : nm₁ = nm₂ := by
+  unfold buildExtIndex at h₁ h₂
+  have hgood := goodExtState_foldl_stmts extNames stmts (state := ({}, 0))
+    ⟨fun nm v h => by simp at h, fun nm₁ nm₂ v h => by simp at h⟩
+  exact hgood.2 nm₁ nm₂ k h₁ h₂
+
+/-! ## Lemma 7b: buildExtIndex value bound (`< extNames.card`) -/
+
+/-- Invariant: the running counter equals the cardinality of a sub-Finset of `extNames` whose
+    members are exactly the map's keys. Gives `cnt ≤ extNames.card` throughout the fold. -/
+private def goodCard (extNames : Finset String) (m : Std.HashMap String Nat) (cnt : Nat) : Prop :=
+  ∃ S : Finset String, S ⊆ extNames ∧ cnt = S.card ∧ ∀ nm, m.contains nm = true ↔ nm ∈ S
+
+private lemma goodCard_step (extNames : Finset String) (nm : String)
+    {state : Std.HashMap String Nat × Nat}
+    (hgood : goodCard extNames state.1 state.2) :
+    goodCard extNames
+      (if decide (nm ∈ extNames) && !state.1.contains nm
+       then (state.1.insert nm state.2, state.2 + 1) else state).1
+      (if decide (nm ∈ extNames) && !state.1.contains nm
+       then (state.1.insert nm state.2, state.2 + 1) else state).2 := by
+  obtain ⟨S, hSsub, hcnt, hmem⟩ := hgood
+  by_cases h : decide (nm ∈ extNames) && !state.1.contains nm
+  · simp only [h, if_true]
+    simp only [Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true'] at h
+    obtain ⟨hne, hnc⟩ := h
+    have hnotin : nm ∉ S := fun hc => by
+      have := (hmem nm).mpr hc; rw [hnc] at this; exact absurd this (by simp)
+    refine ⟨insert nm S, Finset.insert_subset hne hSsub, ?_, ?_⟩
+    · rw [hcnt, Finset.card_insert_of_notMem hnotin]
+    · intro nm'
+      rw [HashMap.contains_insert]
+      simp only [Finset.mem_insert]
+      constructor
+      · intro hc
+        rcases (Bool.or_eq_true _ _).mp hc with h1 | h1
+        · exact Or.inl ((beq_iff_eq).mp h1).symm
+        · exact Or.inr ((hmem nm').mp h1)
+      · intro hc
+        rcases hc with h1 | h1
+        · subst h1; exact (Bool.or_eq_true _ _).mpr (Or.inl (beq_self_eq_true nm'))
+        · exact (Bool.or_eq_true _ _).mpr (Or.inr ((hmem nm').mpr h1))
+  · simp only [h]
+    exact ⟨S, hSsub, hcnt, hmem⟩
+
+private lemma goodCard_foldl_reads (extNames : Finset String) (reads : List String)
+    {state : Std.HashMap String Nat × Nat}
+    (hgood : goodCard extNames state.1 state.2) :
+    goodCard extNames
+      (reads.foldl (fun (m, cnt) nm =>
+        if decide (nm ∈ extNames) && !m.contains nm then (m.insert nm cnt, cnt + 1)
+        else (m, cnt)) state).1
+      (reads.foldl (fun (m, cnt) nm =>
+        if decide (nm ∈ extNames) && !m.contains nm then (m.insert nm cnt, cnt + 1)
+        else (m, cnt)) state).2 := by
+  induction reads generalizing state with
+  | nil => exact hgood
+  | cons nm t ih => simp only [List.foldl_cons]; exact ih (goodCard_step extNames nm hgood)
+
+private lemma goodCard_foldl_stmts (extNames : Finset String) (stmts : List ScanStmt)
+    {state : Std.HashMap String Nat × Nat}
+    (hgood : goodCard extNames state.1 state.2) :
+    goodCard extNames
+      (stmts.foldl (fun (acc : Std.HashMap String Nat × Nat) sc =>
+        sc.reads.foldl (fun (m, cnt) nm =>
+          if decide (nm ∈ extNames) && !m.contains nm then (m.insert nm cnt, cnt + 1)
+          else (m, cnt)) acc) state).1
+      (stmts.foldl (fun (acc : Std.HashMap String Nat × Nat) sc =>
+        sc.reads.foldl (fun (m, cnt) nm =>
+          if decide (nm ∈ extNames) && !m.contains nm then (m.insert nm cnt, cnt + 1)
+          else (m, cnt)) acc) state).2 := by
+  induction stmts generalizing state with
+  | nil => exact hgood
+  | cons sc t ih =>
+      simp only [List.foldl_cons]
+      exact ih (goodCard_foldl_reads extNames sc.reads hgood)
+
+/-- Every value assigned by `buildExtIndex` is strictly less than `extNames.card`. -/
+theorem buildExtIndex_lt_card {extNames : Finset String} {stmts : List ScanStmt}
+    {nm : String} {k : Nat}
+    (h : (buildExtIndex extNames stmts)[nm]? = some k) : k < extNames.card := by
+  unfold buildExtIndex at h
+  -- `k < cnt_final` (goodExtState) and `cnt_final ≤ extNames.card` (goodCard).
+  have hgood := goodExtState_foldl_stmts extNames stmts (state := ({}, 0))
+    ⟨fun nm v h => by simp at h, fun nm₁ nm₂ v h => by simp at h⟩
+  have hlt : k < (stmts.foldl (fun (acc : Std.HashMap String Nat × Nat) sc =>
+      sc.reads.foldl (fun (m, cnt) nm =>
+        if decide (nm ∈ extNames) && !m.contains nm then (m.insert nm cnt, cnt + 1)
+        else (m, cnt)) acc) ({}, 0)).2 := hgood.1 nm k h
+  obtain ⟨S, hSsub, hcnt, -⟩ := goodCard_foldl_stmts extNames stmts (state := ({}, 0))
+    ⟨∅, Finset.empty_subset _, by simp, fun nm => by simp⟩
+  exact _root_.lt_of_lt_of_le hlt (hcnt ▸ Finset.card_le_card hSsub)
+
+/-! ## Public re-exports of the `mapM` per-index facts (used by the agreement layer) -/
+
+/-- Public form: `l.mapM f = .ok r → r.length = l.length`. -/
+theorem mapM_ok_length' {ε α β : Type} {f : α → Except ε β} {l : List α} {r : List β}
+    (h : l.mapM f = .ok r) : r.length = l.length := mapM_ok_length h
+
+/-- Public form: `l.mapM f = .ok r → f (l.getD i d₁) = .ok (r.getD i d₂)` for `i < l.length`. -/
+theorem mapM_ok_getD' {ε α β : Type} [Inhabited β] {f : α → Except ε β} {l : List α} {r : List β}
+    (h : l.mapM f = .ok r) (i : Nat) (d₁ : α) (d₂ : β) (hi : i < l.length) :
+    f (l.getD i d₁) = .ok (r.getD i d₂) := mapM_ok_getD h i d₁ d₂ hi
+
 end LeanNCD

@@ -158,7 +158,9 @@ def schedule (lp : LinearProgram) : FreshM ScheduledProgram := do
   let explicitSizes : Std.HashMap UID Nat := lp.decls.foldl (fun m d => match d with
     | .axis ax (some n) => m.insert ax.uid n
     | _                 => m) {}
-  return { decls := lp.decls, stmts := ordered, env := lp.env, extNames := lp.extNames,
+  let orderedReads := ordered.flatMap ScanStmt.reads
+  let liveExtNames := lp.extNames.filter (fun nm => orderedReads.contains nm)
+  return { decls := lp.decls, stmts := ordered, env := lp.env, extNames := liveExtNames,
            ctx := lp.ctx, explicitSizes }
 
 /-! ## Phase 8 — `route`
@@ -340,7 +342,9 @@ def buildStep (nameToStep : Std.HashMap String Nat) (extIndex : Std.HashMap Stri
       match nameToStep[rf.1]? with
       | some j => (tensorAxes ((stmts.getD j default).repStmt.getD emptyStmt)).map
                     (fun a => WeaveSlotP.fixed a)
-      | none   => rf.2.map (fun e => WeaveSlotP.fixed (readPosAxis e)))
+      | none   => (List.range rf.2.length).map (fun pos =>
+                    WeaveSlotP.fixed (AxisP.mk (some (rf.1 ++ "_" ++ toString pos))
+                      (SizeExpr.var (rf.1 ++ "_" ++ toString pos)))))
   let outputWeaves : List WeaveShapeP := [ stepMkWeave s ]
   let degUids : List UID := degAxes.map (·.uid)
   let reindexings : List StMatP := readFactors.map (fun rf =>

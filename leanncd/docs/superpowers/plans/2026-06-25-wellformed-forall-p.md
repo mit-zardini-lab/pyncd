@@ -307,14 +307,42 @@ git commit -m "feat(routespec): structural characterization lemmas for routeCore
 > engine lemma `buildStep_output_fixedAxes` (Fact A) + `dedup_append_filter`/`fixedAxesP_mapWeave`
 > helpers (`d61e4ec`), all sorry-free.
 >
-> **Phase 4 PARTIAL (2026-06-26, commit `beb414f`).** `compile_wellFormed` is assembled in
-> `Agreement.lean` from 4 conjunct lemmas + the `realizeCompiled` corollary. **Proven sorry-free:**
-> `compile_eq_route` (the `EStateM` plumbing), `wf_singleOutput` (conjunct 3), and the bridge
+> **Phase 4 PARTIAL — UPDATED 2026-06-26 (WIP checkpoint, `wf_typeMatch` ~99% done).**
+> `compile_wellFormed` is assembled in `Agreement.lean` from 4 conjunct lemmas + the `realizeCompiled`
+> corollary. **Proven sorry-free:** `compile_eq_route`, `wf_singleOutput` (conjunct 3), the bridge
 > `weaveToArrayType_congr`/`realizeWeaveShape_targetAxes`.
 >
-> **▶▶ RESUME POINT (next session) ◀◀ — Phase 4 remaining conjuncts (`wf_typeMatch`, `wf_dom`,
-> `wf_topo`), currently `sorry` in `Agreement.lean`.** These need a NEW tier of lemmas (Std.HashMap
-> value bounds + pipeline properties), NOT more `routeCore` mechanics:
+> **NEW THIS SESSION (all compiling unless noted):**
+> - `RouteSpec.lean` — **FULLY CLEAN, no errors/sorries.** Added: `goodExtState` +
+>   `goodExtState_step`/`goodExtState_foldl_reads`/`goodExtState_foldl_stmts`,
+>   `buildExtIndex_injective`, and public re-exports `mapM_ok_length'`/`mapM_ok_getD'` (originals are
+>   `private`, unreachable from Agreement.lean). Also previously: `buildNameToStep_lt`,
+>   `buildStep_inputWeaves`, `buildStep_wires_mapM`, `bind_pure_pair_ok_snd`,
+>   `buildStep_output_fixedAxes`, `fixedAxesP`.
+> - `Lowering.lean` — canonical external weave (axis names `nm ++ "_" ++ toString pos`, independent of
+>   read-var names) in `buildStep`; `extNames` pruned in `schedule` to live (post-DCE) externals so
+>   `nExternal` = live externals. (Both from prior session, uncommitted.)
+> - `Agreement.lean` — `wf_typeMatch` **header changed** to take `hne : tc.nExternal = sp.extNames.card`
+>   (the `hwfd`-alone gap: `wellFormedDom` only quantifies `k < nExternal`, so external-case needs
+>   `k < nExternal`, obtained from `hne` + `buildExtIndex_lt_card`). Call site in `compile_wellFormed`
+>   updated. Helper lemmas added & compiling: `fixedAxesP_map_fixed`, `weaveRank_range_fixed`,
+>   `wellFormedDom_rank`, `externalPort_decode`, `port_external_weave`, `external_pointwise`,
+>   `internal_pointwise`. Main `wf_typeMatch` body (list-ext → per-position internal/external split)
+>   in place.
+>
+> **▶▶ RESUME POINT (next session) ◀◀ — TWO small blockers in `wf_typeMatch`, then `wf_dom`/`wf_topo`.**
+> 1. **MISSING: `buildExtIndex_lt_card`** in `RouteSpec.lean` (referenced at `Agreement.lean:186` by
+>    `external_pointwise`): `(buildExtIndex extNames stmts)[nm]? = some k → k < extNames.card`. Proof:
+>    strengthen the `goodExtState` fold invariant with a `cnt ≤ extNames.card` part — keys are a subset
+>    of `extNames` (the `decide (nm ∈ extNames)` guard), each inserted once, so the running counter is
+>    bounded by `|extNames|`. This is the only nontrivial piece left for `wf_typeMatch`.
+> 2. **`hweave` `rfl` gap** in `wf_typeMatch` (`Agreement.lean:242-251`): the `rw` chain leaves an
+>    unsolved `X = X` goal (both sides identical `match ns[rf.1]? …` in the diagnostic). Likely fix:
+>    trailing `rfl`, or the final `← hrf` rewrite leaves `s.readFactors[pos]` vs `rf` — reorder/close
+>    with `getD_eq_getElem`. One-line fix.
+> After both: `#print axioms wf_typeMatch` must show only `[propext, Classical.choice, Quot.sound]`.
+>
+> Then the remaining `sorry`s (`wf_dom`, `wf_topo`) — original sketches below still apply:
 > - **`wf_typeMatch` (conjunct 2, do FIRST — de-risked):** needs (a) `buildNameToStep_lt`
 >   (`nameToStep[nm] = some j → j < stmts.length`, a Std.HashMap fold value-bound), and (b) buildStep
 >   FIELD-characterization lemmas (built step's `inputWeaves = readFactors.map weaveOf`, wires
