@@ -117,7 +117,7 @@ def topoSortFuel : Nat → List ScanStmt → List ScanStmt → List String →
       match remaining.findIdx? (fun sc => eligible sc all emitted) with
       | none   => acc ++ remaining   -- cycle: shouldn't occur in valid DAGs
       | some i =>
-          let sc   := remaining.getD i (remaining.head!)
+          let sc   := remaining[i]!
           let rest := remaining.eraseIdx i
           topoSortFuel n all rest (emitted ++ sc.writes) (acc ++ [sc])
 
