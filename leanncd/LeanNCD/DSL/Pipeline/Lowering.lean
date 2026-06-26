@@ -226,6 +226,10 @@ def idxAxes : IdxExpr → List AxisSpec
   | .shift a _  => [a]
   | .affine _ xs => xs.map (·.2)
 
+/-- The empty-statement sentinel used as a `getD` default for a `ScanStmt` with no representative
+    stmt (a `scanPre` node). Named so `buildStep`/`buildNameToType` share one definition. -/
+def emptyStmt : Stmt := .assign "" [] { body := { terms := [] }, nonlin := .identity }
+
 /-- A stmt's published (retained) output axes, in LHS order — what a producer emits and a
     consumer receives. -/
 def tensorAxes (s : Stmt) : List AxisP :=
@@ -285,6 +289,17 @@ def buildExtIndex (extNames : Finset String) (stmts : List ScanStmt)
         (m.insert nm cnt, cnt + 1)
       else (m, cnt)) acc) ({}, 0)).1
 
+/-- PASS-1: map each produced tensor name to the step index that writes it. -/
+def buildNameToStep (stmts : List ScanStmt) : Std.HashMap String Nat :=
+  stmts.zipIdx.foldl (fun m (sc, i) =>
+    sc.writes.foldl (fun m' nm => m'.insert nm i) m) {}
+
+/-- PASS-1: map each produced tensor name to its published axes (`tensorAxes` of its rep stmt). -/
+def buildNameToType (stmts : List ScanStmt) : Std.HashMap String (List AxisP) :=
+  stmts.foldl (fun m sc =>
+    sc.writes.foldl (fun m' nm =>
+      m'.insert nm (tensorAxes (sc.repStmt.getD emptyStmt))) m) {}
+
 /-- Build one `BrBaseP` step and its routing wires for `sc`, given the precomputed maps.
     Returns `CompileError.shapeMismatch` for an empty-step `scanPre`, or
     `CompileError.undeclaredName` for an unresolved read. -/
@@ -297,7 +312,7 @@ def buildStep (nameToStep : Std.HashMap String Nat) (extIndex : Std.HashMap Stri
       if tc.steps.isEmpty then
         throw (CompileError.shapeMismatch s!"recurMorphism {nm}: empty step morphism" "non-empty ThreadedComposed")
   | _ => pure ()
-  let s := sc.repStmt.getD (.assign "" [] { body := { terms := [] }, nonlin := .identity })
+  let s := sc.repStmt.getD emptyStmt
   let lhsAxes := s.lhsAxes
   let lhsUids := lhsAxes.map (·.uid)
   let readFactors := s.readFactors
@@ -353,18 +368,10 @@ def buildStep (nameToStep : Std.HashMap String Nat) (extIndex : Std.HashMap Stri
     Computes `nameToStep` and `extIndex` once (PASS 1), then folds `buildStep` over `stmts`
     (PASS 2). -/
 def routeCore (sp : ScheduledProgram) : Except CompileError (List BrBaseP × List (List Wire)) := do
-  -- PASS 1: step indices, name→step map, external-name numbering.
-  let nameToStep : Std.HashMap String Nat :=
-    sp.stmts.zipIdx.foldl (fun m (sc, i) =>
-      sc.writes.foldl (fun m' nm => m'.insert nm i) m) {}
-  let extIndex := buildExtIndex sp.extNames sp.stmts
-  let nameToType : Std.HashMap String (List AxisP) :=
-    sp.stmts.foldl (fun m sc =>
-      sc.writes.foldl (fun m' nm =>
-        m'.insert nm (tensorAxes (sc.repStmt.getD (.assign "" [] { body := { terms := [] }, nonlin := .identity }))))
-        m) {}
-  -- PASS 2: fold buildStep over all stmts.
-  let pairs ← sp.stmts.mapM (buildStep nameToStep extIndex nameToType)
+  -- PASS 2: fold buildStep over all stmts, using the PASS-1 maps (`buildNameToStep`/`buildExtIndex`/
+  -- `buildNameToType`).
+  let pairs ← sp.stmts.mapM
+    (buildStep (buildNameToStep sp.stmts) (buildExtIndex sp.extNames sp.stmts) (buildNameToType sp.stmts))
   return (pairs.map (·.1), pairs.map (·.2))
 
 /-- Phase 8: route the scheduled statements into a `ThreadedComposed`. -/
