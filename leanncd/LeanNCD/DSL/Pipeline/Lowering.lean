@@ -227,7 +227,7 @@ def idxAxes : IdxExpr → List AxisSpec
   | .affine _ xs => xs.map (·.2)
 
 /-- The empty-statement sentinel used as a `getD` default for a `ScanStmt` with no representative
-    stmt (a `scanPre` node). Named so `buildStep`/`buildNameToType` share one definition. -/
+    stmt (a `scanPre` node). Named so `buildStep`/`tensorAxes` callers share one definition. -/
 def emptyStmt : Stmt := .assign "" [] { body := { terms := [] }, nonlin := .identity }
 
 /-- Deduplicate axis specs by uid, keeping the first occurrence in order. Shared by `buildStep`'s
@@ -300,17 +300,12 @@ def buildNameToStep (stmts : List ScanStmt) : Std.HashMap String Nat :=
   stmts.zipIdx.foldl (fun m (sc, i) =>
     sc.writes.foldl (fun m' nm => m'.insert nm i) m) {}
 
-/-- PASS-1: map each produced tensor name to its published axes (`tensorAxes` of its rep stmt). -/
-def buildNameToType (stmts : List ScanStmt) : Std.HashMap String (List AxisP) :=
-  stmts.foldl (fun m sc =>
-    sc.writes.foldl (fun m' nm =>
-      m'.insert nm (tensorAxes (sc.repStmt.getD emptyStmt))) m) {}
-
-/-- Build one `BrBaseP` step and its routing wires for `sc`, given the precomputed maps.
+/-- Build one `BrBaseP` step and its routing wires for `sc`, given the precomputed maps and the
+    full scheduled statement list (`stmts`, used to publish an internal read's producer axes).
     Returns `CompileError.shapeMismatch` for an empty-step `scanPre`, or
     `CompileError.undeclaredName` for an unresolved read. -/
 def buildStep (nameToStep : Std.HashMap String Nat) (extIndex : Std.HashMap String Nat)
-    (nameToType : Std.HashMap String (List AxisP))
+    (stmts : List ScanStmt)
     (sc : ScanStmt) : Except CompileError (BrBaseP × List Wire) := do
   -- Validate a pre-built (escape-hatch) morphism: its step list must be non-empty.
   match sc with
@@ -331,11 +326,15 @@ def buildStep (nameToStep : Std.HashMap String Nat) (extIndex : Std.HashMap Stri
   -- weave per degree axis: contracted ⇒ tiled, else fixed.
   let mkWeave : List WeaveSlotP :=
     degAxes.map (fun a => if contractedUids.contains a.uid then WeaveSlotP.tiled else WeaveSlotP.fixed (AxisP.mk (some a.name) (SizeExpr.var a.name)))
+  -- internal read ⇒ publish the producer step's `tensorAxes` (derived from `stmts[j]`, the SAME `j`
+  -- the wire below uses, so producer output and consumer input weaves coincide by construction);
+  -- external read ⇒ one fixed slot per read position.
   let inputWeaves : List WeaveShapeP :=
     readFactors.map (fun rf =>
-      match nameToType[rf.1]? with
-      | some axs => axs.map (fun a => WeaveSlotP.fixed a)        -- internal: producer-published order
-      | none     => rf.2.map (fun e => WeaveSlotP.fixed (readPosAxis e)))  -- external: one per position
+      match nameToStep[rf.1]? with
+      | some j => (tensorAxes ((stmts.getD j default).repStmt.getD emptyStmt)).map
+                    (fun a => WeaveSlotP.fixed a)
+      | none   => rf.2.map (fun e => WeaveSlotP.fixed (readPosAxis e)))
   let outputWeaves : List WeaveShapeP := [ mkWeave ]
   let degUids : List UID := degAxes.map (·.uid)
   let reindexings : List StMatP := readFactors.map (fun rf =>
@@ -375,7 +374,7 @@ def routeCore (sp : ScheduledProgram) : Except CompileError (List BrBaseP × Lis
   -- PASS 2: fold buildStep over all stmts, using the PASS-1 maps (`buildNameToStep`/`buildExtIndex`/
   -- `buildNameToType`).
   let pairs ← sp.stmts.mapM
-    (buildStep (buildNameToStep sp.stmts) (buildExtIndex sp.extNames sp.stmts) (buildNameToType sp.stmts))
+    (buildStep (buildNameToStep sp.stmts) (buildExtIndex sp.extNames sp.stmts) sp.stmts)
   return (pairs.map (·.1), pairs.map (·.2))
 
 /-- Phase 8: route the scheduled statements into a `ThreadedComposed`. -/

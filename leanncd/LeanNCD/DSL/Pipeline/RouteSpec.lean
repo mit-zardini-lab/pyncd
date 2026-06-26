@@ -6,7 +6,7 @@ import LeanNCD.DSL.Pipeline.Lowering
 Pure `List`/`Except` lemmas that turn `routeCore sp = .ok (steps, routing)` into per-index facts —
 the bridge the `WellFormed` conjunct proofs (Phase 4) stand on. No `EStateM`; `routeCore` is a bare
 `mapM` over `buildStep` with the named PASS-1 map builders (`buildNameToStep`/`buildExtIndex`/
-`buildNameToType`, all in `Lowering.lean`).
+and `sp.stmts` for internal-read producer axes, all in `Lowering.lean`).
 -/
 
 namespace LeanNCD
@@ -68,7 +68,7 @@ theorem routeCore_steps_length {sp : ScheduledProgram}
     steps.length = sp.stmts.length := by
   unfold routeCore at h
   cases hm : sp.stmts.mapM (buildStep (buildNameToStep sp.stmts)
-      (buildExtIndex sp.extNames sp.stmts) (buildNameToType sp.stmts)) with
+      (buildExtIndex sp.extNames sp.stmts) sp.stmts) with
   | error e => rw [hm] at h; simp [bind, Except.bind] at h
   | ok pairs =>
       rw [hm] at h
@@ -82,7 +82,7 @@ theorem routeCore_routing_length {sp : ScheduledProgram}
     routing.length = sp.stmts.length := by
   unfold routeCore at h
   cases hm : sp.stmts.mapM (buildStep (buildNameToStep sp.stmts)
-      (buildExtIndex sp.extNames sp.stmts) (buildNameToType sp.stmts)) with
+      (buildExtIndex sp.extNames sp.stmts) sp.stmts) with
   | error e => rw [hm] at h; simp [bind, Except.bind] at h
   | ok pairs =>
       rw [hm] at h
@@ -97,11 +97,11 @@ theorem routeCore_getD {sp : ScheduledProgram}
     {steps : List BrBaseP} {routing : List (List Wire)}
     (h : routeCore sp = .ok (steps, routing)) (i : Nat) (hi : i < sp.stmts.length) :
     buildStep (buildNameToStep sp.stmts) (buildExtIndex sp.extNames sp.stmts)
-        (buildNameToType sp.stmts) (sp.stmts.getD i default)
+        sp.stmts (sp.stmts.getD i default)
       = .ok (steps.getD i default, routing.getD i []) := by
   unfold routeCore at h
   cases hm : sp.stmts.mapM (buildStep (buildNameToStep sp.stmts)
-      (buildExtIndex sp.extNames sp.stmts) (buildNameToType sp.stmts)) with
+      (buildExtIndex sp.extNames sp.stmts) sp.stmts) with
   | error e => rw [hm] at h; simp [bind, Except.bind] at h
   | ok pairs =>
       rw [hm] at h
@@ -130,9 +130,9 @@ private theorem bind_pure_pair_ok {ε γ δ : Type} {B : Except ε γ} {s b : δ
       exact h.1.symm
 
 theorem buildStep_outputWeaves_length_one
-    {ns ext : Std.HashMap String Nat} {nt : Std.HashMap String (List AxisP)}
+    {ns ext : Std.HashMap String Nat} {stmts : List ScanStmt}
     {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
-    (h : buildStep ns ext nt sc = .ok (b, w)) :
+    (h : buildStep ns ext stmts sc = .ok (b, w)) :
     b.outputWeaves.length = 1 := by
   unfold buildStep at h
   cases sc with
