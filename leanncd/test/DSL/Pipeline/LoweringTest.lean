@@ -1,4 +1,5 @@
 import LeanNCD.DSL.Pipeline.Lowering
+import LeanNCD.DSL.Compile
 namespace LeanNCD
 -- Masked attention: A[q,s] := softmax(where s≤q)(Q[q,d]·K[s,d]) splits into a linear step
 -- (identity nonlin) + a softmax step (carries the mask).
@@ -98,4 +99,38 @@ run_cmd do
   | .ok tc _ => throwError s!"expected route to reject unresolved read, got {tc.steps.length} step(s)"
   | .error (.undeclaredName nm) _ => unless nm == "Ghost" do throwError s!"wrong undeclared name: {nm}"
   | .error e _ => throwError s!"expected undeclaredName, got {repr e}"
+
+-- topoSort: out-of-order source (Y reads H; H is written by a LATER stmt) must be
+-- reordered so H precedes Y after schedule+route, i.e. every internal wire in routing
+-- satisfies producer-step-index < consumer-step-index.
+-- Source order: [yStmt (reads H), hStmt (writes H, reads X ext)]. Y is NOT last, so
+-- we make Y the output by adding a sink Sink[i,j] := Y[i,j] at the end.
+-- After schedule: live = {Sink, Y, H}; non-topological order without sort: [Y, H, Sink].
+-- After topoSort: [H, Y, Sink]. routing[1] should contain internal 0 0 (j=0 < i=1).
+run_cmd do
+  let ax (nm : String) (u : Nat) : AxisSpec := { name := nm, uid := u, kind := .real none }
+  let i := ax "i" 1; let j := ax "j" 2; let k := ax "k" 3; let d := ax "d" 4
+  let mkRd (nm : String) (es : List IdxExpr) : RHSExpr :=
+    { body := { terms := [ { factors := [ .read nm es ] } ] }, nonlin := .identity }
+  let mkRd2 (nm1 : String) (es1 : List IdxExpr) (nm2 : String) (es2 : List IdxExpr) : RHSExpr :=
+    { body := { terms := [ { factors := [ .read nm1 es1, .read nm2 es2 ] } ] }, nonlin := .relu }
+  -- Y[i,j] := relu(W2[j,k] · H[i,k])   -- consumer of H
+  let yStmt : ScanStmt := .plain (.assign "Y" [.free i, .free j]
+    (mkRd2 "W2" [.axis j, .axis k] "H" [.axis i, .axis k]))
+  -- H[i,k] := W1[k,d] · X[i,d]         -- producer of H (reads only externals)
+  let hStmt : ScanStmt := .plain (.assign "H" [.free i, .free k]
+    { body := { terms := [ { factors := [ .read "W1" [.axis k, .axis d], .read "X" [.axis i, .axis d] ] } ] }, nonlin := .identity })
+  -- Sink[i,j] := Y[i,j]                 -- output (reads Y, keeps Y+H alive via DCE)
+  let sinkStmt : ScanStmt := .plain (.assign "Sink" [.free i, .free j] (mkRd "Y" [.axis i, .axis j]))
+  -- Source order: [yStmt, hStmt, sinkStmt] -- NOT topological (Y before H)
+  let exts : Finset String := insert "W2" (insert "W1" (insert "X" ∅))
+  let lp : LinearProgram := { decls := [], stmts := [yStmt, hStmt, sinkStmt], env := {}, extNames := exts, ctx := { classes := [] } }
+  match (do let sp ← schedule lp; route sp) |>.run 0 with
+  | .ok tc _ =>
+      -- After topoSort, every internal wire internal j _ at step i must have j < i.
+      let bad := tc.routing.zipIdx.filter fun p =>
+        p.1.any fun w => match w with | .internal j _ => decide (j ≥ p.2) | .external _ => false
+      unless bad.isEmpty do
+        throwError s!"routing has producer-after-consumer wires: {repr (bad.map (·.1))}"
+  | .error e _ => throwError s!"schedule/route errored: {repr e}"
 end LeanNCD

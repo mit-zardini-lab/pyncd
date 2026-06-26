@@ -65,10 +65,8 @@ def splitNonlins (sp : ScanProgram) : FreshM LinearProgram := do
 
 Dead-code elimination by backward reachability from the program's outputs. A statement is
 kept iff it writes a tensor name that is (transitively) needed to compute an output.
-
-NOTE: a full topological re-sort is NOT performed here — for the §12.1 example programs
-source order already places producers before consumers, so we keep the surviving stmts in
-their original source order. -/
+After DCE, the surviving statements are topologically sorted so producers always precede
+their consumers. -/
 
 /-- Tensor names a ScanStmt writes (its LHS name(s)). -/
 def ScanStmt.writes : ScanStmt → List String
@@ -81,6 +79,52 @@ def ScanStmt.reads : ScanStmt → List String
   | .plain s        => s.readNames
   | .scan _ _ b r _ => (b.flatMap Stmt.readNames ++ r.flatMap Stmt.readNames).eraseDups
   | .scanPre _ _ _  => []
+
+/-! ### Topological sort (stable Kahn's algorithm)
+
+`topoSortFuel` repeatedly emits the first currently-eligible statement — one whose
+internal-read dependencies are all already emitted — scanning `remaining` in source order
+on each pass to get a stable, no-op-on-already-sorted output.
+
+An **internal dependency** is a read name that some stmt in the full list writes.
+**Self-edges** (a stmt's reads ∩ its own writes) are excluded: scan nodes read their own
+state names across iterations, which is not a forward dependency.
+
+Termination: on each recursive call with `fuel > 0`, at least one stmt is emitted (or
+`remaining` is already empty), so the fuel strictly decreases. Setting `fuel := stmts.length`
+is sufficient. Using a `Nat` fuel parameter (rather than `partial`) means Lean accepts the
+definition without a `decreasing_by` proof, and equation lemmas exist for Phase 4. -/
+
+/-- Is `sc` eligible to emit given `emitted` names? Eligible iff every name it reads that
+    is an internal dependency (written by some OTHER stmt in `all`, excluding self-edges)
+    is already in `emitted`. -/
+private def eligible (sc : ScanStmt) (all : List ScanStmt) (emitted : List String) : Bool :=
+  let selfWrites := sc.writes
+  sc.reads.all (fun r =>
+    -- not an internal dep: either a self-edge or not written by any other stmt
+    selfWrites.contains r ||
+    all.all (fun s => s.writes == selfWrites || !s.writes.contains r) ||
+    emitted.contains r)
+
+/-- Fuel-bounded stable Kahn's sort. `all` is the full stmt list (fixed); `remaining` is
+    what's left to emit; `emitted` accumulates written names of already-emitted stmts;
+    `acc` accumulates emitted stmts in order. -/
+def topoSortFuel : Nat → List ScanStmt → List ScanStmt → List String →
+    List ScanStmt → List ScanStmt
+  | 0,    _,   remaining, _,       acc => acc ++ remaining   -- fuel gone: append as-is
+  | _,    _,   [],        _,       acc => acc
+  | n+1,  all, remaining, emitted, acc =>
+      match remaining.findIdx? (fun sc => eligible sc all emitted) with
+      | none   => acc ++ remaining   -- cycle: shouldn't occur in valid DAGs
+      | some i =>
+          let sc   := remaining.getD i (remaining.head!)
+          let rest := remaining.eraseIdx i
+          topoSortFuel n all rest (emitted ++ sc.writes) (acc ++ [sc])
+
+/-- Topological sort of a list of `ScanStmt`s: producers precede consumers.
+    Stable — already-sorted input is returned unchanged (first-eligible-in-source-order). -/
+def topoSort (stmts : List ScanStmt) : List ScanStmt :=
+  topoSortFuel stmts.length stmts stmts [] []
 
 /-- One backward-reachability pass: add names read by any stmt that writes a live name. -/
 def liveStep (stmts : List ScanStmt) (live : List String) : List String :=
@@ -109,11 +153,12 @@ def schedule (lp : LinearProgram) : FreshM ScheduledProgram := do
   let outputs  := if lastOut.isEmpty then produced.filter (fun n => ¬ read.contains n) else lastOut
   let live := liveFix lp.stmts outputs.eraseDups
   let liveStmts := lp.stmts.filter (fun sc => (sc.writes).any (fun w => live.contains w))
+  let ordered   := topoSort liveStmts
   -- collect the sizes pinned by `axis … = n` decls (UIDs are canonical by this phase).
   let explicitSizes : Std.HashMap UID Nat := lp.decls.foldl (fun m d => match d with
     | .axis ax (some n) => m.insert ax.uid n
     | _                 => m) {}
-  return { decls := lp.decls, stmts := liveStmts, env := lp.env, extNames := lp.extNames,
+  return { decls := lp.decls, stmts := ordered, env := lp.env, extNames := lp.extNames,
            ctx := lp.ctx, explicitSizes }
 
 /-! ## Phase 8 — `route`

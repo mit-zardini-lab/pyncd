@@ -60,7 +60,7 @@ structure LinearProgram where
 
 structure ScheduledProgram where
   decls    : List Decl
-  stmts    : List ScanStmt     -- live stmts, reverse-topological order
+  stmts    : List ScanStmt     -- live stmts, topological order: producers precede consumers
   env      : DeclEnv
   extNames : Finset String
   ctx      : Context AxisSpec
