@@ -383,11 +383,13 @@ theorem compile_wellFormed (p : TLProgram) (s : Nat) (tc : ThreadedComposed) (s'
     (h : (TLProgram.compile p).run s = EStateM.Result.ok tc s') : tc.WellFormed
 ```
 
-**Progress (2026-06-25 evening):** Phases 0, 1, 2, and Task 3.1 are DONE and committed (branch
-`wellformed-forall-p`, HEAD `90e45e4`), all sorry-free. **Resume at Task 3.2** — see the ▶▶ RESUME
-POINT ◀◀ block in `docs/superpowers/plans/2026-06-25-wellformed-forall-p.md`. A second conjunct-2
-subtlety surfaced (∀ p is false for repeated-LHS programs like `Y[i,i]` — producer weaves dedup
-axes by uid, consumer weaves don't); the agreed fix is to dedup `tensorAxes` by uid (the plan's Step 0).
+**Progress (2026-06-26):** Phases 0, 1, 2, 3 are DONE and committed (branch `wellformed-forall-p`,
+HEAD `d61e4ec`), all sorry-free. Task 3.2 (the conjunct-2 engine) landed: `tensorAxes` dedups by uid
+(fixes repeated-LHS programs like `Y[i,i]`); `buildStep` derives an internal read's weave from
+`stmts[nameToStep[rf.1]]` (dropping `nameToType` and the hard `Std.HashMap` consistency lemma); and
+`buildStep_output_fixedAxes` proves a step publishes exactly `tensorAxes` of its rep stmt. **Resume at
+Phase 4 (Task 4.1)** — see the ▶▶ RESUME POINT ◀◀ block in
+`docs/superpowers/plans/2026-06-25-wellformed-forall-p.md`.
 
 **Five phases** (each ends `lake build`-green + `#print axioms`-clean, no `sorryAx`):
 

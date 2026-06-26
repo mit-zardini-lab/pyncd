@@ -301,11 +301,24 @@ git commit -m "feat(routespec): structural characterization lemmas for routeCore
 
 ### Task 3.2: `nameToType` ⊳ weave-consistency lemma (the conjunct-2 engine)
 
-> **▶▶ RESUME POINT (2026-06-25 evening) ◀◀** Phases 0, 1, 2, prep, and Task 3.1 are DONE and
-> committed (HEAD `90e45e4` on branch `wellformed-forall-p`); working tree clean. Next session
-> starts HERE.
+> **✅ DONE (2026-06-26).** Task 3.2 is complete and committed (branch `wellformed-forall-p`):
+> Step 0 dedup `tensorAxes` (`d703fd6`); the derive-internal-read-weave-from-`stmts[j]` refactor that
+> **drops `nameToType`** and eliminates the hard `Std.HashMap` consistency lemma (`a56a9e3`); and the
+> engine lemma `buildStep_output_fixedAxes` (Fact A) + `dedup_append_filter`/`fixedAxesP_mapWeave`
+> helpers (`d61e4ec`), all sorry-free.
 >
-> **Decision taken — dedup `tensorAxes` by uid (do this FIRST, as Step 0 below).** Investigating the
+> **▶▶ RESUME POINT (next session) ◀◀ — Phase 4, starting at Task 4.1.** Conjunct 2 (Task 4.5) is now
+> de-risked: for an internal wire `.internal j 0` (`j = nameToStep[rf.1]`), producer step `j`'s output
+> weave fixed-axes `= tensorAxes(stmts[j])` (via `buildStep_output_fixedAxes` + `routeCore_getD`), and
+> `buildStep` builds the consumer's input weave from the same `tensorAxes(stmts[j])`. Since
+> `weaveToArrayType` depends only on the fixed axes (`fixedAxesP`), the two coincide. **One bridge lemma
+> to add in Phase 4** (in `Agreement.lean`, which imports `Realize` where `weaveToArrayType` lives):
+> `fixedAxesP w₁ = fixedAxesP w₂ → weaveToArrayType w₁ = weaveToArrayType w₂` (both reduce to
+> `realizeWeaveShape`'s `targetAxes = (fixedAxesP _).map realizeAxis`). Then conjuncts 3→1→4→2 +
+> assemble `compile_wellFormed` per Tasks 4.1–4.6 below.
+>
+> ---
+> **Historical (the Task 3.2 decision, now landed) — dedup `tensorAxes` by uid (Step 0, done).** Investigating the
 > ∀ p conjunct-2 proof revealed it is *literally false* for repeated-LHS-axis programs (e.g. a
 > diagonal write `Y[i,i] := …`): after `assignUIDs` both `i`s share a uid, so `lhsAxes = [i, i]`. The
 > producer's output weave `mkWeave` dedups (`degAxes = dedup(lhsAxes ++ contracted)` → `[i]`), but the
