@@ -11,18 +11,18 @@ noncomputable def fromThreadedComposed (tc : ThreadedComposed) : Acset.SBrInstan
 /-- **Prop 8 (DSL/CSV agreement).** The DSL-path realization of `tc` and the CSV-path
     realization of its extracted `SBrInstance` are the SAME `Br` morphism (equal as
     `Σ (dom cod : BrObj), BrMorph dom cod` values — same objects AND same morphism). -/
-theorem realize_fromThreadedComposed_agree (tc : ThreadedComposed) :
-    realize tc = realizeSBr (fromThreadedComposed tc) := sorry
+theorem realize_fromThreadedComposed_agree (tc : ThreadedComposed) (h : tc.WellFormed) :
+    realize tc h = realizeSBr (fromThreadedComposed tc) := sorry
 
 /-- **Prop 8′ (axis identity on the nose, §7.4).** Both paths share the §7.4 UID coequalizer,
     so the realized domain objects coincide. -/
-theorem agree_dom (tc : ThreadedComposed) :
-    (realize tc).1 = (realizeSBr (fromThreadedComposed tc)).1 :=
-  congr_arg (·.1) (realize_fromThreadedComposed_agree tc)
+theorem agree_dom (tc : ThreadedComposed) (h : tc.WellFormed) :
+    (realize tc h).1 = (realizeSBr (fromThreadedComposed tc)).1 :=
+  congr_arg (·.1) (realize_fromThreadedComposed_agree tc h)
 
 /-- Prop 8′ (cod). -/
-theorem agree_cod (tc : ThreadedComposed) :
-    (realize tc).2.1 = (realizeSBr (fromThreadedComposed tc)).2.1 :=
-  congr_arg (·.2.1) (realize_fromThreadedComposed_agree tc)
+theorem agree_cod (tc : ThreadedComposed) (h : tc.WellFormed) :
+    (realize tc h).2.1 = (realizeSBr (fromThreadedComposed tc)).2.1 :=
+  congr_arg (·.2.1) (realize_fromThreadedComposed_agree tc h)
 
 end LeanNCD

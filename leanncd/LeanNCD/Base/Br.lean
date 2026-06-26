@@ -56,6 +56,10 @@ inductive Hom : BrObj → BrObj → Type
   | comp   : {a b c : BrObj} → Hom a b → Hom b c → Hom a c
   | tensor : {a b c d : BrObj} → Hom a b → Hom c d → Hom (a ++ c) (b ++ d)
   | braid  : (a b : BrObj) → Hom (a ++ b) (b ++ a)
+-- per-wire comonoid (§ CD/gs-monoidal structure): copy duplicates one wire, del discards it.
+-- Bundle-level copy/discard are derived (fold over the wire list), so no product-compat axiom.
+| copyW  : (A : ArrayType) → Hom [A] [A, A]
+| delW   : (A : ArrayType) → Hom [A] []
 
 inductive Rel : {a b : BrObj} → Hom a b → Hom a b → Prop
   -- equivalence
@@ -114,6 +118,20 @@ inductive Rel : {a b : BrObj} → Hom a b → Hom a b → Prop
           (.comp (.comp (.tensor (.id X) (.braid Y Z))
                        (cast (congrArg (Hom (X ++ (Z ++ Y))) (List.append_assoc X Z Y).symm) (.id _)))
                  (.tensor (.braid X Z) (.id Y)))
+  -- comonoid laws for the per-wire copy/discard (CD / gs-monoidal). NATURALITY IS DELIBERATELY
+  -- ABSENT — a general op need not commute with `copyW`, so `Br` stays non-cartesian (Fox). On
+  -- singleton wires `++` computes, so coassoc / left-counit / cocommutativity are cast-free; only
+  -- the right counit crosses the non-definitional `[A] ++ [] = [A]` (mirrors `tensor_unitr`).
+  | copyW_coassoc (A : ArrayType) :
+      Rel (.comp (.copyW A) (.tensor (.copyW A) (.id [A])))
+          (.comp (.copyW A) (.tensor (.id [A]) (.copyW A)))
+  | copyW_counitl (A : ArrayType) :
+      Rel (.comp (.copyW A) (.tensor (.delW A) (.id [A]))) (.id [A])
+  | copyW_cocomm (A : ArrayType) :
+      Rel (.comp (.copyW A) (.braid [A] [A])) (.copyW A)
+  | copyW_counitr (A : ArrayType) :
+      Rel (.comp (.copyW A) (.tensor (.id [A]) (.delW A)))
+        (cast (show Hom [A] [A] = Hom [A] ([A] ++ []) by rw [List.append_nil]) (.id [A]))
 
 instance setoidHom (a b : BrObj) : Setoid (Hom a b) where
   r := Rel
@@ -169,6 +187,27 @@ theorem braid_natural {a b c d} (f : BrMorph a b) (g : BrMorph c d) :
 theorem tensor_unitl {a b} (f : BrMorph a b) : tensor (idm []) f = f := by
   refine Quotient.inductionOn f (fun f => ?_)
   exact Quotient.sound (Rel.tensor_unitl f)
+
+/-- Per-wire copy `Δ : [A] → [A,A]`. -/
+def copyW (A : ArrayType) : BrMorph [A] [A, A] := mk (.copyW A)
+
+/-- Per-wire discard `ε : [A] → I`. -/
+def delW (A : ArrayType) : BrMorph [A] [] := mk (.delW A)
+
+/-- Copy coassociativity (cast-free: both sides are `BrMorph [A] [A,A,A]`). -/
+theorem copyW_coassoc (A : ArrayType) :
+    comp (copyW A) (tensor (copyW A) (idm [A])) = comp (copyW A) (tensor (idm [A]) (copyW A)) :=
+  Quotient.sound (Rel.copyW_coassoc A)
+
+/-- Copy left counit (cast-free: `[] ++ [A] = [A]` definitionally). -/
+theorem copyW_counitl (A : ArrayType) :
+    comp (copyW A) (tensor (delW A) (idm [A])) = idm [A] :=
+  Quotient.sound (Rel.copyW_counitl A)
+
+/-- Copy cocommutativity. -/
+theorem copyW_cocomm (A : ArrayType) :
+    comp (copyW A) (braid [A] [A]) = copyW A :=
+  Quotient.sound (Rel.copyW_cocomm A)
 
 end BrMorph
 
@@ -280,6 +319,17 @@ theorem BrMorph.tensor_unitr_heq {a b : BrObj} (f : BrMorph a b) :
           rw [List.append_nil, List.append_nil]) f) := Quotient.sound (Rel.tensor_unitr f)
   rw [hrel]
   exact brHEq_mk_cast f (List.append_nil a) (List.append_nil b)
+
+/-- Copy right counit on `BrMorph`, as an `HEq` across `[A] ++ [] = [A]`. Discharged from
+    `Rel.copyW_counitr` via `brHEq_mk_cast` — the per-wire comonoid's only cast-crossing law. -/
+theorem BrMorph.copyW_counitr_heq (A : ArrayType) :
+    HEq (BrMorph.comp (BrMorph.copyW A) (BrMorph.tensor (BrMorph.idm [A]) (BrMorph.delW A)))
+        (BrMorph.idm [A]) := by
+  have hrel : BrMorph.comp (BrMorph.copyW A) (BrMorph.tensor (BrMorph.idm [A]) (BrMorph.delW A))
+      = Quotient.mk _ (cast (show Hom [A] [A] = Hom [A] ([A] ++ []) by rw [List.append_nil])
+          (.id [A])) := Quotient.sound (Rel.copyW_counitr A)
+  rw [hrel]
+  exact brHEq_mk_cast (.id [A]) rfl (List.append_nil [A])
 
 /-- Strict associativity for `tensor` on `BrMorph`, as an `HEq` across `List.append_assoc`.
     Discharged from `Rel.tensor_assoc_coh` (a true strict-monoidal law) via `brHEq_mk_cast`. -/

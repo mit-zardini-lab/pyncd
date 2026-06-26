@@ -18,12 +18,15 @@ import Mathlib
 
   ## Status (batch-verified `lake build`)
   SORRY-FREE: representation (`Node`/`codPorts`/`domPorts`/`NData`); `nId`, `nGen` (full, `rfl`
-  colors); `codPortsAppend`/`domPortsAppend`/`finSplit`/`finJoin`; ALL FIVE op WIRES
+  colors); `codPortsAppend`/`domPortsAppend`/`finSplit`/`finJoin`; ALL FIVE SMC op WIRES
   (`nId`/`nGen`/`nBraid`/`nTensor`/`nComp` — composition is just reassociations, NO GoI trace); `eval`
-  (the full syntax→model interpreter); `NData.ext'`; the `@[simp]` projection lemmas.
-  DEFERRED `sorry`s (4): `nComp.color`/`nTensor.color`/`nBraid.color` (proof-irrelevant
-  well-formedness, off the `sound` path since `color : Prop`); and `nComp_nId_left` (the first SMC
-  law — ~90% mechanized, see its doc-comment for the `erw`-driven recipe and the residual).
+  (the syntax→model interpreter, on the five SMC constructors); `NData.ext'`; the `@[simp]` lemmas.
+  DEFERRED `sorry`s (6): `nComp.color`/`nTensor.color`/`nBraid.color` (proof-irrelevant
+  well-formedness, off the `sound` path since `color : Prop`); `nComp_nId_left` (the first SMC
+  law — ~90% mechanized, see its doc-comment for the `erw`-driven recipe and the residual); and `eval`
+  on the CD comonoid generators `copyW`/`delW` — the linear *bijective-wiring* `NData` cannot model
+  copy/discard (one-in-two-out is not a bijection); a non-bijective CD model is out of scope and off
+  the `brCancelPoint` path (the realize-side `Br` copy/discard laws are sorry-free in `Br.lean`).
 
   ## Remaining route to `brCancelPoint`
   category/SMC laws (technique demonstrated in `nComp_nId_left`) → `sound : Rel f g → eval f = eval g`
@@ -237,6 +240,8 @@ def eval : {a b : BrObj} → Hom a b → NData a b
   | _, _, .comp f g => nComp (eval f) (eval g)
   | _, _, .tensor f g => nTensor (eval f) (eval g)
   | _, _, .braid a b => nBraid a b
+  | _, _, .copyW _ => sorry  -- CD copy: unmodeled by the linear bijective-wiring `NData` (see header)
+  | _, _, .delW _  => sorry  -- CD discard: ditto — needs a non-bijective (CD) model, out of scope
 
 end BrNF
 end LeanNCD

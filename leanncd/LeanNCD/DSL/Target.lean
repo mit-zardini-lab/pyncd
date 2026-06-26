@@ -69,12 +69,15 @@ structure BrBaseP where
   reindexings  : List StMatP
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
 
-/-- A wire in the routed DAG (§12.4): output slot `slot` of step `step`
-    (or, when `step = nExternal`, an external input). -/
-structure Wire where
-  step : Nat
-  slot : Nat
-  deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
+/-- A wire in the routed DAG (§12.4): either an external program input (`slot` = the external
+    index) or output `slot` of producing step `step`. An inductive sum — not a struct with a
+    sentinel `step = nExternal` — so the two cases stay unambiguous even when the external count
+    is below the step count (a deep model has more steps than inputs, and a producer at index
+    `nExternal` would otherwise be indistinguishable from external slot 0). -/
+inductive Wire
+  | external (slot : Nat)               -- an external program input
+  | internal (step : Nat) (slot : Nat)  -- output `slot` of producing step `step`
+  deriving DecidableEq, BEq, Repr, Lean.ToExpr, Inhabited
 
 /-- Computable presentation of one `Br` morphism as a routed DAG (§12.4). The
     math-tower `routing : Fin steps.length → ℕ → Wire` function becomes

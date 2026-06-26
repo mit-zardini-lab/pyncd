@@ -8,11 +8,12 @@ run_cmd do
     { steps := [{ op := BrOp.contract, degree := [],
                   inputWeaves := [[.tiled]], outputWeaves := [[.tiled]],
                   reindexings := [{ domLen := 1, codLen := 1, coeffs := [[1]], bias := [0] }] }],
-      routing := [[⟨0, 0⟩]], nExternal := 1 }
+      routing := [[.external 0]], nExternal := 1 }
   -- DecidableEq:
   unless (tc == tc) do throwError "ThreadedComposed DecidableEq failed"
   -- ToExpr is derivable (compile-time embedding relies on it):
   let _ : Expr := Lean.toExpr tc
   pure ()
-#guard (Wire.mk 0 1) ≠ (Wire.mk 1 0)
+#guard (Wire.internal 0 1) ≠ (Wire.internal 1 0)
+#guard (Wire.external 0) ≠ (Wire.internal 0 0)   -- the disambiguation the inductive guarantees
 end LeanNCD

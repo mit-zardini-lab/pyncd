@@ -138,8 +138,8 @@ The executable back-end's final phase: turn the scheduled statements into a `Thr
      mapping contracted axes (by uid) to `.tiled`, retained axes to `.fixed a`.
    * `reindexings` = one `StMatP` per read factor; `idxToRow` expresses each read coordinate as
      an integer-affine combination of the degree axes (column order = degree order).
-   * `routing[i]` = per read factor: producer step `j` (`Wire j 0`) if internal, else the
-     external sentinel `Wire nExternal (extIndex nm)`.
+   * `routing[i]` = per read factor: `Wire.internal j 0` (output of producer step `j`) if
+     internal, else `Wire.external (extIndex nm)`.
 
 `nExternal := sp.extNames.card`. -/
 
@@ -280,10 +280,10 @@ def route (sp : ScheduledProgram) : FreshM ThreadedComposed := do
     -- silently defaulting to external slot 0 (which masks upstream dataflow errors).
     let wires ← readFactors.mapM (fun rf =>
       match nameToStep[rf.1]? with
-      | some j => pure (Wire.mk j 0)
+      | some j => pure (Wire.internal j 0)
       | none   =>
         match extIndex[rf.1]? with
-        | some k => pure (Wire.mk nExternal k)
+        | some k => pure (Wire.external k)
         | none   => throw (CompileError.undeclaredName rf.1))
     steps := steps ++ [ step ]
     routing := routing ++ [ wires ]

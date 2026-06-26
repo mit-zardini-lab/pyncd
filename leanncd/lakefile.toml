@@ -21,7 +21,7 @@ name = "LeanNCD"
 [[lean_lib]]
 name = "Tests"
 srcDir = "test"
-globs = ["Base.NumericTest", "Base.StTest", "Base.BrTest",
+globs = ["Base.NumericTest", "Base.StTest", "Base.BrTest", "Base.BrWiringTest",
          "Seam.AdapterTest", "Core.GradedTest", "Core.WeaveTest",
          "Mixins.TemporalTest", "Mixins.StubsTest", "Grothendieck.SplitTest",
          "Algebra.AlgebraTest", "Algebra.ConstructTest",

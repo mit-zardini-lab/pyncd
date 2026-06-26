@@ -68,8 +68,8 @@ run_cmd do
       let nTiled := step.outputWeaves.head!.filter (fun | .tiled => true | .fixed _ => false) |>.length
       unless nTiled == 1 do throwError s!"expected exactly one contracted (tiled) axis, got {nTiled}"
       unless step.reindexings.length == 2 do throwError s!"expected 2 input reindexings, got {step.reindexings.length}"
-      -- both inputs route to externals (step = nExternal sentinel)
-      unless tc.routing.head!.all (fun w => w.step == 2) do throwError "matmul inputs should be external"
+      -- both inputs route to externals
+      unless tc.routing.head!.all (fun w => match w with | .external _ => true | .internal .. => false) do throwError "matmul inputs should be external"
   | .error e _ => throwError s!"route errored: {repr e}"
 
 -- Strided read: Y[i] := X[2*i] ⇒ the X reindexing row has coefficient 2.
