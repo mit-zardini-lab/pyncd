@@ -120,7 +120,8 @@ Make every wire's type derive from a single source. Build `nameToType : String �
 **Interfaces:**
 - Consumes: `buildStep`, `routeCore` from Phase 0.
 - Produces: `tensorAxes (s : Stmt) : List AxisP` — a stmt's retained output axes as `AxisP` (name + `SizeExpr.var name`), in LHS order; this is what a producer publishes and a consumer must receive.
-- Produces: `nameToType : Std.HashMap String (List AxisP)` threaded through `routeCore`, built in a pre-pass: for each `sc`, for each `nm ∈ sc.writes`, `nameToType[nm] := tensorAxes sc.repStmt`.
+- Produces: `readPosAxis : IdxExpr → AxisP` — one representative axis per read position, for external reads.
+- Produces: `nameToType : Std.HashMap String (List AxisP)` threaded through `routeCore`, built in a pre-pass: for each `sc`, for each `nm ∈ sc.writes`, `nameToType[nm] := tensorAxes (sc.repStmt.getD …)`.
 
 - [ ] **Step 1: Write the failing faithfulness test**
 
@@ -146,23 +147,52 @@ def fixedNames (w : WeaveShapeP) : List (Option String) :=
 Run: `lake env lean test/DSL/Pipeline/RouteWeaveTest.lean`
 Expected: `#guard` failure — current input weave fixed-names are `[i,j]`, output `[i,k]`.
 
-- [ ] **Step 3: Implement `nameToType` + faithful weaves**
+- [ ] **Step 3: Implement `nameToType` + faithful INPUT weaves (MINIMAL scope — see note)**
 
-In `routeCore`, build `nameToType` in a pre-pass over `sp.stmts` (mirror the `nameToStep` fold, mapping each write name to `tensorAxes` of its representative stmt). Pass it to `buildStep`. In `buildStep`, replace
+**Scope decision (2026-06-25):** descoped to *only* the change `WellFormed` needs. The reindexing-row
+reorder and a fully faithful external-read arity are **deferred to the agreement task** — `WellFormed`
+never inspects `reindexings`, and the change below makes conjunct 2 hold by construction.
+
+Define a producer-published-axes helper and a per-position external helper:
+```lean
+-- a stmt's published (retained) output axes, in LHS order — what a producer emits and a consumer receives.
+def tensorAxes (s : Stmt) : List AxisP :=
+  s.lhsAxes.map (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name))
+
+-- one representative axis per READ POSITION, for external reads (no producer to publish a type).
+def readPosAxis : IdxExpr → AxisP
+  | .axis a      => AxisP.mk (some a.name) (SizeExpr.var a.name)
+  | .shift a _   => AxisP.mk (some a.name) (SizeExpr.var a.name)
+  | .scale _ a   => AxisP.mk (some a.name) (SizeExpr.var a.name)
+  | .affine _ xs => match xs.head? with
+                    | some (_, a) => AxisP.mk (some a.name) (SizeExpr.var a.name)
+                    | none        => AxisP.mk none (SizeExpr.var "_")
+  | .const _     => AxisP.mk none (SizeExpr.var "_")
+```
+In `routeCore`, build `nameToType : Std.HashMap String (List AxisP)` in a pre-pass over `sp.stmts`
+(mirror the `nameToStep` fold; for each `sc`, for each `nm ∈ sc.writes`, insert
+`nm ↦ tensorAxes (sc.repStmt.getD …)`). Pass it to `buildStep`. In `buildStep`, replace
 ```lean
 let inputWeaves : List WeaveShapeP := readFactors.map (fun _ => mkWeave)
 ```
-with a per-factor weave whose `.fixed` slots are the read tensor's published axes in producer order:
+with a per-factor weave — **internal reads use the producer's published axes (producer order); external
+reads use one `.fixed` per read position**:
 ```lean
--- the published axis list for read factor `rf` (internal: nameToType[rf.1]; external: rf's own axes)
-let readPubAxes (rf : String × List IdxExpr) : List AxisP :=
-  match nameToType[rf.1]? with
-  | some axs => axs
-  | none     => (rf.2.flatMap idxAxes).map (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name))
 let inputWeaves : List WeaveShapeP :=
-  readFactors.map (fun rf => (readPubAxes rf).map (fun a => WeaveSlotP.fixed a))
+  readFactors.map (fun rf =>
+    match nameToType[rf.1]? with
+    | some axs => axs.map (fun a => WeaveSlotP.fixed a)        -- internal: producer-published order
+    | none     => rf.2.map (fun e => WeaveSlotP.fixed (readPosAxis e)))  -- external: one per position
 ```
-Set the output weave's `.fixed` slots likewise from `tensorAxes` of this step's repStmt (so the producer publishes exactly `nameToType[writeName]`), keeping the existing `.tiled` markers for contracted axes only where they affect the OUTPUT semantics (output retains `mkWeave`'s tiled-on-contracted form, but its `.fixed` slots must equal `tensorAxes`). Reorder each `reindexings[f]` rows to follow `readPubAxes rf` order (one row per published axis, via `idxToRow degUids` on the matching read `IdxExpr`).
+**Leave the output weave (`outputWeaves := [ mkWeave ]`) and `reindexings` UNCHANGED.** The output
+weave's `.fixed` slots are already `tensorAxes` (degree = `lhsAxes ++ contracted`, so `mkWeave`'s
+fixed slots, in order, equal the LHS axes), so an internal consumer's input weave (`nameToType[nm]`)
+and the producer's output weave have identical `targetAxes` — conjunct 2 is then definitional.
+
+Record in the report (deferred to the agreement task): reindexing rows are NOT reordered to producer
+order (only matters for transposed reads), and external-read weaves are position-representative (an
+affine read like `X[i+p, 2*j+r]` publishes `[i, j]` by first-variable-per-position — a faithfulness
+approximation, not load-bearing for `WellFormed`).
 
 - [ ] **Step 4: Run faithfulness + example tests**
 
