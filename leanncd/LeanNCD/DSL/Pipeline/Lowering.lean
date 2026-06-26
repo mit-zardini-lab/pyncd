@@ -181,6 +181,21 @@ def idxAxes : IdxExpr → List AxisSpec
   | .shift a _  => [a]
   | .affine _ xs => xs.map (·.2)
 
+/-- A stmt's published (retained) output axes, in LHS order — what a producer emits and a
+    consumer receives. -/
+def tensorAxes (s : Stmt) : List AxisP :=
+  s.lhsAxes.map (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name))
+
+/-- One representative axis per READ POSITION, for external reads (no producer to publish a type). -/
+def readPosAxis : IdxExpr → AxisP
+  | .axis a      => AxisP.mk (some a.name) (SizeExpr.var a.name)
+  | .shift a _   => AxisP.mk (some a.name) (SizeExpr.var a.name)
+  | .scale _ a   => AxisP.mk (some a.name) (SizeExpr.var a.name)
+  | .affine _ xs => match xs.head? with
+                    | some (_, a) => AxisP.mk (some a.name) (SizeExpr.var a.name)
+                    | none        => AxisP.mk none (SizeExpr.var "_")
+  | .const _     => AxisP.mk none (SizeExpr.var "_")
+
 /-- Express a read coordinate `IdxExpr` as an integer-affine combination of the degree axes
     identified by uids `us` (column order = `us`): returns `(coeff-row, bias)`. -/
 def idxToRow (us : List UID) : IdxExpr → (List Int × Int)
@@ -229,6 +244,7 @@ def buildExtIndex (extNames : Finset String) (stmts : List ScanStmt)
     Returns `CompileError.shapeMismatch` for an empty-step `scanPre`, or
     `CompileError.undeclaredName` for an unresolved read. -/
 def buildStep (nameToStep : Std.HashMap String Nat) (extIndex : Std.HashMap String Nat)
+    (nameToType : Std.HashMap String (List AxisP))
     (sc : ScanStmt) : Except CompileError (BrBaseP × List Wire) := do
   -- Validate a pre-built (escape-hatch) morphism: its step list must be non-empty.
   match sc with
@@ -251,7 +267,11 @@ def buildStep (nameToStep : Std.HashMap String Nat) (extIndex : Std.HashMap Stri
   -- weave per degree axis: contracted ⇒ tiled, else fixed.
   let mkWeave : List WeaveSlotP :=
     degAxes.map (fun a => if contractedUids.contains a.uid then WeaveSlotP.tiled else WeaveSlotP.fixed (AxisP.mk (some a.name) (SizeExpr.var a.name)))
-  let inputWeaves : List WeaveShapeP := readFactors.map (fun _ => mkWeave)
+  let inputWeaves : List WeaveShapeP :=
+    readFactors.map (fun rf =>
+      match nameToType[rf.1]? with
+      | some axs => axs.map (fun a => WeaveSlotP.fixed a)        -- internal: producer-published order
+      | none     => rf.2.map (fun e => WeaveSlotP.fixed (readPosAxis e)))  -- external: one per position
   let outputWeaves : List WeaveShapeP := [ mkWeave ]
   let degUids : List UID := degAxes.map (·.uid)
   let reindexings : List StMatP := readFactors.map (fun rf =>
@@ -293,8 +313,13 @@ def routeCore (sp : ScheduledProgram) : Except CompileError (List BrBaseP × Lis
     sp.stmts.zipIdx.foldl (fun m (sc, i) =>
       sc.writes.foldl (fun m' nm => m'.insert nm i) m) {}
   let extIndex := buildExtIndex sp.extNames sp.stmts
+  let nameToType : Std.HashMap String (List AxisP) :=
+    sp.stmts.foldl (fun m sc =>
+      sc.writes.foldl (fun m' nm =>
+        m'.insert nm (tensorAxes (sc.repStmt.getD (.assign "" [] { body := { terms := [] }, nonlin := .identity }))))
+        m) {}
   -- PASS 2: fold buildStep over all stmts.
-  let pairs ← sp.stmts.mapM (buildStep nameToStep extIndex)
+  let pairs ← sp.stmts.mapM (buildStep nameToStep extIndex nameToType)
   return (pairs.map (·.1), pairs.map (·.2))
 
 /-- Phase 8: route the scheduled statements into a `ThreadedComposed`. -/
