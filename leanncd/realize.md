@@ -383,6 +383,12 @@ theorem compile_wellFormed (p : TLProgram) (s : Nat) (tc : ThreadedComposed) (s'
     (h : (TLProgram.compile p).run s = EStateM.Result.ok tc s') : tc.WellFormed
 ```
 
+**Progress (2026-06-25 evening):** Phases 0, 1, 2, and Task 3.1 are DONE and committed (branch
+`wellformed-forall-p`, HEAD `90e45e4`), all sorry-free. **Resume at Task 3.2** — see the ▶▶ RESUME
+POINT ◀◀ block in `docs/superpowers/plans/2026-06-25-wellformed-forall-p.md`. A second conjunct-2
+subtlety surfaced (∀ p is false for repeated-LHS programs like `Y[i,i]` — producer weaves dedup
+axes by uid, consumer weaves don't); the agreed fix is to dedup `tensorAxes` by uid (the plan's Step 0).
+
 **Five phases** (each ends `lake build`-green + `#print axioms`-clean, no `sorryAx`):
 
 - **Phase 0 — refactor `route` to a provable core.** Extract the `do`/`forIn`/`mut` PASS-2 body into

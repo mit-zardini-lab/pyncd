@@ -301,8 +301,36 @@ git commit -m "feat(routespec): structural characterization lemmas for routeCore
 
 ### Task 3.2: `nameToType` ⊳ weave-consistency lemma (the conjunct-2 engine)
 
+> **▶▶ RESUME POINT (2026-06-25 evening) ◀◀** Phases 0, 1, 2, prep, and Task 3.1 are DONE and
+> committed (HEAD `90e45e4` on branch `wellformed-forall-p`); working tree clean. Next session
+> starts HERE.
+>
+> **Decision taken — dedup `tensorAxes` by uid (do this FIRST, as Step 0 below).** Investigating the
+> ∀ p conjunct-2 proof revealed it is *literally false* for repeated-LHS-axis programs (e.g. a
+> diagonal write `Y[i,i] := …`): after `assignUIDs` both `i`s share a uid, so `lhsAxes = [i, i]`. The
+> producer's output weave `mkWeave` dedups (`degAxes = dedup(lhsAxes ++ contracted)` → `[i]`), but the
+> consumer's input weave uses `nameToType[nm] = tensorAxes = lhsAxes` un-deduped (`[i, i]`) → targetAxes
+> mismatch → conjunct 2 fails. **Fix:** make `tensorAxes` dedup `lhsAxes` by uid exactly as `mkWeave`'s
+> `degAxes` fold does, so producer and consumer derive the wire type the SAME way and conjunct 2 holds
+> by construction for ALL programs (no side-condition). This is an IDENTITY on every program with
+> distinct LHS axes — including all §12.1 examples — so it is behaviour-preserving for the test suite.
+>
+> **Step 0 (the fix), in `LeanNCD/DSL/Pipeline/Lowering.lean`:**
+> 1. Extract the dedup-by-uid fold (currently inline in `buildStep`'s `degAxes`) as a named helper, e.g.
+>    `def dedupByUid (as : List AxisSpec) : List AxisSpec := as.foldl (fun acc a => if acc.any (·.uid == a.uid) then acc else acc ++ [a]) []`.
+> 2. Rewrite `degAxes := dedupByUid (lhsAxes ++ contracted)` (was the inline fold).
+> 3. Make `tensorAxes s := (dedupByUid s.lhsAxes).map (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name))`.
+> 4. `lake build` green; confirm `RouteWeaveTest`/`CompileExamplesTest`/`LoweringTest`/`EvalExamplesTest`
+>    unchanged (dedup is identity on distinct-axis LHS). Commit as `fix(route): dedup tensorAxes by uid
+>    (conjunct 2 for repeated-LHS programs)`.
+>
+> After Step 0, the engine lemma `producer_output_targetAxes` becomes provable: `mkWeave`'s non-contracted
+> fixed slots, in order, = `dedupByUid lhsAxes` = `tensorAxes` (since `contracted` uids are disjoint from
+> `lhsUids`, the dedup of `lhsAxes ++ contracted` restricted to lhs-uids = `dedupByUid lhsAxes`). That
+> equality (mkWeave.targetAxes = tensorAxes) is the non-trivial structural sub-lemma of Step 2 below.
+
 **Files:**
-- Modify: `LeanNCD/DSL/Pipeline/RouteSpec.lean`
+- Modify: `LeanNCD/DSL/Pipeline/Lowering.lean` (Step 0 — dedup fix), `LeanNCD/DSL/Pipeline/RouteSpec.lean`
 
 **Interfaces:**
 - Produces:
