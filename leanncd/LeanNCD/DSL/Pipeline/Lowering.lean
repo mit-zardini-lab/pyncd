@@ -251,6 +251,20 @@ def readPosAxis : IdxExpr → AxisP
                     | none        => AxisP.mk none (SizeExpr.var "_")
   | .const _     => AxisP.mk none (SizeExpr.var "_")
 
+/-- The contracted (summed-over) axes of a stmt: read axes whose uid is not a retained (LHS) axis. -/
+def stepContracted (s : Stmt) : List AxisSpec :=
+  (s.readFactors.flatMap (fun rf => rf.2.flatMap idxAxes)).filter
+    (fun a => !(s.lhsAxes.map (·.uid)).contains a.uid)
+
+/-- A step's full index space: retained (LHS) axes then contracted axes, deduplicated by uid. -/
+def stepDegAxes (s : Stmt) : List AxisSpec := dedupByUid (s.lhsAxes ++ stepContracted s)
+
+/-- A step's (output) weave over its degree: contracted axes tiled, retained axes fixed. -/
+def stepMkWeave (s : Stmt) : WeaveShapeP :=
+  (stepDegAxes s).map (fun a =>
+    if ((stepContracted s).map (·.uid)).contains a.uid then WeaveSlotP.tiled
+    else WeaveSlotP.fixed (AxisP.mk (some a.name) (SizeExpr.var a.name)))
+
 /-- Express a read coordinate `IdxExpr` as an integer-affine combination of the degree axes
     identified by uids `us` (column order = `us`): returns `(coeff-row, bias)`. -/
 def idxToRow (us : List UID) : IdxExpr → (List Int × Int)
@@ -314,18 +328,10 @@ def buildStep (nameToStep : Std.HashMap String Nat) (extIndex : Std.HashMap Stri
         throw (CompileError.shapeMismatch s!"recurMorphism {nm}: empty step morphism" "non-empty ThreadedComposed")
   | _ => pure ()
   let s := sc.repStmt.getD emptyStmt
-  let lhsAxes := s.lhsAxes
-  let lhsUids := lhsAxes.map (·.uid)
   let readFactors := s.readFactors
-  let readAxes := readFactors.flatMap (fun rf => rf.2.flatMap idxAxes)
-  let contracted := readAxes.filter (fun a => !lhsUids.contains a.uid)
   -- degree = LHS axes ++ contracted, de-duplicated by uid (LHS first).
-  let degAxes : List AxisSpec := dedupByUid (lhsAxes ++ contracted)
-  let contractedUids : List UID := contracted.map (·.uid)
+  let degAxes : List AxisSpec := stepDegAxes s
   let degree : StObjP := degAxes.map (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name))
-  -- weave per degree axis: contracted ⇒ tiled, else fixed.
-  let mkWeave : List WeaveSlotP :=
-    degAxes.map (fun a => if contractedUids.contains a.uid then WeaveSlotP.tiled else WeaveSlotP.fixed (AxisP.mk (some a.name) (SizeExpr.var a.name)))
   -- internal read ⇒ publish the producer step's `tensorAxes` (derived from `stmts[j]`, the SAME `j`
   -- the wire below uses, so producer output and consumer input weaves coincide by construction);
   -- external read ⇒ one fixed slot per read position.
@@ -335,7 +341,7 @@ def buildStep (nameToStep : Std.HashMap String Nat) (extIndex : Std.HashMap Stri
       | some j => (tensorAxes ((stmts.getD j default).repStmt.getD emptyStmt)).map
                     (fun a => WeaveSlotP.fixed a)
       | none   => rf.2.map (fun e => WeaveSlotP.fixed (readPosAxis e)))
-  let outputWeaves : List WeaveShapeP := [ mkWeave ]
+  let outputWeaves : List WeaveShapeP := [ stepMkWeave s ]
   let degUids : List UID := degAxes.map (·.uid)
   let reindexings : List StMatP := readFactors.map (fun rf =>
     let rows := rf.2.map (idxToRow degUids)

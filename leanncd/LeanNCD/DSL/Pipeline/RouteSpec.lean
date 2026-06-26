@@ -144,4 +144,121 @@ theorem buildStep_outputWeaves_length_one
       · simp only [he, pure_bind] at h
         rw [bind_pure_pair_ok h]; rfl
 
+/-! ## Lemma 4 (conjunct-2 engine): a built step publishes `tensorAxes` of its rep stmt -/
+
+/-- Presentation-level fixed (retained) axes of a weave — the `.fixed` slots' `AxisP`s, in order. -/
+def fixedAxesP (w : WeaveShapeP) : List AxisP :=
+  w.filterMap (fun s => match s with | .fixed a => some a | .tiled => none)
+
+/-- The dedup step function (matches `dedupByUid`'s `foldl`). -/
+private def dstep (acc : List AxisSpec) (a : AxisSpec) : List AxisSpec :=
+  if acc.any (fun b => b.uid == a.uid) then acc else acc ++ [a]
+
+private theorem dedupByUid_eq_foldl (xs : List AxisSpec) :
+    dedupByUid xs = xs.foldl dstep [] := rfl
+
+/-- Every element produced by folding `dstep` came from `acc` or the folded list. -/
+private theorem mem_foldl_dstep {a : AxisSpec} :
+    ∀ (xs acc : List AxisSpec), a ∈ xs.foldl dstep acc → a ∈ acc ∨ a ∈ xs := by
+  intro xs
+  induction xs with
+  | nil => intro acc h; exact Or.inl h
+  | cons b t ih =>
+      intro acc h
+      simp only [List.foldl_cons] at h
+      rcases ih _ h with h' | h'
+      · unfold dstep at h'
+        by_cases hb : acc.any (fun c => c.uid == b.uid)
+        · simp [hb] at h'; exact Or.inl h'
+        · simp [hb] at h'
+          rcases h' with h' | h'
+          · exact Or.inl h'
+          · exact Or.inr (by simp [h'])
+      · exact Or.inr (List.mem_cons_of_mem _ h')
+
+/-- Folding `dstep` over a list all of whose elements fail `P`, then filtering by `P`, equals just
+    filtering the accumulator: the appended elements all fail `P` and drop out. -/
+private theorem foldl_dstep_filter (P : AxisSpec → Bool) :
+    ∀ (ys acc : List AxisSpec), (∀ b ∈ ys, P b = false) →
+    (ys.foldl dstep acc).filter P = acc.filter P := by
+  intro ys
+  induction ys with
+  | nil => intro acc _; rfl
+  | cons b t ih =>
+      intro acc hbad
+      simp only [List.foldl_cons]
+      rw [ih (dstep acc b) (fun x hx => hbad x (List.mem_cons_of_mem _ hx))]
+      unfold dstep
+      by_cases hb : acc.any (fun c => c.uid == b.uid)
+      · simp [hb]
+      · simp only [hb, Bool.false_eq_true, if_false, List.filter_append]
+        have : [b].filter P = [] := by simp [List.filter, hbad b (List.mem_cons_self ..)]
+        rw [this, List.append_nil]
+
+/-- Deduping `xs ++ ys` then dropping the `ys`-uid elements recovers `dedupByUid xs`, when every
+    `ys` element's uid is absent from `xs` (the disjointness `buildStep` gives between `lhsAxes` and
+    the contracted axes). -/
+private theorem dedup_append_filter {xs ys : List AxisSpec}
+    (hdisj : ∀ a ∈ ys, a.uid ∉ xs.map (·.uid)) :
+    (dedupByUid (xs ++ ys)).filter (fun a => !(ys.map (·.uid)).contains a.uid) = dedupByUid xs := by
+  rw [dedupByUid_eq_foldl, dedupByUid_eq_foldl, List.foldl_append]
+  set P : AxisSpec → Bool := fun a => !(ys.map (·.uid)).contains a.uid with hP
+  have hbad : ∀ b ∈ ys, P b = false := by
+    intro b hb
+    simp only [hP, List.contains_eq_mem, Bool.not_eq_false', decide_eq_true_eq, List.mem_map]
+    exact ⟨b, hb, rfl⟩
+  rw [foldl_dstep_filter P ys (xs.foldl dstep []) hbad]
+  apply List.filter_eq_self.mpr
+  intro a ha
+  rcases (mem_foldl_dstep xs [] ha) with h | h
+  · simp at h
+  · have haxs : a.uid ∈ xs.map (·.uid) := List.mem_map.mpr ⟨a, h, rfl⟩
+    have hnot : ¬ (a.uid ∈ ys.map (·.uid)) := by
+      intro hcon
+      obtain ⟨b, hb, hbe⟩ := List.mem_map.mp hcon
+      exact hdisj b hb (hbe ▸ haxs)
+    simpa [hP, List.contains_iff_mem] using hnot
+
+/-- `fixedAxesP` of a `mkWeave`-shaped map: the `.fixed` slots are exactly the non-contracted axes,
+    mapped to their `AxisP`. -/
+private theorem fixedAxesP_mapWeave (l : List AxisSpec) (cu : List UID) :
+    fixedAxesP (l.map (fun a => if cu.contains a.uid then WeaveSlotP.tiled
+                                else WeaveSlotP.fixed (AxisP.mk (some a.name) (SizeExpr.var a.name))))
+      = (l.filter (fun a => !cu.contains a.uid)).map
+          (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name)) := by
+  induction l with
+  | nil => rfl
+  | cons a t ih =>
+      by_cases hc : a.uid ∈ cu <;>
+        simp_all [fixedAxesP, List.map_cons, List.contains_eq_mem]
+
+/-- Fact A — the conjunct-2 engine: a step built by `buildStep` publishes exactly `tensorAxes` of its
+    rep stmt as the fixed axes of its (single) output weave. Since `buildStep` derives an internal
+    read's input weave from the same `tensorAxes` of the producer (post-refactor), producer output
+    and consumer input weaves share these fixed axes — making conjunct 2 hold by construction. -/
+theorem buildStep_output_fixedAxes
+    {ns ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
+    (h : buildStep ns ext stmts sc = .ok (b, w)) :
+    fixedAxesP (b.outputWeaves.getD 0 []) = tensorAxes (sc.repStmt.getD emptyStmt) := by
+  -- 1. b is the constructed step; its single output weave is `stepMkWeave s`.
+  have hb : b.outputWeaves.getD 0 [] = stepMkWeave (sc.repStmt.getD emptyStmt) := by
+    unfold buildStep at h
+    cases sc with
+    | plain s => simp only [pure_bind] at h; rw [bind_pure_pair_ok h]; rfl
+    | scan nm ax bs rs aff => simp only [pure_bind] at h; rw [bind_pure_pair_ok h]; rfl
+    | scanPre nm ax tc =>
+        by_cases he : tc.steps.isEmpty = true
+        · simp [he, bind, Except.bind] at h
+        · simp only [he, pure_bind] at h; rw [bind_pure_pair_ok h]; rfl
+  -- 2. `fixedAxesP (stepMkWeave s)` keeps the non-contracted degree axes, which dedup to `lhsAxes`.
+  rw [hb]
+  unfold stepMkWeave tensorAxes
+  rw [fixedAxesP_mapWeave]
+  congr 1
+  unfold stepDegAxes
+  apply dedup_append_filter
+  intro a ha
+  simpa [List.contains_eq_mem] using (List.mem_filter.mp ha).2
+
 end LeanNCD
