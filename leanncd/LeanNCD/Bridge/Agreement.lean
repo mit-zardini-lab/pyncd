@@ -249,6 +249,7 @@ theorem wf_typeMatch {sp : ScheduledProgram} {tc : ThreadedComposed}
       rw [hiw, List.getD_eq_getElem _ _ (by rw [List.length_map]; exact hpos_rf),
           List.getElem_map,
           ← List.getD_eq_getElem s.readFactors (("", []) : String × List IdxExpr) hpos_rf, ← hrf]
+      rfl
     have hwire := mapM_ok_getD' hwm pos (("", []) : String × List IdxExpr) (Wire.external 0) hpos_rf
     rw [← hrf] at hwire
     have hpos_iw : pos < (tc.steps.getD i default).inputWeaves.length := by
