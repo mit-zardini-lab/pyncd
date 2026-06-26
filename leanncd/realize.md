@@ -383,12 +383,15 @@ theorem compile_wellFormed (p : TLProgram) (s : Nat) (tc : ThreadedComposed) (s'
     (h : (TLProgram.compile p).run s = EStateM.Result.ok tc s') : tc.WellFormed
 ```
 
-**Progress (2026-06-26):** Phases 0, 1, 2, 3 are DONE and committed (branch `wellformed-forall-p`,
-HEAD `d61e4ec`), all sorry-free. Task 3.2 (the conjunct-2 engine) landed: `tensorAxes` dedups by uid
-(fixes repeated-LHS programs like `Y[i,i]`); `buildStep` derives an internal read's weave from
-`stmts[nameToStep[rf.1]]` (dropping `nameToType` and the hard `Std.HashMap` consistency lemma); and
-`buildStep_output_fixedAxes` proves a step publishes exactly `tensorAxes` of its rep stmt. **Resume at
-Phase 4 (Task 4.1)** — see the ▶▶ RESUME POINT ◀◀ block in
+**Progress (2026-06-26):** Phases 0–3 DONE, Phase 4 PARTIAL (branch `wellformed-forall-p`, HEAD
+`beb414f`). Task 3.2 (conjunct-2 engine) landed: `tensorAxes` dedups by uid; `buildStep` derives an
+internal read's weave from `stmts[nameToStep[rf.1]]` (dropping `nameToType`); `buildStep_output_fixedAxes`
+proves a step publishes exactly `tensorAxes` of its rep stmt. Phase 4: `compile_wellFormed` is assembled
+in `Agreement.lean` with `compile_eq_route` (EStateM plumbing), `wf_singleOutput` (conjunct 3), and the
+`weaveToArrayType_congr` bridge proven sorry-free. **Resume at the three remaining conjuncts**
+(`wf_typeMatch`/`wf_dom`/`wf_topo`, currently `sorry`) — they need a new tier of `Std.HashMap` value
+bounds + pipeline properties (`buildNameToStep_lt`, buildStep field-extraction, `topoSort` correctness,
+`extNames ⊆ reads`). See the ▶▶ RESUME POINT ◀◀ block in
 `docs/superpowers/plans/2026-06-25-wellformed-forall-p.md`.
 
 **Five phases** (each ends `lake build`-green + `#print axioms`-clean, no `sorryAx`):

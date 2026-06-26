@@ -307,15 +307,26 @@ git commit -m "feat(routespec): structural characterization lemmas for routeCore
 > engine lemma `buildStep_output_fixedAxes` (Fact A) + `dedup_append_filter`/`fixedAxesP_mapWeave`
 > helpers (`d61e4ec`), all sorry-free.
 >
-> **▶▶ RESUME POINT (next session) ◀◀ — Phase 4, starting at Task 4.1.** Conjunct 2 (Task 4.5) is now
-> de-risked: for an internal wire `.internal j 0` (`j = nameToStep[rf.1]`), producer step `j`'s output
-> weave fixed-axes `= tensorAxes(stmts[j])` (via `buildStep_output_fixedAxes` + `routeCore_getD`), and
-> `buildStep` builds the consumer's input weave from the same `tensorAxes(stmts[j])`. Since
-> `weaveToArrayType` depends only on the fixed axes (`fixedAxesP`), the two coincide. **One bridge lemma
-> to add in Phase 4** (in `Agreement.lean`, which imports `Realize` where `weaveToArrayType` lives):
-> `fixedAxesP w₁ = fixedAxesP w₂ → weaveToArrayType w₁ = weaveToArrayType w₂` (both reduce to
-> `realizeWeaveShape`'s `targetAxes = (fixedAxesP _).map realizeAxis`). Then conjuncts 3→1→4→2 +
-> assemble `compile_wellFormed` per Tasks 4.1–4.6 below.
+> **Phase 4 PARTIAL (2026-06-26, commit `beb414f`).** `compile_wellFormed` is assembled in
+> `Agreement.lean` from 4 conjunct lemmas + the `realizeCompiled` corollary. **Proven sorry-free:**
+> `compile_eq_route` (the `EStateM` plumbing), `wf_singleOutput` (conjunct 3), and the bridge
+> `weaveToArrayType_congr`/`realizeWeaveShape_targetAxes`.
+>
+> **▶▶ RESUME POINT (next session) ◀◀ — Phase 4 remaining conjuncts (`wf_typeMatch`, `wf_dom`,
+> `wf_topo`), currently `sorry` in `Agreement.lean`.** These need a NEW tier of lemmas (Std.HashMap
+> value bounds + pipeline properties), NOT more `routeCore` mechanics:
+> - **`wf_typeMatch` (conjunct 2, do FIRST — de-risked):** needs (a) `buildNameToStep_lt`
+>   (`nameToStep[nm] = some j → j < stmts.length`, a Std.HashMap fold value-bound), and (b) buildStep
+>   FIELD-characterization lemmas (built step's `inputWeaves = readFactors.map weaveOf`, wires
+>   `= readFactors.map wireOf`). Then per read factor: internal `.internal j 0` ⇒ `routeCore_getD` at
+>   `j` + `buildStep_output_fixedAxes` give producer-output `fixedAxesP = tensorAxes(stmts[j])
+>   = ` consumer-input `fixedAxesP` ⇒ `weaveToArrayType_congr`. (The de-risk proved the shape by `rfl`
+>   on a concrete `tc`; ∀ p needs this structural extraction + cross-step coupling.)
+> - **`wf_dom` (conjunct 1):** every external slot `< nExternal` referenced (`extNames ⊆ reads` from
+>   `resolveDecls`; `extIndex` covers `extNames`) + rank agreement across ports.
+> - **`wf_topo` (conjunct 4):** internal `j < i` needs `topoSort` CORRECTNESS (`topoSortFuel` produces
+>   topological order — meaty induction) via `nameToStep`; external `k < nExternal` needs the
+>   `extIndex` value bound (`k < extCount ≤ extNames.card`).
 >
 > ---
 > **Historical (the Task 3.2 decision, now landed) — dedup `tensorAxes` by uid (Step 0, done).** Investigating the
