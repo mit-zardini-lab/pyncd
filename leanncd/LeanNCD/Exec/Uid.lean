@@ -27,6 +27,7 @@ inductive CompileError
   | normAxisNotReal      : String → CompileError            -- axis used in freeNorm but kind is ℕ
   | predicateNonlin      : String → CompileError            -- predicate tensor with non-identity nonlin
   | predicateAgg         : String → CompileError            -- predicate tensor with non-sum aggregation
+  | cyclicDataflow       : String → CompileError            -- cyclic dataflow (topoSort cycle fallback)
   deriving Repr, DecidableEq
 
 /-- Combined error + UID-counter monad (`EStateM ε σ α = σ → Result ε σ α`, Lean core). Mints fresh

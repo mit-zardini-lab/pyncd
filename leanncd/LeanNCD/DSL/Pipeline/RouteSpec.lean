@@ -67,28 +67,36 @@ theorem routeCore_steps_length {sp : ScheduledProgram}
     (h : routeCore sp = .ok (steps, routing)) :
     steps.length = sp.stmts.length := by
   unfold routeCore at h
-  cases hm : sp.stmts.mapM (buildStep (buildNameToStep sp.stmts)
-      (buildExtIndex sp.extNames sp.stmts) sp.stmts) with
-  | error e => rw [hm] at h; simp [bind, Except.bind] at h
-  | ok pairs =>
-      rw [hm] at h
-      simp only [bind, Except.bind, pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
-      rw [← h.1, List.length_map]
-      exact mapM_ok_length hm
+  by_cases hro : routableInOrder sp.stmts
+  · rw [if_pos hro] at h
+    cases hm : sp.stmts.mapM (buildStep (buildNameToStep sp.stmts)
+        (buildExtIndex sp.extNames sp.stmts) sp.stmts) with
+    | error e => rw [hm] at h; simp [bind, Except.bind] at h
+    | ok pairs =>
+        rw [hm] at h
+        simp only [bind, Except.bind, pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+        rw [← h.1, List.length_map]
+        exact mapM_ok_length hm
+  · rw [if_neg hro] at h
+    simp [throw, throwThe, MonadExceptOf.throw] at h
 
 theorem routeCore_routing_length {sp : ScheduledProgram}
     {steps : List BrBaseP} {routing : List (List Wire)}
     (h : routeCore sp = .ok (steps, routing)) :
     routing.length = sp.stmts.length := by
   unfold routeCore at h
-  cases hm : sp.stmts.mapM (buildStep (buildNameToStep sp.stmts)
-      (buildExtIndex sp.extNames sp.stmts) sp.stmts) with
-  | error e => rw [hm] at h; simp [bind, Except.bind] at h
-  | ok pairs =>
-      rw [hm] at h
-      simp only [bind, Except.bind, pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
-      rw [← h.2, List.length_map]
-      exact mapM_ok_length hm
+  by_cases hro : routableInOrder sp.stmts
+  · rw [if_pos hro] at h
+    cases hm : sp.stmts.mapM (buildStep (buildNameToStep sp.stmts)
+        (buildExtIndex sp.extNames sp.stmts) sp.stmts) with
+    | error e => rw [hm] at h; simp [bind, Except.bind] at h
+    | ok pairs =>
+        rw [hm] at h
+        simp only [bind, Except.bind, pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+        rw [← h.2, List.length_map]
+        exact mapM_ok_length hm
+  · rw [if_neg hro] at h
+    simp [throw, throwThe, MonadExceptOf.throw] at h
 
 /-! ## Lemma 2: per-index characterization -/
 
@@ -100,21 +108,32 @@ theorem routeCore_getD {sp : ScheduledProgram}
         sp.stmts (sp.stmts.getD i default)
       = .ok (steps.getD i default, routing.getD i []) := by
   unfold routeCore at h
-  cases hm : sp.stmts.mapM (buildStep (buildNameToStep sp.stmts)
-      (buildExtIndex sp.extNames sp.stmts) sp.stmts) with
-  | error e => rw [hm] at h; simp [bind, Except.bind] at h
-  | ok pairs =>
-      rw [hm] at h
-      simp only [bind, Except.bind, pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
-      obtain ⟨hs, hr⟩ := h
-      have hlen : pairs.length = sp.stmts.length := mapM_ok_length hm
-      have hip : i < pairs.length := hlen ▸ hi
-      rw [mapM_ok_getD hm i default default hi, ← hs, ← hr]
-      congr 1
-      rw [List.getD_eq_getElem _ _ hip,
-          List.getD_eq_getElem _ _ (by simpa using hip),
-          List.getD_eq_getElem _ _ (by simpa using hip),
-          List.getElem_map, List.getElem_map]
+  by_cases hro : routableInOrder sp.stmts
+  · rw [if_pos hro] at h
+    cases hm : sp.stmts.mapM (buildStep (buildNameToStep sp.stmts)
+        (buildExtIndex sp.extNames sp.stmts) sp.stmts) with
+    | error e => rw [hm] at h; simp [bind, Except.bind] at h
+    | ok pairs =>
+        rw [hm] at h
+        simp only [bind, Except.bind, pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+        obtain ⟨hs, hr⟩ := h
+        have hlen : pairs.length = sp.stmts.length := mapM_ok_length hm
+        have hip : i < pairs.length := hlen ▸ hi
+        rw [mapM_ok_getD hm i default default hi, ← hs, ← hr]
+        congr 1
+        rw [List.getD_eq_getElem _ _ hip,
+            List.getD_eq_getElem _ _ (by simpa using hip),
+            List.getD_eq_getElem _ _ (by simpa using hip),
+            List.getElem_map, List.getElem_map]
+  · rw [if_neg hro] at h
+    simp [throw, throwThe, MonadExceptOf.throw] at h
+
+/-- A successful `routeCore` implies the program routes in topological order. -/
+theorem routeCore_routable {sp : ScheduledProgram}
+    {steps : List BrBaseP} {routing : List (List Wire)}
+    (h : routeCore sp = .ok (steps, routing)) :
+    routableInOrder sp.stmts = true := by
+  sorry
 
 /-! ## Lemma 3: `buildStep` always produces exactly one output weave -/
 
@@ -129,20 +148,26 @@ private theorem bind_pure_pair_ok {ε γ δ : Type} {B : Except ε γ} {s b : δ
       simp only [bind, Except.bind, pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
       exact h.1.symm
 
+-- NOTE(phaseB): renamed-in-place; true length is `sc.writes.length`, not 1 (multi-output scans).
 theorem buildStep_outputWeaves_length_one
-    {ns ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
     {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
     (h : buildStep ns ext stmts sc = .ok (b, w)) :
-    b.outputWeaves.length = 1 := by
+    b.outputWeaves.length = sc.writes.length := by
   unfold buildStep at h
   cases sc with
-  | plain s => simp only [pure_bind] at h; rw [bind_pure_pair_ok h]; rfl
-  | scan nm ax bs rs aff => simp only [pure_bind] at h; rw [bind_pure_pair_ok h]; rfl
+  | plain s =>
+      simp only [pure_bind] at h; rw [bind_pure_pair_ok h]
+      simp [List.length_map, List.length_range]
+  | scan nm ax bs rs aff =>
+      simp only [pure_bind] at h; rw [bind_pure_pair_ok h]
+      simp [List.length_map, List.length_range]
   | scanPre nm ax tc =>
       by_cases he : tc.steps.isEmpty = true
       · simp [he, bind, Except.bind] at h
       · simp only [he, pure_bind] at h
-        rw [bind_pure_pair_ok h]; rfl
+        rw [bind_pure_pair_ok h]
+        simp [List.length_map, List.length_range]
 
 /-! ## Lemma 4 (conjunct-2 engine): a built step publishes `tensorAxes` of its rep stmt -/
 
@@ -236,71 +261,31 @@ private theorem fixedAxesP_mapWeave (l : List AxisSpec) (cu : List UID) :
     rep stmt as the fixed axes of its (single) output weave. Since `buildStep` derives an internal
     read's input weave from the same `tensorAxes` of the producer (post-refactor), producer output
     and consumer input weaves share these fixed axes — making conjunct 2 hold by construction. -/
+-- NOTE(phaseB): per-slot statement for the new multi-output shape. Body to be proved in Phase B.
 theorem buildStep_output_fixedAxes
-    {ns ext : Std.HashMap String Nat} {stmts : List ScanStmt}
-    {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
-    (h : buildStep ns ext stmts sc = .ok (b, w)) :
-    fixedAxesP (b.outputWeaves.getD 0 []) = tensorAxes (sc.repStmt.getD emptyStmt) := by
-  -- 1. b is the constructed step; its single output weave is `stepMkWeave s`.
-  have hb : b.outputWeaves.getD 0 [] = stepMkWeave (sc.repStmt.getD emptyStmt) := by
-    unfold buildStep at h
-    cases sc with
-    | plain s => simp only [pure_bind] at h; rw [bind_pure_pair_ok h]; rfl
-    | scan nm ax bs rs aff => simp only [pure_bind] at h; rw [bind_pure_pair_ok h]; rfl
-    | scanPre nm ax tc =>
-        by_cases he : tc.steps.isEmpty = true
-        · simp [he, bind, Except.bind] at h
-        · simp only [he, pure_bind] at h; rw [bind_pure_pair_ok h]; rfl
-  -- 2. `fixedAxesP (stepMkWeave s)` keeps the non-contracted degree axes, which dedup to `lhsAxes`.
-  rw [hb]
-  unfold stepMkWeave tensorAxes
-  rw [fixedAxesP_mapWeave]
-  congr 1
-  unfold stepDegAxes
-  apply dedup_append_filter
-  intro a ha
-  simpa [List.contains_eq_mem] using (List.mem_filter.mp ha).2
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w : List Wire} {s : Nat}
+    (h : buildStep ns ext stmts sc = .ok (b, w)) (hs : s < sc.writes.length) :
+    fixedAxesP (b.outputWeaves.getD s []) = tensorAxes (sc.slotStmt s) := by
+  sorry
 
 /-! ## Lemma 5: `buildNameToStep` value bound -/
 
-private lemma foldl_insert_val_lt {n i : Nat} (hi : i < n)
-    {writes : List String} {m : Std.HashMap String Nat}
-    (hm : ∀ k : String, ∀ v : Nat, m[k]? = some v → v < n) :
-    ∀ k : String, ∀ v : Nat, (writes.foldl (fun m' nm => m'.insert nm i) m)[k]? = some v → v < n := by
-  induction writes generalizing m with
-  | nil => exact hm
-  | cons nm t ih =>
-      simp only [List.foldl_cons]
-      apply ih
-      intro (k' : String) (v' : Nat) hk'v'
-      simp only [HashMap.getElem?_insert] at hk'v'
-      split at hk'v'
-      · cases hk'v'; exact hi
-      · exact hm k' v' hk'v'
+-- NOTE(phaseB): the old helpers `foldl_insert_val_lt`/`foldl_zipIdx_val_lt` were written for the
+-- old `String ↦ Nat` fold (inserting `i`). The new `buildNameToStep` folds `nm ↦ (i, s)` over
+-- `sc.writes.zipIdx`, so they no longer typecheck. They are removed; Phase B will re-derive the
+-- bounds for the pair-valued fold.
 
-private lemma foldl_zipIdx_val_lt {n : Nat}
-    {stmts_zip : List (ScanStmt × Nat)}
-    (hbound : ∀ sc i, (sc, i) ∈ stmts_zip → i < n)
-    {m : Std.HashMap String Nat}
-    (hm : ∀ k : String, ∀ v : Nat, m[k]? = some v → v < n) :
-    ∀ k : String, ∀ v : Nat,
-      (stmts_zip.foldl (fun m' (sc, i) => sc.writes.foldl (fun m'' nm => m''.insert nm i) m') m)[k]? = some v → v < n := by
-  induction stmts_zip generalizing m with
-  | nil => exact hm
-  | cons sci t ih =>
-      simp only [List.foldl_cons]
-      obtain ⟨sc, i⟩ := sci
-      apply ih (fun sc' i' h => hbound sc' i' (List.mem_cons_of_mem _ h))
-      exact foldl_insert_val_lt (hbound sc i (List.mem_cons.mpr (Or.inl rfl))) hm
+/-- Every step-index value in `buildNameToStep stmts` is a valid step index `< stmts.length`. -/
+theorem buildNameToStep_lt {stmts : List ScanStmt} {nm : String} {j s : Nat}
+    (h : (buildNameToStep stmts)[nm]? = some (j, s)) : j < stmts.length := by
+  sorry
 
-/-- Every value in `buildNameToStep stmts` is a valid step index `< stmts.length`. -/
-theorem buildNameToStep_lt {stmts : List ScanStmt} {nm : String} {j : Nat}
-    (h : (buildNameToStep stmts)[nm]? = some j) : j < stmts.length := by
-  unfold buildNameToStep at h
-  apply foldl_zipIdx_val_lt _ (fun k v hkv => by simp at hkv) nm j h
-  intro sc i hmem
-  have := (List.mem_zipIdx hmem).2.1
-  omega
+/-- Every slot value in `buildNameToStep stmts` is a valid output slot for its producer step. -/
+theorem buildNameToStep_slot_lt {stmts : List ScanStmt} {nm : String} {j s : Nat}
+    (h : (buildNameToStep stmts)[nm]? = some (j, s)) :
+    s < ((stmts.getD j default).writes.length) := by
+  sorry
 
 /-! ## Lemma 6: `buildStep` field-extraction -/
 
@@ -314,45 +299,33 @@ private theorem bind_pure_pair_ok_snd {ε γ δ : Type} {B : Except ε γ} {s b 
       exact congrArg Except.ok h.2
 
 /-- The `inputWeaves` of a built step equal the per-read-factor map from `buildStep`. -/
+-- NOTE(phaseB): restated to the new `inputReadFactors` / `(j, slot)` shape. Body to be proved later.
 theorem buildStep_inputWeaves
-    {ns ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
     {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
     (h : buildStep ns ext stmts sc = .ok (b, w)) :
-    b.inputWeaves = (sc.repStmt.getD emptyStmt).readFactors.map (fun rf =>
+    b.inputWeaves = sc.inputReadFactors.map (fun rf =>
       match ns[rf.1]? with
-      | some j => (tensorAxes ((stmts.getD j default).repStmt.getD emptyStmt)).map
-                    (fun a => WeaveSlotP.fixed a)
+      | some (j, slot) => (tensorAxes ((stmts.getD j default).slotStmt slot)).map
+                            (fun a => WeaveSlotP.fixed a)
       | none   => (List.range rf.2.length).map (fun pos =>
                     WeaveSlotP.fixed (AxisP.mk (some (rf.1 ++ "_" ++ toString pos))
                       (SizeExpr.var (rf.1 ++ "_" ++ toString pos))))) := by
-  unfold buildStep at h
-  cases sc with
-  | plain s => simp only [pure_bind] at h; rw [bind_pure_pair_ok h]; rfl
-  | scan nm ax bs rs aff => simp only [pure_bind] at h; rw [bind_pure_pair_ok h]; rfl
-  | scanPre nm ax tc =>
-      by_cases he : tc.steps.isEmpty = true
-      · simp [he, bind, Except.bind] at h
-      · simp only [he, pure_bind] at h; rw [bind_pure_pair_ok h]; rfl
+  sorry
 
 /-- The wires from a successful `buildStep` equal the `mapM` of the per-read-factor wire builder. -/
+-- NOTE(phaseB): restated to the new `inputReadFactors` / `Wire.internal j slot` shape.
 theorem buildStep_wires_mapM
-    {ns ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
     {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
     (h : buildStep ns ext stmts sc = .ok (b, w)) :
-    (sc.repStmt.getD emptyStmt).readFactors.mapM (fun rf =>
+    sc.inputReadFactors.mapM (fun rf =>
       match ns[rf.1]? with
-      | some j => Except.ok (Wire.internal j 0)
+      | some (j, slot) => Except.ok (Wire.internal j slot)
       | none   => match ext[rf.1]? with
         | some k => Except.ok (Wire.external k)
         | none   => Except.error (CompileError.undeclaredName rf.1)) = .ok w := by
-  unfold buildStep at h
-  cases sc with
-  | plain s => simp only [pure_bind] at h; exact bind_pure_pair_ok_snd h
-  | scan nm ax bs rs aff => simp only [pure_bind] at h; exact bind_pure_pair_ok_snd h
-  | scanPre nm ax tc =>
-      by_cases he : tc.steps.isEmpty = true
-      · simp [he, bind, Except.bind] at h
-      · simp only [he, pure_bind] at h; exact bind_pure_pair_ok_snd h
+  sorry
 
 /-! ## Lemma 7: buildExtIndex injectivity -/
 

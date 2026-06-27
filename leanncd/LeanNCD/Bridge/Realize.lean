@@ -173,7 +173,8 @@ def ThreadedComposed.WellFormed (tc : ThreadedComposed) : Prop :=
   (∀ i, i < tc.steps.length →
     (tc.routing.getD i []).map tc.wireType
       = (tc.steps.getD i default).inputWeaves.map weaveToArrayType) ∧
-  (∀ i, i < tc.steps.length → (tc.steps.getD i default).outputWeaves.length = 1) ∧
+  -- NOTE(phaseB): weakened from `= 1` to `≥ 1` for multi-output scans (the new compiler shape).
+  (∀ i, i < tc.steps.length → (tc.steps.getD i default).outputWeaves.length ≥ 1) ∧
   (∀ i, i < tc.steps.length → ∀ w ∈ tc.routing.getD i [], w ∈ tc.poolAt i)
 
 /-! ### The assembly fold (monotonic pool)
@@ -215,10 +216,10 @@ noncomputable def stepPiece (tc : ThreadedComposed) (h : tc.WellFormed) (i : Nat
   -- single output ⇒ the step's codomain is the one new pool wire
   have hcod : (tc.steps.getD i default).outputWeaves.map weaveToArrayType ++ (tc.poolAt i).map tc.wireType
             = (tc.poolAt (i + 1)).map tc.wireType := by
-    obtain ⟨x, hx⟩ := List.length_eq_one_iff.1 (h.2.2.1 i hi)
-    rw [tc.poolAt_succ, List.map_cons]
-    simp only [ThreadedComposed.wireType, hx, List.map_cons, List.map_nil, List.getD_cons_zero,
-      List.singleton_append]
+    -- NOTE(phaseB): conjunct 3 weakened to `≥ 1`; the single-output collapse no longer holds
+    -- for multi-output scans. Pool structure (`poolAt_succ`) prepends only slot 0; reconciling the
+    -- multi-output pool is Phase B work.
+    sorry
   exact cast (congrArg (BrMorph ((tc.poolAt i).map tc.wireType)) hcod)
     (BrMorph.comp
       (cast (congrArg (BrMorph ((tc.poolAt i).map tc.wireType)) hdom)
@@ -249,11 +250,9 @@ noncomputable def finalPiece (tc : ThreadedComposed) (h : tc.WellFormed) :
     have hmem : Wire.internal m 0 ∈ tc.poolAt (m + 1) := by
       rw [tc.poolAt_succ]; exact List.mem_cons_self
     have hcod : tc.codObj = [tc.wireType (Wire.internal m 0)] := by
-      obtain ⟨y, hy⟩ := List.length_eq_one_iff.1 (h.2.2.1 m (by rw [hm]; exact Nat.lt_succ_self m))
-      have hco : tc.codObj = (tc.steps.getD m default).outputWeaves.map weaveToArrayType := by
-        simp [ThreadedComposed.codObj, hm]
-      rw [hco, hy]
-      simp only [List.map_cons, List.map_nil, ThreadedComposed.wireType, hy, List.getD_cons_zero]
+      -- NOTE(phaseB): conjunct 3 weakened to `≥ 1`; codObj is no longer a singleton for
+      -- multi-output last steps. Selecting the multi-output codomain is Phase B work.
+      sorry
     exact cast (congrArg (BrMorph ((tc.poolAt (m + 1)).map tc.wireType)) hcod.symm)
       (BrMorph.wiringBy tc.wireType (tc.poolAt (m + 1)) [Wire.internal m 0]
         (fun w hw => by rcases List.mem_singleton.1 hw with rfl; exact hmem))

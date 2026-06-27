@@ -36,13 +36,12 @@ theorem compile_eq_route {p : TLProgram} {s : Nat} {tc : ThreadedComposed} {s' :
         subst htc
         exact ⟨sp, s₁, rfl, hrcc, rfl⟩
 
-/-- Conjunct 3 (single output): every routed step has exactly one output weave. -/
+-- NOTE(phaseB): restated to `≥ 1` to match the weakened `WellFormed` conjunct 3 (multi-output scans).
+/-- Conjunct 3 (at least one output): every routed step has at least one output weave. -/
 theorem wf_singleOutput {sp : ScheduledProgram} {steps : List BrBaseP} {routing : List (List Wire)}
     (hrc : routeCore sp = .ok (steps, routing)) :
-    ∀ i, i < steps.length → (steps.getD i default).outputWeaves.length = 1 := by
-  intro i hi
-  have hi' : i < sp.stmts.length := routeCore_steps_length hrc ▸ hi
-  exact buildStep_outputWeaves_length_one (routeCore_getD hrc i hi')
+    ∀ i, i < steps.length → (steps.getD i default).outputWeaves.length ≥ 1 := by
+  sorry
 
 /-- The realized weave's target (retained) axes are the realized presentation fixed axes. -/
 theorem realizeWeaveShape_targetAxes (w : WeaveShapeP) :
@@ -132,37 +131,9 @@ private theorem port_external_weave {sp : ScheduledProgram} {tc : ThreadedCompos
         (List.range rf.2.length).map (fun pos =>
           WeaveSlotP.fixed (AxisP.mk (some (rf.1 ++ "_" ++ toString pos))
             (SizeExpr.var (rf.1 ++ "_" ++ toString pos)))) := by
-  have hi' : i < sp.stmts.length := routeCore_steps_length hrc ▸ hi
-  have hbs := routeCore_getD hrc i hi'
-  have hiw := buildStep_inputWeaves hbs
-  have hwm := buildStep_wires_mapM hbs
-  set s := (sp.stmts.getD i default).repStmt.getD emptyStmt with hs
-  set ns := buildNameToStep sp.stmts with hns
-  set ext := buildExtIndex sp.extNames sp.stmts with hext
-  have hlen : (tc.routing.getD i []).length = s.readFactors.length := mapM_ok_length' hwm
-  have hj' : j < s.readFactors.length := hlen ▸ hj
-  set rf := s.readFactors.getD j (("", []) : String × List IdxExpr) with hrf
-  have hwb := mapM_ok_getD' hwm j (("", []) : String × List IdxExpr) (Wire.external 0) hj'
-  rw [hw, ← hrf] at hwb
-  have hnone : ns[rf.1]? = none := by
-    revert hwb
-    cases hnsr : ns[rf.1]? with
-    | some jj => intro hwb; simp only [hnsr] at hwb; exact absurd hwb (by simp)
-    | none => intro _; rfl
-  refine ⟨rf, ?_, hnone, ?_⟩
-  · revert hwb
-    cases hnsr : ns[rf.1]? with
-    | some jj => intro hwb; simp only [hnsr] at hwb; exact absurd hwb (by simp)
-    | none =>
-        cases hextr : ext[rf.1]? with
-        | some kk => intro hwb; simp only [hnsr, hextr] at hwb
-                     simp only [Except.ok.injEq, Wire.external.injEq] at hwb
-                     exact congrArg some hwb
-        | none => intro hwb; simp only [hnsr] at hwb; exact absurd hwb (by simp)
-  · rw [hiw, List.getD_eq_getElem _ _ (by rw [List.length_map]; exact hj'),
-        List.getElem_map,
-        ← List.getD_eq_getElem s.readFactors (("", []) : String × List IdxExpr) hj', ← hrf]
-    simp only [hnone]
+  -- NOTE(phaseB): proof depended on the old `repStmt.readFactors` shape of the buildStep field
+  -- lemmas; the new shape is `inputReadFactors` with `(j, slot)` wires. Body to be re-proved.
+  sorry
 
 /-- External pointwise type match: an external read's wire carries exactly its input weave's type.
     Uses `buildExtIndex_lt_card` (slot `< nExternal`), `wellFormedDom` (rank agreement across ports),
@@ -201,17 +172,15 @@ private theorem external_pointwise {sp : ScheduledProgram} {tc : ThreadedCompose
 
 /-- Internal pointwise type match: a producer wire `internal j 0` carries the consumer's published
     weave type, because `buildStep_output_fixedAxes` makes both weaves share the same fixed axes. -/
+-- NOTE(phaseB): restated to the new `(j, slot)` / `slotStmt` shape; body to be proved in Phase B.
 private theorem internal_pointwise {sp : ScheduledProgram} {tc : ThreadedComposed}
     (hrc : routeCore sp = .ok (tc.steps, tc.routing))
-    {rf : String × List IdxExpr} {j : Nat}
-    (hns : (buildNameToStep sp.stmts)[rf.1]? = some j) :
-    tc.wireType (Wire.internal j 0)
-      = weaveToArrayType ((tensorAxes ((sp.stmts.getD j default).repStmt.getD emptyStmt)).map
+    {rf : String × List IdxExpr} {j slot : Nat}
+    (hns : (buildNameToStep sp.stmts)[rf.1]? = some (j, slot)) :
+    tc.wireType (Wire.internal j slot)
+      = weaveToArrayType ((tensorAxes ((sp.stmts.getD j default).slotStmt slot)).map
           (fun a => WeaveSlotP.fixed a)) := by
-  simp only [ThreadedComposed.wireType]
-  apply weaveToArrayType_congr
-  rw [fixedAxesP_map_fixed]
-  exact buildStep_output_fixedAxes (routeCore_getD hrc j (buildNameToStep_lt hns))
+  sorry
 
 /-- Conjunct 2 (producer ⊳ consumer type match). The de-risked one: producer output and consumer
     input weaves share fixed axes by construction (`buildStep_output_fixedAxes`); external reads match
@@ -222,61 +191,10 @@ theorem wf_typeMatch {sp : ScheduledProgram} {tc : ThreadedComposed}
     ∀ i, i < tc.steps.length →
       (tc.routing.getD i []).map tc.wireType
         = (tc.steps.getD i default).inputWeaves.map weaveToArrayType := by
-  intro i hi
-  have hi' : i < sp.stmts.length := routeCore_steps_length hrc ▸ hi
-  have hbs := routeCore_getD hrc i hi'
-  have hiw := buildStep_inputWeaves hbs
-  have hwm := buildStep_wires_mapM hbs
-  set s := (sp.stmts.getD i default).repStmt.getD emptyStmt with hs
-  set ns := buildNameToStep sp.stmts with hns
-  have hlenW : (tc.routing.getD i []).length = s.readFactors.length := mapM_ok_length' hwm
-  apply List.ext_getElem
-  · rw [List.length_map, List.length_map, hiw, List.length_map, hlenW]
-  · intro pos h1 h2
-    rw [List.getElem_map, List.getElem_map]
-    have hpos_rf : pos < s.readFactors.length := by
-      rw [List.length_map] at h1; rw [hlenW] at h1; exact h1
-    have hpos_route : pos < (tc.routing.getD i []).length := by
-      rw [List.length_map] at h1; exact h1
-    set rf := s.readFactors.getD pos (("", []) : String × List IdxExpr) with hrf
-    have hweave : (tc.steps.getD i default).inputWeaves.getD pos [] =
-        (match ns[rf.1]? with
-        | some j => (tensorAxes ((sp.stmts.getD j default).repStmt.getD emptyStmt)).map
-                      (fun a => WeaveSlotP.fixed a)
-        | none => (List.range rf.2.length).map (fun pos =>
-                    WeaveSlotP.fixed (AxisP.mk (some (rf.1 ++ "_" ++ toString pos))
-                      (SizeExpr.var (rf.1 ++ "_" ++ toString pos))))) := by
-      rw [hiw, List.getD_eq_getElem _ _ (by rw [List.length_map]; exact hpos_rf),
-          List.getElem_map,
-          ← List.getD_eq_getElem s.readFactors (("", []) : String × List IdxExpr) hpos_rf, ← hrf]
-      rfl
-    have hwire := mapM_ok_getD' hwm pos (("", []) : String × List IdxExpr) (Wire.external 0) hpos_rf
-    rw [← hrf] at hwire
-    have hpos_iw : pos < (tc.steps.getD i default).inputWeaves.length := by
-      rw [hiw, List.length_map]; exact hpos_rf
-    rw [show (tc.routing.getD i [])[pos] = (tc.routing.getD i []).getD pos (Wire.external 0) from
-        (List.getD_eq_getElem _ _ hpos_route).symm]
-    rw [show ((tc.steps.getD i default).inputWeaves)[pos]
-          = (tc.steps.getD i default).inputWeaves.getD pos [] from
-        (List.getD_eq_getElem _ _ hpos_iw).symm]
-    rw [hweave]
-    cases hnsr : ns[rf.1]? with
-    | some jj =>
-        simp only [hnsr] at hwire ⊢
-        simp only [Except.ok.injEq] at hwire
-        rw [← hwire]
-        exact internal_pointwise hrc hnsr
-    | none =>
-        simp only [hnsr] at hwire ⊢
-        cases hextr : (buildExtIndex sp.extNames sp.stmts)[rf.1]? with
-        | none => simp only [hextr] at hwire; exact absurd hwire (by simp)
-        | some k =>
-            simp only [hextr, Except.ok.injEq] at hwire
-            rw [← hwire]
-            apply external_pointwise hrc hwfd hne rf hi hpos_route
-            · rw [← hwire]
-            · exact hextr
-            · rw [hweave, hnsr]
+  -- NOTE(phaseB): proof depended on the old `repStmt.readFactors` / `internal _ 0` shapes of the
+  -- buildStep field lemmas. New shape is `inputReadFactors` with per-slot wires. Body to be re-proved
+  -- (helpers `internal_pointwise`/`external_pointwise`/`port_external_weave` restated to new shapes).
+  sorry
 
 /-- Conjunct 1 (`wellFormedDom`). Needs: every external slot referenced + rank agreement across
     consuming ports. (Pipeline-property dependent — `extNames ⊆ reads`, `extIndex` bound.) -/
@@ -342,11 +260,12 @@ theorem mem_poolAt_internal {tc : ThreadedComposed} {i j : Nat} (h : j < i) :
 
     The fix is the design owner's call (reject cycles AND absorb scan self-reads into the scan
     generator, or extend `poolAt`/the `WellFormed.topo` conjunct to admit `internal i 0`). -/
+-- NOTE(phaseB): restated to the new `inputReadFactors` / `(j, slot)` shape.
 theorem topo_bound {sp : ScheduledProgram} {s s₁ : Nat} {p : TLProgram}
     (hsp : (TLProgram.compileToScheduled p).run s = .ok sp s₁)
     {i : Nat} (hi : i < sp.stmts.length) {rf : String × List IdxExpr}
-    (hrf : rf ∈ ((sp.stmts.getD i default).repStmt.getD emptyStmt).readFactors)
-    {j : Nat} (hns : (buildNameToStep sp.stmts)[rf.1]? = some j) : j < i := by
+    (hrf : rf ∈ (sp.stmts.getD i default).inputReadFactors)
+    {j slot : Nat} (hns : (buildNameToStep sp.stmts)[rf.1]? = some (j, slot)) : j < i := by
   sorry
 
 /-- Conjunct 4 (topological — reads ⊆ pool). Needs `topoSort` correctness + `extIndex` bound. -/
@@ -354,43 +273,9 @@ theorem wf_topo {sp : ScheduledProgram} {tc : ThreadedComposed} {s s₁ : Nat} {
     (hsp : (TLProgram.compileToScheduled p).run s = .ok sp s₁)
     (hrc : routeCore sp = .ok (tc.steps, tc.routing)) (hne : tc.nExternal = sp.extNames.card) :
     ∀ i, i < tc.steps.length → ∀ w ∈ tc.routing.getD i [], w ∈ tc.poolAt i := by
-  intro i hi w hw
-  have hi' : i < sp.stmts.length := routeCore_steps_length hrc ▸ hi
-  have hbs := routeCore_getD hrc i hi'
-  have hwm := buildStep_wires_mapM hbs
-  set s' := (sp.stmts.getD i default).repStmt.getD emptyStmt with hs'
-  set ns := buildNameToStep sp.stmts with hns
-  set ext := buildExtIndex sp.extNames sp.stmts with hext
-  -- locate `w` at some position in the routing list
-  obtain ⟨pos, hpos_lt, hpos_eq⟩ := List.getElem_of_mem hw
-  have hlen : (tc.routing.getD i []).length = s'.readFactors.length := mapM_ok_length' hwm
-  have hpos_rf : pos < s'.readFactors.length := hlen ▸ hpos_lt
-  set rf := s'.readFactors.getD pos (("", []) : String × List IdxExpr) with hrf
-  have hrf_mem : rf ∈ s'.readFactors := by
-    rw [hrf, List.getD_eq_getElem _ _ hpos_rf]; exact List.getElem_mem hpos_rf
-  have hwire := mapM_ok_getD' hwm pos (("", []) : String × List IdxExpr) (Wire.external 0) hpos_rf
-  rw [← hrf] at hwire
-  -- `routing[i].getD pos default = w`
-  have hwpos : (tc.routing.getD i []).getD pos (Wire.external 0) = w := by
-    rw [List.getD_eq_getElem _ _ hpos_lt, hpos_eq]
-  rw [hwpos] at hwire
-  cases hnsr : ns[rf.1]? with
-  | some jj =>
-      simp only [hnsr] at hwire
-      simp only [Except.ok.injEq] at hwire
-      -- w = internal jj 0, jj < i
-      have hjj : jj < i := topo_bound hsp hi' hrf_mem hnsr
-      rw [← hwire]
-      exact mem_poolAt_internal hjj
-  | none =>
-      simp only [hnsr] at hwire
-      cases hextr : ext[rf.1]? with
-      | none => simp only [hextr] at hwire; exact absurd hwire (by simp)
-      | some k =>
-          simp only [hextr, Except.ok.injEq] at hwire
-          have hk : k < tc.nExternal := hne ▸ buildExtIndex_lt_card hextr
-          rw [← hwire]
-          exact mem_poolAt_external hk
+  -- NOTE(phaseB): proof depended on the old `repStmt.readFactors` / `internal _ 0` shapes; the new
+  -- wire builder is per-slot over `inputReadFactors`. `mem_poolAt_*` still hold; rewire in Phase B.
+  sorry
 
 /-- **The compiler theorem: every compiled program is `WellFormed`** (discharges `realize`'s
     precondition on real input). -/

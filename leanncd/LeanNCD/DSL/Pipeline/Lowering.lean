@@ -311,16 +311,63 @@ def buildExtIndex (extNames : Finset String) (stmts : List ScanStmt)
         (m.insert nm cnt, cnt + 1)
       else (m, cnt)) acc) ({}, 0)).1
 
-/-- PASS-1: map each produced tensor name to the step index that writes it. -/
-def buildNameToStep (stmts : List ScanStmt) : Std.HashMap String Nat :=
+/-- The stmts that contribute reads/axes to a ScanStmt's step. For `.scan`, the base (initial-state)
+    stmts followed by the recurrence stmts; for `.plain`, the stmt itself; `.scanPre` carries none
+    (its morphism is pre-built). -/
+def ScanStmt.stepStmts : ScanStmt → List Stmt
+  | .plain s        => [s]
+  | .scan _ _ b r _ => b ++ r
+  | .scanPre _ _ _  => []
+
+/-- The read factors that become this step's input wires. For `.scan`, ALL base+recur reads with
+    **self-reads excluded** (a read whose name the step itself writes is the recurrence, internal to
+    the scan generator — not a routing wire); the surviving reads are the initial states (`base`) and
+    per-step inputs (`recur`). For `.plain`, the stmt's reads verbatim (a self-read there is a genuine
+    cycle, left in so the acyclicity guard rejects it). `.scanPre` has none. -/
+def ScanStmt.inputReadFactors (sc : ScanStmt) : List (String × List IdxExpr) :=
+  match sc with
+  | .plain s        => s.readFactors
+  | .scan _ _ b r _ =>
+      let ws := sc.writes
+      (b.flatMap Stmt.readFactors ++ r.flatMap Stmt.readFactors).filter (fun rf => !ws.contains rf.1)
+  | .scanPre _ _ _  => []
+
+/-- The defining stmt of output slot `s` (= `writes[s]`): the LAST stmt in `stepStmts` that writes it
+    (for a `.scan`, the recurrence stmt — full output rank, incl. the iteration axis). Used so the
+    producer's per-slot output weave and a consumer's input weave derive the SAME axes (conjunct 2). -/
+def ScanStmt.slotStmt (sc : ScanStmt) (s : Nat) : Stmt :=
+  let nm := sc.writes.getD s ""
+  (sc.stepStmts.filter (fun st => st.lhsName == nm)).getLast?.getD emptyStmt
+
+/-- A step's combined index space across all `stepStmts`: retained (LHS) axes of every contributing
+    stmt, then the contracted (read-but-not-retained) axes, deduplicated by uid. Generalizes
+    `stepDegAxes` from one stmt to the `.scan` group. -/
+def ScanStmt.stepDegAxesMulti (sc : ScanStmt) : List AxisSpec :=
+  let ss := sc.stepStmts
+  let retained := dedupByUid (ss.flatMap Stmt.lhsAxes)
+  let allRead := ss.flatMap (fun s => s.readFactors.flatMap (fun rf => rf.2.flatMap idxAxes))
+  let contracted := allRead.filter (fun a => !(retained.map (·.uid)).contains a.uid)
+  dedupByUid (retained ++ contracted)
+
+/-- The output weave of slot `s` over the step's combined `degree`: fixed on `writes[s]`'s retained
+    (LHS) axes, tiled elsewhere. -/
+def ScanStmt.slotWeave (sc : ScanStmt) (s : Nat) : WeaveShapeP :=
+  let retainedUids := (dedupByUid (sc.slotStmt s).lhsAxes).map (·.uid)
+  sc.stepDegAxesMulti.map (fun a =>
+    if retainedUids.contains a.uid then WeaveSlotP.fixed (AxisP.mk (some a.name) (SizeExpr.var a.name))
+    else WeaveSlotP.tiled)
+
+/-- PASS-1: map each produced tensor name to its (step index, output slot). A step writing several
+    names (a coupled scan) assigns slot `0,1,…` in `writes` order. -/
+def buildNameToStep (stmts : List ScanStmt) : Std.HashMap String (Nat × Nat) :=
   stmts.zipIdx.foldl (fun m (sc, i) =>
-    sc.writes.foldl (fun m' nm => m'.insert nm i) m) {}
+    sc.writes.zipIdx.foldl (fun m' (nm, s) => m'.insert nm (i, s)) m) {}
 
 /-- Build one `BrBaseP` step and its routing wires for `sc`, given the precomputed maps and the
     full scheduled statement list (`stmts`, used to publish an internal read's producer axes).
     Returns `CompileError.shapeMismatch` for an empty-step `scanPre`, or
     `CompileError.undeclaredName` for an unresolved read. -/
-def buildStep (nameToStep : Std.HashMap String Nat) (extIndex : Std.HashMap String Nat)
+def buildStep (nameToStep : Std.HashMap String (Nat × Nat)) (extIndex : Std.HashMap String Nat)
     (stmts : List ScanStmt)
     (sc : ScanStmt) : Except CompileError (BrBaseP × List Wire) := do
   -- Validate a pre-built (escape-hatch) morphism: its step list must be non-empty.
@@ -329,23 +376,25 @@ def buildStep (nameToStep : Std.HashMap String Nat) (extIndex : Std.HashMap Stri
       if tc.steps.isEmpty then
         throw (CompileError.shapeMismatch s!"recurMorphism {nm}: empty step morphism" "non-empty ThreadedComposed")
   | _ => pure ()
+  -- rep stmt drives ONLY the op label (nonlin/agg/kind); reads/axes come from the whole group.
   let s := sc.repStmt.getD emptyStmt
-  let readFactors := s.readFactors
-  -- degree = LHS axes ++ contracted, de-duplicated by uid (LHS first).
-  let degAxes : List AxisSpec := stepDegAxes s
+  let readFactors := sc.inputReadFactors
+  -- degree = combined retained ++ contracted across all stepStmts, de-duplicated by uid.
+  let degAxes : List AxisSpec := sc.stepDegAxesMulti
   let degree : StObjP := degAxes.map (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name))
-  -- internal read ⇒ publish the producer step's `tensorAxes` (derived from `stmts[j]`, the SAME `j`
-  -- the wire below uses, so producer output and consumer input weaves coincide by construction);
-  -- external read ⇒ one fixed slot per read position.
+  -- internal read ⇒ publish producer step `j`'s slot-`slot` `tensorAxes` (the SAME (j,slot) the wire
+  -- below uses, so producer output and consumer input weaves coincide); external ⇒ one fixed slot
+  -- per read position.
   let inputWeaves : List WeaveShapeP :=
     readFactors.map (fun rf =>
       match nameToStep[rf.1]? with
-      | some j => (tensorAxes ((stmts.getD j default).repStmt.getD emptyStmt)).map
-                    (fun a => WeaveSlotP.fixed a)
+      | some (j, slot) => (tensorAxes ((stmts.getD j default).slotStmt slot)).map
+                            (fun a => WeaveSlotP.fixed a)
       | none   => (List.range rf.2.length).map (fun pos =>
                     WeaveSlotP.fixed (AxisP.mk (some (rf.1 ++ "_" ++ toString pos))
                       (SizeExpr.var (rf.1 ++ "_" ++ toString pos)))))
-  let outputWeaves : List WeaveShapeP := [ stepMkWeave s ]
+  -- one output weave per written tensor (a coupled scan has several), in `writes` order.
+  let outputWeaves : List WeaveShapeP := (List.range sc.writes.length).map sc.slotWeave
   let degUids : List UID := degAxes.map (·.uid)
   let reindexings : List StMatP := readFactors.map (fun rf =>
     let rows := rf.2.map (idxToRow degUids)
@@ -365,27 +414,42 @@ def buildStep (nameToStep : Std.HashMap String Nat) (extIndex : Std.HashMap Stri
               | .sum => .contract
           | .recurMorphism .. => .contract   -- unreachable: scanPre handled above
   let step : BrBaseP := { op, degree, inputWeaves, outputWeaves, reindexings }
-  -- Route each read to its producer step, else to the external sentinel. A name that is
+  -- Route each read to its producer (step, slot), else to the external sentinel. A name that is
   -- neither produced nor declared external is an unresolved read: FAIL LOUD rather than
   -- silently defaulting to external slot 0 (which masks upstream dataflow errors).
   let wires ← readFactors.mapM (fun rf =>
     match nameToStep[rf.1]? with
-    | some j => pure (Wire.internal j 0)
+    | some (j, slot) => pure (Wire.internal j slot)
     | none   =>
       match extIndex[rf.1]? with
       | some k => pure (Wire.external k)
       | none   => throw (CompileError.undeclaredName rf.1))
   return (step, wires)
 
+/-- Acyclicity guard for Phase 8: every internal read wire points BACKWARD — its producer step
+    precedes its consumer (`j < i`). False exactly for a genuine inter-step cycle (`topoSort` source-
+    order fallback); scan self-recurrence is NOT a wire (excluded by `inputReadFactors`), so coupled
+    scans pass. A cyclic dataflow can't be realized as a finite `Br` morphism, so `routeCore` rejects
+    it (FAIL LOUD) — making a successful route imply topological order. -/
+def routableInOrder (stmts : List ScanStmt) : Bool :=
+  let ns := buildNameToStep stmts
+  stmts.zipIdx.all (fun (sc, i) =>
+    sc.inputReadFactors.all (fun rf =>
+      match ns[rf.1]? with
+      | some (j, _) => decide (j < i)
+      | none        => true))
+
 /-- Pure core of Phase 8: compute the step list and routing table from a `ScheduledProgram`.
     Computes `nameToStep` and `extIndex` once (PASS 1), then folds `buildStep` over `stmts`
-    (PASS 2). -/
-def routeCore (sp : ScheduledProgram) : Except CompileError (List BrBaseP × List (List Wire)) := do
-  -- PASS 2: fold buildStep over all stmts, using the PASS-1 maps (`buildNameToStep`/`buildExtIndex`/
-  -- `buildNameToType`).
-  let pairs ← sp.stmts.mapM
-    (buildStep (buildNameToStep sp.stmts) (buildExtIndex sp.extNames sp.stmts) sp.stmts)
-  return (pairs.map (·.1), pairs.map (·.2))
+    (PASS 2). Guarded by `routableInOrder`: cyclic dataflow is rejected up front. -/
+def routeCore (sp : ScheduledProgram) : Except CompileError (List BrBaseP × List (List Wire)) :=
+  if routableInOrder sp.stmts then do
+    -- PASS 2: fold buildStep over all stmts, using the PASS-1 maps (`buildNameToStep`/`buildExtIndex`).
+    let pairs ← sp.stmts.mapM
+      (buildStep (buildNameToStep sp.stmts) (buildExtIndex sp.extNames sp.stmts) sp.stmts)
+    return (pairs.map (·.1), pairs.map (·.2))
+  else
+    throw (CompileError.cyclicDataflow "routeCore: cyclic dataflow (topoSort fallback)")
 
 /-- Phase 8: route the scheduled statements into a `ThreadedComposed`. -/
 def route (sp : ScheduledProgram) : FreshM ThreadedComposed := do
