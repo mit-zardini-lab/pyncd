@@ -122,18 +122,64 @@ stub — restate). Cheap because most are still `sorry`.
 
 One commit per lemma; `lean_diagnostic_messages` clean after each.
 
-- **B.1 `buildNameToStep_lt`** (step bound) + **`buildNameToStep_slot_lt`** (NEW: `s < writes_j.length`,
-  via the inner `writes.zipIdx` fold invariant — mirror `goodExtState`/`foldl_zipIdx_val_lt`).
+- **B.1 `buildNameToStep_lt`** (step bound) + **`buildNameToStep_slot_lt`** (NEW: `s < outputs_j.length`,
+  via the inner `outputs.zipIdx` fold invariant — mirror `goodExtState`/`foldl_zipIdx_val_lt`).
+  **[DONE `dab995b`]** — one generic `foldl_preserves_inv` (membership-restricted invariant) applied to
+  the nested zipIdx fold; `buildNameToStep_value` proves both bounds, the two public lemmas project.
+  Key API: `List.mem_zipIdx'`, `Std.HashMap.getElem?_insert`, `List.getD_eq_getElem`. Gotchas solved:
+  destructuring-lambda `match` needs `dsimp only`; concrete `let I` (not metavar) keeps `I (foldl …)`
+  unification first-order under `refine`.
 - **B.2 `routeCore_steps_length` / `routeCore_routing_length` / `routeCore_getD`** — `if_pos` recovers the
-  prior bodies (the guard branch); error branch via `simp [throw,…]`.
+  prior bodies (the guard branch); error branch via `simp [throw,…]`. **[DONE — already green pre-A.5;
+  the guard `if_pos`/`if_neg` bodies survived the A.5 model change, verified by clean build.]**
 - **B.3 `routeCore_routable`** (NEW): `routeCore sp = .ok _ → routableInOrder sp.stmts = true`.
-- **B.4 `buildStep_outputWeaves_length`** (NEW, replaces `_length_one`): `= writes.length`
-  (`List.length_map`).
+  **[DONE `b6638f2`]** — `by_cases` on the guard; false branch reduces `h` to `throw … = .ok`, simp refutes.
+- **B.4 `buildStep_outputWeaves_length`** (NEW, replaces `_length_one`): `= outputs.length`
+  (`List.length_map`). **[DONE — proven as `buildStep_outputWeaves_length_one` (name kept), restated to
+  `= sc.outputs.length` in A.5; green.]**
 - **B.5 `buildStep_wires_mapM`** — RHS wire builder now yields `internal j s` / `external`.
+  **[DONE `4c55222`]** — `cases sc`, `simp [pure_bind]` to clear the guard, `bind_pure_pair_ok_snd h`
+  (pure/throw vs Except.ok/error are defeq).
 - **B.6 `buildStep_inputWeaves`** — RHS per-read weave (internal per-slot `tensorAxes`; external canonical).
+  **[DONE `4c55222`]** — same skeleton; `exact congrArg BrBaseP.inputWeaves (bind_pure_pair_ok h)` so
+  `exact` discharges the struct-literal projection by defeq (plain `rw`'s auto-rfl won't reduce it).
 - **B.7 `buildStep_output_fixedAxes`** (per slot): `fixedAxesP (outputWeaves.getD s []) =
-  tensorAxes (slotDefiningStmt sc s)`.
+  tensorAxes (slotStmt sc s)`.
+  **[BLOCKED — RESUME HERE. Statement is FALSE as written: see §B.7-FINDING below.]**
 - Verify after each: `lean_diagnostic_messages RouteSpec.lean` clean; `lake build`.
+
+### B.7-FINDING (2026-06-27): `buildStep_output_fixedAxes` is not a theorem as stated
+
+`fixedAxesP (b.outputWeaves.getD s [])` is in **degree order** (`slotWeave s` maps over
+`stepDegAxesMulti` then filters), whereas `tensorAxes (sc.slotStmt s)` is in **slotStmt's LHS order**.
+For a `.scan` whose base and recur stmts list the output's axes in DIFFERENT orders these disagree.
+Empirically (adversarial scan: base `G[i,j]`, recur `G[j,i]`, shared uids):
+```
+fixedAxesP (slotWeave 0) = [some "i", some "j"]   -- degree order
+tensorAxes (slotStmt 0)  = [some "j", some "i"]   -- slotStmt LHS order   ⇒ NOT equal
+```
+`sc` is universally quantified with no well-formedness hypothesis, so this counterexample disproves it.
+Same order-mismatch underlies conjunct-2 itself: B.6's consumer input weave is built in
+`tensorAxes(producer.slotStmt)` order (all `.fixed`), while the producer output weave is degree order —
+conjunct-2 needs the two to coincide. Holds for every real §12.1 program (scans list axes consistently
+across base/recur); the gap is a **missing precondition**, not a broken pipeline.
+
+**Resolution options (await decision):**
+1. **Add WF hypothesis** to B.7: scan stmts agree on retained-axis order (degree order restricted to
+   slot `s`'s uids = `slotStmt s`'s LHS order). True of real `finalizeScans` output; discharge at the
+   `routeCore`/Agreement call site. Threads a new hypothesis into conjunct-2 (Phase D `wf_typeMatch`).
+2. **Weaken to uid-set / up-to-permutation equality** — IF realize/`wf_typeMatch` match published axes
+   by uid not position. Check how Agreement consumes these axes first (this is option 4's investigation).
+3. **Make degree order canonical** — change `stepDegAxesMulti`/`slotWeave` so output-weave fixed axes
+   follow `slotStmt` order by construction. Lowering.lean model change; re-touches A.5-adjacent proofs.
+4. **Investigate-first** — read Agreement `wf_typeMatch`/conjunct-2 to see whether axis matching is
+   ordered or by-uid, then pick 1–3 driven by the downstream need. (Recommended starting move.)
+
+**State at checkpoint:** working tree clean; build GREEN; RouteSpec down to its **last** sorry (B.7).
+Remaining sorries project-wide: RouteSpec `buildStep_output_fixedAxes`; Realize `stepPiece`/`finalPiece`
+hcod; Agreement `wf_singleOutput`, `port_external_weave`, `external_pointwise`, `internal_pointwise`,
+`wf_typeMatch`, `wf_dom`, `topo_bound`, `wf_topo`; plus out-of-scope `fromThreadedComposed`,
+`realize_fromThreadedComposed_agree`. Next after B.7: Phase C (C.1–C.3 poolAt/WellFormed/mem_poolAt).
 
 ## E. Phase C — Realize model generalization
 
