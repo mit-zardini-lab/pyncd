@@ -286,12 +286,94 @@ theorem wf_dom {sp : ScheduledProgram} {tc : ThreadedComposed} {s s₁ : Nat} {p
     tc.wellFormedDom = true := by
   sorry
 
+/-! ### Conjunct 4 (`wf_topo`) infrastructure -/
+
+/-- Membership in the fold base survives the `poolAt` prepending fold. -/
+private theorem mem_foldl_prepend {x : Wire} :
+    ∀ (l : List Nat) (b : List Wire), x ∈ b →
+      x ∈ l.foldl (fun p j => Wire.internal j 0 :: p) b := by
+  intro l
+  induction l with
+  | nil => intro b hb; simpa using hb
+  | cons c u ihu =>
+      intro b hb; simp only [List.foldl_cons]; exact ihu _ (List.mem_cons_of_mem _ hb)
+
+/-- Part 1 (external): `poolAt i` contains every external wire with slot `< nExternal`. -/
+theorem mem_poolAt_external {tc : ThreadedComposed} {i k : Nat} (h : k < tc.nExternal) :
+    Wire.external k ∈ tc.poolAt i := by
+  unfold ThreadedComposed.poolAt
+  exact mem_foldl_prepend _ _ (List.mem_map.mpr ⟨k, List.mem_range.mpr h, rfl⟩)
+
+/-- Part 1 (internal): `poolAt i` contains every producer wire `internal j 0` with `j < i`. -/
+theorem mem_poolAt_internal {tc : ThreadedComposed} {i j : Nat} (h : j < i) :
+    Wire.internal j 0 ∈ tc.poolAt i := by
+  unfold ThreadedComposed.poolAt
+  have hj : j ∈ List.range i := List.mem_range.mpr h
+  suffices H : ∀ (l : List Nat) (base : List Wire), j ∈ l →
+      Wire.internal j 0 ∈ l.foldl (fun p x => Wire.internal x 0 :: p) base by
+    exact H _ _ hj
+  intro l
+  induction l with
+  | nil => intro base hb; simp at hb
+  | cons a t ih =>
+      intro base hb
+      simp only [List.foldl_cons]
+      rcases List.mem_cons.mp hb with h' | h'
+      · subst h'; exact mem_foldl_prepend t _ List.mem_cons_self
+      · exact ih _ h'
+
+/-- Part 3 (the topological bound). For the scheduled `sp`, an internal producer wire `internal j 0`
+    appearing in `routing[i]` necessarily has `j < i`: the producer of a non-self read precedes its
+    consumer because `sp.stmts` is `topoSort`-ordered. -/
+theorem topo_bound {sp : ScheduledProgram} {s s₁ : Nat} {p : TLProgram}
+    (hsp : (TLProgram.compileToScheduled p).run s = .ok sp s₁)
+    {i : Nat} (hi : i < sp.stmts.length) {rf : String × List IdxExpr}
+    (hrf : rf ∈ ((sp.stmts.getD i default).repStmt.getD emptyStmt).readFactors)
+    {j : Nat} (hns : (buildNameToStep sp.stmts)[rf.1]? = some j) : j < i := by
+  sorry
+
 /-- Conjunct 4 (topological — reads ⊆ pool). Needs `topoSort` correctness + `extIndex` bound. -/
 theorem wf_topo {sp : ScheduledProgram} {tc : ThreadedComposed} {s s₁ : Nat} {p : TLProgram}
     (hsp : (TLProgram.compileToScheduled p).run s = .ok sp s₁)
     (hrc : routeCore sp = .ok (tc.steps, tc.routing)) (hne : tc.nExternal = sp.extNames.card) :
     ∀ i, i < tc.steps.length → ∀ w ∈ tc.routing.getD i [], w ∈ tc.poolAt i := by
-  sorry
+  intro i hi w hw
+  have hi' : i < sp.stmts.length := routeCore_steps_length hrc ▸ hi
+  have hbs := routeCore_getD hrc i hi'
+  have hwm := buildStep_wires_mapM hbs
+  set s' := (sp.stmts.getD i default).repStmt.getD emptyStmt with hs'
+  set ns := buildNameToStep sp.stmts with hns
+  set ext := buildExtIndex sp.extNames sp.stmts with hext
+  -- locate `w` at some position in the routing list
+  obtain ⟨pos, hpos_lt, hpos_eq⟩ := List.getElem_of_mem hw
+  have hlen : (tc.routing.getD i []).length = s'.readFactors.length := mapM_ok_length' hwm
+  have hpos_rf : pos < s'.readFactors.length := hlen ▸ hpos_lt
+  set rf := s'.readFactors.getD pos (("", []) : String × List IdxExpr) with hrf
+  have hrf_mem : rf ∈ s'.readFactors := by
+    rw [hrf, List.getD_eq_getElem _ _ hpos_rf]; exact List.getElem_mem hpos_rf
+  have hwire := mapM_ok_getD' hwm pos (("", []) : String × List IdxExpr) (Wire.external 0) hpos_rf
+  rw [← hrf] at hwire
+  -- `routing[i].getD pos default = w`
+  have hwpos : (tc.routing.getD i []).getD pos (Wire.external 0) = w := by
+    rw [List.getD_eq_getElem _ _ hpos_lt, hpos_eq]
+  rw [hwpos] at hwire
+  cases hnsr : ns[rf.1]? with
+  | some jj =>
+      simp only [hnsr] at hwire
+      simp only [Except.ok.injEq] at hwire
+      -- w = internal jj 0, jj < i
+      have hjj : jj < i := topo_bound hsp hi' hrf_mem hnsr
+      rw [← hwire]
+      exact mem_poolAt_internal hjj
+  | none =>
+      simp only [hnsr] at hwire
+      cases hextr : ext[rf.1]? with
+      | none => simp only [hextr] at hwire; exact absurd hwire (by simp)
+      | some k =>
+          simp only [hextr, Except.ok.injEq] at hwire
+          have hk : k < tc.nExternal := hne ▸ buildExtIndex_lt_card hextr
+          rw [← hwire]
+          exact mem_poolAt_external hk
 
 /-- **The compiler theorem: every compiled program is `WellFormed`** (discharges `realize`'s
     precondition on real input). -/

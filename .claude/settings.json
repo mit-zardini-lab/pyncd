@@ -84,7 +84,9 @@
       "mcp__lean-lsp__lean_run_code",
       "Bash(~/.elan/bin/lake build *)",
       "mcp__lean-lsp__lean_build",
-      "Bash(rtk tree *)"
+      "Bash(rtk tree *)",
+      "mcp__lean-lsp__lean_local_search",
+      "mcp__lean-lsp__lean_verify"
     ],
     "additionalDirectories": [
       "/tmp"
