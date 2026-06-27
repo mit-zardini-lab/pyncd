@@ -145,7 +145,8 @@ One commit per lemma; `lean_diagnostic_messages` clean after each.
   `exact` discharges the struct-literal projection by defeq (plain `rw`'s auto-rfl won't reduce it).
 - **B.7 `buildStep_output_fixedAxes`** (per slot): `fixedAxesP (outputWeaves.getD s []) =
   tensorAxes (slotStmt sc s)`.
-  **[BLOCKED — RESUME HERE. Statement is FALSE as written: see §B.7-FINDING below.]**
+  **[DECIDED — RESUME HERE. Going with Option 3 (canonical degree order). False as originally written; see
+  §B.7-FINDING + §B.7-PLAN below.]**
 - Verify after each: `lean_diagnostic_messages RouteSpec.lean` clean; `lake build`.
 
 ### B.7-FINDING (2026-06-27): `buildStep_output_fixedAxes` is not a theorem as stated
@@ -196,10 +197,11 @@ multiset match is insufficient unless `ArrayType.shape` itself is made order-ins
    the frontend can't produce it (see precondition check below).
 4. **Investigate-first** — DONE (see Investigation result above).
 
-**RECOMMENDATION: Option 3**, conditional on a precondition check — confirm no real coupled scan needs
-conflicting shared-axis orders (so a single canonical degree order always exists). Fall back to Option 1
-only if re-verifying the degree-order-dependent proofs (B.4, `idxToRow`) costs more than discharging the
-invariant.
+**DECISION (2026-06-27): Option 3** — make degree order canonical. Keeps B.7 and conjunct-2
+hypothesis-free for the common case and fixes the root cause (degree should follow the authoritative
+last-writer/slot order, not base-first). Concrete steps in §B.7-PLAN below. Option 1 remains the
+documented fallback if the degree-order-dependent re-verification (B.4, `idxToRow`) proves costlier than
+expected.
 
 **Precondition check (DONE 2026-06-27).** Probed the real §12.1 coupled scan + simple scan via a
 `compileToScheduled` command that compares, per output slot, `fixedAxesP (slotWeave s)` (degree order)
@@ -219,6 +221,47 @@ Remaining sorries project-wide: RouteSpec `buildStep_output_fixedAxes`; Realize 
 hcod; Agreement `wf_singleOutput`, `port_external_weave`, `external_pointwise`, `internal_pointwise`,
 `wf_typeMatch`, `wf_dom`, `topo_bound`, `wf_topo`; plus out-of-scope `fromThreadedComposed`,
 `realize_fromThreadedComposed_agree`. Next after B.7: Phase C (C.1–C.3 poolAt/WellFormed/mem_poolAt).
+
+### B.7-PLAN (Option 3 — canonical degree order). RESUME HERE.
+
+**Goal:** prove `buildStep_output_fixedAxes` by making `stepDegAxesMulti`'s retained axes follow
+slot/last-writer order, so per-slot filtering recovers `tensorAxes (slotStmt s)` by construction.
+
+**Step 1 — model change in `Lowering.lean` (`ScanStmt.stepDegAxesMulti`).** Replace the retained source
+`dedupByUid (ss.flatMap Stmt.lhsAxes)` (base-first) with last-writer/slot order:
+```
+let retained := dedupByUid ((List.range sc.outputs.length).flatMap (fun s => (sc.slotStmt s).lhsAxes))
+```
+Leave `contracted`/`allRead`/the final `dedupByUid (retained ++ contracted)` as-is. (Re-`#eval` the
+coupled+simple scans: degree should be unchanged on real input — the probe already showed base-first
+already equals slot order there, so this is a no-op on §12.1 but makes the *proof* go through.)
+
+**Step 2 — key algebraic lemma** (RouteSpec): for `s < sc.outputs.length`,
+`(sc.stepDegAxesMulti.filter (·.uid ∈ (dedupByUid (sc.slotStmt s).lhsAxes).map (·.uid))).map mkAxisP
+   = tensorAxes (sc.slotStmt s)`.
+Proof shape: contracted axes have uids ∉ retained ⇒ drop under the filter (reuse `dedup_append_filter`
+machinery already in RouteSpec); on the `retained` prefix, the filter selects exactly slot `s`'s block.
+Needs the **per-uid name-consistency** fact (all `AxisSpec`s sharing a uid share a name — invariant of
+phases ≤5) to equate `mkAxisP` images; check whether such a lemma exists or add it.
+
+**Step 3 — prove B.7.** `b.outputWeaves.getD s [] = sc.slotWeave s` (via `congrArg BrBaseP.outputWeaves
+(bind_pure_pair_ok h)` + `List.getD_map`/`getElem_range`, mirroring B.6); then a "fixed-when-true"
+analogue of `fixedAxesP_mapWeave` turns `fixedAxesP (slotWeave s)` into the filtered-degree map of Step 2.
+
+**RESIDUAL (must decide during impl): coupled scans with conflicting cross-output axis order.** Option 3
+makes B.7 **unconditional for plain + single-output scans** (one `slotStmt` ⇒ filtered degree = its own
+lhs). For a *coupled* scan whose outputs disagree on a shared axis's order (e.g. G `[j,l]` vs H `[l,j]`),
+NO single degree order satisfies both slots ⇒ B.7 is still false for that (invalid) input. Real input is
+fine (probe: G,H both `[j,l]`). Pick one when you hit it:
+  - **(a) Compile guard (recommended):** add a `routableInOrder`-style check rejecting coupled scans with
+    inconsistent output axis order (FAIL LOUD via a new `CompileError`), then derive consistency from
+    `hrc` in B.7 — matches the existing acyclicity-guard pattern (`routeCore_routable`).
+  - **(b) WF hypothesis:** thread cross-output axis-order agreement only for the coupled case.
+Lean toward (a); keeps B.7's statement clean and the invalid input rejected rather than assumed-away.
+
+**Re-verify after Step 1:** B.1 (`buildNameToStep` unaffected — uses `outputs`, not degree), B.4
+(`outputWeaves.length` unaffected), and especially `idxToRow`/`reindexings` column order (uses `degUids`
+= `stepDegAxesMulti.map (·.uid)`) — re-run `LoweringTest`/`CompileExamplesTest` `#guard`s + `lake build`.
 
 ## E. Phase C — Realize model generalization
 
