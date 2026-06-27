@@ -155,20 +155,20 @@ def routeCore sp := if routableInOrder sp.stmts then <build> else throw (.cyclic
 - `stepMorph`/`realizeBrBaseP` already produce `dom = inputWeaves.map _`, `cod = outputWeaves.map _` —
   multi-output works unchanged (the generator is opaque, op-tagged).
 
-## 9. Program-output selection (one semantic choice)
+## 9. Program-output selection — DECIDED: option (a)
 
-`schedule.outputs` currently = the last stmt's `writes`. For a coupled final scan that's `[G, H]`.
-Decide whether the program's `cod` is (a) ALL of the last step's outputs (`codObj` as-is), or (b) a
-designated subset. Recommend (a) for generality (`codObj` already = all last-step outputs); a projection
-to a subset is a separate trailing wiring step if ever needed. No proof impact either way.
+The program's `cod` is **ALL of the last step's outputs** (`codObj` as-is — already = the full last-step
+output list). For a coupled final scan that is the `n`-wire bundle `[G, H, …]`. `schedule.outputs`
+(= the last stmt's `writes`) and `codObj` are already consistent with this; no change and no proof
+impact. (A projection to a designated subset is explicitly NOT pursued.)
 
-## 10. Cross-layer: `tsncd` executor
+## 10. Cross-layer (`tsncd` executor) — OUT OF SCOPE
 
-The Python `scan` executor consumes the step's inputs/outputs. New contract: inputs are
-`{init states} ++ {per-step inputs}` (no self-input), outputs are the `n` coupled sequences. The executor
-must (i) read inits from the leading input slots, (ii) iterate the recurrence internally, (iii) emit `n`
-outputs. **Coordinate this change with the Lean fix** (same desync risk as the base scope §3c). Add/adjust
-executor tests for a coupled scan (LSTM-shaped) end-to-end.
+This effort is **Lean-only**: the formal model (`buildStep`/`route`/`realize`) and the
+`compile_wellFormed` proof. The Python `tsncd` scan-executor contract (inits + `n` outputs, no
+self-input) is acknowledged but **explicitly deferred** — not implemented, tested, or coordinated here.
+No `#eval`/end-to-end executor assertions are in scope; correctness targets are the Lean build + the
+`#guard` structural tests in `test/` + the sorry-free `compile_wellFormed`.
 
 ## 11. Re-proof sequencing (checklist)
 
@@ -187,9 +187,8 @@ executor tests for a coupled scan (LSTM-shaped) end-to-end.
 9. `compile_wellFormed` assembles; `#print axioms` clean.
 
 ## 12. Risk register
-- **Executor desync (§10)** — highest; Lean + Python must land together.
 - **Multi-stmt `degree`/`reindexings` (§3)** — correctly unioning axes across `base ++ recur` and typing
-  lower-rank inits (§6); most intricate compiler change.
+  lower-rank inits (§6); most intricate compiler change. **Highest risk** (executor is out of scope, §10).
 - **`realize` multi-output fold (§8)** — generalizing the `length_eq_one` casts to `range n`; mechanical
   but touches dependent-type casts.
 - **`buildNameToStep` uniqueness** — multi-output means a step writes several names; ensure each live name
