@@ -133,7 +133,11 @@ theorem routeCore_routable {sp : ScheduledProgram}
     {steps : List BrBaseP} {routing : List (List Wire)}
     (h : routeCore sp = .ok (steps, routing)) :
     routableInOrder sp.stmts = true := by
-  sorry
+  unfold routeCore at h
+  by_cases hro : routableInOrder sp.stmts = true
+  · exact hro
+  · rw [if_neg hro] at h
+    simp [throw, throwThe, MonadExceptOf.throw] at h
 
 /-! ## Lemma 3: `buildStep` always produces exactly one output weave -/
 
