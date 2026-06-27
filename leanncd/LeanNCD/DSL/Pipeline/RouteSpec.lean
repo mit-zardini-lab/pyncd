@@ -363,7 +363,16 @@ theorem buildStep_inputWeaves
       | none   => (List.range rf.2.length).map (fun pos =>
                     WeaveSlotP.fixed (AxisP.mk (some (rf.1 ++ "_" ++ toString pos))
                       (SizeExpr.var (rf.1 ++ "_" ++ toString pos))))) := by
-  sorry
+  unfold buildStep at h
+  cases sc with
+  | plain s => simp only [pure_bind] at h; exact congrArg BrBaseP.inputWeaves (bind_pure_pair_ok h)
+  | scan nm ax bs rs aff =>
+      simp only [pure_bind] at h; exact congrArg BrBaseP.inputWeaves (bind_pure_pair_ok h)
+  | scanPre nm ax tc =>
+      by_cases he : tc.steps.isEmpty = true
+      · simp [he, bind, Except.bind] at h
+      · simp only [he, pure_bind] at h
+        exact congrArg BrBaseP.inputWeaves (bind_pure_pair_ok h)
 
 /-- The wires from a successful `buildStep` equal the `mapM` of the per-read-factor wire builder. -/
 -- NOTE(phaseB): restated to the new `inputReadFactors` / `Wire.internal j slot` shape.
@@ -377,7 +386,14 @@ theorem buildStep_wires_mapM
       | none   => match ext[rf.1]? with
         | some k => Except.ok (Wire.external k)
         | none   => Except.error (CompileError.undeclaredName rf.1)) = .ok w := by
-  sorry
+  unfold buildStep at h
+  cases sc with
+  | plain s => simp only [pure_bind] at h; exact bind_pure_pair_ok_snd h
+  | scan nm ax bs rs aff => simp only [pure_bind] at h; exact bind_pure_pair_ok_snd h
+  | scanPre nm ax tc =>
+      by_cases he : tc.steps.isEmpty = true
+      · simp [he, bind, Except.bind] at h
+      · simp only [he, pure_bind] at h; exact bind_pure_pair_ok_snd h
 
 /-! ## Lemma 7: buildExtIndex injectivity -/
 
