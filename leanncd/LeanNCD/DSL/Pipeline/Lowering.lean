@@ -74,6 +74,13 @@ def ScanStmt.writes : ScanStmt → List String
   | .scan _ _ b r _ => (b.map Stmt.lhsName ++ r.map Stmt.lhsName).eraseDups
   | .scanPre nm _ _ => [nm]
 
+/-- The true output names of a ScanStmt: for `.scan`, names written by BOTH base AND recur
+    (drops `%nl` intermediates that appear in only one side). -/
+def ScanStmt.outputs : ScanStmt → List String
+  | .plain s        => [s.lhsName]
+  | .scan _ _ b r _ => (b.map Stmt.lhsName).filter (fun n => (r.map Stmt.lhsName).contains n)
+  | .scanPre nm _ _ => [nm]
+
 /-- Tensor names a ScanStmt reads. -/
 def ScanStmt.reads : ScanStmt → List String
   | .plain s        => s.readNames
@@ -336,7 +343,7 @@ def ScanStmt.inputReadFactors (sc : ScanStmt) : List (String × List IdxExpr) :=
     (for a `.scan`, the recurrence stmt — full output rank, incl. the iteration axis). Used so the
     producer's per-slot output weave and a consumer's input weave derive the SAME axes (conjunct 2). -/
 def ScanStmt.slotStmt (sc : ScanStmt) (s : Nat) : Stmt :=
-  let nm := sc.writes.getD s ""
+  let nm := sc.outputs.getD s ""
   (sc.stepStmts.filter (fun st => st.lhsName == nm)).getLast?.getD emptyStmt
 
 /-- A step's combined index space across all `stepStmts`: retained (LHS) axes of every contributing
@@ -361,7 +368,7 @@ def ScanStmt.slotWeave (sc : ScanStmt) (s : Nat) : WeaveShapeP :=
     names (a coupled scan) assigns slot `0,1,…` in `writes` order. -/
 def buildNameToStep (stmts : List ScanStmt) : Std.HashMap String (Nat × Nat) :=
   stmts.zipIdx.foldl (fun m (sc, i) =>
-    sc.writes.zipIdx.foldl (fun m' (nm, s) => m'.insert nm (i, s)) m) {}
+    sc.outputs.zipIdx.foldl (fun m' (nm, s) => m'.insert nm (i, s)) m) {}
 
 /-- Build one `BrBaseP` step and its routing wires for `sc`, given the precomputed maps and the
     full scheduled statement list (`stmts`, used to publish an internal read's producer axes).
@@ -393,8 +400,8 @@ def buildStep (nameToStep : Std.HashMap String (Nat × Nat)) (extIndex : Std.Has
       | none   => (List.range rf.2.length).map (fun pos =>
                     WeaveSlotP.fixed (AxisP.mk (some (rf.1 ++ "_" ++ toString pos))
                       (SizeExpr.var (rf.1 ++ "_" ++ toString pos)))))
-  -- one output weave per written tensor (a coupled scan has several), in `writes` order.
-  let outputWeaves : List WeaveShapeP := (List.range sc.writes.length).map sc.slotWeave
+  -- one output weave per true output (base∩recur for scans), in `outputs` order.
+  let outputWeaves : List WeaveShapeP := (List.range sc.outputs.length).map sc.slotWeave
   let degUids : List UID := degAxes.map (·.uid)
   let reindexings : List StMatP := readFactors.map (fun rf =>
     let rows := rf.2.map (idxToRow degUids)

@@ -148,12 +148,12 @@ private theorem bind_pure_pair_ok {ε γ δ : Type} {B : Except ε γ} {s b : δ
       simp only [bind, Except.bind, pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
       exact h.1.symm
 
--- NOTE(phaseB): renamed-in-place; true length is `sc.writes.length`, not 1 (multi-output scans).
+-- NOTE(phaseB): renamed-in-place; true length is `sc.outputs.length` (base∩recur for scans).
 theorem buildStep_outputWeaves_length_one
     {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
     {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
     (h : buildStep ns ext stmts sc = .ok (b, w)) :
-    b.outputWeaves.length = sc.writes.length := by
+    b.outputWeaves.length = sc.outputs.length := by
   unfold buildStep at h
   cases sc with
   | plain s =>
@@ -265,7 +265,7 @@ private theorem fixedAxesP_mapWeave (l : List AxisSpec) (cu : List UID) :
 theorem buildStep_output_fixedAxes
     {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
     {sc : ScanStmt} {b : BrBaseP} {w : List Wire} {s : Nat}
-    (h : buildStep ns ext stmts sc = .ok (b, w)) (hs : s < sc.writes.length) :
+    (h : buildStep ns ext stmts sc = .ok (b, w)) (hs : s < sc.outputs.length) :
     fixedAxesP (b.outputWeaves.getD s []) = tensorAxes (sc.slotStmt s) := by
   sorry
 
@@ -284,7 +284,7 @@ theorem buildNameToStep_lt {stmts : List ScanStmt} {nm : String} {j s : Nat}
 /-- Every slot value in `buildNameToStep stmts` is a valid output slot for its producer step. -/
 theorem buildNameToStep_slot_lt {stmts : List ScanStmt} {nm : String} {j s : Nat}
     (h : (buildNameToStep stmts)[nm]? = some (j, s)) :
-    s < ((stmts.getD j default).writes.length) := by
+    s < ((stmts.getD j default).outputs.length) := by
   sorry
 
 /-! ## Lemma 6: `buildStep` field-extraction -/
