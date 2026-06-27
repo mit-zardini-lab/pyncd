@@ -273,19 +273,67 @@ theorem buildStep_output_fixedAxes
 
 -- NOTE(phaseB): the old helpers `foldl_insert_val_lt`/`foldl_zipIdx_val_lt` were written for the
 -- old `String ↦ Nat` fold (inserting `i`). The new `buildNameToStep` folds `nm ↦ (i, s)` over
--- `sc.writes.zipIdx`, so they no longer typecheck. They are removed; Phase B will re-derive the
--- bounds for the pair-valued fold.
+-- `sc.outputs.zipIdx`; the bounds are re-derived below via a single fold-invariant lemma.
+
+/-- A `foldl` of a `step` that preserves an invariant `I` (for arguments drawn from the folded
+    list) carries `I` from the initial map through to the result. The fold's value-bounds for
+    `buildNameToStep` instantiate this with `I m := every recorded value is in range`. -/
+private theorem foldl_preserves_inv {α β γ : Type} [BEq α] [Hashable α]
+    {I : Std.HashMap α β → Prop}
+    (step : Std.HashMap α β → γ → Std.HashMap α β) :
+    ∀ (l : List γ) (init : Std.HashMap α β),
+      I init → (∀ m c, c ∈ l → I m → I (step m c)) → I (l.foldl step init) := by
+  intro l
+  induction l with
+  | nil => intro init hinit _; exact hinit
+  | cons c t ih =>
+      intro init hinit hstep
+      simp only [List.foldl_cons]
+      refine ih (step init c) (hstep init c (List.mem_cons_self ..) hinit) ?_
+      intro m c' hc' hm
+      exact hstep m c' (List.mem_cons_of_mem _ hc') hm
+
+/-- The structural bound on `buildNameToStep`: every recorded value `(j, s)` has `j` a valid step
+    index and `s` a valid output slot of step `j`. Both public bounds project out of this. -/
+private theorem buildNameToStep_value {stmts : List ScanStmt} {nm : String} {j s : Nat}
+    (h : (buildNameToStep stmts)[nm]? = some (j, s)) :
+    j < stmts.length ∧ s < (stmts.getD j default).outputs.length := by
+  -- Invariant: every recorded value `(j, s)` is in range. A concrete `let` (not a metavariable)
+  -- keeps `foldl_preserves_inv`'s `I (foldl …)` unification first-order.
+  let I : Std.HashMap String (Nat × Nat) → Prop :=
+    fun m => ∀ (k : String) (v : Nat × Nat), m[k]? = some v →
+      v.1 < stmts.length ∧ v.2 < (stmts.getD v.1 default).outputs.length
+  suffices hmain : I (buildNameToStep stmts) from hmain nm (j, s) h
+  unfold buildNameToStep
+  refine foldl_preserves_inv (I := I) _ _ _ ?_ ?_
+  · intro k v hk; simp at hk
+  · rintro m ⟨sc, i⟩ hmem hIm
+    obtain ⟨hi, hsc⟩ := List.mem_zipIdx' hmem
+    dsimp only
+    refine foldl_preserves_inv (I := I) _ _ _ hIm ?_
+    rintro m' ⟨n, t⟩ hmem' hIm'
+    obtain ⟨ht, -⟩ := List.mem_zipIdx' hmem'
+    intro k v hk
+    rw [Std.HashMap.getElem?_insert] at hk
+    split at hk
+    · simp only [Option.some.injEq] at hk
+      subst hk
+      refine ⟨hi, ?_⟩
+      have hgetD : stmts.getD i default = sc := by
+        rw [List.getD_eq_getElem _ _ hi]; exact hsc.symm
+      simp only [hgetD]; exact ht
+    · exact hIm' k v hk
 
 /-- Every step-index value in `buildNameToStep stmts` is a valid step index `< stmts.length`. -/
 theorem buildNameToStep_lt {stmts : List ScanStmt} {nm : String} {j s : Nat}
-    (h : (buildNameToStep stmts)[nm]? = some (j, s)) : j < stmts.length := by
-  sorry
+    (h : (buildNameToStep stmts)[nm]? = some (j, s)) : j < stmts.length :=
+  (buildNameToStep_value h).1
 
 /-- Every slot value in `buildNameToStep stmts` is a valid output slot for its producer step. -/
 theorem buildNameToStep_slot_lt {stmts : List ScanStmt} {nm : String} {j s : Nat}
     (h : (buildNameToStep stmts)[nm]? = some (j, s)) :
-    s < ((stmts.getD j default).outputs.length) := by
-  sorry
+    s < ((stmts.getD j default).outputs.length) :=
+  (buildNameToStep_value h).2
 
 /-! ## Lemma 6: `buildStep` field-extraction -/
 
