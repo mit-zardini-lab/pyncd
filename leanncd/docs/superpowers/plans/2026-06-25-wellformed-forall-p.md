@@ -307,10 +307,34 @@ git commit -m "feat(routespec): structural characterization lemmas for routeCore
 > engine lemma `buildStep_output_fixedAxes` (Fact A) + `dedup_append_filter`/`fixedAxesP_mapWeave`
 > helpers (`d61e4ec`), all sorry-free.
 >
-> **Phase 4 PARTIAL — UPDATED 2026-06-26 (WIP checkpoint, `wf_typeMatch` ~99% done).**
-> `compile_wellFormed` is assembled in `Agreement.lean` from 4 conjunct lemmas + the `realizeCompiled`
-> corollary. **Proven sorry-free:** `compile_eq_route`, `wf_singleOutput` (conjunct 3), the bridge
-> `weaveToArrayType_congr`/`realizeWeaveShape_targetAxes`.
+> **Phase 4 — UPDATED 2026-06-26 (session 2): `wf_typeMatch` DONE; `wf_topo` found FALSE (design gap).**
+> `compile_wellFormed` assembled from 4 conjunct lemmas. **Proven sorry-free:** `compile_eq_route`,
+> `wf_singleOutput` (conjunct 3), `wf_typeMatch` (conjunct 2 — committed `f453033`, axiom-clean), the
+> bridge `weaveToArrayType_congr`/`realizeWeaveShape_targetAxes`.
+>
+> **🛑 BLOCKER: `wf_topo` (conjunct 4) is FALSE as stated — a SOUNDNESS/MODELING gap, not a proof gap.**
+> Two counterexamples, both verified through the real pipeline (`#eval`):
+> 1. **True cycles:** pipeline never rejects cyclic dataflow; `topoSortFuel` falls back to source order.
+>    `A:=B; B:=A` → `routing=[[internal 1 0],[internal 0 0]]` (forward edge `j=1>i=0`).
+> 2. **Scan self-recurrence (the deeper one):** a coupled scan `G[l+1]:=f(G[l],H[l]); H[l+1]:=f(H[l],G[l])`
+>    lowers to ONE scan step `i` reading `G`/`H` (both written by step `i`) → `buildStep` emits
+>    `internal i 0` self-wires (`j=i`). VALID program, but `internal i 0 ∉ poolAt i` (pool gains it only
+>    at `poolAt (i+1)`), so `realize`'s `stepPiece`/`wiringBy` cannot gather it. The threaded
+>    monotonic-pool model does not represent intra-step scan recurrence.
+> Attempted fix "fail-loud-on-cycle" (a `routableInOrder` guard in `routeCore`) was REVERTED: it also
+> rejects valid coupled scans (CompileExamplesTest/ScanAffineTest broke). The cycle guard alone is
+> insufficient; the scan case needs a real design decision.
+> **`wf_topo` is now reduced (in `Agreement.lean`) to the single isolated `sorry` `topo_bound`** — Parts
+> 1/2/4 proven (`mem_poolAt_internal`/`mem_poolAt_external` + wire-dispatch). `topo_bound`'s docstring
+> documents both counterexamples. **DESIGN DECISION NEEDED before this can close** (owner's call):
+> reject cycles AND absorb scan self-reads into the scan generator (so they aren't routing wires), OR
+> extend `poolAt`/the `WellFormed.topo` conjunct to admit `internal i 0`. Either touches compiler/realize
+> semantics (a header/model change), so it is out of scope for prove/autoprove's header fence.
+>
+> **`wf_dom` (conjunct 1) still `sorry`** — needs referencedness (surjectivity of `buildExtIndex`) +
+> rank agreement (thread `checkReadRanks` arity-consistency through `compileToScheduled`). Untouched.
+>
+> **EARLIER (session 1) NEW (all compiling unless noted):**
 >
 > **NEW THIS SESSION (all compiling unless noted):**
 > - `RouteSpec.lean` — **FULLY CLEAN, no errors/sorries.** Added: `goodExtState` +

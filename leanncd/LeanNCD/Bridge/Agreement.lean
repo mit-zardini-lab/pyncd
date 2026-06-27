@@ -322,9 +322,26 @@ theorem mem_poolAt_internal {tc : ThreadedComposed} {i j : Nat} (h : j < i) :
       · subst h'; exact mem_foldl_prepend t _ List.mem_cons_self
       · exact ih _ h'
 
-/-- Part 3 (the topological bound). For the scheduled `sp`, an internal producer wire `internal j 0`
-    appearing in `routing[i]` necessarily has `j < i`: the producer of a non-self read precedes its
-    consumer because `sp.stmts` is `topoSort`-ordered. -/
+/-- Part 3 (the topological bound). Claims an internal producer wire `internal j 0` in `routing[i]`
+    has `j < i`.
+
+    ⚠️ FALSE AS STATED — TWO distinct counterexamples found (2026-06-26), both verified through the
+    real pipeline. This sorry is the precise locus of a soundness/modeling gap, NOT a proof
+    difficulty; closing it requires a design change (see plan-doc RESUME POINT):
+
+    1. **True cycles.** The pipeline never rejects cyclic dataflow; `topoSortFuel`'s cycle branch
+       falls back to source order. Program `A[a] := B[a]; B[a] := A[a]` compiles to
+       `routing = [[internal 1 0], [internal 0 0]]` — step 0 has a FORWARD edge (`j = 1 > i = 0`).
+
+    2. **Scan self-recurrence (deeper).** A coupled/self scan (e.g. `G[l+1] := f(G[l], H[l])`,
+       `H[l+1] := f(H[l], G[l])`) lowers to ONE scan step `i` that reads `G`/`H` — both written by
+       step `i` itself — so `buildStep` emits `internal i 0` self-wires (`j = i`). These are VALID
+       programs, but `internal i 0 ∉ poolAt i` (the pool gains it only at `poolAt (i+1)`), so
+       `realize`'s `stepPiece`/`wiringBy` cannot gather them. The threaded monotonic-pool model
+       does not represent intra-step scan recurrence; self-reads should not be routing wires.
+
+    The fix is the design owner's call (reject cycles AND absorb scan self-reads into the scan
+    generator, or extend `poolAt`/the `WellFormed.topo` conjunct to admit `internal i 0`). -/
 theorem topo_bound {sp : ScheduledProgram} {s s₁ : Nat} {p : TLProgram}
     (hsp : (TLProgram.compileToScheduled p).run s = .ok sp s₁)
     {i : Nat} (hi : i < sp.stmts.length) {rf : String × List IdxExpr}
