@@ -76,6 +76,47 @@ Interdependent; land together, scaffolding broken proofs with `sorry`.
 - Verify: `lake build` green (warnings only). Commit
   `feat(route): multi-output buildStep + (step,slot) maps + acyclicity guard [proofs scaffolded]`,
   listing the sorry set.
+- **STATUS (2026-06-26): Tasks A.0–A.4 DONE, committed `d5b6a61`, build GREEN, all tests pass.**
+  Coupled scans compile multi-output (no self-wires, all externals referenced). Deviation from plan:
+  A.0 was batched into the A.0–A.4 landing (one full rebuild instead of two); `#guard` tests needed NO
+  changes (self-read exclusion means coupled scans no longer trip the guard). Remaining scaffold sorries:
+  RouteSpec `routeCore_routable`, `buildStep_output_fixedAxes`, `buildNameToStep_lt`,
+  `buildNameToStep_slot_lt`, `buildStep_inputWeaves`, `buildStep_wires_mapM`; Realize
+  `stepPiece`/`finalPiece` hcod; Agreement `wf_singleOutput`(≥1), `port_external_weave`,
+  `external_pointwise`, `internal_pointwise`, `wf_typeMatch`, `wf_dom`, `topo_bound`, `wf_topo`.
+
+### Task A.5 — faithful scan outputs (drop nonlin-split `%nl` intermediates) — DO BEFORE Phase B
+
+**Why first:** the output set is foundational to every B–D proof (`buildNameToStep` slots, `slotStmt`,
+`outputWeaves`, `buildNameToStep_slot_lt`, `buildStep_output_fixedAxes`, `wf_typeMatch`, `wf_topo`).
+Changing it after proving = re-prove everything; changing it now = ~4 def edits + a re-`#eval`. It also
+serves the soundness goal: `splitNonlins` intermediates (`%nl`) currently surface as extra output slots,
+so `codObj` (program `cod`) includes garbage — a milder instance of the unfaithfulness we are removing.
+
+**The fix (clean — no temporal analysis needed).** True scan outputs are exactly the names written by
+BOTH a base AND a recurrence stmt:
+```
+ScanStmt.outputs : List String
+  | .plain s        => [s.lhsName]
+  | .scan _ _ b r _ => (b.map Stmt.lhsName).filter (fun n => (r.map Stmt.lhsName).contains n)  -- base ∩ recur
+  | .scanPre nm _ _ => [nm]
+```
+- simple: base `[S]` ∩ recur `[%nl,S]` = `[S]`; coupled: `[G,H]` ∩ `[%nlG,G,%nlH,H]` = `[G,H]`; even a
+  nonlinear base `S[0]:=relu(X)` (base `[%nl0,S]`) ∩ recur `[%nlR,S]` = `[S]` — both intermediate kinds
+  drop out. Robust: every true recurrence var has a base case (compiler errors `missingBaseCase`
+  otherwise). `%nl` is only read self-internally (already excluded from `inputReadFactors`), so nothing
+  cross-step references it ⇒ mapping only `outputs` in `buildNameToStep` is safe.
+
+**Edits (Lowering.lean):** add `ScanStmt.outputs`; swap `writes → outputs` in
+(i) `buildNameToStep` (fold `sc.outputs.zipIdx`), (ii) `ScanStmt.slotStmt` (`sc.outputs.getD s`),
+(iii) `buildStep`'s `outputWeaves := (List.range sc.outputs.length).map sc.slotWeave`. Leave
+`ScanStmt.writes` (used by scheduling/`topoSort`/`buildExtIndex`) untouched.
+
+**Verify:** re-`#eval` → `outW = [1]` (simple), `[2]` (coupled); `lake build` green; tests pass.
+**Proof-statement ripples:** the scaffold lemmas that say `…writes.length` become `…outputs.length`
+(`buildStep_outputWeaves_length_one` — already proven, re-check the `simp`; `buildNameToStep_slot_lt`
+stub — restate). Cheap because most are still `sorry`.
+**Commit:** `fix(route): faithful scan outputs = base∩recur (drop %nl intermediates)`.
 
 ## D. Phase B — RouteSpec characterization lemmas (fill sorries)
 
@@ -151,8 +192,8 @@ One commit per lemma; `lean_diagnostic_messages` clean after each.
 
 ## I. Sequencing summary (commit cadence)
 ```
-A.0 cyclicDataflow                          [green]
-A.1-A.4 compiler + scaffold + tests         [green, +sorries: RouteSpec/conjuncts]
+A.0-A.4 compiler + scaffold + tests         [DONE d5b6a61, green]
+A.5 faithful scan outputs (base∩recur)      [green]  ← DO BEFORE Phase B (foundational)
 B.1 … B.7 RouteSpec lemmas                  [green, sorries shrink]   (one commit each)
 C.1-C.3 poolAt/WellFormed/mem_poolAt        [green]
 D.1 … D.4 conjuncts                         [green, sorries shrink]   (one commit each)
@@ -163,6 +204,8 @@ F close-out + axiom check                   [green, only out-of-scope sorries re
 ## J. Risks / watch-items (from design §12, plus impl)
 - **Multi-stmt `degree`/`reindexings` + lower-rank init typing (§3/§6)** — highest; verify with `#eval`
   on coupled + init-bearing scans before trusting the proofs.
+- **Faithful outputs (A.5)** — RESOLVED via `outputs = base∩recur` (drops `%nl` intermediates); do it
+  BEFORE Phase B to avoid re-proving against the loose `writes`-based output set.
 - **`buildNameToStep` uniqueness** — each live name has a unique `(step,slot)` post-DCE/SSA; if a name can
   be written by two steps, `nameToStep`/`topo_bound` break. Add a guard/lemma if needed.
 - **`WellFormed` conjunct-3 phrasing (C.2)** — keep it `tc`-only (`≥ 1`); don't leak `sp` into the
