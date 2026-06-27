@@ -164,16 +164,55 @@ Same order-mismatch underlies conjunct-2 itself: B.6's consumer input weave is b
 conjunct-2 needs the two to coincide. Holds for every real §12.1 program (scans list axes consistently
 across base/recur); the gap is a **missing precondition**, not a broken pipeline.
 
-**Resolution options (await decision):**
+**Investigation result (option 4, DONE 2026-06-27).** The matching is ORDER-SENSITIVE:
+`weaveToArrayType w = { shape := (realizeWeaveShape w).targetAxes }` and
+`realizeWeaveShape_targetAxes : (realizeWeaveShape w).targetAxes = (fixedAxesP w).map realizeAxis`
+(`Agreement.lean:48`), so `ArrayType.shape` is an **ordered list** with structural equality. Conjunct-2
+`wf_typeMatch` (`Realize.lean:175`) demands `(routing[i]).map wireType = inputWeaves[i].map
+weaveToArrayType`; for an internal wire `wireType (internal j s) = weaveToArrayType (outputWeaves[s])`
+and the matching inputWeave is `(tensorAxes (producer.slotStmt s)).map .fixed` (B.6). Via
+`weaveToArrayType_congr` (`Agreement.lean:56`) + `fixedAxesP_map_fixed` (`:62`) this reduces EXACTLY to
+B.7 as an **ordered** equality `fixedAxesP (outputWeaves[s]) = tensorAxes (slotStmt s)`. ⇒ a uid-set /
+multiset match is insufficient unless `ArrayType.shape` itself is made order-insensitive.
+
+**Resolution options (decision pending):**
 1. **Add WF hypothesis** to B.7: scan stmts agree on retained-axis order (degree order restricted to
    slot `s`'s uids = `slotStmt s`'s LHS order). True of real `finalizeScans` output; discharge at the
-   `routeCore`/Agreement call site. Threads a new hypothesis into conjunct-2 (Phase D `wf_typeMatch`).
-2. **Weaken to uid-set / up-to-permutation equality** — IF realize/`wf_typeMatch` match published axes
-   by uid not position. Check how Agreement consumes these axes first (this is option 4's investigation).
-3. **Make degree order canonical** — change `stepDegAxesMulti`/`slotWeave` so output-weave fixed axes
-   follow `slotStmt` order by construction. Lowering.lean model change; re-touches A.5-adjacent proofs.
-4. **Investigate-first** — read Agreement `wf_typeMatch`/conjunct-2 to see whether axis matching is
-   ordered or by-uid, then pick 1–3 driven by the downstream need. (Recommended starting move.)
+   `routeCore`/Agreement call site. PRO: no `Lowering.lean` change (B.1/B.4/A.5 untouched); idiomatic
+   (`wf_typeMatch` already takes `sp`/`hrc`/`hsp`). CON: must FORMULATE + DISCHARGE the invariant — no
+   existing lemma provides it (likely sizeable, §J `wf_dom`-thread flavor); hypothesis propagates into
+   conjunct-2 / `compile_wellFormed` contract.
+2. **Weaken to uid-set / up-to-permutation equality** — REJECTED by the investigation above: does not
+   close conjunct-2 because `ArrayType.shape` is an ordered list; making it sufficient needs `shape` →
+   multiset/quotient and re-proving realize/`BrMorph` — far larger than B.7.
+3. **Make degree order canonical** (RECOMMENDED) — change `stepDegAxesMulti`'s RETAINED portion to
+   `dedupByUid (sc.outputs.flatMap (fun n => (slotStmtByName n).lhsAxes))` (last-writer/slot order)
+   instead of `(all stepStmts).flatMap lhsAxes` (base-first order). Then per-slot filtering matches
+   `slotStmt` order by construction and B.7 is UNCONDITIONAL (no hypothesis into conjunct-2/Agreement).
+   PRO: cleanest downstream; fixes root cause (degree taking base's order over the authoritative
+   recur/slot order). CON: `Lowering.lean` change adjacent to A.5 — must re-verify B.1, B.4, and the
+   `idxToRow`/`reindexings` column-order (uses `degUids` order); cannot satisfy a GENUINELY inconsistent
+   coupled scan (G wants `[j,l]`, H wants `[l,j]` on a shared axis) — but that is invalid input; confirm
+   the frontend can't produce it (see precondition check below).
+4. **Investigate-first** — DONE (see Investigation result above).
+
+**RECOMMENDATION: Option 3**, conditional on a precondition check — confirm no real coupled scan needs
+conflicting shared-axis orders (so a single canonical degree order always exists). Fall back to Option 1
+only if re-verifying the degree-order-dependent proofs (B.4, `idxToRow`) costs more than discharging the
+invariant.
+
+**Precondition check (DONE 2026-06-27).** Probed the real §12.1 coupled scan + simple scan via a
+`compileToScheduled` command that compares, per output slot, `fixedAxesP (slotWeave s)` (degree order)
+vs `tensorAxes (slotStmt s)` (slotStmt order). RESULT — **all slots EQ=true**:
+- coupled `[G, H]`: slot 0 `[j,l]==[j,l]` ✓, slot 1 `[j,l]==[j,l]` ✓
+- simple `[G]`: slot 0 `[j,l]==[j,l]` ✓
+
+⇒ on real input the current base-first degree order ALREADY matches slotStmt order (iteration axis `l`
+consistently last; a single canonical degree order serves all outputs). So **B.7 already holds for every
+real program** — confirming a consistent canonical order exists (Option 3 is safe) AND that the invariant
+is true/dischargeable (Option 1 is viable). The only failing inputs are adversarial transposed scans the
+frontend does not emit. Either Option 1 or 3 closes B.7; Option 3 keeps conjunct-2 hypothesis-free.
+(Probe was scratch — `b7check!{…}` command via `compileToScheduled`; deleted after use.)
 
 **State at checkpoint:** working tree clean; build GREEN; RouteSpec down to its **last** sorry (B.7).
 Remaining sorries project-wide: RouteSpec `buildStep_output_fixedAxes`; Realize `stepPiece`/`finalPiece`
