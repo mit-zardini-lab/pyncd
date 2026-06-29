@@ -105,13 +105,13 @@ Each element of the output is the sum of corresponding elements in the inputs.
 A representable (or **Naperian**) functor is an applicative functor with an additional structure: **total and invertible indexing**.
 
 For a representable functor `f`:
-$$f \, a \cong (\text{Index}(f) \to a)$$
+$$f \, a \cong (\text{Log} f \to a)$$
 
 This isomorphism says: "A value in `f a` is completely determined by its values at each index."
 
 **Concrete meaning:**
-- `lookup : f a → Index(f) → a` retrieves a value at a specific index.
-- `tabulate : (Index(f) → a) → f a` reconstructs `f a` from a function on indices.
+- `lookup : f a → Log f → a` retrieves a value at a specific index.
+- `tabulate : (Log f → a) → f a` reconstructs `f a` from a function on indices.
 - These are inverses: `tabulate (lookup fa) = fa` and `lookup (tabulate f) = f`.
 
 **For arrays:** A 2D array of shape `(m, n)` is isomorphic to a function from pairs `(i, j) ∈ [0..m) × [0..n)` to values. Indexing is retrieval; tabulation is construction.
@@ -141,7 +141,7 @@ Jeremy Gibbons' paper (see [References](#7-references)) gives a typed account of
    - **Total**: You can look up any element of `Log f` without fear of out-of-bounds; the index type is exhaustive.
    - **Invertible**: If you know the value at every index, you can uniquely reconstruct the original container. There is no hidden state.
    
-   *Note on terminology:* `Log f` (the "logarithm" of the functor) is the **index type** or **shape** of `f`. The name comes from the exponential analogy: if a container `f a` is isomorphic to a function `Log f → a`, then `Log f` plays the role of the "exponent." Concretely: `Log(Maybe) = Bool`, `Log(Pair) = Bool`, `Log(Array n) = Fin n` (integers 0..n-1), and for a 2D array of shape `(m, n)`, we have `Log = Fin m × Fin n`.
+   *Note on terminology:* `Log f` (the "logarithm" of the functor) is the index type (same as the functor's **shape** or **dimensions**). The name comes from the exponential analogy: if a container `f a` is isomorphic to a function `Log f → a`, then `Log f` plays the role of the "exponent." Concretely: `Log(Maybe) = Bool`, `Log(Pair) = Bool`, `Log(Array n) = Fin n` (integers 0..n-1), and for a 2D array of shape `(m, n)`, we have `Log = Fin m × Fin n`.
 
 4. **Transpose is structural reindexing.**  
    `transpose :: f (g a) -> g (f a)` comes from representability, not ad hoc tensor code.
