@@ -130,6 +130,8 @@ Jeremy Gibbons' paper (see [References](#7-references)) gives a typed account of
 
 3. **Naperian (representable) dimensions = indexability.**  
    `f a ≅ (Log f → a)` with `lookup/tabulate`; indexing is total and invertible.
+   
+   *Note on terminology:* `Log f` (the "logarithm" of the functor) is the **index type** or **shape** of `f`. The name comes from the exponential analogy: if a container `f a` is isomorphic to a function `Log f → a`, then `Log f` plays the role of the "exponent." Concretely: `Log(Maybe) = Bool`, `Log(Pair) = Bool`, `Log(Array n) = Fin n` (integers 0..n-1), and for a 2D array of shape `(m, n)`, we have `Log = Fin m × Fin n`.
 
 4. **Transpose is structural reindexing.**  
    `transpose :: f (g a) -> g (f a)` comes from representability, not ad hoc tensor code.
