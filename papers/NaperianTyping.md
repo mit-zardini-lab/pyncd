@@ -160,13 +160,20 @@ From [`papers/graded_prop.md`](../papers/graded_prop.md), we already have:
 - operation PROP `C` (for pyncd: `Br`-like operational layer),
 - shape map `sh`,
 - right action/lift `act : C × Dᵒᵖ ⥤ C`,
-- coherence (`δ`, `δ0`, `υ`, `α`),
+- coherence (`δ`, `δ0`, `υ`, `α`): the natural isomorphisms ensuring the action is well-behaved — `δ` is distributivity `(X ⊗ Y) ⊛ P ≅ (X ⊛ P) ⊗ (Y ⊛ P)`, `δ0` is unit action, `υ` is left/right unit laws, and `α` is associativity of nested actions,
 - evaluation slices `ev_p`,
 - broadcast-generation/weave factorization story.
 
 ### Proposed mixin semantics (incremental, backward-compatible)
 
-Keep `DGradedColoredPROP` as the base. Add semantic mixins as capabilities that reinterpret existing passes as enforcing/applying these laws, with Naperian semantics for axis points and applicative pointwise lift:
+Keep `DGradedColoredPROP` as the base. Add semantic mixins as capabilities that reinterpret existing passes as enforcing/applying these laws, with Naperian semantics for axis points and applicative pointwise lift.
+
+**What are these mixins?** Each mixin below is a **semantic law** or **capability** that describes how one or more existing compiler passes should behave. These are not new operations; rather, they are abstractions that capture the principles behind existing transformations. A compiler morphism (like `assignUIDs`, `lowerArith`, `splitNonlins`) may satisfy one or more of these mixins. By making these laws explicit at the type level, we gain:
+- **Type safety**: shape and reindexing errors caught at compile time.
+- **Compositional understanding**: each pass enforces one or more mixin laws, making their roles clearer.
+- **Formal verification**: mixins are propositions that can be proved or tested.
+
+The mixins are:
 
 - **`NaperianAxis`**: finite point/index semantics on `D`-axes (enumerable coordinates).
 - **`BroadcastJoin`**: canonical common degree for pointwise binary composition.
@@ -183,7 +190,7 @@ The mixins above are not decorative; they follow from a deep categorical princip
 
 #### The point functor and representability
 
-The heart of Naperian semantics is **representability** — a fundamental concept in category theory (see [See References](#7-references)) where a functor is isomorphic to a hom-functor. In our setting, the isomorphism is:
+The heart of Naperian semantics is **representability** — a fundamental concept in category theory (see [References](#7-references)) where a functor is isomorphic to a hom-functor. In our setting, the isomorphism is:
 
 $$F(X ⊛ P) \cong \text{El}(P) \to F(X)$$
 
@@ -193,7 +200,7 @@ Here we introduce the key notation:
 - **$F$** is a **semantic algebra**: a functor that interprets objects of `C` into concrete data structures (e.g., arrays, functions, or numerical values).
 - **$\cong$** denotes a natural isomorphism: a natural transformation whose components are all isomorphisms. For this formula specifically, the isomorphism is natural in `X` (covariantly — the isomorphism commutes with morphisms `X → X'` in `C`) and natural in `P` (contravariantly) via `mapEl η : El(P) → El(Q)` for `η : P → Q` in `D` — a field of `NaperianAxis` satisfying functoriality and naturality with `point_hom`.
 
-This representability is not coincidental. Following [See References](#7-references), for a **point functor** 
+This representability is not coincidental. Following [Gibbons 2016](#7-references), for a **point functor** 
 $$\text{El} : D \to \mathsf{FinSet}, \quad P \mapsto D(I_D, P)$$
 with the **strong monoidal property** $\text{El}(P \otimes Q) \cong \text{El}(P) \times \text{El}(Q)$ (where $\otimes$ is the monoidal product in `D`), the point functor has the right product behavior for Naperian indexing. The equivalences `El(P ⊗ Q) ≃ El P × El Q` must satisfy standard monoidal coherence laws (associativity, left/right unit) to constitute a genuine strong monoidal functor; these are carried as explicit fields of `NaperianAxis`.
 
