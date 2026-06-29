@@ -114,6 +114,8 @@ This isomorphism says: "A value in `f a` is completely determined by its values 
 - `tabulate : (Log f → a) → f a` reconstructs `f a` from a function on indices.
 - These are inverses: `tabulate (lookup fa) = fa` and `lookup (tabulate f) = f`.
 
+*Note on terminology:* `Log f` (the "logarithm" of the functor) is the index type (same as the functor's **shape** or **dimensions**). The name comes from the exponential analogy: if a container `f a` is isomorphic to a function `Log f → a`, then `Log f` plays the role of the "exponent." Concretely: `Log(Maybe) = Bool`, `Log(Pair) = Bool`, `Log(Array n) = Fin n` (integers 0..n-1), and for a 2D array of shape `(m, n)`, we have `Log = Fin m × Fin n`.
+
 **For arrays:** A 2D array of shape `(m, n)` is isomorphic to a function from pairs `(i, j) ∈ [0..m) × [0..n)` to values. Indexing is retrieval; tabulation is construction.
 
 This representability is the key difference from general applicatives: it makes **indexing a type-level property**, not a runtime convention. Shape mismatches become compile-time errors.
@@ -140,8 +142,7 @@ Jeremy Gibbons' paper (see [References](#7-references)) gives a typed account of
    **"Indexing is total and invertible"** means:
    - **Total**: You can look up any element of `Log f` without fear of out-of-bounds; the index type is exhaustive.
    - **Invertible**: If you know the value at every index, you can uniquely reconstruct the original container. There is no hidden state.
-   
-   *Note on terminology:* `Log f` (the "logarithm" of the functor) is the index type (same as the functor's **shape** or **dimensions**). The name comes from the exponential analogy: if a container `f a` is isomorphic to a function `Log f → a`, then `Log f` plays the role of the "exponent." Concretely: `Log(Maybe) = Bool`, `Log(Pair) = Bool`, `Log(Array n) = Fin n` (integers 0..n-1), and for a 2D array of shape `(m, n)`, we have `Log = Fin m × Fin n`.
+
 
 4. **Transpose is structural reindexing.**  
    `transpose :: f (g a) -> g (f a)` comes from representability, not ad hoc tensor code.
