@@ -66,7 +66,7 @@ This note explains how to integrate Naperian/applicative array semantics into th
 
 ### Gibbons' APLicative/Naperian results
 
-Jeremy Gibbons' paper (see References) gives a typed account of APL-style rank polymorphism via fixed-shape representable functors:
+Jeremy Gibbons' paper (see [References](#7-references)) gives a typed account of APL-style rank polymorphism via fixed-shape representable functors:
 
 1. **Arrays as nested dimensions.**  
    An `n`-dimensional array is modeled as nested functors (shape at the type level).
