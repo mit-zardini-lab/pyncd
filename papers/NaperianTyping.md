@@ -64,6 +64,60 @@ This note explains how to integrate Naperian/applicative array semantics into th
 
 ## 2. Semantic foundation: Naperian axes in a D-graded PROP
 
+### Background: Applicative Functors and Lifting
+
+Before diving into Naperian semantics, we briefly recap **applicative functors** and **applicative lifting**, as these are the foundational operations that Naperian functors formalize for shape-indexed types.
+
+#### What is an Applicative Functor?
+
+An **applicative functor** is an algebraic structure with two key operations:
+
+1. **`pure : a → F a`** — wraps a value into the functor context, without any structure.
+2. **`<*> : F (a → b) → F a → F b`** — applies a wrapped function to wrapped values.
+
+These must satisfy laws (identity, composition, homomorphism, interchange) that ensure well-behaved composition.
+
+**Intuition for arrays and tensors:**
+- `pure x` broadcasts `x` to match any shape (replicate it everywhere).
+- `f <*> xs` applies the function `f` pointwise to each element of `xs`.
+- Combining: `liftA2 op xs ys` applies `op` pointwise: each element of the result is `op(xs[i], ys[i])` for aligned indices.
+
+#### Applicative Lifting
+
+**Applicative lifting** is the systematic way to lift an ordinary function into the applicative context:
+
+- **`liftA : (a → b) → (F a → F b)`** lifts a unary function.
+- **`liftA2 : (a → b → c) → (F a → F b → F c)`** lifts a binary function.
+- And so on for arity.
+
+**Concrete example:** Binary addition in the applicative context of lists:
+```
+liftA2 (+) [1, 2, 3] [10, 20, 30]  →  [11, 22, 33]
+```
+Each element of the output is the sum of corresponding elements in the inputs.
+
+**Connection to broadcasting:** This is exactly what tensor broadcasting does:
+- `pure 5` broadcasts the scalar `5` to every element of a shape.
+- `liftA2 (+) x y` applies `+` element-wise, automatically aligning shapes.
+
+#### Representable Functors (Naperian Functors)
+
+A representable (or **Naperian**) functor is an applicative functor with an additional structure: **total and invertible indexing**.
+
+For a representable functor `f`:
+$$f \, a \cong (	ext{Index}(f) 	o a)$$
+
+This isomorphism says: "A value in `f a` is completely determined by its values at each index."
+
+**Concrete meaning:**
+- `lookup : f a → Index(f) → a` retrieves a value at a specific index.
+- `tabulate : (Index(f) → a) → f a` reconstructs `f a` from a function on indices.
+- These are inverses: `tabulate (lookup fa) = fa` and `lookup (tabulate f) = f`.
+
+**For arrays:** A 2D array of shape `(m, n)` is isomorphic to a function from pairs `(i, j) ∈ [0..m) × [0..n)` to values. Indexing is retrieval; tabulation is construction.
+
+This representability is the key difference from general applicatives: it makes **indexing a type-level property**, not a runtime convention. Shape mismatches become compile-time errors.
+
 ### Gibbons' APLicative/Naperian results
 
 Jeremy Gibbons' paper (see [References](#7-references)) gives a typed account of APL-style rank polymorphism via fixed-shape representable functors:
