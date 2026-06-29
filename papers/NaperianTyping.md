@@ -105,7 +105,7 @@ Each element of the output is the sum of corresponding elements in the inputs.
 A representable (or **Naperian**) functor is an applicative functor with an additional structure: **total and invertible indexing**.
 
 For a representable functor `f`:
-$$f \, a \cong (	ext{Index}(f) 	o a)$$
+$$f \, a \cong (\text{Index}(f) \to a)$$
 
 This isomorphism says: "A value in `f a` is completely determined by its values at each index."
 
