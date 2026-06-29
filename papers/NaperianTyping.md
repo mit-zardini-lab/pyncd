@@ -131,6 +131,16 @@ Jeremy Gibbons' paper (see [References](#7-references)) gives a typed account of
 3. **Naperian (representable) dimensions = indexability.**  
    `f a ≅ (Log f → a)` with `lookup/tabulate`; indexing is total and invertible.
    
+   *Understanding the isomorphism:* The phrase "with `lookup/tabulate`" means these two functions **witness** the isomorphism:
+   - **`lookup : f a → Log f → a`** — extract a value at an index
+   - **`tabulate : (Log f → a) → f a`** — build a container from a function on indices
+   
+   These are **inverses** of each other (bijection): `lookup (tabulate f) = f` and `tabulate (λi. lookup fa i) = fa`.
+   
+   **"Indexing is total and invertible"** means:
+   - **Total**: You can look up any element of `Log f` without fear of out-of-bounds; the index type is exhaustive.
+   - **Invertible**: If you know the value at every index, you can uniquely reconstruct the original container. There is no hidden state.
+   
    *Note on terminology:* `Log f` (the "logarithm" of the functor) is the **index type** or **shape** of `f`. The name comes from the exponential analogy: if a container `f a` is isomorphic to a function `Log f → a`, then `Log f` plays the role of the "exponent." Concretely: `Log(Maybe) = Bool`, `Log(Pair) = Bool`, `Log(Array n) = Fin n` (integers 0..n-1), and for a 2D array of shape `(m, n)`, we have `Log = Fin m × Fin n`.
 
 4. **Transpose is structural reindexing.**  
