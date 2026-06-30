@@ -247,7 +247,7 @@ $$(\text{El}(P) \to X \times Y) \cong (\text{El}(P) \to X) \times (\text{El}(P) 
 
 Consequently:
 
-- **`PointwiseLift`** and `liftA2 : (a \to b \to c) \to (\text{El}(P) \to a) \to (\text{El}(P) \to b) \to (\text{El}(P) \to c)$ are the same construct, made categorical.
+- **`PointwiseLift`** and `liftA2` with type $$\text{liftA2} : (a \to b \to c) \to (\text{El}(P) \to a) \to (\text{El}(P) \to b) \to (\text{El}(P) \to c)$$ are the same construct, made categorical.
 - **`BroadcastJoin`** constructs a canonical common shape in `D`, with coordinate projections back to each operand, before applying `δ`.
 - Binary operations in the broadcastable fragment factor as: pointwise lifting of base ops, then reindexing to common shape.
 - For **`α`**, the action order matters: `(X ⊛ P) ⊛ Q ≅ X ⊛ (Q ⊗ P)`, so the `El`-side uses `El(Q ⊗ P) ≃ El Q × El P`. For `StObj`, use `alphaElEquiv P Q := appendEquiv Q P`, not `appendEquiv P Q`.
@@ -388,6 +388,11 @@ These should start as verifier-preserving rewrites, then become optimization pas
 ## 4. Optimization and rewrite opportunities
 
 ### 4.1 Law-backed rewrites and optimizations
+
+*Notation:*
+- `f` denotes a **base morphism** — an operation in `C` not yet lifted by any shape (e.g., `add`, `exp`, `softmax`). It acts on unlifted, scalar or base-typed values.
+- `lift P f` is the **explicit-shape version of applicative lifting** (`liftA`): it lifts a base morphism `f` to work pointwise over a `P`-shaped family, corresponding to `[f, P]` in the PROP notation. Unlike `liftA`, the shape `P` is explicit because the compiler needs to track shapes concretely. Nested lifts can be collapsed: `lift P (lift Q f) => lift (Q ⊗ P) f` expresses action associativity `(X ⊛ P) ⊛ Q ≅ X ⊛ (P ⊗ Q)` as a rewrite rule.
+- `reindex η x` applies a `D`-morphism `η : P → Q` contravariantly to a `Q`-shaped value `x`, producing a `P`-shaped value — the `ReindexAction` mixin in concrete form, corresponding to precomposition of the index function by `η`.
 
 1. **Reindex fusion**  
    `reindex η₂ (reindex η₁ x)  =>  reindex (η₁ ∘ η₂) x`.
