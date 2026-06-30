@@ -15,6 +15,7 @@ It is meant as a practical bridge between:
    - [Gibbons' APLicative/Naperian results](#gibbons-aplictativenaperian-results)
    - [D-graded colored PROP substrate (what we already have)](#d-graded-colored-prop-substrate-what-we-already-have)
    - [Proposed mixin semantics (incremental, backward-compatible)](#proposed-mixin-semantics-incremental-backward-compatible)
+   - [Intuition behind why this works](#intuition-behind-why-this-works)
    - [Categorical Integration: Naperian Structure in D-Graded PROPs](#categorical-integration-naperian-structure-in-d-graded-props)
 3. [Compiler pipeline as law enforcement](#3-compiler-pipeline-as-law-enforcement)
 4. [Optimization and rewrite opportunities](#4-optimization-and-rewrite-opportunities)
@@ -183,6 +184,88 @@ The mixins are:
 - **`TemporalGraded`** (already present): prefix-indexed scan semantics and lift-fold law.
 
 Interpretation: these are laws on existing compiler behavior, not a mandatory user syntax change.
+
+### Intuition behind why this works
+
+Before diving into categorical formalism, it is worth stepping back and understanding the core intuition: **representability moves proof obligations from propositions into type constraints**, making properties that would otherwise require separate proofs into automatic consequences of the type structure itself.
+
+#### The problem: scattered proof obligations
+
+In the current pipeline, each morphism and composition is built, then its correctness is *asserted and proved separately*. For example, consider a matrix morphism `m : StMatP dom cod` mapping a domain `dom` to a codomain `cod`:
+
+```lean
+-- Current approach: build then prove correctness
+def matMul (A : StMatP dom mid) (B : StMatP mid cod) : StMatP dom cod := 
+  { data := compute_product A.data B.data
+    h_correct_dims := sorry  -- ← NEW PROOF OBLIGATION
+    -- Many more sorries for shape compatibility, axis ordering, etc.
+  }
+```
+
+The type signature tells you the *intent* (domain dom, codomain cod), but the *guarantees* (that the output has the right shape, that intermediate indices match, etc.) are proved separately. This creates a maintenance burden: every new composition introduces new proof obligations.
+
+#### The solution: encode constraints in types
+
+Representability says: **make the shape part of the type signature itself**, not a property you prove about it. Instead of storing raw data and proving properties hold, use an indexed function view:
+
+```lean
+-- Naperian approach: shape is in the type
+structure StMatP (dom cod : StObj) where
+  lookup : dom.point → cod.point → Float
+
+def matMul {dom mid cod : StObj}
+  (A : StMatP dom mid) (B : StMatP mid cod) : StMatP dom cod :=
+  { lookup := fun i k => ∑ j, A.lookup i j * B.lookup j k }
+  -- Type checks automatically
+  -- No separate proof of shape correctness needed
+```
+
+In the `matMul` example above, `mid` is an intermediate shape (a type parameter of the function). The type signature `A : StMatP dom mid` already **encodes** that matrix `A` maps domain indices (`dom.point`) to intermediate indices (`mid.point`). Similarly, `B : StMatP mid cod` encodes that `B` maps from intermediate to codomain indices. When we compose them in the function body, the sum `∑ j, A.lookup i j * B.lookup j k` *must* iterate over `j : mid.point` (the intermediate indices), and this constraint is enforced by the type system—you cannot use any other index type.
+
+**The proof obligation vanishes because the type constructor itself is the constraint.** We cannot construct a matrix with the wrong dimensionality or compose matrices with mismatched intermediate shapes because the type forbids it.
+
+#### Why representability enables this
+
+Representability (in Gibbons' formulation) states that certain functors are isomorphic to indexed-function spaces:
+
+$$\text{Representable } F \iff F(X) \cong (\text{Log } F \to X)$$
+
+Here:
+- `Log F` is the **index type** (the "logarithm" or point type of the functor)
+- The right-hand side is **functions from indices to values**
+- `lookup` and `tabulate` witness the isomorphism
+
+In your context:
+- `Log(StMatP dom cod)` is the product `dom.point × cod.point` (the set of all coordinates)
+- `lookup` extracts a single element at coordinates `(i, j)`
+- `tabulate` rebuilds from a function `(i, j) ↦ value(i, j)`
+
+Because we work with the **indexed-function view** (not raw arrays), composition becomes function composition:
+
+```lean
+def ap {A B : Type} (f : A → (B → C)) (x : A → B) : A → C :=
+  fun a => f a (x a)
+  -- This is definitional: just function application
+  -- No proof needed
+```
+
+Applicative laws like `pure id <*> v = v` are not theorems—they are **definitional equalities** of function application. The laws hold automatically because we *defined* the operation in the right way.
+
+#### The proof-obligation cascade
+
+This extends to axioms about shapes and compositions:
+
+| Without Representability | With Representability | Why it works |
+|---|---|---|
+| Build matrix + prove dimensions match | Type signature enforces dimensions | Type constructor is the constraint |
+| Prove `tabulate (lookup m) = m` | Isomorphism is definitional | The type is the lookup function |
+| Prove binary operations commute (broadcast) | Use applicative `<*>` | `<*>` is *defined* as pointwise application |
+| Prove composition is associative | Function composition associativity | Function composition *is* syntactically associative |
+| Prove causality (no future reads in scans) | Encode in dependent type | Type forbids invalid state transitions |
+
+Each "new" morphism no longer introduces *new* proof obligations. Instead, we instantiate **universal laws** that come from representability and applicative structure. These laws are *once-and-for-all proofs* about representable functors and applicative operations—they do not depend on problem-specific details. For concrete counts in this codebase, see [Measurable proof-effort reduction](#measurable-proof-effort-reduction).
+
+---
 
 ### Categorical Integration: Naperian Structure in D-Graded PROPs
 
@@ -702,7 +785,7 @@ This framework directly reduces the formalization burden by restructuring proof 
 - **Better test design:** tests can target law-level properties (e.g., lift associativity normalization) in addition to example outputs.
 - **Easier to document:** the framework provides a canonical vocabulary for axis operations, making both user docs and internal design docs clearer.
 
-**Measurable proof-effort reduction:**
+#### Measurable proof-effort reduction
 
 Naperian typing restructures proof obligations by encoding invariants in types. Analysis of LeanNCD's open proof obligations (from `SORRY_INVENTORY.md`, Milestones A–F) projects:
 
