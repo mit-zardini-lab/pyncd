@@ -227,14 +227,19 @@ hcod; Agreement `wf_singleOutput`, `port_external_weave`, `external_pointwise`, 
 **Goal:** prove `buildStep_output_fixedAxes` by making `stepDegAxesMulti`'s retained axes follow
 slot/last-writer order, so per-slot filtering recovers `tensorAxes (slotStmt s)` by construction.
 
-**Step 1 — model change in `Lowering.lean` (`ScanStmt.stepDegAxesMulti`).** Replace the retained source
-`dedupByUid (ss.flatMap Stmt.lhsAxes)` (base-first) with last-writer/slot order:
+**Step 1 — model change in `Lowering.lean` (`ScanStmt.stepDegAxesMulti`). [DONE 2026-07-01].** Replaced
+the retained source `dedupByUid (ss.flatMap Stmt.lhsAxes)` (base-first) with last-writer/slot order:
 ```
 let retained := dedupByUid ((List.range sc.outputs.length).flatMap (fun s => (sc.slotStmt s).lhsAxes))
 ```
-Leave `contracted`/`allRead`/the final `dedupByUid (retained ++ contracted)` as-is. (Re-`#eval` the
-coupled+simple scans: degree should be unchanged on real input — the probe already showed base-first
-already equals slot order there, so this is a no-op on §12.1 but makes the *proof* go through.)
+`contracted`/`allRead`/the final `dedupByUid (retained ++ contracted)` left as-is. **Verified:** `lake
+build` GREEN (only pre-existing `sorry` warnings; this covers the B.1/B.4/`idxToRow`/`reindexings`
+re-check + `LoweringTest`/`CompileExamplesTest` `#guard`s, which build as part of `lake build`). `#eval`
+probe confirms it is a NO-OP on real §12.1 input — coupled `outW.len=2` degree `[j,l,k]`; simple
+`outW.len=1` degree `[j,l,k]` (degree order unchanged from the precondition probe; slot order already
+equals base-first order on real input). The reorder exists only to make the *proof* go through. Scratch
+probe deleted after use. Not yet committed as of this update — to land as its own commit
+(`fix(route): stepDegAxesMulti retained axes in slot order (B.7 step 1)`).
 
 **Step 2 — key algebraic lemma** (RouteSpec): for `s < sc.outputs.length`,
 `(sc.stepDegAxesMulti.filter (·.uid ∈ (dedupByUid (sc.slotStmt s).lhsAxes).map (·.uid))).map mkAxisP

@@ -351,7 +351,7 @@ def ScanStmt.slotStmt (sc : ScanStmt) (s : Nat) : Stmt :=
     `stepDegAxes` from one stmt to the `.scan` group. -/
 def ScanStmt.stepDegAxesMulti (sc : ScanStmt) : List AxisSpec :=
   let ss := sc.stepStmts
-  let retained := dedupByUid (ss.flatMap Stmt.lhsAxes)
+  let retained := dedupByUid ((List.range sc.outputs.length).flatMap (fun s => (sc.slotStmt s).lhsAxes))
   let allRead := ss.flatMap (fun s => s.readFactors.flatMap (fun rf => rf.2.flatMap idxAxes))
   let contracted := allRead.filter (fun a => !(retained.map (·.uid)).contains a.uid)
   dedupByUid (retained ++ contracted)
