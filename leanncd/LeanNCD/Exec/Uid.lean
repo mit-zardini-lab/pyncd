@@ -29,6 +29,7 @@ inductive CompileError
   | predicateAgg         : String → CompileError            -- predicate tensor with non-sum aggregation
   | cyclicDataflow       : String → CompileError            -- cyclic dataflow (topoSort cycle fallback)
   | inconsistentScanAxes : String → CompileError            -- coupled scan outputs disagree on shared axis order
+  | emptyScanOutputs     : String → CompileError            -- scan step with no true outputs (empty base∩recur)
   deriving Repr, DecidableEq
 
 /-- Combined error + UID-counter monad (`EStateM ε σ α = σ → Result ε σ α`, Lean core). Mints fresh

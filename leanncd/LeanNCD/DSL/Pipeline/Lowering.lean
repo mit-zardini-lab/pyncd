@@ -382,6 +382,13 @@ def ScanStmt.outputAxesConsistent (sc : ScanStmt) : Bool :=
     let Ls := dedupByUid (sc.slotStmt s).lhsAxes
     decide (sc.stepDegAxesMulti.filter (fun a => (Ls.map (·.uid)).contains a.uid) = Ls))
 
+/-- The buildStep well-formedness guard: a step must have at least one true output (nonempty
+    `base∩recur` for scans — rejects a degenerate base-only scan) AND its outputs must agree on
+    shared-axis order (`outputAxesConsistent`). Both are FAIL-LOUD on invalid input the frontend
+    should not emit; on real §12.1 programs both hold. -/
+def ScanStmt.stepGuardOk (sc : ScanStmt) : Bool :=
+  !sc.outputs.isEmpty && sc.outputAxesConsistent
+
 /-- PASS-1: map each produced tensor name to its (step index, output slot). A step writing several
     names (a coupled scan) assigns slot `0,1,…` in `writes` order. -/
 def buildNameToStep (stmts : List ScanStmt) : Std.HashMap String (Nat × Nat) :=
@@ -401,10 +408,12 @@ def buildStep (nameToStep : Std.HashMap String (Nat × Nat)) (extIndex : Std.Has
       if tc.steps.isEmpty then
         throw (CompileError.shapeMismatch s!"recurMorphism {nm}: empty step morphism" "non-empty ThreadedComposed")
   | _ => pure ()
-  -- Consistency guard: coupled-scan outputs must agree on shared-axis order, else the shared step
-  -- degree cannot publish every slot in its own LHS order (FAIL LOUD rather than mis-type an output).
-  if ! sc.outputAxesConsistent then
-    throw (CompileError.inconsistentScanAxes "buildStep: coupled scan outputs disagree on shared axis order")
+  -- Step guard: at least one true output, and coupled-scan outputs agree on shared-axis order
+  -- (else the shared step degree cannot publish every slot in its own LHS order). FAIL LOUD.
+  if ! sc.stepGuardOk then
+    throw (if sc.outputs.isEmpty
+      then CompileError.emptyScanOutputs "buildStep: scan step has no true outputs (empty base∩recur)"
+      else CompileError.inconsistentScanAxes "buildStep: coupled scan outputs disagree on shared axis order")
   -- rep stmt drives ONLY the op label (nonlin/agg/kind); reads/axes come from the whole group.
   let s := sc.repStmt.getD emptyStmt
   let readFactors := sc.inputReadFactors

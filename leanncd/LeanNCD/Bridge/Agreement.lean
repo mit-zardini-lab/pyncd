@@ -41,7 +41,13 @@ theorem compile_eq_route {p : TLProgram} {s : Nat} {tc : ThreadedComposed} {s' :
 theorem wf_singleOutput {sp : ScheduledProgram} {steps : List BrBaseP} {routing : List (List Wire)}
     (hrc : routeCore sp = .ok (steps, routing)) :
     ∀ i, i < steps.length → (steps.getD i default).outputWeaves.length ≥ 1 := by
-  sorry
+  intro i hi
+  have hik : i < sp.stmts.length := (routeCore_steps_length hrc) ▸ hi
+  have hbuild := routeCore_getD hrc i hik
+  rw [buildStep_outputWeaves_length_one hbuild]
+  have hne := buildStep_ok_outputs_ne hbuild
+  have hnil : (sp.stmts.getD i default).outputs ≠ [] := fun hc => by rw [hc] at hne; simp at hne
+  exact List.length_pos_of_ne_nil hnil
 
 /-- The realized weave's target (retained) axes are the realized presentation fixed axes. -/
 theorem realizeWeaveShape_targetAxes (w : WeaveShapeP) :

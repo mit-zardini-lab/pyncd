@@ -152,14 +152,14 @@ private theorem bind_pure_pair_ok {ε γ δ : Type} {B : Except ε γ} {s b : δ
       simp only [bind, Except.bind, pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
       exact h.1.symm
 
-/-- A successful `buildStep` implies its coupled-scan output-axis consistency guard passed
-    (the `inconsistentScanAxes` guard throws otherwise, so `.ok` forces it true). -/
-theorem buildStep_ok_consistent
+/-- A successful `buildStep` implies its step guard passed (the guard throws otherwise, so `.ok`
+    forces `stepGuardOk = true`). -/
+theorem buildStep_ok_guard
     {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
     {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
     (h : buildStep ns ext stmts sc = .ok (b, w)) :
-    sc.outputAxesConsistent = true := by
-  by_cases hg : sc.outputAxesConsistent = true
+    sc.stepGuardOk = true := by
+  by_cases hg : sc.stepGuardOk = true
   · exact hg
   · exfalso
     unfold buildStep at h
@@ -171,13 +171,35 @@ theorem buildStep_ok_consistent
         simp only [bind, Except.bind, pure, Except.pure] at h
         split at h <;> simp [hg] at h
 
+/-- A successful `buildStep` implies its outputs are consistent (projected from the guard). -/
+theorem buildStep_ok_consistent
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
+    (h : buildStep ns ext stmts sc = .ok (b, w)) :
+    sc.outputAxesConsistent = true := by
+  have hg := buildStep_ok_guard h
+  unfold ScanStmt.stepGuardOk at hg
+  simp only [Bool.and_eq_true] at hg
+  exact hg.2
+
+/-- A successful `buildStep` implies the step has at least one true output. -/
+theorem buildStep_ok_outputs_ne
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
+    (h : buildStep ns ext stmts sc = .ok (b, w)) :
+    sc.outputs.isEmpty = false := by
+  have hg := buildStep_ok_guard h
+  unfold ScanStmt.stepGuardOk at hg
+  simp only [Bool.and_eq_true] at hg
+  simpa using hg.1
+
 -- NOTE(phaseB): renamed-in-place; true length is `sc.outputs.length` (base∩recur for scans).
 theorem buildStep_outputWeaves_length_one
     {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
     {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
     (h : buildStep ns ext stmts sc = .ok (b, w)) :
     b.outputWeaves.length = sc.outputs.length := by
-  have hg := buildStep_ok_consistent h
+  have hg := buildStep_ok_guard h
   unfold buildStep at h
   cases sc with
   | plain s =>
@@ -302,7 +324,7 @@ theorem buildStep_outputWeaves
     {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
     (h : buildStep ns ext stmts sc = .ok (b, w)) :
     b.outputWeaves = (List.range sc.outputs.length).map sc.slotWeave := by
-  have hg := buildStep_ok_consistent h
+  have hg := buildStep_ok_guard h
   unfold buildStep at h
   cases sc with
   | plain s => simp only [hg, Bool.not_true, pure_bind] at h; exact congrArg BrBaseP.outputWeaves (bind_pure_pair_ok h)
@@ -425,7 +447,7 @@ theorem buildStep_inputWeaves
       | none   => (List.range rf.2.length).map (fun pos =>
                     WeaveSlotP.fixed (AxisP.mk (some (rf.1 ++ "_" ++ toString pos))
                       (SizeExpr.var (rf.1 ++ "_" ++ toString pos))))) := by
-  have hg := buildStep_ok_consistent h
+  have hg := buildStep_ok_guard h
   unfold buildStep at h
   cases sc with
   | plain s => simp only [hg, Bool.not_true, pure_bind] at h; exact congrArg BrBaseP.inputWeaves (bind_pure_pair_ok h)
@@ -449,7 +471,7 @@ theorem buildStep_wires_mapM
       | none   => match ext[rf.1]? with
         | some k => Except.ok (Wire.external k)
         | none   => Except.error (CompileError.undeclaredName rf.1)) = .ok w := by
-  have hg := buildStep_ok_consistent h
+  have hg := buildStep_ok_guard h
   unfold buildStep at h
   cases sc with
   | plain s => simp only [hg, Bool.not_true, pure_bind] at h; exact bind_pure_pair_ok_snd h
