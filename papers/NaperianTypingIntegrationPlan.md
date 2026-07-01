@@ -26,8 +26,73 @@ runtime input tensor shapes are available.
 > sorries. Begin with the [minimum viable integration](#minimum-viable-integration) once the
 > well-formedness proof lands. The projected proof savings in
 > [NaperianTyping.md §6](./NaperianTyping.md) are a **hypothesis to validate at Milestone 2**,
-> and are gated on the [Milestone 1.5 circularity spike](#milestone-15--circularity-spike-gate)
+> and are gated on the [Milestone 1.5 circularity spike](#milestone-15--circularity-spike-s1-gate-for-track-b-spike)
 > succeeding — not a committed deliverable.
+
+## 0. Code audit findings (2026-07-01) — read this first
+
+A ground-truth audit of the LeanNCD **code** (not the design docs) reshapes this plan:
+
+1. **`act` does not exist — it is a bare `sorry`.** The instance
+   `instDGradedStBr : DGradedColoredPROP StObj BrObj` (`LeanNCD/Instances/StBr.lean:13`) has exactly
+   one real field (`sh`); the other **10** — `act`, `δ`, `δ0`, `υ`, `α`, `sh_act`,
+   `act_unit_assoc`, `υ_nat`, `dist_coh`, `broadcast_gen` — are all `:= sorry`. Naperian typing (per
+   [NaperianTyping.md](./NaperianTyping.md)) is a reinterpretation layer *on top of* the graded
+   action `act`. **The action it sits on is the single largest unbuilt piece**, and no coherence-iso
+   benefit is realizable until `act` exists. Defining `act` is a prerequisite, not a Naperian
+   deliverable.
+2. **The `Br`/`BrMorph` SMC quotient is DONE and sorry-free** (`LeanNCD/Base/Br.lean:390`):
+   `swap_swap`/`tensorHom_comp` discharge via `Quotient.sound`. The keystone re-presentation concern
+   is resolved. So `act` is *well-posed* — it must be a `Quotient.lift` over `Br.Hom` respecting the
+   ~20 `Rel` constructors plus functor laws — but that is still substantial new proof work.
+3. **`brCancelPoint` (free-strict-SMC normal form) is an isolated `sorry`, off the executable path.**
+   It gates only `weave_unique` (`Core/Weave.lean:32`, also `sorry`), which has **no consumers**.
+   `BrNF` (the NbE route) is in progress and explicitly not load-bearing; slice extraction uses
+   `St` elementality (proved). So `brCancelPoint`/`weave_unique` are **not** on the critical path for
+   the executable compiler or for the symbolic Naperian layer.
+4. **The evaluation-side action `actV` has a recorded *impossibility*, not just a gap.** Milestone H
+   of `SORRY_INVENTORY.md` records that a faithful `actV` in `FGModuleCat ℝ` is mathematically
+   impossible (it needs an `R`-semimodule carrier, not vector spaces). Naperian does not fix this;
+   Track A (below) is unaffected by it, but any eval-side actegory work inherits it.
+5. **The multi-output `compile_wellFormed` surface is DISJOINT from Naperian.** Every `WellFormed`
+   conjunct (`wf_typeMatch`, `wf_dom`, `wf_topo`, `topo_bound`, output-count) is symbolic axis-list /
+   wire-dispatch / `List.length` bookkeeping; `realize` merely *consumes* `WellFormed`. Naperian's
+   only possible contribution is to the shape-*order*-matching sorries (`buildStep_output_fixedAxes`,
+   `wf_typeMatch`, `internal_pointwise`) — and *only* if weaves are re-typed from `List`-with-`.getD`
+   to representable/`Fin`-indexed functions. The hardest multi-output blockers (`topo_bound`'s
+   false-as-stated modeling gap; `stepPiece`/`finalPiece` pool reconciliation) are untouched by
+   better shape types.
+6. **Naperian is greenfield and Mathlib does not supply the base classes.** No `Naperian`/`El`/
+   `ev_p`-as-Naperian scaffolding exists. Mathlib has no Haskell-style `Representable`/`Log` or
+   `Foldable` class (verified against the pinned `v4.30.0` toolchain) — these must be defined locally.
+
+### 0.1 Two tracks
+
+The findings split this plan into two tracks with very different risk/value profiles:
+
+- **Track A — symbolic typed reindexing layer (feasible now, modest real value, low risk).** The
+  `elaborateAffineReindexings` + `checkNaperianSymbolic` passes and the typed `StMatP` reindexing
+  core (§2, §3, §5 M2–M4). Orthogonal to `act`, to the coherence tower, and to the multi-output
+  work. It hardens the compiler (typed reindex rank/codomain, canonical degree, early law checks).
+  Its wins are the **"reindex soundness"** items in §4.1 — **not** the 50–70% coherence figure.
+- **Track B — categorical / representability payoff (gated, expensive, speculative).** The
+  `NaperianAxis`/`NaperianFamily`/`naperian_jointly_monic` layer meant to shrink the coherence
+  sorries. **Blocked on `act` (finding 1)** and on the circularity spike. The projected 50–70%
+  reduction lives here and is unvalidated. Do not begin Track B until (a) multi-output lands, (b)
+  `act` is defined or scoped by spike S0, and (c) spikes S0/S1 pass.
+
+### 0.2 Spikes to run before committing
+
+| Spike | Question | Exit criterion | Detail |
+| --- | --- | --- | --- |
+| **S0 — `act` definability** | Can `act` be a `Quotient.lift` over `Br.Hom` respecting every `Rel` constructor, and how large is that proof? | A skeleton `act` with the `Rel`-respecting obligations enumerated + a size estimate; or a named blocker. | §5 Milestone 0.5 |
+| **S1 — `jointly_monic` circularity** | Is there an acyclic proof of `naperian_jointly_monic` (not routed through `broadcast_gen`)? | Acyclic proof/skeleton, or the explicit extra assumption it needs. | §5 Milestone 1.5 |
+| **S2 — dependent-weave re-typing** | Would re-typing weaves as `Fin`-indexed/representable make `wf_typeMatch`/`buildStep_output_fixedAxes` definitional, and what does it cost the executable path? | A spike branch re-typing ONE weave/shape and re-proving one shape-match lemma; a cost/benefit note. | §5 Milestone 4.5 |
+| **S3 — `actV` impossibility** | Confirm the `FGModuleCat ℝ` obstruction; is any eval-side actegory work in scope? | Written confirmation + a decision on semimodule redesign scope. | §6.6 |
+
+**S0 is pivotal.** If `act` turns out far larger than Track B's projected savings, Track B is
+net-negative and the effort should stop at Track A + the [minimum viable
+integration](#minimum-viable-integration).
 
 ## 1. Current pipeline and staging constraint
 
@@ -314,27 +379,46 @@ Early milestones should add APIs and bridge lemmas rather than force broad rewri
 
 ## 4. Proof impact and per-field analysis
 
-### 4.1 What gets easier immediately
+### 4.1 What gets easier immediately (Track A — real, ungated)
 
-The strongest immediate benefit is around **reindex soundness**:
+The strongest immediate benefit is around **reindex soundness**, and it does **not** depend on
+`act` or on any coherence lemma:
 
 - typed domain/codomain rank,
 - composition/identity laws for reindexings,
 - clearer proof targets for `route`-level invariants.
 
-This follows from moving affine rows into a typed/symbolic core before evaluation.
+This follows from moving affine rows into a typed/symbolic core before evaluation. These are the
+*only* wins this plan can promise without the Track-B prerequisites landing.
 
-### 4.2 What does not get solved automatically
+**Possible (not automatic) Track-A win on the multi-output shape-match sorries.** Per the audit
+(finding 5), `buildStep_output_fixedAxes`, `wf_typeMatch`, and `internal_pointwise` are all "two
+weaves have the same `fixedAxesP` (same axes, same order) ⇒ same `ArrayType`", proved today with
+`List.getD … default` positional bookkeeping. If weaves were re-typed as `Fin`-indexed/representable
+functions, these become near-definitional. That is a genuine but **localized** simplification, it
+requires re-typing the executable weave representation, and it is **not** what unblocks multi-output
+(see §4.2). Validate it with **spike S2** before assuming it.
 
-The following remain substantial:
+### 4.2 What does NOT get solved (and what Naperian is orthogonal to)
 
-- `act` on `Br` morphisms,
-- quotient interaction for `BrMorph`,
-- `broadcast_gen`,
-- `weave_unique`,
-- coherence fields that still require extensionality and the action itself.
+Substantial and **gating Track B** (audit findings 1–2):
 
-Naperian typing gives a better *proof shape* for these, but does not discharge them alone.
+- **`act` on `Br` morphisms is unbuilt (a `sorry`)** — it must be defined (via `Quotient.lift`
+  respecting all `Rel` constructors + functor laws) before *any* coherence-iso benefit exists. This
+  is the largest single piece and is a prerequisite, not a payoff. Scope it with **spike S0**.
+- `broadcast_gen`, `weave_unique`, and the coherence fields `δ`/`δ0`/`υ`/`α`/`act_unit_assoc`/
+  `υ_nat`/`dist_coh` — all still `sorry`, all downstream of `act`.
+
+Naperian gives a better *proof shape* for these, but does not discharge them, and cannot even be
+stated usefully until `act` exists.
+
+Explicitly **orthogonal** to Naperian typing (audit findings 3–5) — do not expect Naperian to touch
+these:
+
+- The multi-output blockers `topo_bound` (false-as-stated modeling gap: cycles + scan self-reads)
+  and `stepPiece`/`finalPiece` pool reconciliation — `Wire`-list membership/order, not shape types.
+- `brCancelPoint`/`weave_unique` — isolated, off the executable path, no consumers.
+- The `actV` (`FGModuleCat ℝ`) impossibility — an eval-side semantic-algebra redesign (spike S3).
 
 ### 4.3 Why the solver split matters for proofs
 
@@ -349,19 +433,47 @@ That separation is cleaner both logically and implementation-wise.
 
 ## 5. Milestone sequencing
 
-### Milestone 0 — Baseline confirmation
+**Top-level order (revised per the §0 findings):**
+
+1. **Finish the multi-output `compile_wellFormed` effort first, to completion.** It is orthogonal
+   to everything here (audit finding 5) and in-flight; do not interleave. Accept that if spike S2
+   later succeeds, a few shape-match lemmas may be re-typed — a bounded, acceptable "prove-twice"
+   risk that is cheaper than blocking real work on a speculative refactor.
+2. **Track A (M0 → M2 → M3 → M4)** — the symbolic typed-reindexing layer. Deliverable and valuable
+   regardless of Track B. Run spike **S2** (M4.5) here to decide the weave re-typing.
+3. **Spikes S0 (M0.5) and S1 (M1.5)** — gate Track B. Run S0 early; it is pivotal.
+4. **Track B (M6 coherence work)** — only if S0 and S1 pass and `act` is defined.
+
+Milestones are tagged **[A]** / **[B]** / **[spike]** below.
+
+### Milestone 0 — Baseline confirmation **[A]**
 
 - confirm current compile/eval behavior,
 - keep `inferAxisSizes` exactly where it is,
 - add tests documenting the symbolic-vs-concrete split.
 
-### Milestone 1 — Core symbolic API
+### Milestone 0.5 — `act`-definability spike (S0, GATE for Track B) **[spike]**
+
+**Run before committing to any Track-B milestone.** `act` is currently a bare `sorry`
+(`Instances/StBr.lean:15`); the `Br`/`BrMorph` quotient it must lift over is done and sorry-free
+(`Base/Br.lean:390`), so the task is well-posed but unmeasured.
+
+- Sketch `act` as `Quotient.lift` over `Br.Hom`; enumerate the `Rel` constructors it must respect
+  (congruence, category/bifunctor laws, interchange, braid involution/naturality/hexagons, the
+  cast-crossing unit/assoc coherences, CD comonoid laws) and the functor laws (`map_id`/`map_comp`).
+- Estimate the proof size and identify any constructor that looks intractable.
+
+**Exit criterion:** a skeleton `act` with the obligations listed and a size estimate, **or** a named
+blocker. **If `act` dwarfs Track B's projected savings, stop at Track A + the [minimum viable
+integration](#minimum-viable-integration).**
+
+### Milestone 1 — Core symbolic API **[A/B boundary]**
 
 - add `Core/Naperian.lean`,
-- state the mixin classes and key laws,
+- state the mixin classes and key laws (statements only; no `act` dependence yet),
 - no runtime point enumeration yet.
 
-### Milestone 1.5 — circularity spike (GATE)
+### Milestone 1.5 — circularity spike (S1, GATE for Track B) **[spike]**
 
 **This is a gate, not optional.** Before building any typeclass scaffolding on top of it,
 establish an **acyclic** proof route for `naperian_jointly_monic` (lifted `P`-indexed families
@@ -381,37 +493,53 @@ statement of the assumption it needs. **If neither is achievable, stop at the
 [NaperianTyping.md §6](./NaperianTyping.md) do not hold, and Milestones 2+ should not be funded on
 the expectation of them.
 
-### Milestone 2 — Symbolic affine elaboration
+### Milestone 2 — Symbolic affine elaboration **[A]**
 
 - add `elaborateAffineReindexings`,
 - move affine-row normalization out of ad hoc helpers and into the compile pipeline,
 - keep `route` behavior unchanged by using a bridging adapter first.
 
-### Milestone 3 — Symbolic Naperian checks
+### Milestone 3 — Symbolic Naperian checks **[A]**
 
 - add `checkNaperianSymbolic`,
 - enforce degree/reindex/pointwise/reduction/scan invariants,
 - keep all checks independent of concrete extents.
 
-### Milestone 4 — Refactor `route`
+### Milestone 4 — Refactor `route` **[A]**
 
 - make `route` consume the symbolic affine artifacts,
 - introduce the typed `StMat` bridge,
 - preserve the existing executable `ThreadedComposed` output.
 
-### Milestone 5 — Concrete point instantiation
+### Milestone 4.5 — dependent-weave re-typing spike (S2) **[spike]**
+
+Decides whether the *one* place Naperian could touch the multi-output proofs is worth it (§4.1).
+
+- On a throwaway branch, re-type ONE weave/shape from `List WeaveSlotP` (accessed via `.getD …
+  default`) to a `Fin`-indexed / representable form.
+- Re-prove one shape-match lemma against it — pick `buildStep_output_fixedAxes` or the
+  `weaveToArrayType_congr` step of `wf_typeMatch`.
+- Measure: did the `.getD`-default bookkeeping and length side-conditions actually disappear, and
+  what did the executable path (eval, `StMatP`, tests) pay for the re-typing?
+
+**Exit criterion:** a cost/benefit note. If the executable-path cost outweighs the proof savings,
+keep `List`-based weaves and close those lemmas by hand (as the multi-output effort already does).
+
+### Milestone 5 — Concrete point instantiation **[A]**
 
 - add the runtime instantiation layer,
 - consume `inferAxisSizes` output,
 - produce finite point sets and coordinate enumeration data.
 
-### Milestone 6 — Proof tightening
+### Milestone 6 — Proof tightening **[B — gated on S0/S1 and on `act` being defined]**
 
+- **Prerequisite: `act` is implemented** (not this plan's deliverable; see M0.5/S0). Without it the
+  items below cannot even be stated.
 - connect symbolic laws to concrete runtime instantiation,
 - pursue `δ`/`δ0`/`υ`/`α` proof simplifications,
 - add law-level tests alongside existing executable tests.
 
-### Milestone 7 — Optional dependent migration
+### Milestone 7 — Optional dependent migration **[A, opportunistic]**
 
 - migrate more of the executable path from loose `StMatP` records to typed structures,
 - only as touched by later work,
@@ -471,6 +599,8 @@ Risk:
 
 Mitigation:
 
+- the `Br`/`BrMorph` quotient itself is done and sorry-free (audit finding 2), so this is now
+  primarily about defining `act` over it — see 6.7 and spike S0,
 - keep the first milestones focused on the symbolic `St` side and routing invariants,
 - defer full `Br` action integration until the symbolic layer is stable.
 
@@ -483,16 +613,67 @@ Risk:
 Mitigation:
 
 - encode the convention explicitly in the API and tests from the start,
-- reuse the `alphaElEquiv` convention described in `NaperianTyping.md`.
+- reuse the `alphaElEquiv` convention described in `NaperianTyping.md` (the `Q ⊗ P` order is
+  confirmed correct against `graded_prop.md` Def 3.1).
+
+### 6.6 Eval-side `actV` impossibility (recorded obstruction)
+
+Risk:
+
+- Milestone H of `SORRY_INVENTORY.md` records that a **faithful `actV` in `FGModuleCat ℝ` is
+  mathematically impossible** — it needs an `R`-semimodule carrier, not vector spaces. Any
+  Naperian work that reaches the *evaluation-side* actegory inherits this.
+
+Mitigation:
+
+- Track A (symbolic reindexing) does **not** touch `actV` and is unaffected — keep the eval-side
+  actegory out of scope unless a semimodule redesign is explicitly funded (spike S3);
+- treat this as a separate semantic-algebra decision, not a Naperian-typing task.
+
+### 6.7 The gating risk: `act` is unbuilt (Track B has no floor without it)
+
+Risk:
+
+- The entire Track-B payoff assumes `act` exists; today it is a `sorry` (audit finding 1). If S0
+  shows `act` is very large, the projected coherence savings are net-negative — you would spend
+  more building `act` than Naperian typing saves.
+
+Mitigation:
+
+- run spike **S0 (M0.5) first** and treat it as a hard gate;
+- ship Track A regardless (it needs no `act`);
+- do not quote the 50–70% figure as a plan deliverable until S0 + S1 have passed and `act` is
+  defined.
+
+### 6.8 "Prove-twice" risk on multi-output shape lemmas
+
+Risk:
+
+- Finishing multi-output first means proving `wf_typeMatch`/`buildStep_output_fixedAxes` by hand;
+  a later successful S2 weave re-typing could make some of them near-definitional, redoing work.
+
+Mitigation:
+
+- accept it — the rework is bounded and localized, and is far cheaper than blocking the in-flight
+  verified-compiler work on a speculative refactor. Let S2's cost/benefit note decide whether the
+  re-typing ever happens.
 
 ## 7. Summary
 
-The updated implementation plan is:
+After the 2026-07-01 code audit (§0), the plan is:
 
-- **do symbolic Naperian typing before the affine solver**,
-- **keep the affine solver as the runtime/value-level source of concrete extents**,
-- **instantiate concrete finite Naperian point data only after solving extents**.
+- **Finish the multi-output `compile_wellFormed` effort first.** It is orthogonal to everything
+  here; Naperian offers it almost nothing (at most the one shape-match simplification, spike S2).
+- **Ship Track A** — the symbolic typed-reindexing layer — as the real, ungated deliverable:
+  - do symbolic Naperian typing before the affine solver,
+  - keep the affine solver as the runtime/value-level source of concrete extents,
+  - instantiate concrete finite Naperian point data only after solving extents.
+  This hardens the compiler (typed reindex rank/codomain, canonical degree, early law checks)
+  without breaking the padded-semantics evaluation model.
+- **Gate Track B on spikes.** The coherence/representability payoff (the projected 50–70% sorry
+  reduction) sits on top of `act`, which is currently a `sorry`. Run spike **S0** (`act`
+  definability) and **S1** (`jointly_monic` circularity) before committing; if either fails, stop
+  at Track A + the minimum viable integration. Do not treat the 50–70% figure as a deliverable.
 
-This lets the codebase gain the benefits of typed reindexing and law-level structure
-without breaking the current padded-semantics evaluation model or forcing premature
-runtime-size assumptions into compile-time code.
+In one line: **Track A is worth doing on its own merits; Track B is a bet on `act` that must be
+priced by spike S0 before it is funded — and neither should delay the multi-output work.**
