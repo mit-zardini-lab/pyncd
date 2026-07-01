@@ -294,18 +294,23 @@ compile (`outW = [2]`/`[1]`).
   `fixedAxesP_mapWeave_pos` → guard equality (`of_decide_eq_true (List.all_eq_true.mp hg …)`) → `rfl`.
 - **Re-verify done:** full `lake build` green covers B.1/B.4/`idxToRow`/`reindexings` + all `#guard`s.
 
-## E. Phase C — Realize model generalization
+## E. Phase C — Realize model generalization **[DONE 2026-07-01 — folded in E.1/E.2; Realize.lean sorry-free]**
 
-- **C.1 `poolAt` + `poolAt_succ`** (`Realize.lean:163,196`): prepend `outputSlots tc j` (all slots) instead
-  of `internal j 0`. Update `poolAt_succ` and `realizeDom_eq_poolAt_zero`.
-- **C.2 `WellFormed` conjunct 3** (`Realize.lean:171-177`): replace single-output clause with
-  `∀ i < steps.length, (steps.getD i default).outputWeaves.length = (??)`. NOTE: `WellFormed` is over `tc`
-  alone (no `sp`), so phrase conjunct 3 as `outputWeaves.length ≥ 1` (sufficient for `codObj`/`finalPiece`)
-  rather than `= writes.length` (which needs `sp`). The exact `= writes.length` lives in the Agreement
-  proof, not the `WellFormed` contract. Pick `≥ 1` (or `≠ []`) for the conjunct.
-- **C.3 `mem_poolAt_internal`** (Agreement helper): generalize to `j < i ∧ s < n_j ⇒ internal j s ∈
-  poolAt i`. `mem_poolAt_external` unchanged.
-- Verify: `lake build` (Realize + downstream may `sorry` on conjuncts until Phase D).
+Because C.1's `poolAt` change directly unblocks the `stepPiece`/`finalPiece` `hcod` sorries (E.1/E.2),
+those were done in the same landing. `realize` axioms `[propext, Classical.choice, Quot.sound]`.
+
+- **C.1 `poolAt` + `poolAt_succ`** [DONE]: added `ThreadedComposed.outputSlots j := (range
+  outputWeaves.length).map (Wire.internal j ·)`; `poolAt` folds `fun p j => outputSlots j ++ p`;
+  `poolAt_succ : poolAt (i+1) = outputSlots i ++ poolAt i`. `realizeDom_eq_poolAt_zero` unchanged (i=0).
+- **C.2 `WellFormed` conjunct 3** [ALREADY DONE in Phase A]: `outputWeaves.length ≥ 1` (`tc`-only).
+- **C.3 `mem_poolAt_internal`** [DONE]: generalized to `j < i → s < n_j → internal j s ∈ poolAt i`
+  (adds the slot bound `hs`); `mem_foldl_prepend` generalized to any `++`-prepending fold;
+  `mem_poolAt_external` unchanged. No green callers (topo_bound/wf_topo are Phase D sorries).
+- **E.1 `stepPiece` hcod** [DONE]: via new `outputSlots_map_wireType` ((`outputSlots j).map wireType =
+  outputWeaves.map weaveToArrayType`, itself from a `map = range-map-getD` list helper) + `poolAt_succ`.
+- **E.2 `finalPiece` hcod** [DONE]: selects ALL last-step slots (`outputSlots m`, the pool prefix) via
+  `wiringBy`; `codObj = (outputSlots m).map wireType`. `finalPiece` no longer needs `h : WellFormed`.
+- Verify: full `lake build` green (8586 jobs); `realize` sorry-free.
 
 ## F. Phase D — conjuncts (Agreement.lean)
 
@@ -323,14 +328,14 @@ compile (`outW = [2]`/`[1]`).
   `hrc`, drop the unprovable `hsp` form.)
 - Verify each: `lean_verify` on the lemma; `lake build`.
 
-## G. Phase E — realize fold (multi-output)
+## G. Phase E — realize fold (multi-output) **[DONE 2026-07-01 — landed with Phase C above]**
 
-- **E.1 `stepPiece`** (`Realize.lean:204`): cod side via `poolAt_succ` = `outputSlots i ++ poolAt i`;
-  generalize the `length_eq_one` `hcod` to `range n` (map/getElem over the `n` output slots).
-- **E.2 `finalPiece`** (`Realize.lean:238`): select ALL last-step slots (§9 option a) — `wiringBy` over
-  `(range n_m).map (internal m)`; `codObj` already = the full list.
-- **E.3 `interpUpto`/`realize`**: should compose unchanged once `stepPiece`/`finalPiece` typecheck.
-- Verify: `lake build`; `Bridge/AgreementTest` axiom line.
+- **E.1 `stepPiece`** [DONE]: `hcod` proved via `poolAt_succ` + `outputSlots_map_wireType` (see §E).
+- **E.2 `finalPiece`** [DONE]: selects all last-step slots (§9 option a) via `wiringBy` over
+  `outputSlots m`; `codObj = (outputSlots m).map wireType`.
+- **E.3 `interpUpto`/`realize`** [DONE]: composed unchanged; `realize` is sorry-free, axioms
+  `[propext, Classical.choice, Quot.sound]`.
+- Verify: full `lake build` green (8586 jobs).
 
 ## H. Phase F — close-out
 
@@ -354,9 +359,9 @@ compile (`outW = [2]`/`[1]`).
 A.0-A.4 compiler + scaffold + tests         [DONE d5b6a61, green]
 A.5 faithful scan outputs (base∩recur)      [green]  ← DO BEFORE Phase B (foundational)
 B.1 … B.7 RouteSpec lemmas                  [DONE 2026-07-01, RouteSpec sorry-free]
-C.1-C.3 poolAt/WellFormed/mem_poolAt        [green]  ← RESUME HERE (next after B.7)
-D.1 … D.4 conjuncts                         [green, sorries shrink]   (one commit each)
-E.1-E.3 realize fold                        [green]
+C.1-C.3 poolAt/WellFormed/mem_poolAt        [DONE 2026-07-01, Realize sorry-free]
+E.1-E.3 realize fold                        [DONE 2026-07-01, landed with Phase C]
+D.1 … D.4 conjuncts (Agreement)             [green, sorries shrink]  ← RESUME HERE (next)
 F close-out + axiom check                   [green, only out-of-scope sorries remain]
 ```
 

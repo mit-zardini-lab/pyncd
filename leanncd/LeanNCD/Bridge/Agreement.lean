@@ -206,15 +206,15 @@ theorem wf_dom {sp : ScheduledProgram} {tc : ThreadedComposed} {s s₁ : Nat} {p
 
 /-! ### Conjunct 4 (`wf_topo`) infrastructure -/
 
-/-- Membership in the fold base survives the `poolAt` prepending fold. -/
-private theorem mem_foldl_prepend {x : Wire} :
+/-- Membership in the fold base survives any `++`-prepending fold (`poolAt` prepends `outputSlots`). -/
+private theorem mem_foldl_prepend {x : Wire} {f : Nat → List Wire} :
     ∀ (l : List Nat) (b : List Wire), x ∈ b →
-      x ∈ l.foldl (fun p j => Wire.internal j 0 :: p) b := by
+      x ∈ l.foldl (fun p j => f j ++ p) b := by
   intro l
   induction l with
   | nil => intro b hb; simpa using hb
   | cons c u ihu =>
-      intro b hb; simp only [List.foldl_cons]; exact ihu _ (List.mem_cons_of_mem _ hb)
+      intro b hb; simp only [List.foldl_cons]; exact ihu _ (List.mem_append_right _ hb)
 
 /-- Part 1 (external): `poolAt i` contains every external wire with slot `< nExternal`. -/
 theorem mem_poolAt_external {tc : ThreadedComposed} {i k : Nat} (h : k < tc.nExternal) :
@@ -222,13 +222,18 @@ theorem mem_poolAt_external {tc : ThreadedComposed} {i k : Nat} (h : k < tc.nExt
   unfold ThreadedComposed.poolAt
   exact mem_foldl_prepend _ _ (List.mem_map.mpr ⟨k, List.mem_range.mpr h, rfl⟩)
 
-/-- Part 1 (internal): `poolAt i` contains every producer wire `internal j 0` with `j < i`. -/
-theorem mem_poolAt_internal {tc : ThreadedComposed} {i j : Nat} (h : j < i) :
-    Wire.internal j 0 ∈ tc.poolAt i := by
+/-- Part 1 (internal): `poolAt i` contains every producer wire `internal j s` with `j < i` and slot
+    `s < n_j` (the producer step's output count) — generalized for multi-output steps. -/
+theorem mem_poolAt_internal {tc : ThreadedComposed} {i j s : Nat} (h : j < i)
+    (hs : s < (tc.steps.getD j default).outputWeaves.length) :
+    Wire.internal j s ∈ tc.poolAt i := by
   unfold ThreadedComposed.poolAt
   have hj : j ∈ List.range i := List.mem_range.mpr h
+  have hmemOut : Wire.internal j s ∈ tc.outputSlots j := by
+    unfold ThreadedComposed.outputSlots
+    exact List.mem_map.mpr ⟨s, List.mem_range.mpr hs, rfl⟩
   suffices H : ∀ (l : List Nat) (base : List Wire), j ∈ l →
-      Wire.internal j 0 ∈ l.foldl (fun p x => Wire.internal x 0 :: p) base by
+      Wire.internal j s ∈ l.foldl (fun p x => tc.outputSlots x ++ p) base by
     exact H _ _ hj
   intro l
   induction l with
@@ -237,7 +242,7 @@ theorem mem_poolAt_internal {tc : ThreadedComposed} {i j : Nat} (h : j < i) :
       intro base hb
       simp only [List.foldl_cons]
       rcases List.mem_cons.mp hb with h' | h'
-      · subst h'; exact mem_foldl_prepend t _ List.mem_cons_self
+      · subst h'; exact mem_foldl_prepend t _ (List.mem_append_left _ hmemOut)
       · exact ih _ h'
 
 /-- Part 3 (the topological bound). Claims an internal producer wire `internal j 0` in `routing[i]`

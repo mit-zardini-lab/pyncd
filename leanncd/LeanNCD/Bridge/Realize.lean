@@ -158,10 +158,16 @@ noncomputable def ThreadedComposed.codObj (tc : ThreadedComposed) : BrObj :=
   | 0     => []
   | m + 1 => (tc.steps.getD m default).outputWeaves.map weaveToArrayType
 
-/-- The live pool before processing step `i` (monotonic): `[internal (i-1) 0, …, internal 0 0]`
-    followed by the externals. A produced wire is never dropped, so `reads ⊆ pool` stays easy. -/
+/-- The output wires of step `j`: `internal j 0, …, internal j (n_j-1)` where `n_j` is the number of
+    output weaves (a coupled scan has `n_j > 1`). -/
+def ThreadedComposed.outputSlots (tc : ThreadedComposed) (j : Nat) : List Wire :=
+  (List.range (tc.steps.getD j default).outputWeaves.length).map (Wire.internal j ·)
+
+/-- The live pool before processing step `i` (monotonic): every earlier step's output slots
+    (`outputSlots (i-1) ++ … ++ outputSlots 0`) followed by the externals. A produced wire is never
+    dropped, so `reads ⊆ pool` stays easy. Multi-output steps prepend ALL their slots. -/
 def ThreadedComposed.poolAt (tc : ThreadedComposed) (i : Nat) : List Wire :=
-  (List.range i).foldl (fun p j => Wire.internal j 0 :: p)
+  (List.range i).foldl (fun p j => tc.outputSlots j ++ p)
     ((List.range tc.nExternal).map Wire.external)
 
 /-- Type-consistency of the routing — the hypothesis `realize` needs (extends `wellFormedDom`):
@@ -193,15 +199,33 @@ theorem realizeDom_eq_poolAt_zero (tc : ThreadedComposed) :
   simp only [ThreadedComposed.poolAt, List.range_zero, List.foldl_nil, List.map_map]
   rfl
 
-/-- The pool grows by prepending the new output. -/
+/-- The pool grows by prepending the new step's output slots. -/
 theorem ThreadedComposed.poolAt_succ (tc : ThreadedComposed) (i : Nat) :
-    tc.poolAt (i + 1) = Wire.internal i 0 :: tc.poolAt i := by
+    tc.poolAt (i + 1) = tc.outputSlots i ++ tc.poolAt i := by
   simp only [ThreadedComposed.poolAt, List.range_succ, List.foldl_append, List.foldl_cons,
     List.foldl_nil]
 
+/-- A list-of-weaves mapped is the per-index `getD` map over `range length` — lets us equate
+    `outputWeaves.map weaveToArrayType` with `(outputSlots j).map wireType` (which maps over the
+    index range). -/
+private theorem map_eq_range_map_getD {α β : Type*} (l : List α) (f : α → β) (d : α) :
+    l.map f = (List.range l.length).map (fun s => f (l.getD s d)) := by
+  apply List.ext_getElem
+  · simp
+  · intro s h1 h2
+    simp only [List.getElem_map, List.getElem_range, List.getD_eq_getElem _ _ (by simpa using h1)]
+
+/-- The last-step-output types of `outputSlots j` are exactly `outputWeaves.map weaveToArrayType`. -/
+theorem outputSlots_map_wireType (tc : ThreadedComposed) (j : Nat) :
+    (tc.outputSlots j).map tc.wireType
+      = (tc.steps.getD j default).outputWeaves.map weaveToArrayType := by
+  unfold ThreadedComposed.outputSlots
+  rw [List.map_map, map_eq_range_map_getD (tc.steps.getD j default).outputWeaves weaveToArrayType []]
+  rfl
+
 /-- One step of the fold: from the current pool, gather the step's reads to the front (keeping the
     whole pool live), apply the step beside the carried wires, landing on the next pool's types.
-    The two `WellFormed` casts: reads' types = the step's domain, and the step has one output. -/
+    The two `WellFormed` casts: reads' types = the step's domain, and the step's outputs prepend. -/
 noncomputable def stepPiece (tc : ThreadedComposed) (h : tc.WellFormed) (i : Nat)
     (hi : i < tc.steps.length) :
     BrMorph ((tc.poolAt i).map tc.wireType) ((tc.poolAt (i + 1)).map tc.wireType) := by
@@ -213,13 +237,10 @@ noncomputable def stepPiece (tc : ThreadedComposed) (h : tc.WellFormed) (i : Nat
             = (tc.steps.getD i default).inputWeaves.map weaveToArrayType
               ++ (tc.poolAt i).map tc.wireType := by
     rw [List.map_append, h.2.1 i hi]
-  -- single output ⇒ the step's codomain is the one new pool wire
+  -- the step's outputs prepend to the pool: `poolAt (i+1) = outputSlots i ++ poolAt i`
   have hcod : (tc.steps.getD i default).outputWeaves.map weaveToArrayType ++ (tc.poolAt i).map tc.wireType
             = (tc.poolAt (i + 1)).map tc.wireType := by
-    -- NOTE(phaseB): conjunct 3 weakened to `≥ 1`; the single-output collapse no longer holds
-    -- for multi-output scans. Pool structure (`poolAt_succ`) prepends only slot 0; reconciling the
-    -- multi-output pool is Phase B work.
-    sorry
+    rw [tc.poolAt_succ, List.map_append, outputSlots_map_wireType]
   exact cast (congrArg (BrMorph ((tc.poolAt i).map tc.wireType)) hcod)
     (BrMorph.comp
       (cast (congrArg (BrMorph ((tc.poolAt i).map tc.wireType)) hdom)
@@ -236,26 +257,23 @@ noncomputable def interpUpto (tc : ThreadedComposed) (h : tc.WellFormed) :
                               (stepPiece tc h i (Nat.lt_of_succ_le hi))
 
 /-- The final selection: from the full pool, keep the last step's single output (= `cod`). -/
-noncomputable def finalPiece (tc : ThreadedComposed) (h : tc.WellFormed) :
+noncomputable def finalPiece (tc : ThreadedComposed) (_h : tc.WellFormed) :
     BrMorph ((tc.poolAt tc.steps.length).map tc.wireType) tc.codObj := by
   by_cases hz : tc.steps.length = 0
   · -- no steps: cod = [], discard the whole (external) pool
     rw [hz]
     have hcod : tc.codObj = [] := by simp [ThreadedComposed.codObj, hz]
     rw [hcod]; exact BrMorph.delAll _
-  · -- the last output wire is the head of the pool; select it
+  · -- the last step's output slots are the pool prefix; select them all (= cod)
     set m := tc.steps.length - 1 with hmeq
     have hm : tc.steps.length = m + 1 := by omega
     rw [hm]
-    have hmem : Wire.internal m 0 ∈ tc.poolAt (m + 1) := by
-      rw [tc.poolAt_succ]; exact List.mem_cons_self
-    have hcod : tc.codObj = [tc.wireType (Wire.internal m 0)] := by
-      -- NOTE(phaseB): conjunct 3 weakened to `≥ 1`; codObj is no longer a singleton for
-      -- multi-output last steps. Selecting the multi-output codomain is Phase B work.
-      sorry
+    have hmem : ∀ w ∈ tc.outputSlots m, w ∈ tc.poolAt (m + 1) := by
+      intro w hw; rw [tc.poolAt_succ]; exact List.mem_append_left _ hw
+    have hcod : tc.codObj = (tc.outputSlots m).map tc.wireType := by
+      rw [outputSlots_map_wireType]; simp only [ThreadedComposed.codObj, hm]
     exact cast (congrArg (BrMorph ((tc.poolAt (m + 1)).map tc.wireType)) hcod.symm)
-      (BrMorph.wiringBy tc.wireType (tc.poolAt (m + 1)) [Wire.internal m 0]
-        (fun w hw => by rcases List.mem_singleton.1 hw with rfl; exact hmem))
+      (BrMorph.wiringBy tc.wireType (tc.poolAt (m + 1)) (tc.outputSlots m) hmem)
 
 /-- Realize a routed-DAG presentation (`ThreadedComposed`, §12.4) into ONE `Br` morphism
     `BrMorph dom cod`.
