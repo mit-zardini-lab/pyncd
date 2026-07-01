@@ -725,6 +725,75 @@ To avoid rewriting everything at once:
 
 This keeps existing tests and proofs valid while allowing new infrastructure to be cleaner.
 
+### 5.3.1 Pass ordering: symbolic Naperian typing vs affine size inference
+
+One implementation question is whether the existing affine domain/size solver should run
+before or after "Naperian typing." The answer is: **it depends on which layer of
+Naperian structure we mean**.
+
+The current LeanNCD pipeline already separates:
+
+- **symbolic compilation** (`assignUIDs`, `unifyAxes`, `lowerArith`, `route`),
+- **symbolic routed shapes** (`SizeExpr.var a.name` in `route`),
+- **concrete size inference at evaluation time** (`inferAxisSizes` in
+  `LeanNCD/Eval/Shape.lean`, called from `evalScheduled`),
+- **concrete execution** (`evalPlain`, `evalScan`, scatter sizing/evaluation).
+
+This separation should be preserved. In particular:
+
+1. **Symbolic/law-level Naperian typing should happen before the affine size solver.**  
+   This includes:
+   - lowering each `IdxExpr` to a symbolic affine `St` row,
+   - checking rank/codomain compatibility of reindexings,
+   - constructing canonical `degree` objects and broadcast joins,
+   - validating pointwise/reduction/scan discipline,
+   - packaging these invariants in `ReindexAction`, `BroadcastJoin`, and related mixins.
+
+   None of these require concrete axis extents; they only require canonical axis identity
+   and symbolic shape structure.
+
+2. **Concrete finite Naperian instantiation should happen after concrete sizes are known.**  
+   This includes:
+   - materializing finite point sets `El P`,
+   - obtaining `Fintype` evidence for runtime-enumerable axes,
+   - instantiating the coordinate data consumed by concrete `lookup`/`tabulate`,
+   - running any point-enumerating evaluator or proof that depends on actual cardinalities.
+
+   This stage cannot, in general, precede size inference because the current axis size data
+   is symbolic (`Numeric` / `SizeExpr`) and does not by itself determine a `Fintype`.
+
+So the implementation-guiding conclusion is:
+
+> **Do not treat "Naperian typing" as a single pass.** Split it into:
+> (a) a **symbolic typed reindexing/law-checking layer** before size solving, and
+> (b) a **concrete finite-point instantiation layer** after size solving.
+
+For this repository, the recommended staging is:
+
+```text
+assignUIDs
+resolveDecls
+checkReadRanks
+checkDtypes
+unifyAxes
+lowerArith
+finalizeScans
+splitNonlins
+schedule
+elaborateAffineReindexings      -- new symbolic affine/St elaboration pass
+checkNaperianSymbolic           -- new law-level Naperian/reindexing checks
+route                           -- consumes symbolic typed reindexings
+inferAxisSizes                  -- existing runtime/value-level affine solver
+instantiateConcreteNaperian     -- new finite-point instantiation step
+evalPlain / evalScan / scatter evaluation
+```
+
+The crucial design consequence is that the affine solver is **not** replaced by dependent
+typing. Instead, dependent typing should constrain the solver's **inputs** (well-formed
+symbolic affine reindexings) and its **outputs** (size environments used to instantiate
+concrete point data). This keeps the current padded-semantics solver intact while making
+the surrounding compilation pipeline more type-safe.
+
 ### 5.4 Key LeanNCD custom types and their Haskell analogues
 
 | LeanNCD type | Lean definition | Analogous Haskell pattern | Dependent-type benefit |
@@ -743,7 +812,8 @@ The strategies described in §5.1–5.4 are elaborated into a concrete, file-by-
 
 - **New files to create**: `LeanNCD/Core/Naperian.lean` (the `NaperianAxis`, `BroadcastJoin`, `ReindexAction`, and `PointwiseLift` typeclasses, plus `ev_naperian` and the `naperian_jointly_monic` statement) and `LeanNCD/Instances/StNaperian.lean` (the `NaperianAxis StObj` instance).
 - **Modifications to existing files**: minimal changes to `Core/Graded.lean`, `Base/ColoredPROP.lean`, `Instances/StBr.lean`, and `LeanNCD.lean`; all backward-compatible.
-- **The `NaperianAxis StObj` instance in full Lean 4**: using an auxiliary `AxisPointData` typeclass to supply concrete finite point types without mutating the existing `Axis` structure (necessary because `Axis.size : Numeric` is symbolic and does not determine a `Fintype` on its own).
+- **Pass ordering guidance**: symbolic affine/Naperian elaboration and law checks should occur before `inferAxisSizes`, while concrete finite-point instantiation should occur after size solving.
+- **The `NaperianAxis StObj` instance strategy**: using an auxiliary `AxisPointData` typeclass to supply concrete finite point types without mutating the existing `Axis` structure (necessary because `Axis.size : Numeric` is symbolic and does not determine a `Fintype` on its own).
 - **Sorry-impact analysis**: which of the 16 open sorries become easier, which become closeable, and which remain independent. Key result: `δ`/`δ0`/`υ`/`α` get an intended pointwise proof strategy via coherent `El` equivalences once `act` and extensionality are available; `broadcast_gen` and `weave_unique` can be reframed as Naperian normal-form theorems without depending on `brCancelPoint`.
 - **Milestone sequencing**: seven milestones from baseline confirmation through weave uniqueness, with a clearly identified minimum viable integration (three steps).
 - **Risks**: the symbolic-size blocker, quotient-`Br` interaction, instance diamond risks, and the `α` tensor-order convention.
