@@ -152,24 +152,44 @@ private theorem bind_pure_pair_ok {ε γ δ : Type} {B : Except ε γ} {s b : δ
       simp only [bind, Except.bind, pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
       exact h.1.symm
 
+/-- A successful `buildStep` implies its coupled-scan output-axis consistency guard passed
+    (the `inconsistentScanAxes` guard throws otherwise, so `.ok` forces it true). -/
+theorem buildStep_ok_consistent
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
+    (h : buildStep ns ext stmts sc = .ok (b, w)) :
+    sc.outputAxesConsistent = true := by
+  by_cases hg : sc.outputAxesConsistent = true
+  · exact hg
+  · exfalso
+    unfold buildStep at h
+    simp only [Bool.not_eq_true] at hg
+    cases sc with
+    | plain s => simp [hg, bind, Except.bind, pure, Except.pure] at h
+    | scan nm ax bs rs aff => simp [hg, bind, Except.bind, pure, Except.pure] at h
+    | scanPre nm ax tc =>
+        simp only [bind, Except.bind, pure, Except.pure] at h
+        split at h <;> simp [hg] at h
+
 -- NOTE(phaseB): renamed-in-place; true length is `sc.outputs.length` (base∩recur for scans).
 theorem buildStep_outputWeaves_length_one
     {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
     {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
     (h : buildStep ns ext stmts sc = .ok (b, w)) :
     b.outputWeaves.length = sc.outputs.length := by
+  have hg := buildStep_ok_consistent h
   unfold buildStep at h
   cases sc with
   | plain s =>
-      simp only [pure_bind] at h; rw [bind_pure_pair_ok h]
+      simp only [hg, Bool.not_true, pure_bind] at h; rw [bind_pure_pair_ok h]
       simp [List.length_map, List.length_range]
   | scan nm ax bs rs aff =>
-      simp only [pure_bind] at h; rw [bind_pure_pair_ok h]
+      simp only [hg, Bool.not_true, pure_bind] at h; rw [bind_pure_pair_ok h]
       simp [List.length_map, List.length_range]
   | scanPre nm ax tc =>
       by_cases he : tc.steps.isEmpty = true
       · simp [he, bind, Except.bind] at h
-      · simp only [he, pure_bind] at h
+      · simp only [hg, Bool.not_true, he, pure_bind] at h
         rw [bind_pure_pair_ok h]
         simp [List.length_map, List.length_range]
 
@@ -261,6 +281,39 @@ private theorem fixedAxesP_mapWeave (l : List AxisSpec) (cu : List UID) :
       by_cases hc : a.uid ∈ cu <;>
         simp_all [fixedAxesP, List.map_cons, List.contains_eq_mem]
 
+/-- `fixedAxesP` of a `slotWeave`-shaped map (fixed WHEN the uid is retained): the `.fixed` slots
+    are exactly the retained axes, mapped to their `AxisP`. Positive-polarity analogue of
+    `fixedAxesP_mapWeave`. -/
+private theorem fixedAxesP_mapWeave_pos (l : List AxisSpec) (ru : List UID) :
+    fixedAxesP (l.map (fun a => if ru.contains a.uid
+        then WeaveSlotP.fixed (AxisP.mk (some a.name) (SizeExpr.var a.name))
+        else WeaveSlotP.tiled))
+      = (l.filter (fun a => ru.contains a.uid)).map
+          (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name)) := by
+  induction l with
+  | nil => rfl
+  | cons a t ih =>
+      by_cases hc : a.uid ∈ ru <;>
+        simp_all [fixedAxesP, List.map_cons, List.contains_eq_mem]
+
+/-- The `outputWeaves` of a built step equal the per-slot `slotWeave` map. -/
+theorem buildStep_outputWeaves
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
+    (h : buildStep ns ext stmts sc = .ok (b, w)) :
+    b.outputWeaves = (List.range sc.outputs.length).map sc.slotWeave := by
+  have hg := buildStep_ok_consistent h
+  unfold buildStep at h
+  cases sc with
+  | plain s => simp only [hg, Bool.not_true, pure_bind] at h; exact congrArg BrBaseP.outputWeaves (bind_pure_pair_ok h)
+  | scan nm ax bs rs aff =>
+      simp only [hg, Bool.not_true, pure_bind] at h; exact congrArg BrBaseP.outputWeaves (bind_pure_pair_ok h)
+  | scanPre nm ax tc =>
+      by_cases he : tc.steps.isEmpty = true
+      · simp [he, bind, Except.bind] at h
+      · simp only [hg, Bool.not_true, he, pure_bind] at h
+        exact congrArg BrBaseP.outputWeaves (bind_pure_pair_ok h)
+
 /-- Fact A — the conjunct-2 engine: a step built by `buildStep` publishes exactly `tensorAxes` of its
     rep stmt as the fixed axes of its (single) output weave. Since `buildStep` derives an internal
     read's input weave from the same `tensorAxes` of the producer (post-refactor), producer output
@@ -271,7 +324,16 @@ theorem buildStep_output_fixedAxes
     {sc : ScanStmt} {b : BrBaseP} {w : List Wire} {s : Nat}
     (h : buildStep ns ext stmts sc = .ok (b, w)) (hs : s < sc.outputs.length) :
     fixedAxesP (b.outputWeaves.getD s []) = tensorAxes (sc.slotStmt s) := by
-  sorry
+  have hg := buildStep_ok_consistent h
+  have hgetD : b.outputWeaves.getD s [] = sc.slotWeave s := by
+    rw [buildStep_outputWeaves h, List.getD_eq_getElem _ _ (by simpa using hs)]
+    simp [List.getElem_map, List.getElem_range]
+  rw [hgetD]
+  unfold ScanStmt.slotWeave
+  rw [fixedAxesP_mapWeave_pos]
+  have hcons := of_decide_eq_true (List.all_eq_true.mp hg s (List.mem_range.mpr hs))
+  rw [hcons]
+  rfl
 
 /-! ## Lemma 5: `buildNameToStep` value bound -/
 
@@ -363,15 +425,16 @@ theorem buildStep_inputWeaves
       | none   => (List.range rf.2.length).map (fun pos =>
                     WeaveSlotP.fixed (AxisP.mk (some (rf.1 ++ "_" ++ toString pos))
                       (SizeExpr.var (rf.1 ++ "_" ++ toString pos))))) := by
+  have hg := buildStep_ok_consistent h
   unfold buildStep at h
   cases sc with
-  | plain s => simp only [pure_bind] at h; exact congrArg BrBaseP.inputWeaves (bind_pure_pair_ok h)
+  | plain s => simp only [hg, Bool.not_true, pure_bind] at h; exact congrArg BrBaseP.inputWeaves (bind_pure_pair_ok h)
   | scan nm ax bs rs aff =>
-      simp only [pure_bind] at h; exact congrArg BrBaseP.inputWeaves (bind_pure_pair_ok h)
+      simp only [hg, Bool.not_true, pure_bind] at h; exact congrArg BrBaseP.inputWeaves (bind_pure_pair_ok h)
   | scanPre nm ax tc =>
       by_cases he : tc.steps.isEmpty = true
       · simp [he, bind, Except.bind] at h
-      · simp only [he, pure_bind] at h
+      · simp only [hg, Bool.not_true, he, pure_bind] at h
         exact congrArg BrBaseP.inputWeaves (bind_pure_pair_ok h)
 
 /-- The wires from a successful `buildStep` equal the `mapM` of the per-read-factor wire builder. -/
@@ -386,14 +449,15 @@ theorem buildStep_wires_mapM
       | none   => match ext[rf.1]? with
         | some k => Except.ok (Wire.external k)
         | none   => Except.error (CompileError.undeclaredName rf.1)) = .ok w := by
+  have hg := buildStep_ok_consistent h
   unfold buildStep at h
   cases sc with
-  | plain s => simp only [pure_bind] at h; exact bind_pure_pair_ok_snd h
-  | scan nm ax bs rs aff => simp only [pure_bind] at h; exact bind_pure_pair_ok_snd h
+  | plain s => simp only [hg, Bool.not_true, pure_bind] at h; exact bind_pure_pair_ok_snd h
+  | scan nm ax bs rs aff => simp only [hg, Bool.not_true, pure_bind] at h; exact bind_pure_pair_ok_snd h
   | scanPre nm ax tc =>
       by_cases he : tc.steps.isEmpty = true
       · simp [he, bind, Except.bind] at h
-      · simp only [he, pure_bind] at h; exact bind_pure_pair_ok_snd h
+      · simp only [hg, Bool.not_true, he, pure_bind] at h; exact bind_pure_pair_ok_snd h
 
 /-! ## Lemma 7: buildExtIndex injectivity -/
 

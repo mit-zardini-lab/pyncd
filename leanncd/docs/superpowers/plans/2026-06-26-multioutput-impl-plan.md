@@ -145,8 +145,9 @@ One commit per lemma; `lean_diagnostic_messages` clean after each.
   `exact` discharges the struct-literal projection by defeq (plain `rw`'s auto-rfl won't reduce it).
 - **B.7 `buildStep_output_fixedAxes`** (per slot): `fixedAxesP (outputWeaves.getD s []) =
   tensorAxes (slotStmt sc s)`.
-  **[DECIDED — RESUME HERE. Going with Option 3 (canonical degree order). False as originally written; see
-  §B.7-FINDING + §B.7-PLAN below.]**
+  **[DONE 2026-07-01.] Option 3 (canonical degree order, Step 1) + compile guard for the residual.
+  Axioms `[propext, Classical.choice, Quot.sound]` (no `sorryAx`); RouteSpec is now sorry-free.
+  See §B.7-DONE below for what actually landed.**
 - Verify after each: `lean_diagnostic_messages RouteSpec.lean` clean; `lake build`.
 
 ### B.7-FINDING (2026-06-27): `buildStep_output_fixedAxes` is not a theorem as stated
@@ -268,6 +269,31 @@ Lean toward (a); keeps B.7's statement clean and the invalid input rejected rath
 (`outputWeaves.length` unaffected), and especially `idxToRow`/`reindexings` column order (uses `degUids`
 = `stepDegAxesMulti.map (·.uid)`) — re-run `LoweringTest`/`CompileExamplesTest` `#guard`s + `lake build`.
 
+### B.7-DONE (2026-07-01) — what actually landed
+
+**Result:** `buildStep_output_fixedAxes` proved, axioms `[propext, Classical.choice, Quot.sound]`;
+`RouteSpec.lean` is now **sorry-free**. Full `lake build` green (8586 jobs); coupled+simple scans still
+compile (`outW = [2]`/`[1]`).
+
+**What landed (deviations from the sketch above, all simplifications):**
+- **Step 1** (canonical degree): `ScanStmt.stepRetainedAxes` factored out; `stepDegAxesMulti`'s retained
+  source now `slotStmt`-order (`Lowering.lean`). No-op on real input.
+- **Residual → Option (a) compile guard**, but keyed off `buildStep` success (not `hrc`): new
+  `CompileError.inconsistentScanAxes` (`Uid.lean`) + `ScanStmt.outputAxesConsistent` (`Lowering.lean`),
+  thrown in `buildStep` when a coupled scan's outputs disagree on shared-axis order. **Key simplification:**
+  the guard's decidable check is *exactly* `stepDegAxesMulti.filter (·.uid ∈ slotStmt-uids) = dedupByUid
+  (slotStmt s).lhsAxes` — i.e. the equality B.7 needs is offloaded to compile-time `decide`, so the proof
+  needed **no contracted-drop and no dedup-idempotence lemmas** (the Step-2 sketch's hardest part vanished).
+- **`buildStep_ok_consistent`** (RouteSpec): `buildStep = .ok ⇒ outputAxesConsistent = true` (mirrors
+  `routeCore_routable`; `by_cases` on the guard, throw-branch refuted).
+- The guard added a monadic step to `buildStep`, so the three previously-green extraction lemmas
+  (`buildStep_outputWeaves_length_one`, `_inputWeaves`, `_wires_mapM`) were re-greened by inserting
+  `have hg := buildStep_ok_consistent h` + `simp only [hg, Bool.not_true, pure_bind]` to clear the guard.
+- **Step 3 helpers:** `fixedAxesP_mapWeave_pos` (fixed-when-true analogue) + `buildStep_outputWeaves`
+  (`outputWeaves = (range outputs.length).map slotWeave`). B.7 = `getD`-of-map-range → `slotWeave` unfold →
+  `fixedAxesP_mapWeave_pos` → guard equality (`of_decide_eq_true (List.all_eq_true.mp hg …)`) → `rfl`.
+- **Re-verify done:** full `lake build` green covers B.1/B.4/`idxToRow`/`reindexings` + all `#guard`s.
+
 ## E. Phase C — Realize model generalization
 
 - **C.1 `poolAt` + `poolAt_succ`** (`Realize.lean:163,196`): prepend `outputSlots tc j` (all slots) instead
@@ -327,8 +353,8 @@ Lean toward (a); keeps B.7's statement clean and the invalid input rejected rath
 ```
 A.0-A.4 compiler + scaffold + tests         [DONE d5b6a61, green]
 A.5 faithful scan outputs (base∩recur)      [green]  ← DO BEFORE Phase B (foundational)
-B.1 … B.7 RouteSpec lemmas                  [green, sorries shrink]   (one commit each)
-C.1-C.3 poolAt/WellFormed/mem_poolAt        [green]
+B.1 … B.7 RouteSpec lemmas                  [DONE 2026-07-01, RouteSpec sorry-free]
+C.1-C.3 poolAt/WellFormed/mem_poolAt        [green]  ← RESUME HERE (next after B.7)
 D.1 … D.4 conjuncts                         [green, sorries shrink]   (one commit each)
 E.1-E.3 realize fold                        [green]
 F close-out + axiom check                   [green, only out-of-scope sorries remain]

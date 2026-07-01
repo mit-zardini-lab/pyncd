@@ -346,12 +346,18 @@ def ScanStmt.slotStmt (sc : ScanStmt) (s : Nat) : Stmt :=
   let nm := sc.outputs.getD s ""
   (sc.stepStmts.filter (fun st => st.lhsName == nm)).getLast?.getD emptyStmt
 
+/-- The retained (LHS/output) axes of a step, in last-writer/slot order: the per-slot defining stmts'
+    LHS axes concatenated in `outputs` order, deduplicated by uid. Factored out of `stepDegAxesMulti`
+    so the acyclicity/consistency guard and the degree share one source of truth. -/
+def ScanStmt.stepRetainedAxes (sc : ScanStmt) : List AxisSpec :=
+  dedupByUid ((List.range sc.outputs.length).flatMap (fun s => (sc.slotStmt s).lhsAxes))
+
 /-- A step's combined index space across all `stepStmts`: retained (LHS) axes of every contributing
     stmt, then the contracted (read-but-not-retained) axes, deduplicated by uid. Generalizes
     `stepDegAxes` from one stmt to the `.scan` group. -/
 def ScanStmt.stepDegAxesMulti (sc : ScanStmt) : List AxisSpec :=
   let ss := sc.stepStmts
-  let retained := dedupByUid ((List.range sc.outputs.length).flatMap (fun s => (sc.slotStmt s).lhsAxes))
+  let retained := sc.stepRetainedAxes
   let allRead := ss.flatMap (fun s => s.readFactors.flatMap (fun rf => rf.2.flatMap idxAxes))
   let contracted := allRead.filter (fun a => !(retained.map (·.uid)).contains a.uid)
   dedupByUid (retained ++ contracted)
@@ -363,6 +369,18 @@ def ScanStmt.slotWeave (sc : ScanStmt) (s : Nat) : WeaveShapeP :=
   sc.stepDegAxesMulti.map (fun a =>
     if retainedUids.contains a.uid then WeaveSlotP.fixed (AxisP.mk (some a.name) (SizeExpr.var a.name))
     else WeaveSlotP.tiled)
+
+/-- Consistency guard for coupled scans: every output slot's own (dedup'd) LHS axes must equal the
+    step's `stepRetainedAxes` restricted to that slot's uids. Since an output weave masks the SHARED
+    step degree (which follows `stepRetainedAxes` order), this is exactly the condition under which
+    slot `s`'s published axes come out in `slotStmt s`'s own LHS order. Trivially true for plain and
+    single-output scans (one `slotStmt` ⇒ retained = its LHS); can only fail for a coupled scan whose
+    outputs disagree on a shared axis's order (e.g. `G[j,l]` vs `H[l,j]`) — invalid input the
+    frontend should not emit, which `buildStep` rejects (FAIL LOUD) via `inconsistentScanAxes`. -/
+def ScanStmt.outputAxesConsistent (sc : ScanStmt) : Bool :=
+  (List.range sc.outputs.length).all (fun s =>
+    let Ls := dedupByUid (sc.slotStmt s).lhsAxes
+    decide (sc.stepDegAxesMulti.filter (fun a => (Ls.map (·.uid)).contains a.uid) = Ls))
 
 /-- PASS-1: map each produced tensor name to its (step index, output slot). A step writing several
     names (a coupled scan) assigns slot `0,1,…` in `writes` order. -/
@@ -383,6 +401,10 @@ def buildStep (nameToStep : Std.HashMap String (Nat × Nat)) (extIndex : Std.Has
       if tc.steps.isEmpty then
         throw (CompileError.shapeMismatch s!"recurMorphism {nm}: empty step morphism" "non-empty ThreadedComposed")
   | _ => pure ()
+  -- Consistency guard: coupled-scan outputs must agree on shared-axis order, else the shared step
+  -- degree cannot publish every slot in its own LHS order (FAIL LOUD rather than mis-type an output).
+  if ! sc.outputAxesConsistent then
+    throw (CompileError.inconsistentScanAxes "buildStep: coupled scan outputs disagree on shared axis order")
   -- rep stmt drives ONLY the op label (nonlin/agg/kind); reads/axes come from the whole group.
   let s := sc.repStmt.getD emptyStmt
   let readFactors := sc.inputReadFactors
