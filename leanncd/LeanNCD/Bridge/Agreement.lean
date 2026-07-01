@@ -18,7 +18,8 @@ scheduled program `sp`, after which each `WellFormed` conjunct is a fact about `
 theorem compile_eq_route {p : TLProgram} {s : Nat} {tc : ThreadedComposed} {s' : Nat}
     (h : (TLProgram.compile p).run s = .ok tc s') :
     ∃ (sp : ScheduledProgram) (s₁ : Nat), (TLProgram.compileToScheduled p).run s = .ok sp s₁ ∧
-      routeCore sp = .ok (tc.steps, tc.routing) ∧ tc.nExternal = sp.extNames.card := by
+      routeCore sp = .ok (tc.steps, tc.routing) ∧ tc.nExternal = sp.extNames.card ∧
+      tc.wellFormedDom = true := by
   have hcr : TLProgram.compile p = TLProgram.compileToScheduled p >>= route := by
     simp only [TLProgram.compile, TLProgram.compileToScheduled, Bind.kleisliRight, bind_assoc]
   rw [hcr, EStateM.run_bind] at h
@@ -31,10 +32,14 @@ theorem compile_eq_route {p : TLProgram} {s : Nat} {tc : ThreadedComposed} {s' :
       rcases hrcc : routeCore sp with _ | ⟨steps, routing⟩
       · rw [hrcc] at h; simp [EStateM.run, throw, throwThe, MonadExceptOf.throw, EStateM.throw] at h
       · rw [hrcc] at h
-        simp only [EStateM.run, pure, EStateM.pure, EStateM.Result.ok.injEq] at h
-        obtain ⟨htc, -⟩ := h
-        subst htc
-        exact ⟨sp, s₁, rfl, hrcc, rfl⟩
+        dsimp only at h
+        split at h
+        · rename_i hwf
+          simp only [EStateM.run, pure, EStateM.pure, EStateM.Result.ok.injEq] at h
+          obtain ⟨htc, -⟩ := h
+          subst htc
+          exact ⟨sp, s₁, rfl, hrcc, rfl, hwf⟩
+        · simp [EStateM.run, throw, throwThe, MonadExceptOf.throw, EStateM.throw] at h
 
 -- NOTE(phaseB): restated to `≥ 1` to match the weakened `WellFormed` conjunct 3 (multi-output scans).
 /-- Conjunct 3 (at least one output): every routed step has at least one output weave. -/
@@ -258,13 +263,13 @@ theorem wf_typeMatch {sp : ScheduledProgram} {tc : ThreadedComposed}
                 List.getElem_map, ← hrfdef, hns]
         | none => rw [hns, hext] at hwb; simp at hwb
 
-/-- Conjunct 1 (`wellFormedDom`). Needs: every external slot referenced + rank agreement across
-    consuming ports. (Pipeline-property dependent — `extNames ⊆ reads`, `extIndex` bound.) -/
-theorem wf_dom {sp : ScheduledProgram} {tc : ThreadedComposed} {s s₁ : Nat} {p : TLProgram}
-    (hsp : (TLProgram.compileToScheduled p).run s = .ok sp s₁)
-    (hrc : routeCore sp = .ok (tc.steps, tc.routing)) (hne : tc.nExternal = sp.extNames.card) :
-    tc.wellFormedDom = true := by
-  sorry
+/-! ### Conjunct 1 (`wellFormedDom`) — carried by construction
+
+Every external slot referenced + rank agreement across consuming ports is now established BY
+CONSTRUCTION: `route` validates `tc.wellFormedDom` and fails loud otherwise (`Lowering.lean`), so
+`compile_eq_route` yields `tc.wellFormedDom = true` directly. This replaces the former `wf_dom`
+sorry (which would have required threading `checkReadRanks` arity-consistency + `buildExtIndex`
+surjectivity out of `compileToScheduled`). -/
 
 /-! ### Conjunct 4 (`wf_topo`) infrastructure -/
 
@@ -386,9 +391,8 @@ theorem wf_topo {sp : ScheduledProgram} {tc : ThreadedComposed}
     precondition on real input). -/
 theorem compile_wellFormed (p : TLProgram) (s : Nat) (tc : ThreadedComposed) (s' : Nat)
     (h : (TLProgram.compile p).run s = .ok tc s') : tc.WellFormed := by
-  obtain ⟨sp, s₁, hsp, hrc, hne⟩ := compile_eq_route h
-  have hdom := wf_dom hsp hrc hne
-  exact ⟨hdom, wf_typeMatch hrc hdom hne, wf_singleOutput hrc, wf_topo hrc hne⟩
+  obtain ⟨sp, s₁, _hsp, hrc, hne, hwfd⟩ := compile_eq_route h
+  exact ⟨hwfd, wf_typeMatch hrc hwfd hne, wf_singleOutput hrc, wf_topo hrc hne⟩
 
 /-- Every compiled program crosses the bridge: the formal morphism exists. -/
 noncomputable def realizeCompiled (p : TLProgram) (s : Nat) (tc : ThreadedComposed) (s' : Nat)

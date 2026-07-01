@@ -60,44 +60,6 @@ noncomputable def realizeBrBaseP (b : BrBaseP) : Σ (dom cod : BrObj), BrBase do
         ((realizeWeaveShape (b.inputWeaves.getD i.val [])).targetAxes)
   }⟩
 
-/-- Rank of a presentation weave = number of `fixed` (retained/target) axes; `tiled` slots are
-    broadcast/contracted and carry no wire dimension. -/
-def weaveRank (w : WeaveShapeP) : Nat :=
-  w.countP fun s => match s with | .fixed _ => true | .tiled => false
-
-/-- First port `(stepIdx, inputIdx)` consuming external slot `k`: the first `routing[i][j]` equal
-    to `Wire.external k`. `none` if `k` is unreferenced — impossible for a pipeline-built `tc`
-    (`extNames ⊆ reads`), and made an explicit requirement by `wellFormedDom`. -/
-def ThreadedComposed.externalPort (tc : ThreadedComposed) (k : Nat) : Option (Nat × Nat) :=
-  (List.range tc.routing.length).findSome? fun i =>
-    let wires := tc.routing.getD i []
-    (List.range wires.length).findSome? fun j =>
-      match wires.getD j (.external 0) with
-      | .external k' => if k' == k then some (i, j) else none
-      | .internal .. => none
-
-/-- §12.4 well-formedness guard for the `dom` reconstruction (`realize.md` §6d): every external
-    slot `< nExternal` is referenced, and all ports consuming a slot agree on RANK (count of
-    `fixed` axes). Bound-name differences across reads are allowed; unreferenced slots and genuine
-    rank conflicts are rejected. Holds for any compiled `tc` (`checkReadRanks` pins external arity,
-    `extNames ⊆ reads` pins referencedness); an explicit guard for hand-built `recurMorphism`
-    graphs that bypass the pipeline. -/
-def ThreadedComposed.wellFormedDom (tc : ThreadedComposed) : Bool :=
-  (List.range tc.nExternal).all fun k =>
-    match tc.externalPort k with
-    | none          => false
-    | some (i₀, j₀) =>
-      let r₀ := weaveRank ((tc.steps.getD i₀ default).inputWeaves.getD j₀ [])
-      (List.range tc.routing.length).all fun i =>
-        let wires := tc.routing.getD i []
-        (List.range wires.length).all fun j =>
-          match wires.getD j (.external 0) with
-          | .external k' => !(k' == k) || weaveRank ((tc.steps.getD i default).inputWeaves.getD j []) == r₀
-          | .internal .. => true
-
-/-- Propositional form of `wellFormedDom` (decidable via the `Bool`). -/
-abbrev ThreadedComposed.WellFormedDom (tc : ThreadedComposed) : Prop := tc.wellFormedDom = true
-
 /-- The faithful external-input bundle (`realize.md` §6d): for each slot `0 ≤ k < nExternal`, the
     `ArrayType` of its first `Wire.external k` consuming port's input weave. This is the Lean image
     of the Python reference `ThreadedComposed.dom()` (walk `routing`, first occurrence per slot).

@@ -327,7 +327,28 @@ those were done in the same landing. `realize` axioms `[propext, Classical.choic
   `buildStep_outputWeaves_length_one`) or `external k` (`k<nExternal`) ⇒ `mem_poolAt_internal`/`_external`.
   Dropped `wf_topo`'s unused `hsp`; updated `compile_wellFormed`.
 
-### RESUME HERE — D.1 + D.3 (the `compileToScheduled` invariant thread)
+### D.1 + D.3 — DONE 2026-07-01 (via guards; `compile_wellFormed` sorry-free)
+
+Both remaining conjuncts were closed with FAIL-LOUD guards rather than the full `compileToScheduled`
+invariant thread — `compile_wellFormed` axioms are now `[propext, Classical.choice, Quot.sound]`.
+
+- **D.1 `wf_singleOutput`** [DONE]: added `CompileError.emptyScanOutputs` + folded the emptiness check
+  into a single `ScanStmt.stepGuardOk := !outputs.isEmpty && outputAxesConsistent` guard in
+  `buildStep` (conditional error). `buildStep_ok_guard` projects `buildStep_ok_consistent` (for B.7)
+  and `buildStep_ok_outputs_ne`; `wf_singleOutput` = `outputs ≠ []` + `buildStep_outputWeaves_length_one`.
+- **D.3 `wf_dom`** [DONE — deviation from the "stored ScheduledProgram field" decision]: instead of
+  threading `checkReadRanks` arity + `buildExtIndex` surjectivity out of `compileToScheduled`, `route`
+  now **validates `tc.wellFormedDom` and fails loud** (moved the structural `weaveRank`/`externalPort`/
+  `wellFormedDom` defs from `Realize.lean` down to `Target.lean` so `route` can see them). This bundles
+  BOTH obligations (referencedness + rank agreement) into one decidable check carried by construction;
+  `compile_eq_route` now yields `tc.wellFormedDom = true`, so `wf_dom` is subsumed (theorem removed).
+  Simpler and same spirit as the stored-invariant decision (establish-by-construction, no cross-pass
+  re-derivation). Real §12.1 programs pass the guard (full `lake build` + `#guard`s green).
+
+**`compile_wellFormed` is proved sorry-free.** Remaining Agreement sorries are the out-of-scope §8.2
+acset extraction (`fromThreadedComposed`, `realize_fromThreadedComposed_agree`).
+
+### (superseded) original D.1 + D.3 plan — the `compileToScheduled` invariant thread
 
 Both remaining conjuncts need NEW invariants extracted from `hsp` (`compileToScheduled`), threaded
 through `routeCore` to `tc`. This is a different kind of work from D.2/D.4 (which wired up existing
@@ -388,8 +409,8 @@ B.1 … B.7 RouteSpec lemmas                  [DONE 2026-07-01, RouteSpec sorry-
 C.1-C.3 poolAt/WellFormed/mem_poolAt        [DONE 2026-07-01, Realize sorry-free]
 E.1-E.3 realize fold                        [DONE 2026-07-01, landed with Phase C]
 D.2 wf_typeMatch + D.4 wf_topo              [DONE 2026-07-01]
-D.1 wf_singleOutput + D.3 wf_dom            [green]  ← RESUME HERE (compileToScheduled invariant thread)
-F close-out + axiom check                   [green, only out-of-scope sorries remain]
+D.1 wf_singleOutput + D.3 wf_dom            [DONE 2026-07-01, via guards; compile_wellFormed sorry-free]
+F close-out + axiom check                   [compile_wellFormed axioms clean; only out-of-scope acset sorries remain]
 ```
 
 ## J. Risks / watch-items (from design §12, plus impl)

@@ -493,7 +493,14 @@ def routeCore (sp : ScheduledProgram) : Except CompileError (List BrBaseP × Lis
 def route (sp : ScheduledProgram) : FreshM ThreadedComposed := do
   let nExternal := sp.extNames.card
   match routeCore sp with
-  | .ok (steps, routing) => return { steps, routing, nExternal }
+  | .ok (steps, routing) =>
+      let tc : ThreadedComposed := { steps, routing, nExternal }
+      -- Validate the domain well-formedness (every external slot referenced + rank agreement) on the
+      -- built morphism. FAIL LOUD rather than emit a `tc` the bridge can't realize; this is the
+      -- `WellFormed` conjunct-1 invariant carried by construction (see `wf_dom`).
+      if tc.wellFormedDom then return tc
+      else throw (CompileError.shapeMismatch
+        "route: wellFormedDom failed (unreferenced external slot or read-rank mismatch)" "wellFormedDom")
   | .error e             => throw e
 
 end LeanNCD
