@@ -12,7 +12,7 @@ It is meant as a practical bridge between:
 
 1. [Motivation and alignment](#1-motivation-and-alignment)
 2. [Semantic foundation: Naperian axes in a D-graded PROP](#2-semantic-foundation-naperian-axes-in-a-d-graded-prop)
-   - [Gibbons' APLicative/Naperian results](#gibbons-aplictativenaperian-results)
+   - [Gibbons' APLicative/Naperian results](#gibbons-aplicativenaperian-results)
    - [D-graded colored PROP substrate (what we already have)](#d-graded-colored-prop-substrate-what-we-already-have)
    - [Proposed mixin semantics (incremental, backward-compatible)](#proposed-mixin-semantics-incremental-backward-compatible)
    - [Intuition behind why this works](#intuition-behind-why-this-works)
@@ -55,11 +55,17 @@ So this is not an imposed abstraction; it formalizes the semantics Tensor Logic 
 
 ### Scope and rollout
 
-This note explains how to integrate Naperian/applicative array semantics into the existing LeanNCD tensor-logic pipeline and `D`-graded colored PROP formalism, with minimal disruption to current code paths. It is meant as a practical bridge between:
+The rollout is staged and backward-compatible (see [§4.2](#42-staged-rollout-plan-low-risk-implementation) for stages and [§5.3](#53-staged-dependent-type-introduction) for the dependent-type introduction order). One sequencing point matters up front:
 
-- [`papers/graded_prop.md`](../papers/graded_prop.md) (categorical core),
-- [`docs/tensor_logic_dsl.md`](../docs/tensor_logic_dsl.md) (user-facing DSL),
-- [`leanncd/LeanNCD/DSL/Pipeline/*.lean`](../leanncd/LeanNCD/DSL/Pipeline/*.lean) (actual passes).
+> **Sequencing relative to in-flight work.** This is a forward-looking design; it is **not**
+> scheduled to start now. The active LeanNCD proof effort is the multi-output `BrBase` +
+> `compile_wellFormed` work (see `leanncd/docs/superpowers/plans/2026-06-26-multioutput-impl-plan.md`).
+> This integration should be sequenced **after** that lands — it touches the categorical core
+> (`Graded.lean`, `ColoredPROP.lean`, `StBr.lean`) and, honestly, in the near term it *adds*
+> surface area (six new typeclasses with coherence-law fields) before it removes any sorries. Do
+> not open this in parallel with the well-formedness proof; treat the [minimum viable
+> integration](NaperianTypingIntegrationPlan.md) as the first thing to attempt once that work is
+> complete.
 
 ---
 
@@ -91,11 +97,11 @@ These must satisfy laws (identity, composition, homomorphism, interchange) that 
 - **`liftA2 : (a → b → c) → (F a → F b → F c)`** lifts a binary function.
 - And so on for arity.
 
-**Concrete example:** Binary addition in the applicative context of lists:
+**Concrete example:** Binary addition in the *`ZipList`* applicative (the pointwise/aligned one — which is the Naperian-relevant applicative for fixed-shape arrays):
 ```
-liftA2 (+) [1, 2, 3] [10, 20, 30]  →  [11, 22, 33]
+liftA2 (+) (ZipList [1, 2, 3]) (ZipList [10, 20, 30])  →  ZipList [11, 22, 33]
 ```
-Each element of the output is the sum of corresponding elements in the inputs.
+Each element of the output is the sum of corresponding elements in the inputs. (Note: Haskell's *default* list applicative is the **Cartesian product**, so `liftA2 (+) [1,2,3] [10,20,30]` there yields the nine sums `[11,21,31,12,22,32,13,23,33]`, not the pointwise result. The pointwise/broadcasting semantics we want is `ZipList`, not the default list instance.)
 
 **Connection to broadcasting:** This is exactly what tensor broadcasting does:
 - `pure 5` broadcasts the scalar `5` to every element of a shape.
@@ -115,7 +121,7 @@ This isomorphism says: "A value in `f a` is completely determined by its values 
 - `tabulate : (Log f → a) → f a` reconstructs `f a` from a function on indices.
 - These are inverses: `tabulate (lookup fa) = fa` and `lookup (tabulate f) = f`.
 
-*Note on terminology:* `Log f` (the "logarithm" of the functor) is the index type (same as the functor's **shape** or **dimensions**). The name comes from the exponential analogy: if a container `f a` is isomorphic to a function `Log f → a`, then `Log f` plays the role of the "exponent." Concretely: `Log(Maybe) = Bool`, `Log(Pair) = Bool`, `Log(Array n) = Fin n` (integers 0..n-1), and for a 2D array of shape `(m, n)`, we have `Log = Fin m × Fin n`.
+*Note on terminology:* `Log f` (the "logarithm" of the functor) is the index type (same as the functor's **shape** or **dimensions**). The name comes from the exponential analogy: if a container `f a` is isomorphic to a function `Log f → a`, then `Log f` plays the role of the "exponent." Concretely: `Log(Pair) = Bool` (a pair is a function from `Bool`), `Log(Array n) = Fin n` (integers 0..n-1), and for a 2D array of shape `(m, n)`, `Log = Fin m × Fin n`. (Only *fixed-shape* functors are representable — `Maybe` and `List`, whose shape varies with the value, are **not** Naperian and have no `Log`.)
 
 **For arrays:** A 2D array of shape `(m, n)` is isomorphic to a function from pairs `(i, j) ∈ [0..m) × [0..n)` to values. Indexing is retrieval; tabulation is construction.
 
@@ -132,18 +138,7 @@ Jeremy Gibbons' paper (see [References](#7-references)) gives a typed account of
    `pure` gives replication/broadcasting; `<*>`/`zipWith` gives pointwise lifted operators.
 
 3. **Naperian (representable) dimensions = indexability.**  
-   `f a ≅ (Log f → a)` with `lookup/tabulate`; indexing is total and invertible.
-   
-   *Understanding the isomorphism:* The phrase "with `lookup/tabulate`" means these two functions **witness** the isomorphism:
-   - **`lookup : f a → Log f → a`** — extract a value at an index
-   - **`tabulate : (Log f → a) → f a`** — build a container from a function on indices
-   
-   These are **inverses** of each other (bijection): `lookup (tabulate f) = f` and `tabulate (λi. lookup fa i) = fa`.
-   
-   **"Indexing is total and invertible"** means:
-   - **Total**: You can look up any element of `Log f` without fear of out-of-bounds; the index type is exhaustive.
-   - **Invertible**: If you know the value at every index, you can uniquely reconstruct the original container. There is no hidden state.
-
+   `f a ≅ (Log f → a)`, witnessed by the inverse pair `lookup`/`tabulate`, so indexing is total and invertible (defined under [Representable Functors](#representable-functors-naperian-functors) above).
 
 4. **Transpose is structural reindexing.**  
    `transpose :: f (g a) -> g (f a)` comes from representability, not ad hoc tensor code.
@@ -161,7 +156,7 @@ From [`papers/graded_prop.md`](../papers/graded_prop.md), we already have:
 - operation PROP `C` (for pyncd: `Br`-like operational layer),
 - shape map `sh`,
 - right action/lift `act : C × Dᵒᵖ ⥤ C`,
-- coherence (`δ`, `δ0`, `υ`, `α`): the natural isomorphisms ensuring the action is well-behaved — `δ` is distributivity `(X ⊗ Y) ⊛ P ≅ (X ⊛ P) ⊗ (Y ⊛ P)`, `δ0` is unit action, `υ` is left/right unit laws, and `α` is associativity of nested actions,
+- coherence (`δ`, `δ0`, `υ`, `α`): the natural isomorphisms ensuring the action is well-behaved — `δ` is distributivity `(X ⊗ Y) ⊛ P ≅ (X ⊛ P) ⊗ (Y ⊛ P)`, `δ0` is the *nullary* distributivity `I ⊛ P ≅ I` (the tensor unit's action is trivial), `υ` is the unit-grading law `X ⊛ I_D ≅ X`, and `α` is associativity of nested actions `(X ⊛ P) ⊛ Q ≅ X ⊛ (Q ⊗ P)` (note the `Q ⊗ P` order — matches `graded_prop.md` Def 3.1),
 - evaluation slices `ev_p`,
 - broadcast-generation/weave factorization story.
 
@@ -226,21 +221,7 @@ In the `matMul` example above, `mid` is an intermediate shape (a type parameter 
 
 #### Why representability enables this
 
-Representability (in Gibbons' formulation) states that certain functors are isomorphic to indexed-function spaces:
-
-$$\text{Representable } F \iff F(X) \cong (\text{Log } F \to X)$$
-
-Here:
-- `Log F` is the **index type** (the "logarithm" or point type of the functor)
-- The right-hand side is **functions from indices to values**
-- `lookup` and `tabulate` witness the isomorphism
-
-In your context:
-- `Log(StMatP dom cod)` is the product `dom.point × cod.point` (the set of all coordinates)
-- `lookup` extracts a single element at coordinates `(i, j)`
-- `tabulate` rebuilds from a function `(i, j) ↦ value(i, j)`
-
-Because we work with the **indexed-function view** (not raw arrays), composition becomes function composition:
+Representability (defined [above](#representable-functors-naperian-functors): `F(X) ≅ (Log F → X)`) instantiates here as `Log(StMatP dom cod) = dom.point × cod.point`, so `lookup` extracts the element at `(i, j)` and `tabulate` rebuilds from `(i, j) ↦ value(i, j)`. Because we work with this **indexed-function view** (not raw arrays), composition becomes function composition:
 
 ```lean
 def ap {A B : Type} (f : A → (B → C)) (x : A → B) : A → C :=
@@ -249,7 +230,7 @@ def ap {A B : Type} (f : A → (B → C)) (x : A → B) : A → C :=
   -- No proof needed
 ```
 
-Applicative laws like `pure id <*> v = v` are not theorems—they are **definitional equalities** of function application. The laws hold automatically because we *defined* the operation in the right way.
+For the indexed-function (reader) applicative, laws like `pure id <*> v = v` reduce to `fun i => v i = v`, which holds **definitionally in Lean 4** by beta plus function eta — no explicit proof needed. (This is specific to the bare function/structure view and Lean 4's eta; it is not a claim that applicative laws are free for *every* applicative. It also relies on `StMatP` being definitionally the indexed function, so structure eta applies.)
 
 #### The proof-obligation cascade
 
@@ -263,7 +244,7 @@ This extends to axioms about shapes and compositions:
 | Prove composition is associative | Function composition associativity | Function composition *is* syntactically associative |
 | Prove causality (no future reads in scans) | Encode in dependent type | Type forbids invalid state transitions |
 
-Each "new" morphism no longer introduces *new* proof obligations. Instead, we instantiate **universal laws** that come from representability and applicative structure. These laws are *once-and-for-all proofs* about representable functors and applicative operations—they do not depend on problem-specific details. For concrete counts in this codebase, see [Measurable proof-effort reduction](#measurable-proof-effort-reduction).
+Each "new" morphism no longer introduces *new* proof obligations. Instead, we instantiate **universal laws** that come from representability and applicative structure. These laws are *once-and-for-all proofs* about representable functors and applicative operations—they do not depend on problem-specific details. **Scope caveat:** this mechanism eliminates *indexing/dimension* obligations (shape match, rank agreement, reindex identity/composition); it does **not** by itself discharge the coherence isos, the quotient-`Br` action, or `broadcast_gen`, which remain substantial (see [§4.2 What does not get solved automatically](NaperianTypingIntegrationPlan.md) and the projected — not measured — counts in [Projected proof-effort reduction](#projected-proof-effort-reduction-a-hypothesis-to-validate-not-a-measured-result)).
 
 ---
 
@@ -280,10 +261,10 @@ $$F(X ⊛ P) \cong \text{El}(P) \to F(X)$$
 (*Intuition:* a P-shaped container of X-values is completely determined by specifying, for each point (coordinate) in P, what the corresponding X-value is.)
 
 Here we introduce the key notation:
-- **⊛** is the **graded action** functor (from [graded_prop.md §3](#references)): the right action of objects in `D` on objects in `C`. This is the core structure of D-graded PROPs.
-- **$\text{El}(P) := D(I_D, P)$** denotes the **points** (or **global elements**) of a shape object `P` in the index category `D`. Here `D(I_D, P)` is the **hom-set** — the set of all morphisms `I_D → P` in `D`, where `I_D` is the monoidal unit of `D` (written `I_D` throughout [graded_prop.md](#references); it is the unit for the `⊛` action, satisfying `X ⊛ I_D ≅ X`). Each morphism `I_D → P` picks out a single "coordinate" or "element" of `P`, hence the name. 
+- **⊛** is the **graded action** functor (from [graded_prop.md §3](#7-references)): the right action of objects in `D` on objects in `C`. This is the core structure of D-graded PROPs.
+- **$\text{El}(P) := D(I_D, P)$** denotes the **points** (or **global elements**) of a shape object `P` in the index category `D`. Here `D(I_D, P)` is the **hom-set** — the set of all morphisms `I_D → P` in `D`, where `I_D` is the monoidal unit of `D` (written `I_D` throughout [graded_prop.md](#7-references); it is the unit for the `⊛` action, satisfying `X ⊛ I_D ≅ X`). Each morphism `I_D → P` picks out a single "coordinate" or "element" of `P`, hence the name. 
   
-  In practice: In the concrete `StObj` setting, the full hom-set `D(I_D, P)` consists of all affine-stride morphisms `StMat [] P`. The `NaperianAxis StObj` instance uses a finite chosen representative set via `AxisPointData`, with `point_hom` providing the embedding. The categorical theory is stated for the full hom-set; the Lean implementation works with a finite representative (see [Connection to elementality](#connection-to-elementality) below for how this relates to elementality and separating families).
+  In practice: In the concrete `StObj` setting, the full hom-set `D(I_D, P)` consists of all affine-stride morphisms `StMat [] P`. The symbolic `NaperianAxis StObj` instance supplies `El P` as an abstract point *type* plus `point_hom` (the embedding into `D(I_D, P)`); the *finite* chosen representative set is supplied separately, post-solver, by `AxisPointData` (see [§5.2](#52-mixin-specific-implementation-strategies-with-dependent-type-optimization) for why finiteness is kept out of the symbolic class). The categorical theory is stated for the full hom-set; the Lean implementation works with a finite representative (see the **Connection to elementality** note below for how this relates to elementality and separating families).
 - **$F$** is a **semantic algebra**: a functor that interprets objects of `C` into concrete data structures (e.g., arrays, functions, or numerical values).
 - **$\cong$** denotes a natural isomorphism: a natural transformation whose components are all isomorphisms. For this formula specifically, the isomorphism is natural in `X` (covariantly — the isomorphism commutes with morphisms `X → X'` in `C`) and natural in `P` (contravariantly) via `mapEl η : El(P) → El(Q)` for `η : P → Q` in `D` — a field of `NaperianAxis` satisfying functoriality and naturality with `point_hom`.
 
@@ -293,22 +274,22 @@ with the **strong monoidal property** $\text{El}(P \otimes Q) \cong \text{El}(P)
 
 **Important caveat:** Strong monoidality of `El` is necessary but not sufficient for the isomorphism `F(X ⊛ P) ≅ (El(P) → F(X))`. The representability assumption — that the lifted functor `act(−, P)` is represented by `El P` — must be supplied explicitly via the `NaperianFamily` typeclass, which packages `lookup`/`tabulate` and their inverse laws. Strong monoidality ensures the point functor respects monoidal structure, making coherence laws like `El(P ⊗ Q) ≃ El(P) × El(Q)` well-behaved, but does not produce the isomorphism itself.
 
-**Connection to elementality:** When the representability assumption holds, the evaluation transformations `ev_p := act(−, p)` (for $p \in \text{El}(P)$) form a jointly separating family for lifted `P`-indexed values. This Naperian joint monicity—where **lifted P-indexed families are determined by their values at each coordinate**—is a **different layer** from the **(Elem-C)** axiom of [graded_prop.md](#references). The (Elem-C) axiom says that **base C-morphisms are separated by C-points** (i.e., base operations are determined by their pointwise behavior). Naperian is a *separate assumption* about the **lifted** structure: it says that when we lift morphisms by a shape P, the resulting P-shaped families are determined by their coordinates. You can have (Elem-C) without Naperian representability; they are not derived from each other. Naperian typing makes the lifted dense family explicit in the type system by:
+**Connection to elementality:** When the representability assumption holds, the evaluation transformations `ev_p := act(−, p)` (for $p \in \text{El}(P)$) form a jointly separating family for lifted `P`-indexed values. This Naperian joint monicity—where **lifted P-indexed families are determined by their values at each coordinate**—is a **different layer** from the **(Elem-C)** axiom of [graded_prop.md](#7-references). The (Elem-C) axiom says that **base C-morphisms are separated by C-points** (i.e., base operations are determined by their pointwise behavior). Naperian is a *separate assumption* about the **lifted** structure: it says that when we lift morphisms by a shape P, the resulting P-shaped families are determined by their coordinates. You can have (Elem-C) without Naperian representability; they are not derived from each other. Naperian typing makes the lifted dense family explicit in the type system by:
 1. **Explicitly enumerating points**: The point functor `El` is finite and enumerable (for `D = St`, these are coordinate tuples).
 2. **Typeclass-level monoidality**: Strong monoidality, with coherence laws, ensures the point functor respects the monoidal structure of `D`.
 3. **Representability as first-class semantics**: Rather than deriving representability from `NaperianAxis`, Naperian typing records it in `NaperianFamily`, making `lookup`/`tabulate` laws explicit.
 
 Additionally:
-- **`lookup_p : X ⊛ P → X`** corresponds to the **evaluation transformation** $\text{ev}_p$ from [graded_prop.md §3](#references): for each point $p \in \text{El}(P)$, evaluating a `P`-indexed family at `p` yields a value in the base type. This evaluation is exactly the `ev_p` slice used in [graded_prop.md (line 97)](#references).
-- **`tabulate`** (the inverse) is the **universal property** of representability: it reconstructs a `P`-indexed family from its pointwise evaluations. Because the `ev_p` are jointly separating under `naperian_jointly_monic`, this reconstruction is **unique** — a key fact used in the weave-uniqueness result ([graded_prop.md §3.3, Prop 8.2](#references)).
+- **`lookup_p : X ⊛ P → X`** corresponds to the **evaluation transformation** $\text{ev}_p$ from [graded_prop.md §3](#7-references): for each point $p \in \text{El}(P)$, evaluating a `P`-indexed family at `p` yields a value in the base type. This evaluation is exactly the `ev_p` slice used in [graded_prop.md §3](#7-references).
+- **`tabulate`** (the inverse) is the **universal property** of representability: it reconstructs a `P`-indexed family from its pointwise evaluations. Because the `ev_p` are jointly separating under `naperian_jointly_monic`, this reconstruction is **unique** — a key fact used in the weave-uniqueness result ([graded_prop.md §3.3, Prop 8.2](#7-references)).
 
 #### Fiber semantics and reindexing
 
-From [graded_prop.md §3](#references), objects of `C` are **fibered over shapes in `D`** via the **shape map** 
+From [graded_prop.md §3](#7-references), objects of `C` are **fibered over shapes in `D`** via the **shape map** 
 $$\text{sh} : O_C \to \text{Ob}(D).$$
 (Read: every object in the operation PROP `C` is assigned a shape/index object in `D`.) This is one of the core axioms of D-graded PROPs.
 
-For a morphism $\eta : P \to Q$ in `D`, the existing D-graded PROP structure defines a **contravariant action** (§3, [graded_prop.md](#references))
+For a morphism $\eta : P \to Q$ in `D`, the existing D-graded PROP structure defines a **contravariant action** (§3, [graded_prop.md](#7-references))
 $$[X, \eta] : X ⊛ Q \to X ⊛ P.$$
 (Read: "applying `η` to `X` at shape `Q` produces a morphism to shape `P`".)
 
@@ -318,7 +299,7 @@ where $\eta^* : \text{El}(P) \to \text{El}(Q)$ is the **induced map on points**,
 
 This interpretation clarifies the existing structure:
 
-- **`ReindexAction`** is not new algebra; it is the **contravariance of the action `act`** (from [graded_prop.md](#references)) made explicit via representability. Every reindexing is a precomposition in the index category `D`.
+- **`ReindexAction`** is not new algebra; it is the **contravariance of the action `act`** (from [graded_prop.md](#7-references)) made explicit via representability. Every reindexing is a precomposition in the index category `D`.
 - **Affine index arithmetic** (e.g., $i \mapsto 2i+1$) is a **restricted class of `D`-morphisms**, particularly when `D = St` (the spatial index PROP). With `mapEl` and the relevant joint-monicity/extensionality theorem, reindexings can be classified by their action on points.
 
 #### Applicative lifting and distributivity
@@ -337,21 +318,21 @@ Consequently:
 
 #### Temporal grading as directed folding
 
-The `TemporalGraded` mixin adds **causality**: output at time `t` depends only on times `≤ t`. This is a special case of the `D`-graded structure when the index category `D` is enriched with **directed structure** (see [See References](#7-references) in category theory literature). Categorically:
+The `TemporalGraded` mixin adds **causality**: output at time `t` depends only on times `≤ t`. This is a special case of the `D`-graded structure when the index category `D` is enriched with **directed structure** (see [References](#7-references) in category theory literature). Categorically:
 
-1. The **temporal axis** `L` is a **directed index object** in `D`, typically isomorphic to the finite ordinal $[0..N]$ with a **prefix order** (or **interval-order morphisms** in standard terminology). In [graded_prop.md](#references), this corresponds to a distinguished temporal color in the index PROP.
+1. The **temporal axis** `L` is a **directed index object** in `D`, typically isomorphic to the finite ordinal $[0..N]$ with a **prefix order** (or **interval-order morphisms** in standard terminology). In [graded_prop.md](#7-references), this corresponds to a distinguished temporal color in the index PROP.
 
-2. A **scan** is not a pointwise operation along `L`; it is a **finite fold** / **catamorphism** over the directed structure. Formally (from [See References](#7-references)), it is a morphism out of the initial algebra of the prefix-indexed functor, encoding stepwise iteration with feedback.
+2. A **scan** is not a pointwise operation along `L`; it is a **finite fold** / **catamorphism** over the directed structure. Formally (from [References](#7-references)), it is a morphism out of the initial algebra of the prefix-indexed functor, encoding stepwise iteration with feedback.
 
 3. The **lift-fold distributivity law** states
    $$[\text{Scan}, P] \cong \text{Scan}([\text{step}, P])$$
-   for `P` orthogonal to the temporal axis `L`. This is a **Beck-Chevalley / Fubini law** (see [graded_prop.md §3](#references)) on the **grading fibration** $C \to D$: the action and folding commute when dimensions are independent. This is not a coincidence but a consequence of the categorical structure.
+   for `P` orthogonal to the temporal axis `L`. This has the **shape of a Beck-Chevalley / Fubini law** (see [graded_prop.md §3](#7-references)) on the **grading fibration** $C \to D$: the action and folding commute when dimensions are independent. (This is an analogy that motivates the proof target, not a claim that the LeanNCD scan law is *literally* an instance of Beck-Chevalley — establishing that would itself be work; see the scope note under [Reformulated view](#reformulated-view-naperian-d-graded-props).)
 
 The constraint that **no morphism can depend on future indices** is formalized as: only **monotone / prefix-respecting `D`-morphisms** are allowed along temporal axes. (A prefix-respecting morphism maps $[0..s]$ into $[0..s']$ for any `s`, preserving causality.) This causality constraint **cannot be expressed purely pointwise**; it requires the full directed structure of the grading fibration.
 
 #### Broadcast generation as applicative normal form
 
-The **broadcast-generation axiom** from [graded_prop.md §3](#references) states that every morphism in the **broadcastable fragment** of `C` factors as:
+The **broadcast-generation axiom** from [graded_prop.md §3](#7-references) states that every morphism in the **broadcastable fragment** of `C` factors as:
 $$g = [f_{\text{base}}, P] ; \rho$$
 where $\rho$ is a **reindexing alignment** (a sequence of precompositions in `D`) and $[f_{\text{base}}, P]$ is **pointwise lifting** of a base morphism $f_{\text{base}}$. This factorization is unique up to equivalence in the broadcastable fragment.
 
@@ -359,35 +340,51 @@ Categorically, this says:
 
 > The **broadcastable fragment** is the **free applicative / reindexing completion** of the base fragment.
 
-This is a **normal-form theorem** (following [Plotkin & Power 2003](#references) on algebraic computational effects and normal forms): morphisms are **determined by their pointwise action on evaluations**. The points $p \in \text{El}(P)$ and evaluation transformations $\text{ev}_p$ form a **dense family** (in the sense of [MacLane & Moerdijk](#references), a separating family in category-theoretic terms), so two morphisms that agree on all pointwise evaluations are equal once `naperian_jointly_monic` is available. This relies on representability or a broadcast-generation normal form; it does not follow from strong monoidality of `El` alone.
+This is a **normal-form theorem** (following [Plotkin & Power 2003](#7-references) on algebraic computational effects and normal forms): morphisms are **determined by their pointwise action on evaluations**. The points $p \in \text{El}(P)$ and evaluation transformations $\text{ev}_p$ form a **dense family** (in the sense of [MacLane & Moerdijk](#7-references), a separating family in category-theoretic terms), so two morphisms that agree on all pointwise evaluations are equal once `naperian_jointly_monic` is available. This relies on representability or a broadcast-generation normal form; it does not follow from strong monoidality of `El` alone.
 
 #### Reformulated view: Naperian D-graded PROPs
 
 A cleaner categorical statement integrates all the pieces:
 
-> A **Naperian D-graded colored PROP** is a D-graded colored PROP (as defined in [graded_prop.md](#references)) equipped with:
+> A **Naperian D-graded colored PROP** is a D-graded colored PROP (as defined in [graded_prop.md](#7-references)) equipped with:
 > 1. A **finite, strong-monoidal point functor** $\text{El} : D \to \mathsf{FinSet}$ with $\text{El}(I_D) = \{*\}$. (The point functor must satisfy $\text{El}(P \otimes Q) \cong \text{El}(P) \times \text{El}(Q)$, with associativity and unit coherence.)
 > 2. A separate **representability assumption** for lifted families: `NaperianFamily.lookup`/`tabulate` witness `F(X ⊛ P) ≃ (El P → F X)`. This is not derived from `NaperianAxis` or strong monoidality.
-> 3. **Jointly separating lifted evaluations** (`naperian_jointly_monic`): For lifted objects `X ⊛ P`, the evaluation transformations $\text{ev}_p$ (for $p \in \text{El}(P)$) form a separating family. This is not the same as full **(Elem-C)** from [graded_prop.md (Def 3.2)](#references), which separates arbitrary `C`-morphisms by `C`-points.
-> 4. **Reindexings by precomposition**: For $\eta : P \to Q$ in `D`, reindexing $[X, \eta]$ is defined as postcomposition by the induced map `mapEl η : El(P) → El(Q)` on points, i.e., $[X, \eta](x)(p) = x(\text{mapEl}(\eta)(p))$. This is the contravariance of the action `act` from [graded_prop.md (Def 3.1.2)](#references), now indexed explicitly by elements.
-> 5. **Reduction/fold as Kan extension**: Contractions are not pointwise; they are computed as **left Kan extensions** (or catamorphisms, for temporal structure) along index projections. This gives the Beck-Chevalley proof target and makes the lift-fold distributivity from [graded_prop.md](#references) a theorem of category theory once the required Kan-extension structure is supplied.
+> 3. **Jointly separating lifted evaluations** (`naperian_jointly_monic`): For lifted objects `X ⊛ P`, the evaluation transformations $\text{ev}_p$ (for $p \in \text{El}(P)$) form a separating family. This is not the same as full **(Elem-C)** (the elementality axiom of [graded_prop.md §3.2](#7-references); Def 3.2 there is the *Weave*, not (Elem-C)), which separates arbitrary `C`-morphisms by `C`-points.
+> 4. **Reindexings by precomposition**: For $\eta : P \to Q$ in `D`, reindexing $[X, \eta]$ is defined as postcomposition by the induced map `mapEl η : El(P) → El(Q)` on points, i.e., $[X, \eta](x)(p) = x(\text{mapEl}(\eta)(p))$. This is the contravariance of the action `act` from [graded_prop.md (Def 3.1.2)](#7-references), now indexed explicitly by elements.
+> 5. **Reduction/fold as Kan extension**: Contractions can be *read as* **left Kan extensions** (or catamorphisms, for temporal structure) along index projections. This framing suggests the Beck-Chevalley proof target for lift-fold distributivity — but see the scope note below: this is intuition, not a scheduled construction. LeanNCD's contraction is a concrete `foldl`, and proving it equals a Kan extension is itself substantial work that no milestone currently funds.
 
 Under this definition:
 
 - `NaperianAxis` is the **data of a finite index object** with **explicit point enumeration** (realized by the point functor `El`) and coherent maps on points.
 - `BroadcastJoin`, `ReindexAction`, and `PointwiseLift` require their own data/laws or concrete derivations from the chosen action and alignment strategy; they are not consequences of strong monoidality alone.
-- `AxisReduce` encodes **left Kan extensions**; `TemporalGraded` adds **directed temporal structure** with monotone-morphism restriction (a constraint on allowed reindexings).
+- `AxisReduce` is *described* by **left Kan extensions**; `TemporalGraded` adds **directed temporal structure** with monotone-morphism restriction (a constraint on allowed reindexings).
 - The **compiler pipeline becomes an enforcer** of applicative/representability laws: each pass verifies that operations respect strong monoidality, representability, and the Naperian separating family.
 
-#### Benefits of this categorical clarity
+> **Scope of formalization commitment (framing vs. structures we will build).** Not all of the
+> categorical language above is on the critical path to reducing sorries, and the document should
+> not be read as a commitment to formalize all of it. We separate:
+>
+> - **Load-bearing — will be built and proved against:** `NaperianAxis` (finite point functor
+>   `El` with strong-monoidal coherence), `NaperianFamily` (`lookup`/`tabulate`), the
+>   `ev_p`/`naperian_jointly_monic` separating family, and typed `StMatP` reindexing. These
+>   directly gate the projected proof savings.
+> - **Vocabulary/framing only — adopted for understanding, NOT scheduled as Lean constructions:**
+>   the Kan-extension reading of `AxisReduce`, the Beck–Chevalley/Fubini reading of scan, the
+>   free-applicative-completion reading of `broadcast_gen`, and the dense-family/topos language.
+>   These are correct and useful for reasoning, but building, e.g., a left-Kan-extension-based
+>   contraction in Lean and proving it equal to the current `foldl` is a large amount of Mathlib
+>   machinery for an operation the evaluator already performs directly. Unless a concrete milestone
+>   explicitly funds one of these, the contraction/scan proofs should target the **existing
+>   operational definitions**, using the categorical reading only as intuition.
 
-1. **Soundness is structured** (from [See References](#7-references)): If mixins respect strong monoidality, its coherence laws, and the separate representability assumptions, then **coherence isomorphisms** ($\delta, \delta_0, \upsilon, \alpha$) from [See References](#7-references) have standard categorical proof targets. Constructor-level quotient and extensionality proofs are still required in the Lean implementation.
+#### Why the categorical framing helps
 
-2. **Proof obligations shift** (from direct application to categorical library): Rather than proving individual lemmas about reindexing or pointwise lifting, Lean implementations **inherit theorems from the categorical library** (e.g., [See References](#7-references) for monoidal functor properties). This significantly reduces the sorry-count.
+The practical payoff (and its caveats and *projected* — not measured — sorry counts) is collected in [§6](#6-payoff-benefits-for-users-maintainers-and-formalization); this note records only *why the framing* buys those things:
 
-3. **Extension is systematic** (from functor extension principles): Adding a new type of graded operation (e.g., grouped reductions, higher-rank liftings) becomes an exercise in **extending the point functor or index category**, not ad-hoc axiom invention. The categorical framework constrains the design space and ensures consistency.
-
-4. **Dependent types align with structure** (from [graded_prop.md](#references)): Type-level ranks (as in `StMatP dom cod`) **directly encode the fiber structure** of the grading; invariants become **unrepresentable violations** (rejected by the type system), not proof obligations. This is a consequence of internalizing the contravariant action into dependent types.
+1. **Coherence isos get standard proof targets.** If the mixins respect strong monoidality and the separate representability assumptions, then $\delta, \delta_0, \upsilon, \alpha$ have the canonical categorical proof shapes. Constructor-level quotient and extensionality proofs are still required in Lean — the framing supplies the *target*, not the proof.
+2. **Some obligations move to reusable library facts.** Instead of re-proving reindexing/pointwise-lifting lemmas per morphism, Lean can lean on monoidal-functor properties (see [§5.1](#51-haskell--lean-translation-and-implementation-patterns) for which Mathlib structures actually exist). How much this reduces the sorry count is a hypothesis to validate, not a delivered result — see [§6](#6-payoff-benefits-for-users-maintainers-and-formalization).
+3. **Extension is systematic.** A new graded operation (grouped reductions, higher-rank liftings) becomes an exercise in extending the point functor or index category, not inventing ad-hoc axioms.
+4. **Dependent types encode the fibration.** Type-level ranks (as in `StMatP dom cod`) directly encode the grading's fiber structure, so dimension/rank invariants become unrepresentable violations rather than proof obligations.
 
 ---
 
@@ -443,28 +440,8 @@ Under this definition:
 6. **Temporal safety**  
    Base/recur alignment, no future reads, single-scan-axis coupling unless explicitly supported.
 
-1. **Reindex fusion**  
-   `reindex η₂ (reindex η₁ x)  =>  reindex (η₁ ∘ η₂) x`.
-
-2. **Pointwise-reindex commutation**  
-   For true pointwise ops: `map f (reindex η x)  =>  reindex η (map f x)`.
-
-3. **Lift associativity normalization**  
-   `lift P (lift Q f)  =>  lift (Q ⊗ P) f`.
-
-4. **Broadcast normalization**  
-   normalize equivalent `degree` constructions to one canonical `BroadcastJoin` normal form.
-
-5. **Reduction simplifications**  
-   singleton/empty-axis fold eliminations where shape proves trivial contraction.
-
-6. **Scan batching distributivity**  
-   for batch axis independent of temporal axis: `lift P (scan step)  ≅  scan (lift P step)`.
-
-7. **Softmax constant-drop (existing DSL behavior, formalized)**  
-   constants independent of norm axis may be removed before softmax.
-
-These should start as verifier-preserving rewrites, then become optimization passes.
+(The law-backed *rewrites* these checks enable — reindex fusion, broadcast normalization, scan
+batching, etc. — are listed once in [§4.1](#41-law-backed-rewrites-and-optimizations).)
 
 ---
 
@@ -532,26 +509,33 @@ When implementing the Naperian/applicative mixins in Lean, the following table m
 
 ### 5.1 Haskell ↔ Lean translation and implementation patterns
 
+> **Verify module paths before relying on them.** The paths below were checked against the
+> repo's pinned toolchain (`leanprover/lean4:v4.30.0` + the manifest-pinned Mathlib) on
+> 2026-07-01. Two Haskell classes — `Representable`/`Log` and `Foldable` — have **no
+> Mathlib equivalent** and must be defined locally; do not assume Mathlib supplies them. The
+> "inherit theorems from the categorical library" payoff (§6) is contingent on the structures
+> that *do* exist (monoidal functors, `Equiv`, `Traversable`), not on these two.
+
 | Haskell concept | Haskell signature | Lean equivalent | Location | Implementation note |
 |---|---|---|---|---|
 | **Applicative** | `class Applicative f` | `class Applicative (f : Type → Type)` | `Mathlib.Control.Applicative` | Base class for all lifting operations |
-| `pure` | `pure : a → f a` | `Applicative.pure` or `pure` | `Mathlib.Control.Applicative` | Replication/broadcasting in our context |
-| `<*>` | `(<*>) : f (a → b) → f a → f b` | `Applicative.seq` or `<*>` | `Mathlib.Control.Applicative` | Pointwise binary composition |
-| `liftA2` | `liftA2 : (a → b → c) → f a → f b → f c` | `Applicative.liftA2` or `liftA2` | `Mathlib.Control.Applicative` | Used in `PointwiseLift` implementation |
-| **Representable/Naperian** | `class Representable f where type Log f; ...` | `class Representable (f : Type u → Type v)` | `Mathlib.Data.Functor.Repr` | **Dependent optimization:** point types can live near axes, but representability still needs explicit `lookup`/`tabulate` laws |
-| `lookup` | `lookup : Log f → f a → a` | `Representable.repr` (inverse) | --- | Evaluation at a point; becomes type-level for `Axis` |
-| `tabulate` | `tabulate : (Log f → a) → f a` | `Representable.unrepr` | --- | Reconstruction; supplied by `NaperianFamily`, not by point enumeration alone |
-| **Traversable** | `class Traversable t` | `class Traversable (t : Type u → Type u)` | `Mathlib.Data.Traversable.Basic` | Used in reduction/fold over axes |
-| `traverse` | `traverse : Applicative f => (a → f b) → t a → f (t b)` | `Traversable.traverse` | `Mathlib.Data.Traversable.Basic` | Generalize pointwise ops to all traversable shapes |
-| **Foldable** | `class Foldable t` | `class Foldable (t : Type u → Type v)` | `Mathlib.Data.Functor.Foldable` | Base for reductions |
-| `fold` | `fold : Monoid a => t a → a` | `Foldable.fold` | `Mathlib.Data.Functor.Foldable` | Contract over monoidal aggregation |
-| `foldl` | `foldl : (a → b → a) → a → t b → a` | `Foldable.foldl` | `Mathlib.Data.Functor.Foldable` | Used in scan iteration |
-| `foldr` | `foldr : (a → b → b) → b → t a → b` | `Foldable.foldr` | `Mathlib.Data.Functor.Foldable` | Reverse-order reduction (for certain scan strategies) |
-| **Array transpose** | `transpose :: f (g a) → g (f a)` | `Matrix.transpose : Matrix m n α → Matrix n m α` | `Mathlib.Data.Matrix.Transpose` | **Dependent optimization:** build from `Representable` isomorphism; encode axis permutation in type |
+| `pure` | `pure : a → f a` | `Applicative.pure` or `pure` | core Lean (`Pure`) | Replication/broadcasting in our context |
+| `<*>` | `(<*>) : f (a → b) → f a → f b` | `Seq.seq` or `<*>` | core Lean (`Seq`) | Pointwise binary composition |
+| `liftA2` | `liftA2 : (a → b → c) → f a → f b → f c` | `liftA2` | core Lean (prelude) | Used in `PointwiseLift` implementation |
+| **Representable/Naperian** | `class Representable f where type Log f; ...` | **No Mathlib class** — define locally | (local) | Mathlib's `CategoryTheory.RepresentedBy`/Yoneda captures *categorical* representability, but NOT the Haskell `Representable` with `Log`/`index`/`tabulate`. That interface must be defined in `LeanNCD/Core/Naperian.lean`. |
+| `lookup` | `lookup : Log f → f a → a` | local field on `NaperianFamily` | (local) | Evaluation at a point; becomes type-level for `Axis` |
+| `tabulate` | `tabulate : (Log f → a) → f a` | local field on `NaperianFamily` | (local) | Reconstruction; supplied by `NaperianFamily`, not by point enumeration alone |
+| **Traversable** | `class Traversable t` | `class Traversable (t : Type u → Type u)` | `Mathlib.Control.Traversable.Basic` | Used in reduction/fold over axes |
+| `traverse` | `traverse : Applicative f => (a → f b) → t a → f (t b)` | `Traversable.traverse` | `Mathlib.Control.Traversable.Basic` | Generalize pointwise ops to all traversable shapes |
+| **Foldable** | `class Foldable t` | **No Mathlib class** — fold via `Traversable`/`List` | `Mathlib.Control.Fold`, `Mathlib.Data.List.Fold` | Mathlib has no `Foldable` class; reductions go through `Traversable` folds, `Control.Fold`, or plain `List.foldl`. Do not cite a `Foldable` class. |
+| `fold` | `fold : Monoid a => t a → a` | `Traversable`/`Control.Fold` helpers | `Mathlib.Control.Fold` | Contract over monoidal aggregation |
+| `foldl` | `foldl : (a → b → a) → a → t b → a` | `List.foldl` / `Traversable` | core Lean / `Mathlib.Control.Fold` | Used in scan iteration |
+| `foldr` | `foldr : (a → b → b) → b → t a → b` | `List.foldr` / `Traversable` | core Lean / `Mathlib.Control.Fold` | Reverse-order reduction (for certain scan strategies) |
+| **Array transpose** | `transpose :: f (g a) → g (f a)` | `Matrix.transpose : Matrix m n α → Matrix n m α` | `Mathlib.Data.Matrix.Basic` | **Dependent optimization:** build from the local representability isomorphism; encode axis permutation in type |
 | **Isomorphism** | `(≅) : a → b` (type equivalence) | `Equiv : α ≃ β` or `Iso` in `CategoryTheory` | `Mathlib.Logic.Equiv.Basic` or `Mathlib.CategoryTheory.Iso` | Used for broadcast joins and reindex invertibility |
 | **Monoidal functor** | `class MonoidalFunctor` | `class MonoidalFunctor` | `Mathlib.CategoryTheory.Monoidal.Functor` | Lift functor preserves monoidal structure |
-| **Natural transformation** | `(⇒) : f → g` (between functors) | `Nat.Trans : F ⟹ G` | `Mathlib.CategoryTheory.Functor` | `ev_p` slices and evaluation transformations |
-| **Symmetric monoidal** | `class SymmetricMonoidal` | `class SymmetricMonoidalCategory` | `Mathlib.CategoryTheory.Monoidal.Symmetric` | Permutation laws on colors |
+| **Natural transformation** | `(⇒) : f → g` (between functors) | `NatTrans : F ⟹ G` | `Mathlib.CategoryTheory.NatTrans` | `ev_p` slices and evaluation transformations |
+| **Symmetric monoidal** | `class SymmetricMonoidal` | `class SymmetricCategory` | `Mathlib.CategoryTheory.Monoidal.Braided.Basic` | Permutation laws on colors |
 | **Free monoid** | `Free f` or `[a]` | `List α` (linear free monoid) or `FreeMonoid α` | `Mathlib.Data.List.Basic` or `Mathlib.GroupTheory.FreeMonoid` | Object lists in colored PROP |
 
 ### 5.2 Mixin-specific implementation strategies (with dependent-type optimization)
@@ -561,8 +545,7 @@ When implementing the Naperian/applicative mixins in Lean, the following table m
 The core typeclass (in `LeanNCD/Core/Naperian.lean`):
 ```lean
 class NaperianAxis (D : Type) [ColoredPROP D] where
-  El : D → Type
-  finite : ∀ P : D, Fintype (El P)
+  El : D → Type   -- abstract point TYPE (no finiteness here — see note below)
   point_hom : ∀ P : D, El P → SmallCategory.hom (ColoredPROP.unit : D) P
   mapEl : ∀ {P Q : D}, SmallCategory.hom P Q → El P → El Q
   mapEl_id : ∀ P (p : El P), mapEl (SmallCategory.id P) p = p
@@ -590,11 +573,25 @@ class NaperianAxis (D : Type) [ColoredPROP D] where
     Equiv.prodPUnit _
 ```
 
-`El P` is the finite set of coordinate tuples of shape `P`. `point_hom` bridges to the existing `ev_p` API (converting a finite coordinate into a global element `I_D → P`), and `mapEl` records the functorial action of `D`-morphisms on finite points. `lookup` and `tabulate` — the Naperian isomorphism `F(X ⊛ P) ≅ (El(P) → F(X))` — live in a separate `NaperianFamily` class, keeping `NaperianAxis` focused on the index category `D` only. This requires an additional representability assumption — that the lifted functor `act(−, P)` is represented by `El P` — which is not a consequence of strong monoidality alone. This assumption is encoded in `NaperianFamily` as explicit `lookup`/`tabulate` fields.
+`El P` is the *type* of coordinate tuples of shape `P`. **Finiteness is deliberately NOT a field
+of `NaperianAxis`** (an earlier draft had `finite : ∀ P, Fintype (El P)`; it was removed). The
+reason is foundational: `Axis.size` is symbolic (`Numeric`/`SizeExpr`) at compile time and does
+not determine a `Fintype`, so a monolithic class carrying `Fintype` could not be instantiated for
+`StObj` during symbolic compilation. Finiteness therefore lives in a **separate, post-solver**
+class (`AxisPointData`/`FiniteNaperian`), supplied only once `inferAxisSizes` yields concrete
+extents. See [NaperianTypingIntegrationPlan.md §3.2](NaperianTypingIntegrationPlan.md) for the
+symbolic-vs-concrete class split. `point_hom` bridges to the existing `ev_p` API (converting a
+coordinate into a global element `I_D → P`), and `mapEl` records the functorial action of
+`D`-morphisms on points. `lookup` and `tabulate` — the Naperian isomorphism
+`F(X ⊛ P) ≅ (El(P) → F(X))` — live in a separate `NaperianFamily` class, keeping `NaperianAxis`
+focused on the index category `D` only. This requires an additional representability assumption —
+that the lifted functor `act(−, P)` is represented by `El P` — which is not a consequence of
+strong monoidality alone. This assumption is encoded in `NaperianFamily` as explicit
+`lookup`/`tabulate` fields.
 
 **Important:** the existing `Axis` structure (`name : Option String; size : Numeric`) does not carry point/enumeration data, because `size : Numeric` is symbolic and cannot determine a `Fintype` alone. The `NaperianAxis StObj` instance is provided via an auxiliary `AxisPointData` typeclass in `LeanNCD/Instances/StNaperian.lean` that supplies concrete point types externally — without mutating `Axis` or breaking the existing `StMat`, DSL, or quotient code. See [NaperianTypingIntegrationPlan.md §3](NaperianTypingIntegrationPlan.md) for the full instance code.
 
-Benefit: `El P` is a type-level invariant; finiteness is enforced by `Fintype` rather than bundled as a separate proof; the `strong_monoidal` fields ensure the point functor commutes coherently with the monoidal structure of `D`.
+Benefit: `El P` is a type-level invariant and the `strong_monoidal` fields ensure the point functor commutes coherently with the monoidal structure of `D`. Finiteness (`Fintype (El P)`) is enforced by the separate post-solver class rather than bundled here, so the symbolic instance stays constructible.
 
 ---
 
@@ -636,15 +633,24 @@ class ReindexAction (D C : Type) [ColoredPROP D] [ColoredPROP C]
 
 Dependent-type optimization (encode codomain rank):
 ```lean
--- StMatP is typed so codomain rank is enforced at construction
-def StMatP (from to : StObj) : Type :=
-  {coeffs : Matrix (Fin to.length) (Fin from.length) Coeff //
-   -- Invariant: to.length = rows, from.length = cols, built into the type}
+-- StMatP is typed so domain/codomain rank is enforced at construction.
+-- (`from` is a reserved keyword in Lean 4, so we use `dom`/`cod`.)
+-- Rows are indexed by the codomain, columns by the domain — the rank
+-- invariant is carried by the Matrix index types, so no side predicate is needed:
+def StMatP (dom cod : StObj) : Type :=
+  Matrix (Fin cod.length) (Fin dom.length) Coeff
 
 def reindex (η : StMatP P Q) {X : C} : X ⊛ Q → X ⊛ P :=
   -- Type signature makes contravariance and codomain rank implicit
   sorry
 ```
+
+> **Note — three illustrative `StMatP` lenses, one authoritative form.** This document shows
+> `StMatP` two ways for pedagogy: the *indexed-function* view (`structure … where lookup : …`,
+> under [Intuition](#intuition-behind-why-this-works)) and the *dependent-matrix* view (above).
+> Neither is the real definition — the executable code uses a `structure` with a `coeffs` field
+> (see [NaperianTypingIntegrationPlan.md §3.5](NaperianTypingIntegrationPlan.md)). Treat both here
+> as lenses on the same object, not literal source.
 
 Benefit: A pass that produces `η : StMatP P Q` *statically guarantees* codomain rank; no runtime check needed.
 
@@ -860,9 +866,38 @@ This framework directly reduces the formalization burden by restructuring proof 
 - **Better test design:** tests can target law-level properties (e.g., lift associativity normalization) in addition to example outputs.
 - **Easier to document:** the framework provides a canonical vocabulary for axis operations, making both user docs and internal design docs clearer.
 
-#### Measurable proof-effort reduction
+#### Circularity hazard and a required early spike
 
-Naperian typing restructures proof obligations by encoding invariants in types. Analysis of LeanNCD's open proof obligations (from `SORRY_INVENTORY.md`, Milestones A–F) projects:
+The entire payoff routes through **`naperian_jointly_monic`** (the statement that lifted
+`P`-indexed families are separated by their coordinate evaluations `ev_p`). This lemma has a
+known **circularity hazard**: it is tempting to prove it *from* `broadcast_gen`, but
+`broadcast_gen` is itself one of the obligations we hope Naperian typing helps discharge — so if
+`naperian_jointly_monic` is used as an input to `broadcast_gen`, neither is actually proved.
+
+Because so much depends on this lemma, it must be **de-risked before the typeclass scaffolding is
+built**, not discovered late. The integration plan schedules this as
+[Milestone 1.5 — circularity spike](NaperianTypingIntegrationPlan.md): establish an
+acyclic proof route for `naperian_jointly_monic` (either a direct proof over `St` evaluations
+independent of `broadcast_gen`, or an explicit statement of the extra assumption it requires)
+*before* committing to Milestones 2+. If no acyclic route exists, the projected reduction below
+does not hold and the plan should stop at the minimum viable integration.
+
+#### Projected proof-effort reduction (a hypothesis to validate, not a measured result)
+
+**Read this table as a projection, not a measurement.** The numbers below are *estimates* of
+how the open proof obligations (from `SORRY_INVENTORY.md`, Milestones A–F) *could* shift IF the
+enabling structure is built and the key lemma holds. The baseline counts (the "~16–20" of
+milestone-relevant obligations — §5.5 rounds this to 16, this table to ~18–20; reconcile against
+the *current* `SORRY_INVENTORY.md` before quoting either, since the raw `sorry` total across the
+repo is larger and drifts) are indicative, not audited. Almost all of the projected savings sit in
+the first row, and that row's savings are gated on two things that are **not yet done**: the
+object-level `act` functor being defined, and `naperian_jointly_monic` being provable without
+circularity (see [the circularity note](#circularity-hazard-and-a-required-early-spike) and
+[NaperianTypingIntegrationPlan.md §5, Milestone 1.5](NaperianTypingIntegrationPlan.md)). Dependent
+types reliably remove the *easy* sorries (dimension/rank checks); they do **not** remove the hard
+ones (quotient-`Br` action, coherence isos, `broadcast_gen`). Treat the headline percentage as a
+claim to be confirmed or refuted at Milestone 2, and do not cite it as an achieved benefit until
+the enabling spike has landed.
 
 | Proof family | Current | Projected | Impact |
 |---|---:|---:|---|
@@ -870,9 +905,9 @@ Naperian typing restructures proof obligations by encoding invariants in types. 
 | Reindex identity/composition | scattered | ~0 | Dependent rank eliminates dimension checks |
 | Weave uniqueness (`weave_unique`) | 1 | 0–1 | `weave_unique_naperian` (new theorem over `St` evaluations) avoids `brCancelPoint`; existing `weave_unique` via `Elemental Br` path unchanged |
 | Scan/temporal laws | ~0 current | 0 future | Type-level causality barrier |
-| Bridge/compilation (`E2b` bridge) | 6 | 1–2 | Well-formedness by construction |
+| Bridge/compilation (`E2b` bridge) | 6 | 1–2 | Well-formedness *by construction* in a hypothetical typed redesign. **Caveat:** the in-flight `compile_wellFormed` effort (`2026-06-26-multioutput-impl-plan.md`) is currently proving well-formedness is a *substantial* obligation, not free — so this row assumes a redesign that has not happened and is the most speculative in the table. |
 | Point cancellation (`brCancelPoint`) | 1 | 0–1 | NbE/semantic Br rebuild; Naperian makes it less critical if consumers switch to `weave_unique_naperian` via `naperian_jointly_monic` (distinct from (Elem-C): this separates lifted morphisms by D-point evaluations, not C-morphisms by C-points) |
-| **Subtotal** | **~18–20** | **3–6** | **estimated 50–70% reduction, contingent on `act` being defined and `naperian_jointly_monic` being provable without circularity** |
+| **Subtotal** | **~18–20** | **3–6** | **PROJECTED 50–70% reduction — unvalidated. Holds only if (a) the object-level `act` is defined and (b) the Milestone 1.5 circularity spike gives an acyclic proof of `naperian_jointly_monic`. If either fails, expect little net reduction (the easy dimension/rank sorries still go, but they are few).** |
 
 **Key proof simplifications:**
 

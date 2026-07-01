@@ -20,6 +20,15 @@ That separation is required because the current axis size story is symbolic (`Nu
 `SizeExpr`) during compilation, while the affine solver learns concrete extents only when
 runtime input tensor shapes are available.
 
+> **Prerequisite / sequencing.** Do not start this in parallel with the active multi-output
+> `BrBase` + `compile_wellFormed` effort (`docs/superpowers/plans/2026-06-26-multioutput-impl-plan.md`).
+> This plan touches the categorical core and, near-term, *adds* surface area before removing
+> sorries. Begin with the [minimum viable integration](#minimum-viable-integration) once the
+> well-formedness proof lands. The projected proof savings in
+> [NaperianTyping.md §6](./NaperianTyping.md) are a **hypothesis to validate at Milestone 2**,
+> and are gated on the [Milestone 1.5 circularity spike](#milestone-15--circularity-spike-gate)
+> succeeding — not a committed deliverable.
+
 ## 1. Current pipeline and staging constraint
 
 Today the compile/eval split is already:
@@ -125,14 +134,33 @@ and then build:
 - product/append point data for `StObj := List Axis`,
 - `NaperianAxis StObj`.
 
-Important staging rule:
+**Foundational constraint — split finiteness out of the symbolic class.** As written in
+[NaperianTyping.md §5.2](./NaperianTyping.md), `NaperianAxis` carries `finite : ∀ P, Fintype (El P)`
+as a *class field*. That field **cannot be constructed at the symbolic layer**: `Axis.size` is
+`Numeric`/`SizeExpr` and does not determine a `Fintype`. So a single monolithic `NaperianAxis`
+instance for `StObj` is impossible before size solving — the plan and the paper's class definition
+are in direct tension unless the class is split. The required resolution:
 
-- this file may define the **shape** of the instance and the pointwise laws,
-- but any path that needs actual finite point sets for runtime evaluation must be supplied
-  only after extents are concretely known.
+- **`NaperianAxis` (symbolic, constructible now):** carries only the index-category structure —
+  `El` as an abstract point *type*, `mapEl`, `point_hom`, and the strong-monoidal coherence
+  equivalences. **No `Fintype` field.**
+- **`AxisPointData` / a separate `FiniteNaperian` class (concrete, post-solver):** supplies
+  `Fintype El` and the enumerable coordinate data, instantiated only after `inferAxisSizes` gives
+  concrete extents.
 
-So the instance should be written to support **symbolic compilation first**, with concrete
-point realization deferred to the post-solver stage.
+```lean
+-- concrete layer only; NOT a field of the symbolic NaperianAxis
+class AxisPointData (a : Axis) where
+  El : Type
+  finite : Fintype El
+  -- bridge from concrete points to `I_D ⟶ a`
+```
+
+Then build: point data for one axis → product/append point data for `StObj := List Axis` → the
+concrete finite instance. The symbolic `NaperianAxis StObj` instance is what compilation uses;
+the concrete finite instance is realized in the post-solver stage (§3.7). **Action item:** before
+Milestone 1, adjust the `NaperianAxis` class in `NaperianTyping.md §5.2` to remove the `finite`
+field (move it to the concrete layer), so the symbolic instance is actually constructible.
 
 ### 3.3 `LeanNCD/DSL/Pipeline/Structural.lean`
 
@@ -332,6 +360,26 @@ That separation is cleaner both logically and implementation-wise.
 - add `Core/Naperian.lean`,
 - state the mixin classes and key laws,
 - no runtime point enumeration yet.
+
+### Milestone 1.5 — circularity spike (GATE)
+
+**This is a gate, not optional.** Before building any typeclass scaffolding on top of it,
+establish an **acyclic** proof route for `naperian_jointly_monic` (lifted `P`-indexed families
+are separated by their `ev_p` coordinate evaluations). The hazard: proving it *from*
+`broadcast_gen` while also using it to prove `broadcast_gen` proves neither.
+
+Concretely, in this spike:
+
+- attempt a **direct** proof over `St` evaluations that does **not** reference `broadcast_gen`
+  (e.g. via the finite point enumeration of `El` and function extensionality on coordinates), OR
+- if no direct proof is found, write down the **explicit extra assumption** it requires and
+  confirm that assumption does not itself depend on `broadcast_gen`.
+
+**Exit criterion:** either an acyclic proof/skeleton of `naperian_jointly_monic`, or a precise
+statement of the assumption it needs. **If neither is achievable, stop at the
+[minimum viable integration](#minimum-viable-integration)** — the projected proof savings in
+[NaperianTyping.md §6](./NaperianTyping.md) do not hold, and Milestones 2+ should not be funded on
+the expectation of them.
 
 ### Milestone 2 — Symbolic affine elaboration
 
