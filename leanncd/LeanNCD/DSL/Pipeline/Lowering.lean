@@ -65,10 +65,8 @@ def splitNonlins (sp : ScanProgram) : FreshM LinearProgram := do
 
 Dead-code elimination by backward reachability from the program's outputs. A statement is
 kept iff it writes a tensor name that is (transitively) needed to compute an output.
-
-NOTE: a full topological re-sort is NOT performed here — for the §12.1 example programs
-source order already places producers before consumers, so we keep the surviving stmts in
-their original source order. -/
+After DCE, the surviving statements are topologically sorted so producers always precede
+their consumers. -/
 
 /-- Tensor names a ScanStmt writes (its LHS name(s)). -/
 def ScanStmt.writes : ScanStmt → List String
@@ -76,11 +74,64 @@ def ScanStmt.writes : ScanStmt → List String
   | .scan _ _ b r _ => (b.map Stmt.lhsName ++ r.map Stmt.lhsName).eraseDups
   | .scanPre nm _ _ => [nm]
 
+/-- The true output names of a ScanStmt: for `.scan`, names written by BOTH base AND recur
+    (drops `%nl` intermediates that appear in only one side). -/
+def ScanStmt.outputs : ScanStmt → List String
+  | .plain s        => [s.lhsName]
+  | .scan _ _ b r _ => (b.map Stmt.lhsName).filter (fun n => (r.map Stmt.lhsName).contains n)
+  | .scanPre nm _ _ => [nm]
+
 /-- Tensor names a ScanStmt reads. -/
 def ScanStmt.reads : ScanStmt → List String
   | .plain s        => s.readNames
   | .scan _ _ b r _ => (b.flatMap Stmt.readNames ++ r.flatMap Stmt.readNames).eraseDups
   | .scanPre _ _ _  => []
+
+/-! ### Topological sort (stable Kahn's algorithm)
+
+`topoSortFuel` repeatedly emits the first currently-eligible statement — one whose
+internal-read dependencies are all already emitted — scanning `remaining` in source order
+on each pass to get a stable, no-op-on-already-sorted output.
+
+An **internal dependency** is a read name that some stmt in the full list writes.
+**Self-edges** (a stmt's reads ∩ its own writes) are excluded: scan nodes read their own
+state names across iterations, which is not a forward dependency.
+
+Termination: on each recursive call with `fuel > 0`, at least one stmt is emitted (or
+`remaining` is already empty), so the fuel strictly decreases. Setting `fuel := stmts.length`
+is sufficient. Using a `Nat` fuel parameter (rather than `partial`) means Lean accepts the
+definition without a `decreasing_by` proof, and equation lemmas exist for Phase 4. -/
+
+/-- Is `sc` eligible to emit given `emitted` names? Eligible iff every name it reads that
+    is an internal dependency (written by some OTHER stmt in `all`, excluding self-edges)
+    is already in `emitted`. -/
+private def eligible (sc : ScanStmt) (all : List ScanStmt) (emitted : List String) : Bool :=
+  let selfWrites := sc.writes
+  sc.reads.all (fun r =>
+    -- not an internal dep: either a self-edge or not written by any other stmt
+    selfWrites.contains r ||
+    all.all (fun s => s.writes == selfWrites || !s.writes.contains r) ||
+    emitted.contains r)
+
+/-- Fuel-bounded stable Kahn's sort. `all` is the full stmt list (fixed); `remaining` is
+    what's left to emit; `emitted` accumulates written names of already-emitted stmts;
+    `acc` accumulates emitted stmts in order. -/
+def topoSortFuel : Nat → List ScanStmt → List ScanStmt → List String →
+    List ScanStmt → List ScanStmt
+  | 0,    _,   remaining, _,       acc => acc ++ remaining   -- fuel gone: append as-is
+  | _,    _,   [],        _,       acc => acc
+  | n+1,  all, remaining, emitted, acc =>
+      match remaining.findIdx? (fun sc => eligible sc all emitted) with
+      | none   => acc ++ remaining   -- cycle: shouldn't occur in valid DAGs
+      | some i =>
+          let sc   := remaining[i]!
+          let rest := remaining.eraseIdx i
+          topoSortFuel n all rest (emitted ++ sc.writes) (acc ++ [sc])
+
+/-- Topological sort of a list of `ScanStmt`s: producers precede consumers.
+    Stable — already-sorted input is returned unchanged (first-eligible-in-source-order). -/
+def topoSort (stmts : List ScanStmt) : List ScanStmt :=
+  topoSortFuel stmts.length stmts stmts [] []
 
 /-- One backward-reachability pass: add names read by any stmt that writes a live name. -/
 def liveStep (stmts : List ScanStmt) (live : List String) : List String :=
@@ -109,11 +160,14 @@ def schedule (lp : LinearProgram) : FreshM ScheduledProgram := do
   let outputs  := if lastOut.isEmpty then produced.filter (fun n => ¬ read.contains n) else lastOut
   let live := liveFix lp.stmts outputs.eraseDups
   let liveStmts := lp.stmts.filter (fun sc => (sc.writes).any (fun w => live.contains w))
+  let ordered   := topoSort liveStmts
   -- collect the sizes pinned by `axis … = n` decls (UIDs are canonical by this phase).
   let explicitSizes : Std.HashMap UID Nat := lp.decls.foldl (fun m d => match d with
     | .axis ax (some n) => m.insert ax.uid n
     | _                 => m) {}
-  return { decls := lp.decls, stmts := liveStmts, env := lp.env, extNames := lp.extNames,
+  let orderedReads := ordered.flatMap ScanStmt.reads
+  let liveExtNames := lp.extNames.filter (fun nm => orderedReads.contains nm)
+  return { decls := lp.decls, stmts := ordered, env := lp.env, extNames := liveExtNames,
            ctx := lp.ctx, explicitSizes }
 
 /-! ## Phase 8 — `route`
@@ -181,6 +235,45 @@ def idxAxes : IdxExpr → List AxisSpec
   | .shift a _  => [a]
   | .affine _ xs => xs.map (·.2)
 
+/-- The empty-statement sentinel used as a `getD` default for a `ScanStmt` with no representative
+    stmt (a `scanPre` node). Named so `buildStep`/`tensorAxes` callers share one definition. -/
+def emptyStmt : Stmt := .assign "" [] { body := { terms := [] }, nonlin := .identity }
+
+/-- Deduplicate axis specs by uid, keeping the first occurrence in order. Shared by `buildStep`'s
+    `degAxes` and `tensorAxes` so producer (output weave) and consumer (input weave) derive a wire's
+    axes the SAME way — making conjunct 2 hold even for repeated-LHS programs (e.g. `Y[i,i]`). -/
+def dedupByUid (as : List AxisSpec) : List AxisSpec :=
+  as.foldl (fun acc a => if acc.any (fun b => b.uid == a.uid) then acc else acc ++ [a]) []
+
+/-- A stmt's published (retained) output axes, in LHS order (deduplicated by uid) — what a producer
+    emits and a consumer receives. -/
+def tensorAxes (s : Stmt) : List AxisP :=
+  (dedupByUid s.lhsAxes).map (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name))
+
+/-- One representative axis per READ POSITION, for external reads (no producer to publish a type). -/
+def readPosAxis : IdxExpr → AxisP
+  | .axis a      => AxisP.mk (some a.name) (SizeExpr.var a.name)
+  | .shift a _   => AxisP.mk (some a.name) (SizeExpr.var a.name)
+  | .scale _ a   => AxisP.mk (some a.name) (SizeExpr.var a.name)
+  | .affine _ xs => match xs.head? with
+                    | some (_, a) => AxisP.mk (some a.name) (SizeExpr.var a.name)
+                    | none        => AxisP.mk none (SizeExpr.var "_")
+  | .const _     => AxisP.mk none (SizeExpr.var "_")
+
+/-- The contracted (summed-over) axes of a stmt: read axes whose uid is not a retained (LHS) axis. -/
+def stepContracted (s : Stmt) : List AxisSpec :=
+  (s.readFactors.flatMap (fun rf => rf.2.flatMap idxAxes)).filter
+    (fun a => !(s.lhsAxes.map (·.uid)).contains a.uid)
+
+/-- A step's full index space: retained (LHS) axes then contracted axes, deduplicated by uid. -/
+def stepDegAxes (s : Stmt) : List AxisSpec := dedupByUid (s.lhsAxes ++ stepContracted s)
+
+/-- A step's (output) weave over its degree: contracted axes tiled, retained axes fixed. -/
+def stepMkWeave (s : Stmt) : WeaveShapeP :=
+  (stepDegAxes s).map (fun a =>
+    if ((stepContracted s).map (·.uid)).contains a.uid then WeaveSlotP.tiled
+    else WeaveSlotP.fixed (AxisP.mk (some a.name) (SizeExpr.var a.name)))
+
 /-- Express a read coordinate `IdxExpr` as an integer-affine combination of the degree axes
     identified by uids `us` (column order = `us`): returns `(coeff-row, bias)`. -/
 def idxToRow (us : List UID) : IdxExpr → (List Int × Int)
@@ -214,79 +307,162 @@ def ScanStmt.isAffineScan : ScanStmt → Bool
   | .scan _ _ _ _ isAff => isAff
   | _                   => false
 
+/-- PASS-1 helper: assign external-name indices `0,1,…` in first-seen order over reads.
+    Iterates `stmts` in order, then each stmt's `ScanStmt.reads` in order; assigns the next
+    integer the first time a name that `∈ extNames` is seen. -/
+def buildExtIndex (extNames : Finset String) (stmts : List ScanStmt)
+    : Std.HashMap String Nat :=
+  (stmts.foldl (fun (acc : Std.HashMap String Nat × Nat) sc =>
+    sc.reads.foldl (fun (m, cnt) nm =>
+      if decide (nm ∈ extNames) && !m.contains nm then
+        (m.insert nm cnt, cnt + 1)
+      else (m, cnt)) acc) ({}, 0)).1
+
+/-- The stmts that contribute reads/axes to a ScanStmt's step. For `.scan`, the base (initial-state)
+    stmts followed by the recurrence stmts; for `.plain`, the stmt itself; `.scanPre` carries none
+    (its morphism is pre-built). -/
+def ScanStmt.stepStmts : ScanStmt → List Stmt
+  | .plain s        => [s]
+  | .scan _ _ b r _ => b ++ r
+  | .scanPre _ _ _  => []
+
+/-- The read factors that become this step's input wires. For `.scan`, ALL base+recur reads with
+    **self-reads excluded** (a read whose name the step itself writes is the recurrence, internal to
+    the scan generator — not a routing wire); the surviving reads are the initial states (`base`) and
+    per-step inputs (`recur`). For `.plain`, the stmt's reads verbatim (a self-read there is a genuine
+    cycle, left in so the acyclicity guard rejects it). `.scanPre` has none. -/
+def ScanStmt.inputReadFactors (sc : ScanStmt) : List (String × List IdxExpr) :=
+  match sc with
+  | .plain s        => s.readFactors
+  | .scan _ _ b r _ =>
+      let ws := sc.writes
+      (b.flatMap Stmt.readFactors ++ r.flatMap Stmt.readFactors).filter (fun rf => !ws.contains rf.1)
+  | .scanPre _ _ _  => []
+
+/-- The defining stmt of output slot `s` (= `writes[s]`): the LAST stmt in `stepStmts` that writes it
+    (for a `.scan`, the recurrence stmt — full output rank, incl. the iteration axis). Used so the
+    producer's per-slot output weave and a consumer's input weave derive the SAME axes (conjunct 2). -/
+def ScanStmt.slotStmt (sc : ScanStmt) (s : Nat) : Stmt :=
+  let nm := sc.outputs.getD s ""
+  (sc.stepStmts.filter (fun st => st.lhsName == nm)).getLast?.getD emptyStmt
+
+/-- A step's combined index space across all `stepStmts`: retained (LHS) axes of every contributing
+    stmt, then the contracted (read-but-not-retained) axes, deduplicated by uid. Generalizes
+    `stepDegAxes` from one stmt to the `.scan` group. -/
+def ScanStmt.stepDegAxesMulti (sc : ScanStmt) : List AxisSpec :=
+  let ss := sc.stepStmts
+  let retained := dedupByUid ((List.range sc.outputs.length).flatMap (fun s => (sc.slotStmt s).lhsAxes))
+  let allRead := ss.flatMap (fun s => s.readFactors.flatMap (fun rf => rf.2.flatMap idxAxes))
+  let contracted := allRead.filter (fun a => !(retained.map (·.uid)).contains a.uid)
+  dedupByUid (retained ++ contracted)
+
+/-- The output weave of slot `s` over the step's combined `degree`: fixed on `writes[s]`'s retained
+    (LHS) axes, tiled elsewhere. -/
+def ScanStmt.slotWeave (sc : ScanStmt) (s : Nat) : WeaveShapeP :=
+  let retainedUids := (dedupByUid (sc.slotStmt s).lhsAxes).map (·.uid)
+  sc.stepDegAxesMulti.map (fun a =>
+    if retainedUids.contains a.uid then WeaveSlotP.fixed (AxisP.mk (some a.name) (SizeExpr.var a.name))
+    else WeaveSlotP.tiled)
+
+/-- PASS-1: map each produced tensor name to its (step index, output slot). A step writing several
+    names (a coupled scan) assigns slot `0,1,…` in `writes` order. -/
+def buildNameToStep (stmts : List ScanStmt) : Std.HashMap String (Nat × Nat) :=
+  stmts.zipIdx.foldl (fun m (sc, i) =>
+    sc.outputs.zipIdx.foldl (fun m' (nm, s) => m'.insert nm (i, s)) m) {}
+
+/-- Build one `BrBaseP` step and its routing wires for `sc`, given the precomputed maps and the
+    full scheduled statement list (`stmts`, used to publish an internal read's producer axes).
+    Returns `CompileError.shapeMismatch` for an empty-step `scanPre`, or
+    `CompileError.undeclaredName` for an unresolved read. -/
+def buildStep (nameToStep : Std.HashMap String (Nat × Nat)) (extIndex : Std.HashMap String Nat)
+    (stmts : List ScanStmt)
+    (sc : ScanStmt) : Except CompileError (BrBaseP × List Wire) := do
+  -- Validate a pre-built (escape-hatch) morphism: its step list must be non-empty.
+  match sc with
+  | .scanPre nm _ tc =>
+      if tc.steps.isEmpty then
+        throw (CompileError.shapeMismatch s!"recurMorphism {nm}: empty step morphism" "non-empty ThreadedComposed")
+  | _ => pure ()
+  -- rep stmt drives ONLY the op label (nonlin/agg/kind); reads/axes come from the whole group.
+  let s := sc.repStmt.getD emptyStmt
+  let readFactors := sc.inputReadFactors
+  -- degree = combined retained ++ contracted across all stepStmts, de-duplicated by uid.
+  let degAxes : List AxisSpec := sc.stepDegAxesMulti
+  let degree : StObjP := degAxes.map (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name))
+  -- internal read ⇒ publish producer step `j`'s slot-`slot` `tensorAxes` (the SAME (j,slot) the wire
+  -- below uses, so producer output and consumer input weaves coincide); external ⇒ one fixed slot
+  -- per read position.
+  let inputWeaves : List WeaveShapeP :=
+    readFactors.map (fun rf =>
+      match nameToStep[rf.1]? with
+      | some (j, slot) => (tensorAxes ((stmts.getD j default).slotStmt slot)).map
+                            (fun a => WeaveSlotP.fixed a)
+      | none   => (List.range rf.2.length).map (fun pos =>
+                    WeaveSlotP.fixed (AxisP.mk (some (rf.1 ++ "_" ++ toString pos))
+                      (SizeExpr.var (rf.1 ++ "_" ++ toString pos)))))
+  -- one output weave per true output (base∩recur for scans), in `outputs` order.
+  let outputWeaves : List WeaveShapeP := (List.range sc.outputs.length).map sc.slotWeave
+  let degUids : List UID := degAxes.map (·.uid)
+  let reindexings : List StMatP := readFactors.map (fun rf =>
+    let rows := rf.2.map (idxToRow degUids)
+    { domLen := degUids.length, codLen := rf.2.length,
+      coeffs := rows.map (·.1), bias := rows.map (·.2) })
+  let op : BrOp :=
+    if sc.isScanPre then .scanPre
+    else if sc.isScan then (if sc.isAffineScan then .scanAffine else .scan)
+    else match s.nonlin with
+      | .relu        => .relu
+      | .softmax _   => .softmax
+      | .normalize _ => .normalize
+      | .identity    => match s with
+          | .scatter .. => .scatter
+          | .assign ..  => match s.agg with
+              | .max => .maxreduce
+              | .sum => .contract
+          | .recurMorphism .. => .contract   -- unreachable: scanPre handled above
+  let step : BrBaseP := { op, degree, inputWeaves, outputWeaves, reindexings }
+  -- Route each read to its producer (step, slot), else to the external sentinel. A name that is
+  -- neither produced nor declared external is an unresolved read: FAIL LOUD rather than
+  -- silently defaulting to external slot 0 (which masks upstream dataflow errors).
+  let wires ← readFactors.mapM (fun rf =>
+    match nameToStep[rf.1]? with
+    | some (j, slot) => pure (Wire.internal j slot)
+    | none   =>
+      match extIndex[rf.1]? with
+      | some k => pure (Wire.external k)
+      | none   => throw (CompileError.undeclaredName rf.1))
+  return (step, wires)
+
+/-- Acyclicity guard for Phase 8: every internal read wire points BACKWARD — its producer step
+    precedes its consumer (`j < i`). False exactly for a genuine inter-step cycle (`topoSort` source-
+    order fallback); scan self-recurrence is NOT a wire (excluded by `inputReadFactors`), so coupled
+    scans pass. A cyclic dataflow can't be realized as a finite `Br` morphism, so `routeCore` rejects
+    it (FAIL LOUD) — making a successful route imply topological order. -/
+def routableInOrder (stmts : List ScanStmt) : Bool :=
+  let ns := buildNameToStep stmts
+  stmts.zipIdx.all (fun (sc, i) =>
+    sc.inputReadFactors.all (fun rf =>
+      match ns[rf.1]? with
+      | some (j, _) => decide (j < i)
+      | none        => true))
+
+/-- Pure core of Phase 8: compute the step list and routing table from a `ScheduledProgram`.
+    Computes `nameToStep` and `extIndex` once (PASS 1), then folds `buildStep` over `stmts`
+    (PASS 2). Guarded by `routableInOrder`: cyclic dataflow is rejected up front. -/
+def routeCore (sp : ScheduledProgram) : Except CompileError (List BrBaseP × List (List Wire)) :=
+  if routableInOrder sp.stmts then do
+    -- PASS 2: fold buildStep over all stmts, using the PASS-1 maps (`buildNameToStep`/`buildExtIndex`).
+    let pairs ← sp.stmts.mapM
+      (buildStep (buildNameToStep sp.stmts) (buildExtIndex sp.extNames sp.stmts) sp.stmts)
+    return (pairs.map (·.1), pairs.map (·.2))
+  else
+    throw (CompileError.cyclicDataflow "routeCore: cyclic dataflow (topoSort fallback)")
+
 /-- Phase 8: route the scheduled statements into a `ThreadedComposed`. -/
 def route (sp : ScheduledProgram) : FreshM ThreadedComposed := do
-  -- PASS 1: step indices, name→step map, external-name numbering.
-  let mut nameToStep : Std.HashMap String Nat := {}
-  for (sc, i) in sp.stmts.zipIdx do
-    for nm in sc.writes do
-      nameToStep := nameToStep.insert nm i
   let nExternal := sp.extNames.card
-  let mut extIndex : Std.HashMap String Nat := {}
-  let mut extCount : Nat := 0
-  for sc in sp.stmts do
-    for nm in sc.reads do
-      if decide (nm ∈ sp.extNames) && !extIndex.contains nm then
-        extIndex := extIndex.insert nm extCount
-        extCount := extCount + 1
-  -- PASS 2: build one step + its routing per ScanStmt.
-  let mut steps : List BrBaseP := []
-  let mut routing : List (List Wire) := []
-  for sc in sp.stmts do
-    -- Validate a pre-built (escape-hatch) morphism: its step list must be non-empty.
-    match sc with
-    | .scanPre nm _ tc =>
-        if tc.steps.isEmpty then
-          throw (CompileError.shapeMismatch s!"recurMorphism {nm}: empty step morphism" "non-empty ThreadedComposed")
-    | _ => pure ()
-    let s := sc.repStmt.getD (.assign "" [] { body := { terms := [] }, nonlin := .identity })
-    let lhsAxes := s.lhsAxes
-    let lhsUids := lhsAxes.map (·.uid)
-    let readFactors := s.readFactors
-    let readAxes := readFactors.flatMap (fun rf => rf.2.flatMap idxAxes)
-    let contracted := readAxes.filter (fun a => !lhsUids.contains a.uid)
-    -- degree = LHS axes ++ contracted, de-duplicated by uid (LHS first).
-    let degAxes : List AxisSpec :=
-      (lhsAxes ++ contracted).foldl (fun acc a =>
-        if acc.any (fun b => b.uid == a.uid) then acc else acc ++ [a]) []
-    let contractedUids : List UID := contracted.map (·.uid)
-    let degree : StObjP := degAxes.map (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name))
-    -- weave per degree axis: contracted ⇒ tiled, else fixed.
-    let mkWeave : List WeaveSlotP :=
-      degAxes.map (fun a => if contractedUids.contains a.uid then WeaveSlotP.tiled else WeaveSlotP.fixed (AxisP.mk (some a.name) (SizeExpr.var a.name)))
-    let inputWeaves : List WeaveShapeP := readFactors.map (fun _ => mkWeave)
-    let outputWeaves : List WeaveShapeP := [ mkWeave ]
-    let degUids : List UID := degAxes.map (·.uid)
-    let reindexings : List StMatP := readFactors.map (fun rf =>
-      let rows := rf.2.map (idxToRow degUids)
-      { domLen := degUids.length, codLen := rf.2.length,
-        coeffs := rows.map (·.1), bias := rows.map (·.2) })
-    let op : BrOp :=
-      if sc.isScanPre then .scanPre
-      else if sc.isScan then (if sc.isAffineScan then .scanAffine else .scan)
-      else match s.nonlin with
-        | .relu        => .relu
-        | .softmax _   => .softmax
-        | .normalize _ => .normalize
-        | .identity    => match s with
-            | .scatter .. => .scatter
-            | .assign ..  => match s.agg with
-                | .max => .maxreduce
-                | .sum => .contract
-            | .recurMorphism .. => .contract   -- unreachable: scanPre handled above
-    let step : BrBaseP := { op, degree, inputWeaves, outputWeaves, reindexings }
-    -- Route each read to its producer step, else to the external sentinel. A name that is
-    -- neither produced nor declared external is an unresolved read: FAIL LOUD rather than
-    -- silently defaulting to external slot 0 (which masks upstream dataflow errors).
-    let wires ← readFactors.mapM (fun rf =>
-      match nameToStep[rf.1]? with
-      | some j => pure (Wire.internal j 0)
-      | none   =>
-        match extIndex[rf.1]? with
-        | some k => pure (Wire.external k)
-        | none   => throw (CompileError.undeclaredName rf.1))
-    steps := steps ++ [ step ]
-    routing := routing ++ [ wires ]
-  return { steps, routing, nExternal }
+  match routeCore sp with
+  | .ok (steps, routing) => return { steps, routing, nExternal }
+  | .error e             => throw e
 
 end LeanNCD

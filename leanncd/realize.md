@@ -120,8 +120,10 @@ Two phases determine the graph's shape:
   stays as one `contract` node. Statement 2 splits into a `contract` node computing
   `T[i,j] = W2[j,k] · H[i,k]` and a `relu` node computing `Y[i,j] = relu(T[i,j])`. Total: three
   nodes.
-- **`schedule`** topologically sorts the nodes. This is the ordering `realize`'s fold relies on (§4,
-  §7).
+- **`schedule`** does dead-code elimination (backward-reachability liveness `filter`) and currently
+  **preserves source order** — it does *not* yet topologically sort (despite earlier wording here).
+  `realize`'s fold relies on a topological order; today that holds only because the example programs
+  are written producer-before-consumer. A real sort is added in Phase 2 of the §7 plan.
 
 `route` replaces every named tensor input with a `Wire` pointing to the step that wrote it, or to
 the external-input sentinel if no step wrote it, and emits the `ThreadedComposed`.
@@ -329,18 +331,38 @@ exists for every well-formed `tc`. What remains is **correctness**, not existenc
 **(a) Correctness + well-formedness — the remaining gap.** Two linked obligations, both in
 `LeanNCD/Bridge/Agreement.lean` (still `sorry`):
 
-- **`WellFormed` for compiled `tc`** — the theorem `∀ p, WellFormed (TLProgram.compile p)` (for source
-  programs that pass the compiler's checks). This is what discharges `realize`'s precondition on real
-  input, and it buys two things at once: **(i) applicability** — it upgrades "a morphism exists *if*
-  the graph is well-formed" to "*every* compiled program *has* a formal morphism," so the sorry-free
-  `realize` becomes a bridge programs actually cross; and **(ii) a compiler-correctness result** —
-  proving the `assignUIDs → … → schedule → route` pipeline emits topologically-ordered,
-  type-consistent, single-output graphs, connecting the compiler's dynamic checks (`checkReadRanks`,
-  `checkDtypes`, `schedule`) to the static `WellFormed` predicate. (A *per-program* version — e.g.
-  `WellFormed (compile matmulProgram)` by `decide`/`rfl` — is cheaper and already exhibits one real
-  program crossing the bridge end-to-end; the `∀ p` version is the full compiler theorem.) Note this
-  is well-*typedness*, not behaviour — it makes the morphism *exist* for every program, not *agree*
-  with execution; that is the next bullet.
+- **`WellFormed` for compiled `tc`** — the theorem
+  `(compile p).run s = .ok tc s' → tc.WellFormed` (the honest `∀ p` form; `compile` is in the
+  `EStateM CompileError Nat` monad). This discharges `realize`'s precondition on real input and is a
+  compiler-correctness result (the `assignUIDs → … → schedule → route` pipeline emits
+  topologically-ordered, type-consistent, single-output graphs).
+
+  **CRITICAL FINDING (2026-06-25): `WellFormed` is currently FALSE for compiled programs** — verified
+  empirically on the 2-layer net `H[i,k] := W1[k,d]·X[i,d]; Y[i,j] := relu(W2[j,k]·H[i,k])`. Two of
+  the four conjuncts fail, so this is a **fix-the-compiler-then-prove** task, not a pure proof:
+  - **Conjunct 2 (producer⊳consumer type match) — the killer.** `route`
+    (`LeanNCD/DSL/Pipeline/Lowering.lean`) sets every input weave to the step's *own* output weave
+    (`inputWeaves := readFactors.map (fun _ => mkWeave)`), so a producer's output type ≠ a consumer's
+    input type. On the example, the `H` wire carries type `[i,k]` but the consumer's input weave
+    claims `[i,j]`. The degenerate weave also mis-types `reindexings`. **Fix:** `route` derives every
+    tensor's wire type *once* into a `nameToType` map and builds both the producer's output weave and
+    each consumer's input weave from it (in **producer order**) — making conjunct 2 hold *by
+    construction*.
+  - **Conjunct 4 (topological order).** `schedule` does not sort (see §3.2); holds only for
+    producer-before-consumer source. **Fix:** add a real topological sort to `schedule`.
+  - Conjuncts 1 (`wellFormedDom`) and 3 (single output) already hold.
+
+  **De-risk (2026-06-25) — the fix is validated.** A throwaway spike hand-built the *faithful* 2-layer
+  `tc` (per-tensor weaves in producer order) and proved `WellFormed` **sorry-free**
+  (`[propext, Classical.choice, Quot.sound]`). Conjunct 2 closed by **`rfl`** per index: `weaveToArrayType`
+  drops `.tiled` slots, so producer `[fixed i, fixed k, tiled]` and consumer `[fixed i, fixed k]` are
+  *definitionally* equal `ArrayType`s. A second spike confirmed the **transpose canary**: with the
+  consumer reading `H` transposed, producer-order weaves keep conjunct 2 `rfl`, while read-order weaves
+  make it provably false — so the producer-order choice is both necessary and sufficient (the transpose
+  lives only in `reindexings`, which `WellFormed` never inspects).
+
+  Note this is well-*typedness*, not behaviour — it makes the morphism *exist* for every program, not
+  *agree* with execution; that is the next bullet.
 - **Agreement.** A sorry-free `realize` proves the formal morphism *exists*; it does not prove it
   *behaves like the running program*. That is `realize_fromThreadedComposed_agree` and the
   reverse-direction extractor `fromThreadedComposed`. This is what earns "the math describes the
@@ -348,21 +370,59 @@ exists for every well-formed `tc`. What remains is **correctness**, not existenc
 
 ---
 
-## 7. Suggested path to close it
+## 7. Path to close it — the `∀ p WellFormed` plan of attack
 
-The whole forward construction is landed (the `Wire` encoding, the faithful `dom`, the `Δ`/`ε`
-comonoid, the `wiring` morphism, and the assembly fold — `realize` is sorry-free; see §5). What
-remains:
+The forward construction is landed (§5). The active work is **fixing the compiler so `WellFormed`
+holds, then proving the `∀ p` theorem**. Full task-by-task plan with code and tests:
+**`docs/superpowers/plans/2026-06-25-wellformed-forall-p.md`** (de-risk results recorded there too).
+This is a **resumable checkpoint** — pick up at whichever phase is unstarted.
 
-1. **Prove `WellFormed` for compiled `tc`.** Show `TLProgram.compile`'s output satisfies
-   `ThreadedComposed.WellFormed`: the topological order (`schedule` runs before `route`, so
-   `routing[i]` only references steps `< i` — already true, now to be proved), the producer⊳consumer
-   type matches, and single outputs. This discharges `realize`'s hypothesis on real programs.
+**Target theorem** (`LeanNCD/Bridge/Agreement.lean`):
+```lean
+theorem compile_wellFormed (p : TLProgram) (s : Nat) (tc : ThreadedComposed) (s' : Nat)
+    (h : (TLProgram.compile p).run s = EStateM.Result.ok tc s') : tc.WellFormed
+```
 
-2. **Reuse `interpUpto`/`finalPiece` for `realizeSBr`.** The CSV-path bridge sorry reduces to the same
+**Progress (2026-06-26):** Phases 0–3 DONE, Phase 4 PARTIAL (branch `wellformed-forall-p`, HEAD
+`beb414f`). Task 3.2 (conjunct-2 engine) landed: `tensorAxes` dedups by uid; `buildStep` derives an
+internal read's weave from `stmts[nameToStep[rf.1]]` (dropping `nameToType`); `buildStep_output_fixedAxes`
+proves a step publishes exactly `tensorAxes` of its rep stmt. Phase 4: `compile_wellFormed` is assembled
+in `Agreement.lean` with `compile_eq_route` (EStateM plumbing), `wf_singleOutput` (conjunct 3), and the
+`weaveToArrayType_congr` bridge proven sorry-free. **Resume at the three remaining conjuncts**
+(`wf_typeMatch`/`wf_dom`/`wf_topo`, currently `sorry`) — they need a new tier of `Std.HashMap` value
+bounds + pipeline properties (`buildNameToStep_lt`, buildStep field-extraction, `topoSort` correctness,
+`extNames ⊆ reads`). See the ▶▶ RESUME POINT ◀◀ block in
+`docs/superpowers/plans/2026-06-25-wellformed-forall-p.md`.
+
+**Five phases** (each ends `lake build`-green + `#print axioms`-clean, no `sorryAx`):
+
+- **Phase 0 — refactor `route` to a provable core.** Extract the `do`/`forIn`/`mut` PASS-2 body into
+  pure `buildStep` + `routeCore : ScheduledProgram → Except CompileError (List BrBaseP × List (List Wire))`
+  (a `mapM` over `sp.stmts`), so output structure is provable by `List` induction rather than `EStateM`
+  reasoning. Behaviour-preserving; guarded by `#guard` on matmul + 2-layer routing. *(low risk — start here)*
+- **Phase 1 — faithful weaves (fixes conjunct 2 by construction).** Build `nameToType : String → List AxisP`
+  (each produced tensor's retained axes, producer order); build both the producer's output `.fixed` slots
+  and every consumer's input weave's `.fixed` slots from it. **Internal reads use producer order, NOT
+  read-expression order** (transpose canary, §6a) — the transpose stays in `reindexings`. Reorder
+  `reindexings` rows to match.
+- **Phase 2 — topological sort in `schedule` (fixes conjunct 4).** Add a Kahn-style sort (fuel-bounded,
+  for equation lemmas) after the liveness filter, excluding scan self-edges. Must be a no-op on
+  already-ordered §12.1 programs (evaluator regression: `compileToScheduled` feeds `Eval`).
+- **Phase 3 — structural lemmas (`LeanNCD/DSL/Pipeline/RouteSpec.lean`).** Turn
+  `routeCore sp = .ok (steps, routing)` into per-index facts: `steps.length = sp.stmts.length`,
+  `getD i = buildStep (stmts[i])`, output-weave-length-one, and the producer/consumer weave-consistency
+  lemmas (the conjunct-2 engine).
+- **Phase 4 — prove the four conjuncts + assemble.** `compile_eq_route` plumbing (peel `EStateM` binds,
+  isolating all further reasoning to `routeCore`), then conjuncts 3→1→4→2 as lemmas, then
+  `compile_wellFormed = ⟨wf_dom, wf_typeMatch, wf_singleOutput, wf_topo⟩`, plus a `realizeCompiled`
+  corollary (every compiled program crosses the bridge). Conjunct 2 (Task 4.5) is the hard one but is
+  de-risked: faithful weaves make it `rfl`/`simp`-closeable.
+
+**Then** (unchanged, after `compile_wellFormed`):
+
+1. **Reuse `interpUpto`/`finalPiece` for `realizeSBr`.** The CSV-path bridge sorry reduces to the same
    fold once an `SBrInstance` is presented as routing.
-
-3. **Agreement** (impediment a): `realize_fromThreadedComposed_agree` + `fromThreadedComposed`.
+2. **Agreement** (impediment a): `realize_fromThreadedComposed_agree` + `fromThreadedComposed`.
 
 ---
 
@@ -378,8 +438,13 @@ construction covers whole models (fan-out), not just linear ones. Python sideste
 interpreting the graph operationally over a live pool; the Lean bridge instead emits it as an explicit
 comonoid morphism — the idiomatic categorical form.
 
-What is left is **correctness, not existence**: proving `WellFormed` holds for compiled programs (so
-`realize`'s hypothesis is discharged on real input), and the agreement theorem relating the formal
-morphism to the executable semantics. Those — plus the reverse-direction `realizeSBr`/`fromThreadedComposed`
-extractor — are the project's remaining bridge gaps; the forward `ThreadedComposed → BrMorph` direction,
-once the central hole, is closed.
+What is left is **correctness, not existence** — but with a twist found 2026-06-25: `WellFormed` does
+**not** currently hold for compiled programs (conjunct 2's producer⊳consumer type match fails because
+`route` emits degenerate input weaves; conjunct 4's topological order is only assumed). So the active
+task is **fix the compiler, then prove**: make `route` emit faithful per-tensor weaves and `schedule`
+topologically sort, then prove `compile_wellFormed` (so `realize`'s hypothesis is discharged on real
+input). The fix is de-risked — a faithful hand-built `tc` proves `WellFormed` sorry-free with conjunct 2
+closing by `rfl` (§6a). After that: the agreement theorem relating the formal morphism to the executable
+semantics, plus the reverse-direction `realizeSBr`/`fromThreadedComposed` extractor. The five-phase plan
+of attack is §7 and `docs/superpowers/plans/2026-06-25-wellformed-forall-p.md`; the forward
+`ThreadedComposed → BrMorph` *construction* (once the central hole) is closed.

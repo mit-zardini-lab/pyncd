@@ -123,6 +123,7 @@ import LeanNCD.DSL.Traverse
 import LeanNCD.DSL.Pipeline.Types
 import LeanNCD.DSL.Pipeline.Structural
 import LeanNCD.DSL.Pipeline.Lowering
+import LeanNCD.DSL.Pipeline.RouteSpec
 import LeanNCD.DSL.Compile
 import LeanNCD.Bridge.Realize
 import LeanNCD.Bridge.SBr
