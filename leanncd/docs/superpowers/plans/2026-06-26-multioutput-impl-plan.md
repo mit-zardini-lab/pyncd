@@ -223,7 +223,7 @@ hcod; Agreement `wf_singleOutput`, `port_external_weave`, `external_pointwise`, 
 `wf_typeMatch`, `wf_dom`, `topo_bound`, `wf_topo`; plus out-of-scope `fromThreadedComposed`,
 `realize_fromThreadedComposed_agree`. Next after B.7: Phase C (C.1–C.3 poolAt/WellFormed/mem_poolAt).
 
-### B.7-PLAN (Option 3 — canonical degree order). RESUME HERE.
+### B.7-PLAN (Option 3 — canonical degree order). [DONE — see §B.7-DONE.]
 
 **Goal:** prove `buildStep_output_fixedAxes` by making `stepDegAxesMulti`'s retained axes follow
 slot/last-writer order, so per-slot filtering recovers `tensorAxes (slotStmt s)` by construction.
@@ -314,19 +314,45 @@ those were done in the same landing. `realize` axioms `[propext, Classical.choic
 
 ## F. Phase D — conjuncts (Agreement.lean)
 
-- **D.1 conjunct 3** (`outCount`): `outputWeaves.length ≥ 1` from `buildStep_outputWeaves_length`
-  (`writes ≠ []`). 
-- **D.2 `wf_typeMatch`** (re-prove): per-slot internal case uses `buildStep_output_fixedAxes` (per slot) +
-  `buildNameToStep_slot_lt` for `s`-bounds; external case unchanged (`external_pointwise`). The scan
-  init/input reads are ordinary internal/external reads now.
-- **D.3 `wf_dom`**: referencedness via `buildExtIndex` surjectivity (NEW lemma: every `k < extNames.card`
-  is hit — strengthen `goodExtState`/`goodCard` with surjectivity, or a direct bijection argument) +
-  `externalPort` existence from a wired read; rank agreement via `checkReadRanks` thread (NEW: extract
-  arity-consistency from `hsp` — the deferred `compileToScheduled` plumbing).
-- **D.4 `topo_bound` → `wf_topo`**: `topo_bound` now provable — `routeCore_routable hrc` +
-  `buildNameToStep_slot_lt` give `j < i ∧ s < n_j` ⇒ `mem_poolAt_internal`. (Switch `topo_bound` to take
-  `hrc`, drop the unprovable `hsp` form.)
+- **D.2 `wf_typeMatch`** + helpers **[DONE 2026-07-01]**: `internal_pointwise` (via
+  `buildStep_output_fixedAxes` + `fixedAxesP_map_fixed` + `weaveToArrayType_congr`);
+  `port_external_weave` re-proved for the `inputReadFactors`/`(j,slot)` shape (`mapM_ok_getD'` +
+  `buildStep_inputWeaves` indexing), which un-sorries `external_pointwise`; `wf_typeMatch` itself by
+  position-wise `List.ext_getElem` alignment of `routing` (mapM wire builder) vs `inputWeaves` (map
+  weave builder), dispatching each read to `internal_pointwise`/`external_pointwise`.
+- **D.4 `topo_bound` → `wf_topo`** **[DONE 2026-07-01]**: `topo_bound` restated to take `hrc` and
+  proved from `routeCore_routable` (both former counterexamples now inapplicable — Phase-A acyclicity
+  guard rejects cycles; scan self-reads excluded from `inputReadFactors`). `wf_topo`: each routing wire
+  is `internal j slot` (`j<i` by `topo_bound`, `slot<n_j` by `buildNameToStep_slot_lt` +
+  `buildStep_outputWeaves_length_one`) or `external k` (`k<nExternal`) ⇒ `mem_poolAt_internal`/`_external`.
+  Dropped `wf_topo`'s unused `hsp`; updated `compile_wellFormed`.
+
+### RESUME HERE — D.1 + D.3 (the `compileToScheduled` invariant thread)
+
+Both remaining conjuncts need NEW invariants extracted from `hsp` (`compileToScheduled`), threaded
+through `routeCore` to `tc`. This is a different kind of work from D.2/D.4 (which wired up existing
+engine lemmas) — it is the deferred plumbing, and D.3's rank thread is the plan's flagged
+"largest single proof / may warrant its own sub-plan."
+
+- **D.1 conjunct 3 `wf_singleOutput`** (`outputWeaves.length ≥ 1`): reduces (via `routeCore_getD` +
+  `buildStep_outputWeaves_length_one`) to `sp.stmts[i].outputs.length ≥ 1`, i.e. **`outputs ≠ []`**.
+  For `.plain`/`.scanPre` this is `[nm]` (len 1); for `.scan` it is `base ∩ recur`, nonempty iff every
+  recurrence var has a base case — the `finalizeScans` `missingBaseCase` invariant. NEW: thread that
+  invariant from `hsp` (so `wf_singleOutput` likely gains an `hsp` argument, or a guard enforces it).
+- **D.3 `wf_dom`** (`tc.wellFormedDom = true`): two sub-obligations, both new:
+  1. **Referencedness** — every `k < nExternal` has `externalPort k = some _`. Needs `buildExtIndex`
+     **surjectivity** (every `k < extNames.card` is the index of some read name) + that name's read is
+     routed to a `.external k` wire. Extend the existing `goodExtState`/`goodCard` fold machinery
+     (`buildExtIndex_injective`/`_lt_card` already prove injectivity + bound; surjectivity is the gap).
+  2. **Rank agreement** — reads of the same external name share input-weave rank. The external input
+     weave has rank `= rf.2.length` (the read's arity), so this is exactly `checkReadRanks`
+     arity-consistency, threaded from `hsp` through `routeCore`. This is the largest piece; consider a
+     dedicated sub-plan if it balloons.
 - Verify each: `lean_verify` on the lemma; `lake build`.
+
+**Status (2026-07-01):** `RouteSpec.lean` and `Realize.lean` sorry-free; `Agreement.lean` down to
+`wf_singleOutput` (D.1) + `wf_dom` (D.3) + the out-of-scope acset sorries (`fromThreadedComposed`,
+`realize_fromThreadedComposed_agree`). Full `lake build` green (8586).
 
 ## G. Phase E — realize fold (multi-output) **[DONE 2026-07-01 — landed with Phase C above]**
 
@@ -361,7 +387,8 @@ A.5 faithful scan outputs (base∩recur)      [green]  ← DO BEFORE Phase B (fo
 B.1 … B.7 RouteSpec lemmas                  [DONE 2026-07-01, RouteSpec sorry-free]
 C.1-C.3 poolAt/WellFormed/mem_poolAt        [DONE 2026-07-01, Realize sorry-free]
 E.1-E.3 realize fold                        [DONE 2026-07-01, landed with Phase C]
-D.1 … D.4 conjuncts (Agreement)             [green, sorries shrink]  ← RESUME HERE (next)
+D.2 wf_typeMatch + D.4 wf_topo              [DONE 2026-07-01]
+D.1 wf_singleOutput + D.3 wf_dom            [green]  ← RESUME HERE (compileToScheduled invariant thread)
 F close-out + axiom check                   [green, only out-of-scope sorries remain]
 ```
 
