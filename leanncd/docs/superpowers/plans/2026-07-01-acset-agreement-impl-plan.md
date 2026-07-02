@@ -47,10 +47,32 @@ instances, not `ThreadedComposed`-derived ones — it is untouched by this plan.
 
 **Decision: `fromThreadedComposed` uses a systematic/synthetic encoding** (slot-index-based `AxisUID`s
 via `Nat.pair`, a fixed internal `BrOp ↔ OpTag` bijection-on-image, wire routing packed into
-`wireLabel` as `"ext:<k>"` / `"int:<j>:<s>"`). Names carry no semantic meaning; the ONLY correctness
-requirement is that `toThreadedComposed` (Task B) exactly inverts it (Task C). Rejected alternative:
-threading real names/predicates from the DSL front-end through `BrBaseP` — much larger scope (touches
-`Lowering.lean`/`Target.lean`, re-verifies the whole multi-output proof chain for no benefit to Prop 8).
+`wireLabel` as `"ext:<k>"` / `"int:<j>:<s>"`). Operator/tensor/predicate semantics carry no meaning;
+the ONLY correctness requirement is that `toThreadedComposed` (Task B) exactly inverts it (Task C).
+Rejected alternative: threading real names/predicates from the DSL front-end through `BrBaseP` — much
+larger scope (touches `Lowering.lean`/`Target.lean`, re-verifies the whole multi-output proof chain for
+no benefit to Prop 8).
+
+**CORRECTION (found during Task A implementation, 2026-07-02): `Axis.name` IS load-bearing and CANNOT
+be dropped.** `Axis = {name : Option String, size : Numeric}` (`Base/St.lean:8`) is used directly
+inside `BrObj = List ArrayType`, and `realize_fromThreadedComposed_agree`/`agree_dom`/`agree_cod` state
+*exact* `BrObj` equality — so a decoded axis with `name := none` where the original had `some "i"` would
+make the theorem false, not just harder. This does NOT reopen the "systematic encoding" decision above
+(that was about operator/tensor/predicate semantics, which really are erased before `ThreadedComposed`)
+— it's a narrower, orthogonal fact: axis names ALREADY exist verbatim inside `tc` and must simply survive
+the round trip.
+
+**Resolution — no schema change needed.** Exhaustive grep of every `AxisP` construction site in
+`LeanNCD/` (`Lowering.lean`, `RouteSpec.lean`, `Agreement.lean` — 8 call sites, zero exceptions) shows
+the codebase-wide invariant `AxisP.mk (some x) (SizeExpr.var x)` — the name is always redundantly
+embedded inside its own `SizeExpr.var` payload — with the unnamed case always `AxisP.mk none
+(SizeExpr.var "_")` (the reserved sentinel). So `axisSizes : List (AxisUID × SizeExpr)` (already in the
+Task A plan below, unmodified) is sufficient: store the axis's real `SizeExpr` verbatim; decode derives
+`AxisP.name` from it via `nameOfSizeExpr : SizeExpr → Option String := fun | .var "_" => none | .var s
+=> some s | _ => none` and reuses the stored `SizeExpr` verbatim for `.size` (exact, not re-derived).
+Task A/B below are written against this resolution. If a genuine counterexample surfaces during
+implementation (a real `AxisP` with a non-`.var` size or a name/`.var` mismatch), STOP and re-raise —
+the invariant is empirically verified, not structurally guaranteed by the type system.
 
 ---
 
@@ -90,6 +112,10 @@ threading real names/predicates from the DSL front-end through `BrBaseP` — muc
   hard requirement is that Task C's round-trip lemma holds.)
 - Produces: `wireLabel (w : Wire) : String := match w with | .external k => s!"ext:{k}" | .internal j s
   => s!"int:{j}:{s}"` and its parser `parseWireLabel : String → Option Wire`.
+- Produces: `nameOfSizeExpr : SizeExpr → Option String := fun | .var "_" => none | .var s => some s | _
+  => none` — the decode-side inverse of the codebase-wide `AxisP.mk (some x) (SizeExpr.var x)` /
+  `AxisP.mk none (SizeExpr.var "_")` invariant (see Design Decision CORRECTION). Used by Task B, not
+  Task A itself (Task A stores the real `SizeExpr` verbatim; it never needs to derive a name).
 - Produces: `fromThreadedComposed (tc : ThreadedComposed) : Acset.SBrInstance`.
 
 - [ ] **Step 1: Add the codec file skeleton with `axisUidFor`, `brOpToOpTag`, `wireLabel`/
@@ -149,9 +175,9 @@ threading real names/predicates from the DSL front-end through `BrBaseP` — muc
   Nat (List ArrayRow)` etc., built via one fold each — mirror the `goodExtState`-style fold idiom
   already used in `RouteSpec.lean`).** For each `equationIdx` present, reconstruct one `BrBaseP`:
   - `outputWeaves`: rows with `isInput = false`, sorted by `slot`, each weave rebuilt from its
-    `ArrayAxisRow`s sorted by `position` (`.fixed ⟨none, size⟩` per row — the `AxisP.name` field is
-    `none` since names carry no meaning here, per the Design Decision; `size` read from `s.axisSizes`
-    by `axisUid`).
+    `ArrayAxisRow`s sorted by `position` — per row, `size := s.axisSizes.lookup axisUid` (the verbatim
+    stored `SizeExpr`) and `name := nameOfSizeExpr size` (see the CORRECTION in Design Decision above —
+    `.fixed ⟨nameOfSizeExpr size, size⟩`, NOT `⟨none, size⟩`).
   - `inputWeaves`/wires: rows with `isInput = true`, sorted by `slot`; each row's `wireLabel` decodes
     via `parseWireLabel` to the `Wire` at that read position.
   - `degree`: reconstruct from the UNION of all `axisUid`s appearing in this equation's rows whose
@@ -193,6 +219,14 @@ not a deep category-theory one). Likely needed sub-lemmas, proved bottom-up, one
   parseWireLabel]` (string round-trip via `s!"ext:{k}"`/`toString`/`String.toNat?` — confirm
   `String.toNat?.toNat!` round-trips for arbitrary `Nat`, or use a decimal-digit lemma from Mathlib/
   Std if the raw round-trip isn't `rfl`-level). Verify: clean.
+- [ ] **Step 3b: `nameOfSizeExpr` recovers `AxisP.name` exactly, for every `AxisP` reachable from a
+  compiled `tc`.** Since `nameOfSizeExpr` is defined by cases on `SizeExpr`, NOT on `AxisP`, state it
+  as: `∀ a : AxisP, (∃ i k, a = (tc.steps.getD i default).degree.getD k default) → nameOfSizeExpr a.size
+  = a.name` (or the simpler unconditional `∀ x, nameOfSizeExpr (SizeExpr.var x) = if x = "_" then none
+  else some x` plus a side lemma that every real `AxisP` construction site satisfies `a.size =
+  SizeExpr.var (a.name.getD "_")` — whichever shape falls out naturally once Task A/B's concrete field
+  layout is fixed). This is the ONE genuinely empirical step (see Design Decision CORRECTION) — if it
+  fails on some real `tc`, STOP, do not paper over it with a fallback default. Verify: clean.
 - [ ] **Step 4: per-equation weave/degree/reindexing round-trip** — the grouping-by-`equationIdx` and
   sorting-by-`position`/`slot` in Task B's decode must recover exactly Task A's construction order.
   Likely needs a `List.mergeSort`/`List.range`-indexed rebuild lemma analogous to
