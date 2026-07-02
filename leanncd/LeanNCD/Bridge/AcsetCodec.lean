@@ -305,6 +305,115 @@ The decode exactly inverts the encode. Empirically verified on all five §12.1 e
 (scratch eval); this is the formal proof. `WellFormed` is needed only for `nExternal` (an
 unreferenced external slot leaves no trace in the routing, so `nExternal` is otherwise unrecoverable);
 `steps`/`routing` round-trip unconditionally. -/
+
+/-- Isolation, general form (base offset): if every row of sublist `k` is tagged `key = b + k`, then
+    filtering the flattened list by `key = i ∧ P` recovers `P`-filtered sublist `i - b` (empty when
+    `i < b`). The engine behind `decodeStep`'s per-`equationIdx` filters recovering exactly one step's
+    rows from the fieldwise-flattened `fromThreadedComposed` tables. -/
+theorem filter_flatten_tagged_aux {β : Type*} (key : β → Nat) (i : Nat) (P : β → Bool) :
+    ∀ (L : List (List β)) (b : Nat),
+      (∀ k (hk : k < L.length), ∀ r ∈ L[k], key r = b + k) →
+      (L.map (fun l => l.filter (fun r => decide (key r = i) && P r))).flatten
+        = if b ≤ i then (L.getD (i - b) []).filter P else [] := by
+  intro L
+  induction L with
+  | nil => intro b _; simp
+  | cons hd tl ih =>
+    intro b htag
+    have hhd : ∀ r ∈ hd, key r = b := by
+      intro r hr
+      have := htag 0 (by simp) r (by simpa using hr)
+      simpa using this
+    have htl : ∀ k (hk : k < tl.length), ∀ r ∈ tl[k], key r = (b+1) + k := by
+      intro k hk r hr
+      have := htag (k+1) (by simp; omega) r (by simpa using hr)
+      omega
+    have ihtl := ih (b+1) htl
+    simp only [List.map_cons, List.flatten_cons]
+    have hfhd : (hd.filter (fun r => decide (key r = i) && P r))
+        = if b = i then hd.filter P else [] := by
+      by_cases hbi : b = i
+      · subst hbi; rw [if_pos rfl]
+        apply List.filter_congr
+        intro r hr; rw [hhd r hr]; simp
+      · rw [if_neg hbi]
+        apply List.filter_eq_nil_iff.mpr
+        intro r hr hq
+        rw [hhd r hr] at hq
+        simp [hbi] at hq
+    rw [hfhd, ihtl]
+    by_cases hbi : b = i
+    · subst hbi; simp
+    · by_cases hlt : b < i
+      · rw [if_neg (by omega), if_pos (by omega), if_pos (by omega)]
+        have : i - b = (i - (b+1)) + 1 := by omega
+        rw [this, List.getD_cons_succ, List.nil_append]
+      · rw [if_neg hbi, if_neg (by omega), if_neg (by omega)]
+        simp
+
+/-- Isolation at base 0 (the shape `decodeStep` needs): each sublist `k` tagged `key = k`. -/
+theorem filter_flatten_tagged {β : Type*} (L : List (List β)) (key : β → Nat) (i : Nat)
+    (P : β → Bool) (htag : ∀ k (hk : k < L.length), ∀ r ∈ L[k], key r = k) :
+    (L.flatten.filter (fun r => decide (key r = i) && P r)) = (L.getD i []).filter P := by
+  rw [List.filter_flatten]
+  have := filter_flatten_tagged_aux key i P L 0 (by simpa using htag)
+  simpa using this
+
+/-! #### `stepInsts` indexing and per-step `equationIdx` tagging (the `htag` for isolation) -/
+
+@[simp] theorem stepInsts_length (tc : ThreadedComposed) :
+    (stepInsts tc).length = tc.steps.length := by
+  simp [stepInsts]
+
+theorem stepInsts_getElem (tc : ThreadedComposed) (k : Nat) (hk : k < tc.steps.length) :
+    (stepInsts tc)[k]'(by simp [stepInsts]; omega)
+      = encodeStep k (tc.steps[k]) (tc.routing.getD k []) := by
+  simp only [stepInsts]
+  rw [List.getElem_map, List.getElem_zipIdx]
+  simp
+
+theorem encodeAxisRows_eqIdx (i slot : Nat) (w : WeaveShapeP) :
+    ∀ r ∈ encodeAxisRows i slot w, r.equationIdx = i := by
+  intro r hr
+  simp only [encodeAxisRows, List.mem_map] at hr
+  rcases hr with ⟨p, _, rfl⟩
+  split <;> rfl
+
+theorem encodeStep_arrays_eqIdx (i : Nat) (b : BrBaseP) (reads : List Wire) :
+    ∀ r ∈ (encodeStep i b reads).arrays, r.equationIdx = i := by
+  intro r hr
+  simp only [encodeStep] at hr
+  rcases List.mem_append.1 hr with h | h
+  · rcases List.mem_map.1 h with ⟨s, _, rfl⟩; rfl
+  · rcases List.mem_map.1 h with ⟨j, _, rfl⟩; rfl
+
+theorem encodeStep_arrayAxes_eqIdx (i : Nat) (b : BrBaseP) (reads : List Wire) :
+    ∀ r ∈ (encodeStep i b reads).arrayAxes, r.equationIdx = i := by
+  intro r hr
+  simp only [encodeStep] at hr
+  rcases List.mem_append.1 hr with h | h
+  · rcases List.mem_append.1 h with h | h
+    · rcases List.mem_flatMap.1 h with ⟨s, _, hs⟩; exact encodeAxisRows_eqIdx _ _ _ _ hs
+    · rcases List.mem_flatMap.1 h with ⟨j, _, hs⟩; exact encodeAxisRows_eqIdx _ _ _ _ hs
+  · exact encodeAxisRows_eqIdx _ _ _ _ h
+
+theorem encodeStep_samples_eqIdx (i : Nat) (b : BrBaseP) (reads : List Wire) :
+    ∀ r ∈ (encodeStep i b reads).samples, r.equationIdx = i := by
+  intro r hr
+  simp only [encodeStep] at hr
+  rcases List.mem_flatMap.1 hr with ⟨j, _, hj⟩
+  simp only [encodeReindexing] at hj
+  rcases List.mem_flatMap.1 hj with ⟨c, _, hc⟩
+  split at hc
+  · simp only [List.mem_singleton] at hc; rw [hc]
+  · rcases List.mem_map.1 hc with ⟨d, _, rfl⟩; rfl
+
+theorem encodeStep_equations_eqIdx (i : Nat) (b : BrBaseP) (reads : List Wire) :
+    ∀ r ∈ (encodeStep i b reads).equations, r.equationIdx = i := by
+  intro r hr
+  simp only [encodeStep, List.mem_singleton] at hr
+  rw [hr]
+
 theorem toThreadedComposed_fromThreadedComposed (tc : ThreadedComposed) (h : tc.WellFormed) :
     toThreadedComposed (fromThreadedComposed tc) = tc := by
   sorry
