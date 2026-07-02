@@ -211,4 +211,89 @@ def fromThreadedComposed (tc : ThreadedComposed) : Acset.SBrInstance :=
   (tc.steps.zipIdx.map fun (b, i) => encodeStep i b (tc.routing.getD i [])).foldl
     SBrInstance.append SBrInstance.empty
 
+/-! ### `toThreadedComposed` — the decode direction
+
+None of the `Acset` row types derive `BEq` (only `DecidableEq`), so equality tests below go through
+`decide` rather than `==`. -/
+
+/-- Look up an axis's stored `SizeExpr` by uid; `.lit 0` on a miss (unreachable for real encoder
+    output — only relevant for garbage/malformed `s`, where `toThreadedComposed` must stay total). -/
+def lookupSize (s : SBrInstance) (u : AxisUID) : SizeExpr :=
+  ((s.axisSizes.find? fun p => decide (p.1 = u)).map Prod.snd).getD (.lit 0)
+
+/-- Rebuild one weave (output/input/degree slot) from its `ArrayAxisRow`s. Length = row count for
+    that `(equationIdx, arraySlot)` (Task A emits exactly one row per position, contiguous from `0`).
+    A `.natAxis`-tagged row is the `.tiled` sentinel (see `encodeAxisRows`); otherwise `.fixed`, name
+    recovered from the stored `SizeExpr` via `nameOfSizeExpr`. A missing position (garbage input)
+    defaults to `.tiled`. -/
+def decodeWeaveAt (s : SBrInstance) (i slot : Nat) : WeaveShapeP :=
+  let rows := s.arrayAxes.filter fun r => decide (r.equationIdx = i ∧ r.arraySlot = slot)
+  (List.range rows.length).map fun p =>
+    match rows.find? fun r => decide (r.position = p) with
+    | some r => match r.axisUid.type with
+        | .natAxis => .tiled
+        | _        => let size := lookupSize s r.axisUid; .fixed ⟨nameOfSizeExpr size, size⟩
+    | none   => .tiled
+
+/-- Rebuild one input's reindexing matrix from its `SampleRow`s — the exact inverse of
+    `encodeReindexing`: `fps := fixedPositions inW` recovers the same cod-index ↔ weave-position
+    correspondence Task A used to encode, so `coeffs[c][d]`/`bias[c]` are read straight off the
+    `SampleRow` with matching `(tgtUid, srcUid)` / `tgtUid`, defaulting to `0` (matches `encodeReindexing`
+    only emitting nonzero entries). -/
+def decodeReindexing (s : SBrInstance) (i degSlot arraySlot domLen : Nat) (inW : WeaveShapeP) :
+    StMatP :=
+  let fps := fixedPositions inW
+  let codLen := fps.length
+  let mySamples := s.samples.filter fun r => decide (r.equationIdx = i ∧ r.reindexingSlot = arraySlot)
+  let coeffs := (List.range codLen).map fun c =>
+    let tgtUid := axisUidFor3 i arraySlot (fps.getD c 0)
+    (List.range domLen).map fun d =>
+      let srcUid := axisUidFor3 i degSlot d
+      ((mySamples.find? fun r => decide (r.tgtUid = tgtUid ∧ r.srcUid = srcUid)).map (·.coeff)).getD 0
+  let bias := (List.range codLen).map fun c =>
+    let tgtUid := axisUidFor3 i arraySlot (fps.getD c 0)
+    ((mySamples.find? fun r => decide (r.tgtUid = tgtUid)).map (·.offset)).getD 0
+  { domLen := domLen, codLen := codLen, coeffs := coeffs, bias := bias }
+
+/-- Rebuild one step's `BrBaseP` and its routing reads from `s`'s rows for `equationIdx = i`.
+    `outLen`/`inLen` come straight from counting `ArrayRow`s (Task A emits exactly one per real
+    output/input slot); `degSlot := outLen + inLen`, matching `encodeStep`. -/
+def decodeStep (s : SBrInstance) (i : Nat) : BrBaseP × List Wire :=
+  let outputRows := s.arrays.filter fun a => decide (a.equationIdx = i ∧ a.isInput = false)
+  let inputRows  := s.arrays.filter fun a => decide (a.equationIdx = i ∧ a.isInput = true)
+  let outLen := outputRows.length
+  let inLen  := inputRows.length
+  let degSlot := outLen + inLen
+  let outputWeaves := (List.range outLen).map fun sN => decodeWeaveAt s i sN
+  let inputWeaves  := (List.range inLen).map fun j => decodeWeaveAt s i (outLen + j)
+  let degree : StObjP := (decodeWeaveAt s i degSlot).map fun
+    | .fixed a => a
+    | .tiled   => default
+  let reindexings := (List.range inLen).map fun j =>
+    decodeReindexing s i degSlot (outLen + j) degree.length (inputWeaves.getD j [])
+  let opIdxStr := ((s.equations.find? fun e => decide (e.equationIdx = i)).bind (·.lhsName)).getD ""
+  let op := brOpOfIdx (unaryToNat opIdxStr)
+  let reads := (List.range inLen).map fun j =>
+    match inputRows.find? fun a => decide (a.slot = outLen + j) with
+    | some a => (a.wireLabel.bind parseWireLabel).getD (.external 0)
+    | none   => .external 0
+  ({ op := op, degree := degree, inputWeaves := inputWeaves, outputWeaves := outputWeaves,
+     reindexings := reindexings }, reads)
+
+/-- Decode an `SBrInstance` back into a `ThreadedComposed`. Total over ANY `s` (no `WellFormed`-style
+    hypothesis) — `realizeSBr` (Task D) needs this, per `SBr.lean`'s doc comment. `nExternal` is
+    reconstructed as `1 + ` the max referenced external index (`0` if none); this equals the
+    ORIGINAL `tc.nExternal` only when `tc` was `WellFormed` (an unreferenced external slot leaves no
+    trace in any wire) — hence Task C's round-trip theorem takes that as a hypothesis. -/
+def toThreadedComposed (s : SBrInstance) : ThreadedComposed :=
+  let n := s.equations.length
+  let decoded := (List.range n).map fun i => decodeStep s i
+  let allWires := decoded.flatMap Prod.snd
+  let extKs := allWires.filterMap fun w => match w with
+    | .external k   => some k
+    | .internal _ _ => none
+  { steps := decoded.map Prod.fst
+    routing := decoded.map Prod.snd
+    nExternal := match extKs.max? with | some m => m + 1 | none => 0 }
+
 end LeanNCD.AcsetCodec

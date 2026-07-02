@@ -261,33 +261,52 @@ Task B (`toThreadedComposed`, the decode direction) — NOT started.
 **Files:**
 - Modify: `leanncd/LeanNCD/Bridge/AcsetCodec.lean`
 
-**Interfaces:**
-- Consumes: `axisUidFor`, `brOpToOpTag`/its intended inverse `opTagToBrOp`, `parseWireLabel` (Task A).
+**Interfaces (revised 2026-07-02 to match Task A's actual final design — supersedes the sketch
+originally written here, which referenced the superseded `axisUidFor`/`brOpToOpTag`/`splitOn`
+scheme):**
+- Consumes: `axisUidFor3`, `brOpOfIdx`, `parseWireLabel`, `nameOfSizeExpr`, `fixedPositions` (all Task
+  A).
 - Produces: `toThreadedComposed (s : Acset.SBrInstance) : ThreadedComposed` — total, defaulting on
-  malformed/partial tables (never throws; unrecognized rows are skipped, matching the "no hypothesis on
-  `realizeSBr`'s input" requirement noted in `SBr.lean`'s doc comment).
+  malformed/partial tables (never throws), matching the "no hypothesis on `realizeSBr`'s input"
+  requirement noted in `SBr.lean`'s doc comment.
 
-- [ ] **Step 1: Group `s.equations`/`s.arrays`/`s.arrayAxes`/`s.samples` by `equationIdx` (`Std.HashMap
-  Nat (List ArrayRow)` etc., built via one fold each — mirror the `goodExtState`-style fold idiom
-  already used in `RouteSpec.lean`).** For each `equationIdx` present, reconstruct one `BrBaseP`:
-  - `outputWeaves`: rows with `isInput = false`, sorted by `slot`, each weave rebuilt from its
-    `ArrayAxisRow`s sorted by `position` — per row, `size := s.axisSizes.lookup axisUid` (the verbatim
-    stored `SizeExpr`) and `name := nameOfSizeExpr size` (see the CORRECTION in Design Decision above —
-    `.fixed ⟨nameOfSizeExpr size, size⟩`, NOT `⟨none, size⟩`).
-  - `inputWeaves`/wires: rows with `isInput = true`, sorted by `slot`; each row's `wireLabel` decodes
-    via `parseWireLabel` to the `Wire` at that read position.
-  - `degree`: reconstruct from the UNION of all `axisUid`s appearing in this equation's rows whose
-    `AxisUID.id` decodes (via `Nat.unpair`) to `(equationIdx, _)`, ordered by the `k` component.
-  - `reindexings`: per input slot `j`, rebuild the `codLen × domLen` matrix from that slot's
-    `SampleRow`s (`codLen := (inputWeaves.getD j []).length`... actually `weaveRank`, since only
-    `fixed` slots are cod positions — match Task A's convention exactly) plus bias from the pure-bias
-    rows.
-  - `op`: `opTagToBrOp` applied to the output row's `operatorTag`, falling back to parsing
-    `elementwiseFn`'s `"brop:<n>"` tag when the `OpTag` collision case (Task A Step 2 note) applies.
-- [ ] **Step 2: Assemble `ThreadedComposed`** — `steps` = the reconstructed `BrBaseP`s ordered by
-  `equationIdx`; `routing` = each step's decoded wire list (already built above); `nExternal` =
-  `1 + ` the max `k` appearing in any `"ext:<k>"` wireLabel (or `0` if none).
-  Verify: `lake env lean leanncd/LeanNCD/Bridge/AcsetCodec.lean` compiles.
+- [ ] **Step 1: `decodeWeaveAt (s) (i slot) : WeaveShapeP`** — gather `s.arrayAxes` rows with matching
+  `equationIdx`/`arraySlot`, length = row count (Task A emits one row per position, contiguous), each
+  position `p` looked up by `position == p`: `axisUid.type = .natAxis ⇒ .tiled`; else `.fixed
+  ⟨nameOfSizeExpr size, size⟩` where `size := s.axisSizes` looked up by `axisUid` (defaulting to
+  `.lit 0` — unreachable for real encoder output, only relevant for garbage input).
+- [ ] **Step 2: `decodeReindexing (s) (i degSlot arraySlot domLen) (inW : WeaveShapeP) : StMatP`** —
+  `fps := fixedPositions inW` (same helper Task A uses to encode), `codLen := fps.length`; for `c ∈
+  [0,codLen)`, `tgtUid := axisUidFor3 i arraySlot (fps.getD c 0)`; `coeffs[c][d] :=` the `SampleRow`
+  with that `tgtUid` and `srcUid = axisUidFor3 i degSlot d`'s `coeff`, else `0`; `bias[c] :=` any
+  matching-`tgtUid` row's `offset`, else `0`.
+- [ ] **Step 3: `decodeStep (s) (i) : BrBaseP × List Wire`** — `outLen`/`inLen` from counting
+  `s.arrays` rows with that `equationIdx` split by `isInput`; `degSlot := outLen+inLen`;
+  `outputWeaves := (range outLen).map (decodeWeaveAt s i)`, `inputWeaves := (range
+  inLen).map (fun j => decodeWeaveAt s i (outLen+j))`, `degree := (decodeWeaveAt s i
+  degSlot).map (fun | .fixed a => a | .tiled => default)`; `reindexings := (range inLen).map (fun j
+  => decodeReindexing s i degSlot (outLen+j) degree.length (inputWeaves.getD j []))`; `op :=
+  brOpOfIdx (unaryToNat ((s.equations.find? (fun e => e.equationIdx = i)).bind (·.lhsName)
+  |>.getD ""))`; reads: for `j ∈ [0,inLen)`, the `ArrayRow` at `slot = outLen+j`'s `wireLabel` through
+  `parseWireLabel`, defaulting to `.external 0` if missing/unparseable.
+- [ ] **Step 4: Assemble `ThreadedComposed`.** `n := s.equations.length` (equations are emitted
+  exactly once per step, in step order, by Task A's `foldl` — so `s.equations[i].equationIdx = i`
+  for a well-formed encoder output); `steps/routing := (range n).map (decodeStep s ·)` unzipped;
+  `nExternal := 1 + max` over all decoded wires' external indices (`0` if none) — see the
+  Design Decision note: this is only guaranteed to equal the ORIGINAL `tc.nExternal` when `tc` is
+  `WellFormed` (hence Task C's theorem takes that as a hypothesis).
+  Verify: `lake env lean leanncd/LeanNCD/Bridge/AcsetCodec.lean` compiles; avoid `==`/`BEq` on
+  `AxisUID`/`ArrayType`-ish fields without checking a `BEq` instance actually exists (`SBrInstance.lean`
+  derives `DecidableEq`, not necessarily `BEq`) — prefer `match`/`decide`/`Nat`'s native `BEq` (used
+  for `Nat`-typed fields like `arraySlot`/`equationIdx`/`position`, which are fine).
+
+**TASK B DONE (2026-07-02).** Compiles clean (no `sorry`, no errors). **Empirically verified via
+`decide (toThreadedComposed (fromThreadedComposed tc) == tc)` on ALL FIVE §12.1 example programs**
+(matmul, masked attention, strided conv — nontrivial reindexing coefficients — upsample/scatter,
+coupled scan) — every one returns `true` (scratch eval file, not committed). This is strong empirical
+evidence Task C's theorem is actually TRUE and the encoding is correct end-to-end, not just
+individually-plausible per-field. Implementation matched the plan sketch above almost exactly — no
+further design surprises. Next: Task C, the formal proof of what was just checked empirically.
 - [ ] **Step 3: Commit.**
   ```bash
   git add leanncd/LeanNCD/Bridge/AcsetCodec.lean
