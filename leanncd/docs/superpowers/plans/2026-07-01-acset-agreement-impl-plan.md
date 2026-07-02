@@ -366,6 +366,17 @@ of a new `stepInsts` helper (cleaner isolation reasoning). PROVEN & committed in
    routing external index `< nExternal`, and `wellFormedDom` referencedness gives every `k < nExternal`
    IS referenced ⇒ `max + 1 = nExternal`; handle `nExternal = 0` separately).
 
+**CORRECTNESS FIX (2026-07-02): two-slot name encoding.** `realizeAxis` keeps `a.name`, which flows
+into `realize`'s `dom`/`cod` `BrObj`s (via `targetAxes : StObj = List Axis`), so the agreement's exact
+Σ-equality requires the round trip to recover `AxisP.name` EXACTLY. The original encoding recovered the
+name from `a.size` (via a `size = .var name` "canonical axis" invariant) — true of all compiler output
+but NOT implied by `WellFormed`, so the theorem would have been FALSE for a pathological `WellFormed`
+`tc` (e.g. axis `⟨some "i", .lit 5⟩`). Fixed by storing the name in a dedicated `.normAxis`-tagged
+`axisSizes` entry (`nameUidFor3`/`lookupName`), independent of size — round trip is now UNCONDITIONAL
+(verified on a name/size-mismatch case + all 5 §12.1 examples; only `h : WellFormed` needed). This adds
+a second `axisSizes` entry per named axis but no extra proof burden (same `find?`-uniqueness machinery
+as `lookupSize`). `nameOfSizeExpr` removed.
+
 Original bottom-up step list (partially subsumed above):
 - [ ] **Step 1: `axisUidFor`/`Nat.pair` injectivity lemma** — `axisUidFor i k = axisUidFor i' k' → i =
   i' ∧ k = k'` (direct from `Nat.pair_eq_pair`/`Nat.unpair_pair` in Mathlib). Verify:

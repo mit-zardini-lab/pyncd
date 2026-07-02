@@ -92,14 +92,6 @@ def brOpOfIdx : Nat → BrOp
 @[simp] theorem brOpOfIdx_brOpIdx (op : BrOp) : brOpOfIdx (brOpIdx op) = op := by
   cases op <;> rfl
 
-/-- Decode-side inverse of the codebase-wide `AxisP.mk (some x) (SizeExpr.var x)` /
-    `AxisP.mk none (SizeExpr.var "_")` construction invariant (verified by exhaustive grep of every
-    `AxisP` construction site in `LeanNCD/` — see the Design Decision CORRECTION in the plan doc). -/
-def nameOfSizeExpr : SizeExpr → Option String
-  | .var "_" => none
-  | .var s   => some s
-  | _        => none
-
 /-! ### `fromThreadedComposed` — the encode direction -/
 
 /-- One `ArrayAxisRow` per weave POSITION (not just `fixed` ones) — a `.tiled` slot gets the
@@ -116,13 +108,22 @@ def encodeAxisRows (i slot : Nat) (w : WeaveShapeP) : List ArrayAxisRow :=
     | .tiled   => { equationIdx := i, arraySlot := slot, axisUid := ⟨.natAxis, 0⟩,
                      isTarget := false, position := p }
 
-/-- The `axisSizes` contribution of one weave: one `(uid, size)` pair per `fixed` position (`tiled`
-    slots have no axis, hence no size). -/
+/-- The name-slot uid for a fixed axis: same `id` as its `axisUidFor3`, retagged `.normAxis` so it
+    never collides with the size entry (`.rawAxis`) or the tiled sentinel (`.natAxis`). Stores the
+    axis NAME faithfully & independently of its size (two-slot encoding), so the round trip recovers
+    `AxisP.name` unconditionally — not only under the `size = .var name` "canonical axis" invariant. -/
+def nameUidFor3 (i slot pos : Nat) : Acset.AxisUID := ⟨.normAxis, Nat.pair i (Nat.pair slot pos)⟩
+
+/-- The `axisSizes` contribution of one weave: per `fixed` position, one `(rawAxis-uid, size)` entry,
+    plus (when the axis is named) one `(normAxis-uid, .var name)` name entry. `tiled` slots contribute
+    nothing. The two entries per axis are the two-slot encoding that makes name recovery unconditional. -/
 def encodeAxisSizes (i slot : Nat) (w : WeaveShapeP) : List (AxisUID × SizeExpr) :=
-  (List.range w.length).filterMap fun p =>
+  (List.range w.length).flatMap fun p =>
     match w.getD p .tiled with
-    | .fixed a => some (axisUidFor3 i slot p, a.size)
-    | .tiled   => none
+    | .fixed a => match a.name with
+        | some nm => [(axisUidFor3 i slot p, a.size), (nameUidFor3 i slot p, .var nm)]
+        | none    => [(axisUidFor3 i slot p, a.size)]
+    | .tiled   => []
 
 /-- The weave-positions (in order) that are `fixed` — the reindexing matrix's `codLen` cod-index `c`
     refers to the `c`-th fixed position, not literally weave-position `c` (tiled slots don't get a
@@ -224,18 +225,27 @@ None of the `Acset` row types derive `BEq` (only `DecidableEq`), so equality tes
 def lookupSize (s : SBrInstance) (u : AxisUID) : SizeExpr :=
   ((s.axisSizes.find? fun p => decide (p.1 = u)).map Prod.snd).getD (.lit 0)
 
+/-- Recover an axis's `name` from its dedicated `.normAxis`-tagged name entry (two-slot encoding, see
+    `encodeAxisSizes`/`nameUidFor3`). Keyed on the same `id` as the size uid `u`, retagged `.normAxis`.
+    Absence of the entry ⇒ `none` (faithfully encodes `AxisP.name = none`). Independent of the size,
+    so name recovery does not rely on any `size = .var name` invariant. -/
+def lookupName (s : SBrInstance) (u : AxisUID) : Option String :=
+  match (s.axisSizes.find? fun p => decide (p.1 = ⟨.normAxis, u.id⟩)).map Prod.snd with
+  | some (.var nm) => some nm
+  | _              => none
+
 /-- Rebuild one weave (output/input/degree slot) from its `ArrayAxisRow`s. Length = row count for
     that `(equationIdx, arraySlot)` (Task A emits exactly one row per position, contiguous from `0`).
-    A `.natAxis`-tagged row is the `.tiled` sentinel (see `encodeAxisRows`); otherwise `.fixed`, name
-    recovered from the stored `SizeExpr` via `nameOfSizeExpr`. A missing position (garbage input)
-    defaults to `.tiled`. -/
+    A `.natAxis`-tagged row is the `.tiled` sentinel (see `encodeAxisRows`); otherwise `.fixed`, with
+    `size` from `lookupSize` and `name` from `lookupName` (the dedicated name slot). A missing position
+    (garbage input) defaults to `.tiled`. -/
 def decodeWeaveAt (s : SBrInstance) (i slot : Nat) : WeaveShapeP :=
   let rows := s.arrayAxes.filter fun r => decide (r.equationIdx = i ∧ r.arraySlot = slot)
   (List.range rows.length).map fun p =>
     match rows.find? fun r => decide (r.position = p) with
     | some r => match r.axisUid.type with
         | .natAxis => .tiled
-        | _        => let size := lookupSize s r.axisUid; .fixed ⟨nameOfSizeExpr size, size⟩
+        | _        => .fixed ⟨lookupName s r.axisUid, lookupSize s r.axisUid⟩
     | none   => .tiled
 
 /-- Rebuild one input's reindexing matrix from its `SampleRow`s — the exact inverse of
@@ -413,6 +423,28 @@ theorem encodeStep_equations_eqIdx (i : Nat) (b : BrBaseP) (reads : List Wire) :
   intro r hr
   simp only [encodeStep, List.mem_singleton] at hr
   rw [hr]
+
+/-- Generic per-field isolation applied to `fromThreadedComposed`: filtering any flattened table
+    field by `equationIdx = i ∧ P` recovers step `i`'s own rows filtered by `P`, for
+    `i < tc.steps.length`. Instantiate with `proj := SBrInstance.arrays` (etc.), the matching
+    `equationIdx` accessor, and the field's tagging lemma. -/
+theorem from_field_filter {β : Type*} (tc : ThreadedComposed) (i : Nat)
+    (hi : i < tc.steps.length) (proj : SBrInstance → List β) (key : β → Nat) (P : β → Bool)
+    (hproj : proj (fromThreadedComposed tc) = ((stepInsts tc).map proj).flatten)
+    (htag : ∀ (k : Nat) (b : BrBaseP) (reads : List Wire),
+      ∀ r ∈ proj (encodeStep k b reads), key r = k) :
+    (proj (fromThreadedComposed tc)).filter (fun r => decide (key r = i) && P r)
+      = (proj (encodeStep i tc.steps[i] (tc.routing.getD i []))).filter P := by
+  rw [hproj]
+  rw [filter_flatten_tagged ((stepInsts tc).map proj) key i P ?htag]
+  case htag =>
+    intro k hk r hr
+    rw [List.getElem_map] at hr
+    have hk' : k < tc.steps.length := by simpa using hk
+    rw [stepInsts_getElem tc k hk'] at hr
+    exact htag k _ _ r hr
+  have hlen : i < ((stepInsts tc).map proj).length := by simp; omega
+  rw [List.getD_eq_getElem _ _ hlen, List.getElem_map, stepInsts_getElem tc i hi]
 
 theorem toThreadedComposed_fromThreadedComposed (tc : ThreadedComposed) (h : tc.WellFormed) :
     toThreadedComposed (fromThreadedComposed tc) = tc := by
