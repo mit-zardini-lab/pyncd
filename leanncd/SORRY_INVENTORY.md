@@ -294,14 +294,22 @@ re-prove sorry-free over it (their tactics are CommRing-generic). The size type 
 `intToCoeff : Int → Coeff := MvPolynomial.C` is sorry-free, so look-back offsets (`X[i-1]`) realize
 faithfully. (`St.lean` is now fully sorry-free; the remaining B+/G open items are all in `Br`.)
 
-Named obligations (the remaining 6 `sorry`s):
-- `realize` (ThreadedComposed→BrMorph) body, `realizeSBr` (SBrInstance→BrMorph) body — the routed-DAG
-  threading rests on `Br.tensorHom`/`Br.swap` (B+). `realize` derives real `dom`/`cod` (first step's
-  inputs / last step's outputs); full external-input assembly (walk `routing` for `step = nExternal`
-  wires) is the documented obligation.
-- `fromThreadedComposed` — the §8.2 acset extraction algorithm (acset.md).
-- `realize_fromThreadedComposed_agree` (full Σ-equality of the two realized morphisms), `agree_dom`,
-  `agree_cod` — the §8 DSL/CSV agreement; faithful statements, sorry-proved.
+**UPDATE (2026-07-01):** `realize` is now **sorry-free** — closed by the multi-output `BrBase`
+generalization (`2026-06-26-multioutput-impl-plan.md` Phases C/E), not by closing `Br.tensorHom`/
+`Br.swap` (those were already sorry-free per Milestone G's re-presentation by the time this landed).
+The remaining work was the routing traversal (`poolAt`/`stepPiece`/`finalPiece` over all output
+slots), not the categorical combinators. `RouteSpec.lean` and `LeanNCD/Bridge/Realize.lean` are both
+fully sorry-free; `compile_wellFormed` (`Agreement.lean`) is proved sorry-free (Phases B–D of the same
+plan; axioms `[propext, Classical.choice, Quot.sound]`, verified via `lean_verify`).
+
+Named obligations (the remaining 2 literal `sorry`s in `Agreement.lean`, plus 1 in `Bridge/SBr.lean`):
+- `realizeSBr` (SBrInstance→BrMorph) body — still `sorry`. Per its own doc comment, this needs the
+  SAME routing-traversal work `realize` just had proved (see above), replayed over the acset tables
+  instead of `ThreadedComposed` directly — NOT gated on any `Br.tensorHom`/`Br.swap` obligation.
+- `fromThreadedComposed` — the §8.2 acset extraction algorithm (acset.md). Still `sorry`.
+- `realize_fromThreadedComposed_agree` (full Σ-equality of the two realized morphisms) — still `sorry`;
+  needs both of the above to exist first. `agree_dom`/`agree_cod` are NOT themselves `sorry` (real
+  `congr_arg` proofs) but transitively depend on `realize_fromThreadedComposed_agree`.
 
 Documented choice (NOT a sorry) / DEFERRED feedback:
 - `weaveToArrayType` defaults `dtype := .reals`. The E2a presentation (`BrBaseP`/`AxisP`) dropped
