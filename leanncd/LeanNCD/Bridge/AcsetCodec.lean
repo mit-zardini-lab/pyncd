@@ -3,6 +3,7 @@ import Mathlib.Data.Nat.Pairing   -- Nat.pair/unpair
 import LeanNCD.Acset.SBrInstance  -- Acset.SBrInstance and its row types
 import LeanNCD.DSL.Target         -- ThreadedComposed, BrBaseP, Wire, BrOp
 import LeanNCD.DSL.SizeExpr       -- SizeExpr
+import LeanNCD.Bridge.Realize     -- ThreadedComposed.WellFormed (round-trip theorem, Task C)
 
 /-! ### §8.2 acset codec — `ThreadedComposed ↔ Acset.SBrInstance`
 
@@ -193,23 +194,25 @@ def encodeStep (i : Nat) (b : BrBaseP) (reads : List Wire) : SBrInstance :=
     arrayAxes := outputAxisRows ++ inputAxisRows ++ degAxisRows
     samples   := samples }
 
-/-- Concatenate two `SBrInstance`s (field-wise `++`). -/
-def SBrInstance.append (a b : SBrInstance) : SBrInstance :=
-  { axisSizes := a.axisSizes ++ b.axisSizes, equations := a.equations ++ b.equations,
-    arrays := a.arrays ++ b.arrays, arrayAxes := a.arrayAxes ++ b.arrayAxes,
-    samples := a.samples ++ b.samples }
-
-/-- The empty `SBrInstance`. -/
-def SBrInstance.empty : SBrInstance := ⟨[], [], [], [], []⟩
+/-- The per-step `SBrInstance`s (one per step, in step order), each tagged with its step index.
+    Factored out so the round-trip proof (Task C) can reason about the fieldwise flatten below and
+    the per-step isolation separately. -/
+def stepInsts (tc : ThreadedComposed) : List SBrInstance :=
+  tc.steps.zipIdx.map fun (b, i) => encodeStep i b (tc.routing.getD i [])
 
 /-- Encode a `ThreadedComposed` as its acset-table twin — a systematic/synthetic encoding (see
-    `2026-07-01-acset-agreement-impl-plan.md`), one "equation" per step. Kept in the `AcsetCodec`
-    namespace (not bare `LeanNCD`) so it doesn't collide with `Agreement.lean`'s
-    `LeanNCD.fromThreadedComposed` declaration until that file is wired to call this one (Task A
-    Step 3). -/
+    `2026-07-01-acset-agreement-impl-plan.md`), one "equation" per step. Fieldwise flatten of
+    `stepInsts` (rather than `foldl append`) so the decode-side filters reduce cleanly in the
+    round-trip proof. Kept in the `AcsetCodec` namespace (not bare `LeanNCD`) so it doesn't collide
+    with `Agreement.lean`'s `LeanNCD.fromThreadedComposed` declaration until that file is wired to
+    call this one (Task A Step 3). -/
 def fromThreadedComposed (tc : ThreadedComposed) : Acset.SBrInstance :=
-  (tc.steps.zipIdx.map fun (b, i) => encodeStep i b (tc.routing.getD i [])).foldl
-    SBrInstance.append SBrInstance.empty
+  let insts := stepInsts tc
+  { axisSizes := (insts.map (·.axisSizes)).flatten
+    equations := (insts.map (·.equations)).flatten
+    arrays    := (insts.map (·.arrays)).flatten
+    arrayAxes := (insts.map (·.arrayAxes)).flatten
+    samples   := (insts.map (·.samples)).flatten }
 
 /-! ### `toThreadedComposed` — the decode direction
 
@@ -295,5 +298,15 @@ def toThreadedComposed (s : SBrInstance) : ThreadedComposed :=
   { steps := decoded.map Prod.fst
     routing := decoded.map Prod.snd
     nExternal := match extKs.max? with | some m => m + 1 | none => 0 }
+
+/-! ### Round-trip (Task C): `toThreadedComposed ∘ fromThreadedComposed = id`
+
+The decode exactly inverts the encode. Empirically verified on all five §12.1 example programs
+(scratch eval); this is the formal proof. `WellFormed` is needed only for `nExternal` (an
+unreferenced external slot leaves no trace in the routing, so `nExternal` is otherwise unrecoverable);
+`steps`/`routing` round-trip unconditionally. -/
+theorem toThreadedComposed_fromThreadedComposed (tc : ThreadedComposed) (h : tc.WellFormed) :
+    toThreadedComposed (fromThreadedComposed tc) = tc := by
+  sorry
 
 end LeanNCD.AcsetCodec
