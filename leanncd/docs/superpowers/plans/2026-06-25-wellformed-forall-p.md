@@ -354,7 +354,15 @@ git commit -m "feat(routespec): structural characterization lemmas for routeCore
 >   `internal_pointwise`. Main `wf_typeMatch` body (list-ext → per-position internal/external split)
 >   in place.
 >
-> **▶▶ RESUME POINT (next session) ◀◀ — TWO small blockers in `wf_typeMatch`, then `wf_dom`/`wf_topo`.**
+> **▶▶ RESUME POINT — Phase 4 DONE (2026-07-01) ◀◀** Superseded by
+> `2026-06-26-multioutput-impl-plan.md`: `wf_typeMatch`, `wf_dom`, `wf_topo`, and `wf_singleOutput` are all
+> proved (Phases B–D there); `compile_wellFormed` is sorry-free with axioms
+> `[propext, Classical.choice, Quot.sound]` (verified via `lean_verify`). The blockers below were resolved
+> during that effort, not by the sketches in this doc — see the impl plan for what actually landed. Only
+> the out-of-scope §8.2 acset sorries (`fromThreadedComposed`, `realize_fromThreadedComposed_agree`) remain
+> anywhere in `Agreement.lean`.
+>
+> **Original (stale) resume note, kept for history:** TWO small blockers in `wf_typeMatch`, then `wf_dom`/`wf_topo`.
 > 1. **MISSING: `buildExtIndex_lt_card`** in `RouteSpec.lean` (referenced at `Agreement.lean:186` by
 >    `external_pointwise`): `(buildExtIndex extNames stmts)[nm]? = some k → k < extNames.card`. Proof:
 >    strengthen the `goodExtState` fold invariant with a `cnt ≤ extNames.card` part — keys are a subset

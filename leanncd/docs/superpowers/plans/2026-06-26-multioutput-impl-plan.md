@@ -384,14 +384,19 @@ engine lemmas) — it is the deferred plumbing, and D.3's rank thread is the pla
   `[propext, Classical.choice, Quot.sound]`.
 - Verify: full `lake build` green (8586 jobs).
 
-## H. Phase F — close-out
+## H. Phase F — close-out **[DONE 2026-07-01]**
 
 - Remove any residual scaffolding `sorry` (target: only the pre-existing out-of-scope ones —
-  `fromThreadedComposed`, `realize_fromThreadedComposed_agree`).
+  `fromThreadedComposed`, `realize_fromThreadedComposed_agree`). **[DONE — confirmed, no others remain.]**
 - `#print axioms compile_wellFormed` ⇒ `[propext, Classical.choice, Quot.sound]` (run `lean_verify
-  LeanNCD.compile_wellFormed`).
-- Update `2026-06-25-wellformed-forall-p.md` RESUME POINT: Phase 4 DONE.
-- Final `/lean4:checkpoint` (per-file + project build + axiom check). Commit.
+  LeanNCD.compile_wellFormed`). **[DONE — verified clean, no `sorryAx`.]**
+- Update `2026-06-25-wellformed-forall-p.md` RESUME POINT: Phase 4 DONE. **[DONE.]**
+- Final `/lean4:checkpoint` (per-file + project build + axiom check). Commit. **[DONE — D.1/D.3 pushed
+  `52917ee`; full `lake build` green (8586 jobs).]**
+
+**The fully-general multi-output `BrBase` + provable `compile_wellFormed` effort is complete.** Everything
+in scope (Phases A–F) is proved sorry-free; only the explicitly out-of-scope §8.2 acset extraction
+(`fromThreadedComposed`, `realize_fromThreadedComposed_agree`) remains as a sorry anywhere in the file.
 
 ## G(harness). Verification commands
 - Build: `lake build` (full) or `lean_build` on the top file (`Bridge/Agreement.lean`).
