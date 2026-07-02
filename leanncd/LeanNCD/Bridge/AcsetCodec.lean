@@ -446,8 +446,207 @@ theorem from_field_filter {β : Type*} (tc : ThreadedComposed) (i : Nat)
   have hlen : i < ((stepInsts tc).map proj).length := by simp; omega
   rw [List.getD_eq_getElem _ _ hlen, List.getElem_map, stepInsts_getElem tc i hi]
 
-theorem toThreadedComposed_fromThreadedComposed (tc : ThreadedComposed) (h : tc.WellFormed) :
-    toThreadedComposed (fromThreadedComposed tc) = tc := by
+/-! #### Array-count round trips (step 1): output/input `ArrayRow`s recover exactly. -/
+
+/-- The output `ArrayRow`s decode filters out of `fromThreadedComposed tc` are exactly the ones
+    `encodeStep` emitted for step `i`: one blank row per output weave. -/
+theorem from_outputRows (tc : ThreadedComposed) (i : Nat) (hi : i < tc.steps.length) :
+    (fromThreadedComposed tc).arrays.filter (fun a => decide (a.equationIdx = i ∧ a.isInput = false))
+      = (List.range (tc.steps[i]).outputWeaves.length).map (fun s => blankArrayRow i s false) := by
+  have hpred : (fun a : ArrayRow => decide (a.equationIdx = i ∧ a.isInput = false))
+      = (fun a => decide (a.equationIdx = i) && decide (a.isInput = false)) := by
+    funext a; rw [Bool.decide_and]
+  rw [hpred, from_field_filter tc i hi SBrInstance.arrays (·.equationIdx)
+        (fun a => decide (a.isInput = false)) rfl encodeStep_arrays_eqIdx]
+  simp only [encodeStep, List.filter_append]
+  rw [List.filter_eq_self.2, List.filter_eq_nil_iff.2, List.append_nil]
+  · intro a ha; simp only [List.mem_map] at ha; obtain ⟨k, _, rfl⟩ := ha; simp [blankArrayRow]
+  · intro a ha; simp only [List.mem_map] at ha; obtain ⟨k, _, rfl⟩ := ha; simp [blankArrayRow]
+
+/-- The input `ArrayRow`s decode filters out are exactly `encodeStep`'s input rows: one per read,
+    at slot `outLen + j`, carrying that read's `wireLabel`. -/
+theorem from_inputRows (tc : ThreadedComposed) (i : Nat) (hi : i < tc.steps.length) :
+    (fromThreadedComposed tc).arrays.filter (fun a => decide (a.equationIdx = i ∧ a.isInput = true))
+      = (List.range (tc.routing.getD i []).length).map (fun j =>
+          { blankArrayRow i ((tc.steps[i]).outputWeaves.length + j) true with
+              wireLabel := some (wireLabel ((tc.routing.getD i []).getD j (.external 0))) }) := by
+  have hpred : (fun a : ArrayRow => decide (a.equationIdx = i ∧ a.isInput = true))
+      = (fun a => decide (a.equationIdx = i) && decide (a.isInput = true)) := by
+    funext a; rw [Bool.decide_and]
+  rw [hpred, from_field_filter tc i hi SBrInstance.arrays (·.equationIdx)
+        (fun a => decide (a.isInput = true)) rfl encodeStep_arrays_eqIdx]
+  simp only [encodeStep, List.filter_append]
+  rw [List.filter_eq_nil_iff.2, List.filter_eq_self.2, List.nil_append]
+  · intro a ha; simp only [List.mem_map] at ha; obtain ⟨k, _, rfl⟩ := ha; simp [blankArrayRow]
+  · intro a ha; simp only [List.mem_map] at ha; obtain ⟨k, _, rfl⟩ := ha; simp [blankArrayRow]
+
+/-- Output row count = number of output weaves (unblocks concrete slot indices `outLen + j`). -/
+theorem from_outLen (tc : ThreadedComposed) (i : Nat) (hi : i < tc.steps.length) :
+    ((fromThreadedComposed tc).arrays.filter
+        (fun a => decide (a.equationIdx = i ∧ a.isInput = false))).length
+      = (tc.steps[i]).outputWeaves.length := by
+  rw [from_outputRows tc i hi]; simp
+
+/-- Input row count = number of routing reads. -/
+theorem from_inLen (tc : ThreadedComposed) (i : Nat) (hi : i < tc.steps.length) :
+    ((fromThreadedComposed tc).arrays.filter
+        (fun a => decide (a.equationIdx = i ∧ a.isInput = true))).length
+      = (tc.routing.getD i []).length := by
+  rw [from_inputRows tc i hi]; simp
+
+/-- One equation row per step, so the equation table's length is the step count. -/
+theorem equations_length (tc : ThreadedComposed) :
+    (fromThreadedComposed tc).equations.length = tc.steps.length := by
+  simp only [fromThreadedComposed, List.length_flatten, List.map_map]
+  rw [show ((stepInsts tc).map ((·.length) ∘ (·.equations)))
+        = List.replicate (stepInsts tc).length 1 from ?_]
+  · simp
+  · apply List.ext_getElem <;> simp [Function.comp, encodeStep, stepInsts]
+
+/-- The per-step shape invariant the encoding assumes but `WellFormed` does not carry (the dropped
+    dependent `StMat degree (inputWeaves i).targetAxes` typing, `Target.lean:63`). `fromThreadedComposed`
+    only iterates `steps`/`reads`, and `decodeReindexing` normalizes each matrix to `codLen ×
+    domLen`, so the round trip needs: routing and steps agree in length; per step, one reindexing per
+    read; and each reindexing matrix has the shape its input weave / degree dictate. -/
+def _root_.LeanNCD.ThreadedComposed.WellShaped (tc : ThreadedComposed) : Prop :=
+  tc.routing.length = tc.steps.length ∧
+  ∀ i, i < tc.steps.length →
+    let b := tc.steps.getD i default
+    let reads := tc.routing.getD i []
+    b.reindexings.length = reads.length ∧
+    ∀ j, j < reads.length →
+      let m := b.reindexings.getD j default
+      let inW := b.inputWeaves.getD j []
+      m.codLen = (fixedPositions inW).length ∧
+      m.domLen = b.degree.length ∧
+      m.coeffs.length = m.codLen ∧
+      (∀ row ∈ m.coeffs, row.length = m.domLen) ∧
+      m.bias.length = m.codLen
+
+/-- The per-step inversion (steps 1–6): decoding step `i` recovers exactly the encoded `BrBaseP`
+    and its routing reads. Needs `WellFormed` (for `inputWeaves.length = reads.length`, conjunct 2)
+    and `WellShaped` (for the reindexing dimensions). -/
+theorem decodeStep_eq (tc : ThreadedComposed) (h : tc.WellFormed) (hs : tc.WellShaped)
+    (i : Nat) (hi : i < tc.steps.length) :
+    decodeStep (fromThreadedComposed tc) i = (tc.steps[i], tc.routing.getD i []) := by
+  simp only [decodeStep]
   sorry
+
+/-- Only external wires `< nExternal` live in any pool: the fold prepends internal output slots
+    onto the external base `(range nExternal).map .external`. -/
+theorem mem_poolAt_external (tc : ThreadedComposed) (i k : Nat) :
+    Wire.external k ∈ tc.poolAt i → k < tc.nExternal := by
+  induction i with
+  | zero =>
+    intro hmem
+    simp only [ThreadedComposed.poolAt, List.range_zero, List.foldl_nil, List.mem_map] at hmem
+    obtain ⟨x, hx, hxe⟩ := hmem; rw [List.mem_range] at hx; cases hxe; exact hx
+  | succ n ih =>
+    intro hmem
+    rw [tc.poolAt_succ] at hmem
+    rcases List.mem_append.1 hmem with h | h
+    · simp only [ThreadedComposed.outputSlots, List.mem_map] at h
+      obtain ⟨x, _, hxe⟩ := h; cases hxe
+    · exact ih h
+
+/-- If `externalPort k` finds a port, external slot `k` really is referenced in the routing. -/
+theorem externalPort_mem (tc : ThreadedComposed) (k : Nat) (i j : Nat)
+    (hp : tc.externalPort k = some (i, j)) :
+    ∃ wires ∈ tc.routing, Wire.external k ∈ wires := by
+  simp only [ThreadedComposed.externalPort] at hp
+  obtain ⟨i', hi', hinner⟩ := List.exists_of_findSome?_eq_some hp
+  obtain ⟨j', hj', hmatch⟩ := List.exists_of_findSome?_eq_some hinner
+  rw [List.mem_range] at hi' hj'
+  set wires := tc.routing.getD i' [] with hw
+  rcases hwj : wires.getD j' (Wire.external 0) with k' | ⟨s1, s2⟩
+  · rw [hwj] at hmatch
+    by_cases hkk : k' == k
+    · have : k' = k := by simpa using hkk
+      subst this
+      refine ⟨wires, ?_, ?_⟩
+      · rw [hw, List.getD_eq_getElem _ _ hi']; exact List.getElem_mem hi'
+      · rw [← hwj, List.getD_eq_getElem _ _ hj']; exact List.getElem_mem hj'
+    · simp [hkk] at hmatch
+  · rw [hwj] at hmatch; simp at hmatch
+
+/-- The reconstructed external count matches (step 7 — the only part needing `WellFormed`). -/
+theorem from_nExternal (tc : ThreadedComposed) (h : tc.WellFormed) (hsh : tc.WellShaped) :
+    (toThreadedComposed (fromThreadedComposed tc)).nExternal = tc.nExternal := by
+  set s := fromThreadedComposed tc with hsdef
+  have hn : s.equations.length = tc.steps.length := equations_length tc
+  set extKs := ((List.range s.equations.length).map (decodeStep s)).flatMap Prod.snd |>.filterMap
+      (fun w => match w with | .external k => some k | .internal _ _ => none) with hextKs
+  have hmemK : ∀ k, k ∈ extKs ↔
+      ∃ i, i < tc.steps.length ∧ Wire.external k ∈ tc.routing.getD i [] := by
+    intro k
+    rw [hextKs, List.mem_filterMap]
+    constructor
+    · rintro ⟨w, hw, hwk⟩
+      rw [List.mem_flatMap] at hw
+      obtain ⟨pr, hpr, hwpr⟩ := hw
+      rw [List.mem_map] at hpr
+      obtain ⟨i, hi, rfl⟩ := hpr
+      rw [List.mem_range, hn] at hi
+      rw [decodeStep_eq tc h hsh i hi] at hwpr
+      cases w with
+      | external k' => simp at hwk; subst hwk; exact ⟨i, hi, hwpr⟩
+      | internal => simp at hwk
+    · rintro ⟨i, hi, hmem⟩
+      refine ⟨Wire.external k, ?_, rfl⟩
+      rw [List.mem_flatMap]
+      refine ⟨decodeStep s i, ?_, ?_⟩
+      · rw [List.mem_map]; exact ⟨i, by rw [List.mem_range, hn]; exact hi, rfl⟩
+      · rw [decodeStep_eq tc h hsh i hi]; exact hmem
+  have hall : ∀ k ∈ extKs, k < tc.nExternal := by
+    intro k hk
+    rw [hmemK] at hk
+    obtain ⟨i, hi, hmem⟩ := hk
+    exact mem_poolAt_external tc i k (h.2.2.2 i hi _ hmem)
+  have href : ∀ k, k < tc.nExternal → k ∈ extKs := by
+    intro k hkN
+    rw [hmemK]
+    have hpred := (List.all_eq_true.mp h.1) k (List.mem_range.mpr hkN)
+    rcases hep : tc.externalPort k with _ | ⟨i, j⟩
+    · rw [hep] at hpred; simp at hpred
+    · obtain ⟨wires, hwires, hmem⟩ := externalPort_mem tc k i j hep
+      obtain ⟨idx, hidx, rfl⟩ := List.mem_iff_getElem.mp hwires
+      refine ⟨idx, by rw [← hsh.1]; exact hidx, ?_⟩
+      rw [List.getD_eq_getElem _ _ hidx]; exact hmem
+  show (match extKs.max? with | some m => m + 1 | none => 0) = tc.nExternal
+  rcases hN : tc.nExternal with _ | m
+  · have : extKs = [] := by
+      rcases hL : extKs with _ | ⟨x, xs⟩
+      · rfl
+      · exact absurd (hall x (by rw [hL]; exact List.mem_cons_self ..)) (by rw [hN]; omega)
+    rw [this]; rfl
+  · have hmax : extKs.max? = some m := by
+      rw [List.max?_eq_some_iff]
+      refine ⟨href m (by rw [hN]; omega), fun b hb => ?_⟩
+      have := hall b hb; rw [hN] at this; omega
+    rw [hmax]
+
+theorem toThreadedComposed_fromThreadedComposed (tc : ThreadedComposed) (h : tc.WellFormed)
+    (hs : tc.WellShaped) :
+    toThreadedComposed (fromThreadedComposed tc) = tc := by
+  have hlen := hs.1
+  set s := fromThreadedComposed tc with hsdef
+  have hn : s.equations.length = tc.steps.length := equations_length tc
+  have hsteps : (toThreadedComposed s).steps = tc.steps := by
+    simp only [toThreadedComposed, List.map_map]
+    rw [hn]; apply List.ext_getElem
+    · simp
+    · intro k h1 _; simp only [List.getElem_map, List.getElem_range, Function.comp]
+      rw [decodeStep_eq tc h hs k (by simpa using h1)]
+  have hrouting : (toThreadedComposed s).routing = tc.routing := by
+    simp only [toThreadedComposed, List.map_map]
+    rw [hn]; apply List.ext_getElem
+    · simp [hlen]
+    · intro k h1 _; simp only [List.getElem_map, List.getElem_range, Function.comp]
+      rw [decodeStep_eq tc h hs k (by simpa using h1),
+        List.getD_eq_getElem _ _ (by simpa [hlen] using h1)]
+  calc toThreadedComposed s
+      = ⟨(toThreadedComposed s).steps, (toThreadedComposed s).routing,
+          (toThreadedComposed s).nExternal⟩ := rfl
+    _ = tc := by rw [hsteps, hrouting, from_nExternal tc h hs]
 
 end LeanNCD.AcsetCodec
