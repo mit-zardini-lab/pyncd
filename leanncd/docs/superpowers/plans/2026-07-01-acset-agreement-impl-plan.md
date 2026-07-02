@@ -327,6 +327,46 @@ further design surprises. Next: Task C, the formal proof of what was just checke
 
 This is the hardest task — expect it to be the B.7-equivalent of this plan (an order/grouping fight,
 not a deep category-theory one). Likely needed sub-lemmas, proved bottom-up, one commit each:
+
+**IN PROGRESS (2026-07-02) — resume state.** Restructured `fromThreadedComposed` to fieldwise-flatten
+of a new `stepInsts` helper (cleaner isolation reasoning). PROVEN & committed in `AcsetCodec.lean`:
+- `filter_flatten_tagged_aux` / `filter_flatten_tagged` — **the general isolation lemma** (offset
+  induction): filtering `(L.map …).flatten` by `key = i ∧ P` recovers `P`-filtered sublist `i` when
+  each sublist `k` is tagged `key = k`. This is the workhorse — it applies BOTH cross-step (key =
+  `equationIdx`, sublists = steps) AND within-step per-slot (key = `arraySlot`, sublists = the
+  `(range …).flatMap encodeAxisRows` groups, since `flatMap = (map …).flatten`).
+- `stepInsts_length`, `stepInsts_getElem` (`(stepInsts tc)[k] = encodeStep k tc.steps[k] (routing k)`).
+- `encodeAxisRows_eqIdx`, `encodeStep_{arrays,arrayAxes,samples,equations}_eqIdx` (the `htag` suppliers).
+- `from_field_filter` (in scratch, ready to port): generic reduction
+  `(proj (from tc)).filter (decide (eqIdx=i) && P) = (proj (encodeStep i …)).filter P` for
+  `i < steps.length`, instantiable per field via `Bool.decide_and` + the tagging lemmas. Bridge
+  `decide (A ∧ B) = decide A && decide B` is `Bool.decide_and`.
+
+**REMAINING (the mechanical grind, each its own mini-proof):**
+1. **`decodeWeaveAt (from tc) i slot = <original weave>`** for a valid slot — reduce arrayAxes filter
+   via `from_field_filter` (P = `arraySlot = slot`) to inst-`i`, then within inst-`i` use
+   `filter_flatten_tagged` AGAIN (key = `arraySlot`) to pick the one `encodeAxisRows i slot w` group
+   (the 3-way `output ++ input ++ deg` append needs `filter_append` + showing the non-matching groups'
+   slots are out of range), then invert `encodeAxisRows`↔`decodeWeaveAt` (find? by position over a
+   range-map recovers each slot; `.natAxis`⇒`.tiled`, else `.fixed ⟨nameOfSizeExpr size, size⟩`).
+   Needs `lookupSize (from tc) (axisUidFor3 i slot p) = <that axis's size>` — global uid uniqueness via
+   `axisUidFor3` injectivity (`Nat.pair_eq_pair`) so `find?` over the flattened axisSizes hits inst-i's
+   entry (first & only match). This is the ONE empirical name-invariant step (Step 3b below): the size
+   stored is `SizeExpr.var name` (or `.var "_"`), so `nameOfSizeExpr` recovers `.name` and the stored
+   `SizeExpr` IS `.size` verbatim.
+2. **`decodeReindexing (from tc) … = <original StMatP>`** — hardest; same reduction to inst-i samples,
+   then invert the `SampleRow` matrix encoding (coeffs/bias per (fixed-pos, dom-pos)). Depends on the
+   scan/`route` producing matrices whose stored shape matches `codLen = fixedPositions.length`.
+3. **op / reads / degree** round trips — op via `brOpOfIdx_brOpIdx` + `unaryToNat_natToUnary` on the
+   `equations.find?`; reads via `parseWireLabel_wireLabel`; degree via the weave round trip on `degSlot`.
+4. **`decodeStep (from tc) i = (tc.steps[i], tc.routing.getD i [])`** — assemble 1–3 (`outLen`/`inLen`
+   recovered by array-count via `from_field_filter` + `List.length_filter`-ish + tagging).
+5. **Assembly** — `ThreadedComposed` ext on steps/routing (both from step 4 via `List.ext_getElem`) and
+   **`nExternal`** (the only part needing `h : WellFormed`: conjunct-4 `w ∈ poolAt i` bounds every
+   routing external index `< nExternal`, and `wellFormedDom` referencedness gives every `k < nExternal`
+   IS referenced ⇒ `max + 1 = nExternal`; handle `nExternal = 0` separately).
+
+Original bottom-up step list (partially subsumed above):
 - [ ] **Step 1: `axisUidFor`/`Nat.pair` injectivity lemma** — `axisUidFor i k = axisUidFor i' k' → i =
   i' ∧ k = k'` (direct from `Nat.pair_eq_pair`/`Nat.unpair_pair` in Mathlib). Verify:
   `lean_diagnostic_messages` clean.
