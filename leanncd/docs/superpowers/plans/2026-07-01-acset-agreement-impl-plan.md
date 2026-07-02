@@ -98,61 +98,157 @@ the invariant is empirically verified, not structurally guaranteed by the type s
 - Modify: `leanncd/LeanNCD/Bridge/Agreement.lean` (remove the `fromThreadedComposed` sorry, re-export
   or call the `AcsetCodec` def)
 
-**Interfaces:**
-- Produces: `axisUidFor : Nat → Nat → Acset.AxisUID := fun i k => ⟨.rawAxis, Nat.pair i k⟩` (step `i`,
-  within-step degree-axis position `k`; `Nat.pair` is Mathlib's injective pairing, `Nat.pair`/
-  `Nat.unpair`, so distinct `(i,k)` never collide — no arbitrary bound assumption).
-- Produces: `brOpToOpTag : BrOp → Acset.OpTag` (fixed injective map, documented as internal-only, e.g.
-  `contract↦identity, maxreduce↦elementwise, scatter↦linear, relu↦elementwise·¹, softmax↦softmax,
-  normalize↦normalize, scan↦addition, scanAffine↦embedding, scanPre↦weightedTriangularLower` — ¹NOTE:
-  `maxreduce` and `relu` collide on `elementwise`; disambiguate by encoding the ORIGINAL `BrOp`
-  constructor index as a decimal string in `elementwiseFn` instead, e.g. `some "brop:1"` for
-  `maxreduce`, so `opTagToBrOp` is a true left-inverse — do NOT rely on `operatorTag` alone. Revise
-  this sub-scheme during implementation if a cleaner single-field encoding presents itself; the only
-  hard requirement is that Task C's round-trip lemma holds.)
-- Produces: `wireLabel (w : Wire) : String := match w with | .external k => s!"ext:{k}" | .internal j s
-  => s!"int:{j}:{s}"` and its parser `parseWireLabel : String → Option Wire`.
+**Interfaces (finalized 2026-07-02 against real Lean 4.30 APIs — verified compiling in isolation
+before writing the real file; supersedes the sketch originally written here):**
+- `Nat.pair`/`Nat.unpair`/`Nat.pair_eq_pair`/`Nat.unpair_pair` live in `Mathlib.Data.Nat.Pairing`
+  (already reachable — every file in this project imports `Mathlib` wholesale). Produces:
+  `axisUidFor : Nat → Nat → Acset.AxisUID := fun i k => ⟨.rawAxis, Nat.pair i k⟩`.
+- **Numbers-in-strings use a UNARY encoding, not decimal.** `String.toNat?`/`toString` round-trip
+  has no ready-made `∀ n, (toString n).toNat? = some n` lemma in core/Mathlib/Batteries (checked); a
+  from-scratch decimal-digit proof is a real detour. Unary is trivially provable and the values
+  involved (step/slot/external indices) are small enough that a string of that many characters is
+  practically fine:
+  ```lean
+  def natToUnary (n : Nat) : String := String.ofList (List.replicate n '1')
+  def unaryToNat (s : String) : Nat := s.length
+  theorem unaryToNat_natToUnary (n : Nat) : unaryToNat (natToUnary n) = n := by
+    simp [unaryToNat, natToUnary, String.length]
+  ```
+  (Verified: this exact lemma closes with plain `simp`, no induction needed — confirmed by isolated
+  `lake env lean` check before adopting.)
+- **`wireLabel` encodes the whole `Wire` as ONE `Nat` via `Nat.pair`, then unary-strings that** —
+  NOT `String.splitOn`-with-delimiters as originally sketched. `splitOn` has no established
+  `++`-interaction lemmas (`-- TODO: splitOn` literally in `Batteries/Data/String/Lemmas.lean`);
+  proving `parseWireLabel (wireLabel w) = some w` through it would be its own sub-project. `Nat.pair`/
+  `Nat.unpair` already round-trip cleanly (used for `axisUidFor`), so nesting pairs sidesteps the
+  string-library gap entirely:
+  ```lean
+  def wireCode : Wire → Nat
+    | .external k   => Nat.pair 0 k
+    | .internal j s => Nat.pair 1 (Nat.pair j s)
+  def wireOfCode (n : Nat) : Wire :=
+    let (tag, rest) := Nat.unpair n
+    if tag = 0 then .external rest else let (j, s) := Nat.unpair rest; .internal j s
+  def wireLabel (w : Wire) : String := natToUnary (wireCode w)
+  def parseWireLabel (s : String) : Option Wire := some (wireOfCode (unaryToNat s))
+  ```
+  (Verified: `wireOfCode_wireCode`/`parseWireLabel_wireLabel` both close with plain `cases <;> simp`
+  — confirmed by compiling `LeanNCD/Bridge/AcsetCodec.lean` directly, exit code 0, no `sorry`.)
+- **`BrOp` is NOT mapped into `Acset.OpTag` at all** (drops the earlier 9-vs-10 collision problem
+  entirely) — since the design decision is systematic/no-semantic-fidelity, just store the `BrOp`
+  constructor's own index directly: `brOpIdx : BrOp → Nat` (`.contract↦0, .maxreduce↦1, .scatter↦2,
+  .relu↦3, .softmax↦4, .normalize↦5, .scan↦6, .scanAffine↦7, .scanPre↦8`), `brOpOfIdx : Nat → BrOp`
+  (inverse on `0..8`, defaulting to `.contract` outside that range — never hit on real round-trip
+  data). Encode via `elementwiseFn := some (natToUnary (brOpIdx b.op))` on the `slot = 0` output row
+  ONLY (mirrors Python's `_add_equation` convention of putting operator info on the first/`slot=0`
+  output row — a step's `op` is per-`BrBaseP`, not per-output-slot, so other output rows for a
+  multi-output step leave `elementwiseFn := none`). `operatorTag`/`opPredicate`/`bias` are left `none`
+  throughout — they carry Python-specific semantic distinctions (masked-softmax predicate strings,
+  linear-layer bias flags) that `BrOp` doesn't make, and nothing here needs to reconstruct them.
 - Produces: `nameOfSizeExpr : SizeExpr → Option String := fun | .var "_" => none | .var s => some s | _
   => none` — the decode-side inverse of the codebase-wide `AxisP.mk (some x) (SizeExpr.var x)` /
   `AxisP.mk none (SizeExpr.var "_")` invariant (see Design Decision CORRECTION). Used by Task B, not
   Task A itself (Task A stores the real `SizeExpr` verbatim; it never needs to derive a name).
 - Produces: `fromThreadedComposed (tc : ThreadedComposed) : Acset.SBrInstance`.
 
-- [ ] **Step 1: Add the codec file skeleton with `axisUidFor`, `brOpToOpTag`, `wireLabel`/
-  `parseWireLabel`, each as a standalone sorry-free total function (no `ThreadedComposed` dependency
-  yet).** Verify: `lake env lean leanncd/LeanNCD/Bridge/AcsetCodec.lean` compiles with no errors.
+- [ ] **Step 1: Add the codec file skeleton with `axisUidFor`, `natToUnary`/`unaryToNat` (+ its
+  round-trip lemma), `wireLabel`/`parseWireLabel`, `brOpIdx`/`brOpOfIdx`, each as a standalone
+  sorry-free total function/lemma (no `ThreadedComposed` dependency yet).** Verify: `lake env lean
+  leanncd/LeanNCD/Bridge/AcsetCodec.lean` compiles with no errors.
 
-- [ ] **Step 2: Implement `fromThreadedComposed` per-step.** For step `i` with `BrBaseP` `b` and reads
-  `tc.routing.getD i []`:
-  - One `EquationRow ⟨i, none⟩`.
-  - For each output slot `s < b.outputWeaves.length`: one `ArrayRow` at `slot := s`, `isInput :=
-    false`, `operatorTag := some (brOpToOpTag b.op)`, plus one `ArrayAxisRow` per `fixed` axis in
-    `b.outputWeaves.getD s []` (position = index within that weave, `axisUid := axisUidFor i` of the
-    matching **degree** position — recovered via `List.findIdx?` against `b.degree`, since B.7
-    guarantees per-slot output axes are a sub-list of degree in order; `isTarget := false`).
-  - For each read `j`, wire `w := (tc.routing.getD i []).getD j (.external 0)`: one `ArrayRow` at
-    `slot := b.outputWeaves.length + j`, `isInput := true`, `wireLabel := some (wireLabel w)`, plus one
-    `ArrayAxisRow` per `fixed` axis in `b.inputWeaves.getD j []` (`isTarget := true` for axes NOT in
-    `b.degree`, i.e. contracted; else `false`).
-  - `SampleRow`s: for reindexing `b.reindexings.getD j default : StMatP` (`codLen × domLen` matrix +
-    bias), for each `(c, d)` with `coeffs.getD c [] |>.getD d 0 ≠ 0`: one `SampleRow ⟨i, j, axisUidFor
-    i d, axisUidFor i c, coeffs[c][d], bias.getD c 0⟩` (bias repeated redundantly per nonzero-coeff row
-    for slot `(i,j,c)`; if a `c` has NO nonzero coeffs, one `SampleRow` with `coeff := 0, offset :=
-    bias.getD c 0` so pure-bias axes are not silently dropped).
-  - `axisSizes`: one `(axisUidFor i k, (b.degree.getD k default).size)` per degree position `k`,
-    unioned (`List.union` or plain `++` — duplicates across steps are impossible since `axisUidFor` is
-    injective in `i`) across all steps.
-  Concatenate all steps' rows (`List.flatMap` over `tc.steps.zipIdx`, threading the routing list in
-  parallel via `tc.routing.getD i []`).
-  Verify: `lake env lean leanncd/LeanNCD/Bridge/AcsetCodec.lean`; `#eval fromThreadedComposed <a
-  concrete tc from tl!{}>` on the §12.1 coupled-scan example — sanity-check table row counts by hand
-  (steps × (outputs+inputs) rows, etc.) before moving on.
+**REVISED design (found during implementation, 2026-07-02) — `axisUidFor` needs a THIRD coordinate,
+and the op index needs a slot-independent home:**
 
-- [ ] **Step 3: Wire up `Agreement.lean`.** Replace `noncomputable def fromThreadedComposed (tc :
-  ThreadedComposed) : Acset.SBrInstance := sorry` with `:= AcsetCodec.fromThreadedComposed tc` (import
-  `LeanNCD.Bridge.AcsetCodec`). Verify: `lake build` green; `grep -n sorry
-  leanncd/LeanNCD/Bridge/Agreement.lean` shows only `realize_fromThreadedComposed_agree` (and
-  `agree_dom`/`agree_cod`, which are not literal sorries but transitively depend on it).
+- `axisUidFor i k` (2-arg, degree-position only) is insufficient: `degree`, each output weave, and
+  each input weave are ALL independent axis-position spaces that must round-trip independently (the
+  E2a presentation carries no uid linking a weave's fixed axis back to a specific degree position —
+  "the dependent typing is dropped", per `Target.lean:63`). Use a 3-arg version instead: `axisUidFor3
+  (i slot pos : Nat) : Acset.AxisUID := ⟨.rawAxis, Nat.pair i (Nat.pair slot pos)⟩`, where `slot`
+  ranges over a per-step-uniform numbering: `0..outLen-1` = output weaves, `outLen..outLen+inLen-1` =
+  input weaves (`outLen + j` for read `j`), and `outLen+inLen` (one past the last real slot) = the
+  reserved **degree slot**. No cross-referencing between spaces is needed for the round-trip — each
+  weave/degree's fixed axes just need to survive independently.
+- **Tiled slots need their own marker**, not just an absent row: `ArrayAxisRow` is emitted for EVERY
+  weave position (not just `fixed` ones), so the decoder can recover the weave's total length
+  (otherwise a weave ending in `.tiled` slots would silently lose length information). Fixed slots get
+  `axisUid := axisUidFor3 i slot p`; tiled slots get the reserved sentinel `⟨.natAxis, 0⟩` (`.natAxis`
+  is otherwise unused by this codec, so it unambiguously means "tiled, ignore `id`"). `isTarget` is
+  unused by this codec (nothing in the round-trip needs it) — set `false` uniformly.
+- **The op index goes on `EquationRow.lhsName`, NOT an output-slot `ArrayRow`.** A step's `BrOp` is
+  per-`BrBaseP`, but `outputWeaves.length` could in principle be `0` for a non-well-formed `tc` (the
+  codec must be total over ALL `ThreadedComposed`, not just compiler output) — there would be no
+  "slot 0" row to carry it. `EquationRow` is unconditionally emitted once per step, so
+  `lhsName := some (natToUnary (brOpIdx b.op))` has no such gap.
+- **`degree` is just a weave with no `tiled` option** — reuse the SAME output/input weave encoding
+  helper on `b.degree.map .fixed : WeaveShapeP` rather than writing separate degree-specific code.
+
+**Implementation, using the 3-arg scheme above.** Two shared helpers, then per-step assembly:
+```lean
+def encodeAxisRows (i slot : Nat) (w : WeaveShapeP) : List ArrayAxisRow :=
+  (List.range w.length).map fun p => match w.getD p .tiled with
+    | .fixed _ => { equationIdx := i, arraySlot := slot, axisUid := axisUidFor3 i slot p,
+                     isTarget := false, position := p }
+    | .tiled   => { equationIdx := i, arraySlot := slot, axisUid := ⟨.natAxis, 0⟩,
+                     isTarget := false, position := p }
+def encodeAxisSizes (i slot : Nat) (w : WeaveShapeP) : List (AxisUID × SizeExpr) :=
+  (List.range w.length).filterMap fun p => match w.getD p .tiled with
+    | .fixed a => some (axisUidFor3 i slot p, a.size)
+    | .tiled   => none
+def fixedPositions (w : WeaveShapeP) : List Nat :=
+  (List.range w.length).filter fun p => match w.getD p .tiled with
+    | .fixed _ => true | .tiled => false
+```
+Per step `i` (`b := tc.steps.getD i default`, `reads := tc.routing.getD i []`, `outLen :=
+b.outputWeaves.length`, `inLen := reads.length`, `degSlot := outLen + inLen`):
+- `EquationRow ⟨i, some (natToUnary (brOpIdx b.op))⟩`.
+- Output rows: `s ∈ [0,outLen)` → `ArrayRow ⟨i, s, none, false, none, none, .reals, none, none, none,
+  none, none⟩` + `encodeAxisRows i s (b.outputWeaves.getD s [])` + `encodeAxisSizes i s (...)`.
+- Input rows: `j ∈ [0,inLen)`, `w := reads.getD j (.external 0)` → `ArrayRow ⟨i, outLen+j, none, true,
+  none, none, .reals, none, none, none, none, some (wireLabel w)⟩` + `encodeAxisRows i (outLen+j)
+  (b.inputWeaves.getD j [])` + `encodeAxisSizes i (outLen+j) (...)`.
+- Degree: `encodeAxisRows i degSlot (b.degree.map .fixed)` + `encodeAxisSizes i degSlot (...)` (no
+  `ArrayRow` needed for the degree slot — nothing decodes an `ArrayRow` for it, only its
+  `ArrayAxisRow`/`axisSizes` rows, which is fine: `ArrayAxisRow.arraySlot` need not reference a real
+  `ArrayRow` here, this is an internal-only codec, not a literal acset with Python-style FK integrity).
+- `SampleRow`s per read `j` (reindexing `m := b.reindexings.getD j default`, `inW := b.inputWeaves.getD
+  j []`, `fps := fixedPositions inW`): for `c ∈ [0, m.codLen)`, `tgtUid := axisUidFor3 i (outLen+j)
+  (fps.getD c 0)`, `row := m.coeffs.getD c []`, `nz := (List.range m.domLen).filter (fun d =>
+  row.getD d 0 ≠ 0)`: if `nz = []`, one row `⟨i, outLen+j, tgtUid, tgtUid, 0, m.bias.getD c 0⟩`
+  (self-referencing `srcUid = tgtUid` sentinel for "pure bias, no source axis"); else one row per
+  `d ∈ nz`: `⟨i, outLen+j, axisUidFor3 i degSlot d, tgtUid, row.getD d 0, m.bias.getD c 0⟩` (bias
+  redundantly repeated across all rows sharing `(outLen+j, tgtUid)` — decode reads it off any one).
+
+Concatenate all steps' rows (`List.flatMap` over `tc.steps.zipIdx`, threading `tc.routing.getD i []`
+in parallel per step).
+
+Verify: `lake env lean leanncd/LeanNCD/Bridge/AcsetCodec.lean`; `#eval fromThreadedComposed <a
+concrete tc from tl!{}>` on the §12.1 coupled-scan example — sanity-check table row counts by hand
+(steps × (outputs+inputs+1) weave-encodings, etc.) before moving on.
+
+**Consequence for Task C:** `toThreadedComposed_fromThreadedComposed` should take `(h : tc.WellFormed)`
+as a hypothesis, not hold unconditionally — `nExternal` is NOT recoverable from `routing` alone for an
+arbitrary (non-well-formed) `tc` (an unreferenced external slot leaves no trace in any wire), and
+`WellFormed`'s `wellFormedDom` conjunct is exactly what guarantees every external slot `< nExternal` IS
+referenced. This matches how the lemma is actually used in Task E (always under a `WellFormed`
+witness), so it costs nothing to add.
+
+- [x] **Step 3: Wire up `Agreement.lean`.** [DONE 2026-07-02] Replaced the `sorry` body with `:=
+  AcsetCodec.fromThreadedComposed tc` (dropped the stale `noncomputable` — the codec is fully
+  computable, no `MvPolynomial`/`Classical.choice`). `lean_verify LeanNCD.fromThreadedComposed` ⇒
+  `[propext]`, no `sorryAx`. Full `lake build` green (8587 jobs — one more than the prior 8586, the
+  new `AcsetCodec.lean` module). Remaining sorries in `Agreement.lean`: only
+  `realize_fromThreadedComposed_agree` (Task E); `agree_dom`/`agree_cod` are real proofs, still
+  transitively sorry through it.
+
+**TASK A DONE (2026-07-02).** `fromThreadedComposed` implemented and verified sorry-free. Sanity-checked
+against real compiled examples (`test/DSL/CompileExamplesTest.lean`'s matmul and coupled-scan cases via
+a scratch eval file — NOT committed, structure only): step/array/axis/sample row counts match hand
+calculation exactly for both; axis names round-trip losslessly including the compiler's synthetic
+external-read names (`W_0`/`W_1` etc., per `route`'s canonical-external-weave convention). Two design
+corrections surfaced during implementation and are folded into the sections above: (1) axis names are
+load-bearing, fixed via the `SizeExpr.var` invariant, no schema change; (2) `wireLabel` uses nested
+`Nat.pair` instead of `String.splitOn` (no established `++`-interaction lemmas for `splitOn` yet). Next:
+Task B (`toThreadedComposed`, the decode direction) — NOT started.
 
 - [ ] **Step 4: Commit.**
   ```bash
@@ -205,8 +301,10 @@ the invariant is empirically verified, not structurally guaranteed by the type s
 
 **Interfaces:**
 - Consumes: `fromThreadedComposed` (Task A), `toThreadedComposed` (Task B).
-- Produces: `theorem toThreadedComposed_fromThreadedComposed (tc : ThreadedComposed) :
-  toThreadedComposed (fromThreadedComposed tc) = tc`.
+- Produces: `theorem toThreadedComposed_fromThreadedComposed (tc : ThreadedComposed)
+  (h : tc.WellFormed) : toThreadedComposed (fromThreadedComposed tc) = tc` — the `WellFormed`
+  hypothesis was added during Task A implementation (see the note at the end of Task A): `nExternal`
+  isn't recoverable from `routing` alone without it, and Task E's only call site already has it.
 
 This is the hardest task — expect it to be the B.7-equivalent of this plan (an order/grouping fight,
 not a deep category-theory one). Likely needed sub-lemmas, proved bottom-up, one commit each:

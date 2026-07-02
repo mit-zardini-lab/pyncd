@@ -1,6 +1,7 @@
 -- LeanNCD/Bridge/Agreement.lean
 import LeanNCD.Bridge.Realize
 import LeanNCD.Bridge.SBr
+import LeanNCD.Bridge.AcsetCodec
 import LeanNCD.DSL.Compile
 import LeanNCD.DSL.Pipeline.RouteSpec
 
@@ -401,9 +402,12 @@ noncomputable def realizeCompiled (p : TLProgram) (s : Nat) (tc : ThreadedCompos
 
 
 
-/-- §8.2 acset extraction (`from_tensor_program`): a ThreadedComposed's tabular twin.
-    OBLIGATION (`sorry`): the extraction algorithm (acset.md). -/
-noncomputable def fromThreadedComposed (tc : ThreadedComposed) : Acset.SBrInstance := sorry
+/-- §8.2 acset extraction (`from_tensor_program`): a ThreadedComposed's tabular twin. A
+    systematic/synthetic encoding (see `2026-07-01-acset-agreement-impl-plan.md`) — no attempt at
+    Python `from_tensor_program`/`OpTag` fidelity, just enough that `toThreadedComposed` (Task B)
+    can invert it (Task C), which is all `realize_fromThreadedComposed_agree` below needs. -/
+def fromThreadedComposed (tc : ThreadedComposed) : Acset.SBrInstance :=
+  AcsetCodec.fromThreadedComposed tc
 
 /-- **Prop 8 (DSL/CSV agreement).** The DSL-path realization of `tc` and the CSV-path
     realization of its extracted `SBrInstance` are the SAME `Br` morphism (equal as
