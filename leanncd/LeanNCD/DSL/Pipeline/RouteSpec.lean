@@ -379,17 +379,14 @@ theorem buildStep_output_fixedAxes
   rw [hcons]
   rfl
 
-/-- The reindexings of a built step: one `StMatP` per input read factor, its columns indexed by the
-    step degree (by uid) and its rows the read's `idxToRow` coordinates. The equation both the
-    well-formedness and domain-rank proofs stand on. -/
+/-- M2 bridge: a built step's reindexings are exactly the pre-route artifact `elaborateReindexings`.
+    `route` is thus provably faithful to the standalone elaboration (whose invariants — well-formed,
+    domain-rank — are proved independently in `Lowering.lean`); consuming the artifact is M4. -/
 theorem buildStep_reindexings
     {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
     {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
     (h : buildStep ns ext stmts sc = .ok (b, w)) :
-    b.reindexings = sc.inputReadFactors.map (fun rf =>
-      let degUids := sc.stepDegAxesMulti.map (·.uid)
-      let rows := rf.2.map (idxToRow degUids)
-      StMatP.mk degUids.length rf.2.length (rows.map (·.1)) (rows.map (·.2))) := by
+    b.reindexings = sc.elaborateReindexings := by
   have hg := buildStep_ok_guard h
   unfold buildStep at h
   cases sc with
@@ -431,11 +428,7 @@ theorem buildStep_reindexings_wellFormed
     {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
     (h : buildStep ns ext stmts sc = .ok (b, w)) :
     ∀ m ∈ b.reindexings, m.wellFormed := by
-  rw [buildStep_reindexings h]
-  intro m hm
-  simp only [List.mem_map] at hm
-  obtain ⟨rf, _, rfl⟩ := hm
-  exact reindexing_wellFormed _ _
+  rw [buildStep_reindexings h]; exact sc.elaborateReindexings_wellFormed
 
 /-- Track A: every reindexing's domain rank equals the step's degree length — a reindexing maps
     *from* the step degree, so its `domLen` (column count) must match `degree.length`. The typed
@@ -445,10 +438,10 @@ theorem buildStep_reindexings_domLen
     {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
     (h : buildStep ns ext stmts sc = .ok (b, w)) :
     ∀ m ∈ b.reindexings, m.domLen = b.degree.length := by
-  rw [buildStep_degree h, buildStep_reindexings h]
+  rw [buildStep_degree h]
   intro m hm
-  simp only [List.mem_map] at hm
-  obtain ⟨rf, _, rfl⟩ := hm
+  rw [buildStep_reindexings h] at hm
+  rw [sc.elaborateReindexings_domLen m hm]
   simp [List.length_map]
 
 /-- Track A (Option 1), route level: every reindexing of every step in a routed program is
@@ -498,6 +491,25 @@ theorem routeCore_reindexings_domLen {sp : ScheduledProgram}
         obtain ⟨x, hx⟩ := mapM_ok_mem hm p hp
         exact buildStep_reindexings_domLen hx m hm2
   · rw [if_neg hro] at h; simp at h
+
+/-- M2 route-level bridge: a routed program's step reindexings are **exactly** the pre-route artifact
+    `elaborateAffineReindexings sp`. `route` is provably faithful to the standalone elaboration — the
+    "single source of truth" made precise. (Consuming the artifact instead of recomputing is M4.) -/
+theorem routeCore_reindexings_eq {sp : ScheduledProgram}
+    {steps : List BrBaseP} {routing : List (List Wire)}
+    (h : routeCore sp = .ok (steps, routing)) :
+    steps.map (·.reindexings) = elaborateAffineReindexings sp := by
+  unfold elaborateAffineReindexings
+  have hlen : steps.length = sp.stmts.length := routeCore_steps_length h
+  apply List.ext_getElem
+  · rw [List.length_map, List.length_map, hlen]
+  · intro i h1 h2
+    have hi : i < sp.stmts.length := by rw [List.length_map] at h2; exact h2
+    have hbr := buildStep_reindexings (routeCore_getD h i hi)
+    rw [List.getD_eq_getElem steps default (by rw [hlen]; exact hi),
+        List.getD_eq_getElem sp.stmts default hi] at hbr
+    rw [List.getElem_map, List.getElem_map]
+    exact hbr
 
 /-! ## Lemma 5: `buildNameToStep` value bound -/
 

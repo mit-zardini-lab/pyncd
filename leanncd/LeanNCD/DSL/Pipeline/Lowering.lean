@@ -418,6 +418,39 @@ theorem ScanStmt.stepDegAxesMulti_uid_nodup (sc : ScanStmt) :
   unfold ScanStmt.stepDegAxesMulti
   exact dedupByUid_uid_nodup _
 
+/-- M2 (`elaborateAffineReindexings`): the affine reindexing artifact for a step, lifted out of
+    `buildStep` as the single source of truth. One `StMatP` per input read factor: columns indexed by
+    the canonical step degree (`stepDegAxesMulti` uids, `stepDegAxesMulti_uid_nodup`), rows the read's
+    `idxToRow` coordinates. `buildStep` produces exactly this (`buildStep_reindexings`, the bridge);
+    `route` is unchanged for now (consuming it is M4). `IdxExpr` is affine by construction, so there
+    is no non-affine case to reject. -/
+def ScanStmt.elaborateReindexings (sc : ScanStmt) : List StMatP :=
+  let degUids := sc.stepDegAxesMulti.map (·.uid)
+  sc.inputReadFactors.map (fun rf =>
+    let rows := rf.2.map (idxToRow degUids)
+    StMatP.mk degUids.length rf.2.length (rows.map (·.1)) (rows.map (·.2)))
+
+/-- The M2 artifact is well-formed: every elaborated reindexing has `coeffs` `codLen × domLen` and
+    `bias` length `codLen` (from `reindexing_wellFormed`). A property of the artifact itself,
+    independent of `route`. -/
+theorem ScanStmt.elaborateReindexings_wellFormed (sc : ScanStmt) :
+    ∀ m ∈ sc.elaborateReindexings, m.wellFormed := by
+  unfold ScanStmt.elaborateReindexings
+  intro m hm
+  simp only [List.mem_map] at hm
+  obtain ⟨rf, _, rfl⟩ := hm
+  exact reindexing_wellFormed _ _
+
+/-- Every elaborated reindexing's domain rank equals the canonical degree length (its column count is
+    the number of distinct degree axes). A property of the artifact itself. -/
+theorem ScanStmt.elaborateReindexings_domLen (sc : ScanStmt) :
+    ∀ m ∈ sc.elaborateReindexings, m.domLen = (sc.stepDegAxesMulti.map (·.uid)).length := by
+  unfold ScanStmt.elaborateReindexings
+  intro m hm
+  simp only [List.mem_map] at hm
+  obtain ⟨rf, _, rfl⟩ := hm
+  rfl
+
 /-- The output weave of slot `s` over the step's combined `degree`: fixed on `writes[s]`'s retained
     (LHS) axes, tiled elsewhere. -/
 def ScanStmt.slotWeave (sc : ScanStmt) (s : Nat) : WeaveShapeP :=
@@ -532,6 +565,13 @@ def routableInOrder (stmts : List ScanStmt) : Bool :=
       match ns[rf.1]? with
       | some (j, _) => decide (j < i)
       | none        => true))
+
+/-- M2 (`elaborateAffineReindexings`): the program-level affine reindexing artifact — each step's
+    `elaborateReindexings`. A pre-route, `Except`-free compile-time artifact (no routing/cyclicity
+    concerns), the single source of truth for reindex rows that `route` is shown to reproduce
+    (`routeCore` step reindexings = this; per-step bridge `buildStep_reindexings`). -/
+def elaborateAffineReindexings (sp : ScheduledProgram) : List (List StMatP) :=
+  sp.stmts.map (·.elaborateReindexings)
 
 /-- Pure core of Phase 8: compute the step list and routing table from a `ScheduledProgram`.
     Computes `nameToStep` and `extIndex` once (PASS 1), then folds `buildStep` over `stmts`
