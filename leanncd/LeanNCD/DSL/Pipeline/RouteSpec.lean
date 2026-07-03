@@ -379,6 +379,49 @@ theorem buildStep_output_fixedAxes
   rw [hcons]
   rfl
 
+/-- The reindexings of a built step: one `StMatP` per input read factor, its columns indexed by the
+    step degree (by uid) and its rows the read's `idxToRow` coordinates. The equation both the
+    well-formedness and domain-rank proofs stand on. -/
+theorem buildStep_reindexings
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
+    (h : buildStep ns ext stmts sc = .ok (b, w)) :
+    b.reindexings = sc.inputReadFactors.map (fun rf =>
+      let degUids := sc.stepDegAxesMulti.map (·.uid)
+      let rows := rf.2.map (idxToRow degUids)
+      StMatP.mk degUids.length rf.2.length (rows.map (·.1)) (rows.map (·.2))) := by
+  have hg := buildStep_ok_guard h
+  unfold buildStep at h
+  cases sc with
+  | plain s => simp only [hg, Bool.not_true, pure_bind] at h
+               exact congrArg BrBaseP.reindexings (bind_pure_pair_ok h)
+  | scan nm ax bs rs aff => simp only [hg, Bool.not_true, pure_bind] at h
+                            exact congrArg BrBaseP.reindexings (bind_pure_pair_ok h)
+  | scanPre nm ax tc =>
+      by_cases he : tc.steps.isEmpty = true
+      · simp [he, bind, Except.bind] at h
+      · simp only [hg, Bool.not_true, he, pure_bind] at h
+        exact congrArg BrBaseP.reindexings (bind_pure_pair_ok h)
+
+/-- The degree of a built step is `stepDegAxesMulti` (retained ++ contracted, uid-deduplicated). -/
+theorem buildStep_degree
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
+    (h : buildStep ns ext stmts sc = .ok (b, w)) :
+    b.degree = sc.stepDegAxesMulti.map (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name)) := by
+  have hg := buildStep_ok_guard h
+  unfold buildStep at h
+  cases sc with
+  | plain s => simp only [hg, Bool.not_true, pure_bind] at h
+               exact congrArg BrBaseP.degree (bind_pure_pair_ok h)
+  | scan nm ax bs rs aff => simp only [hg, Bool.not_true, pure_bind] at h
+                            exact congrArg BrBaseP.degree (bind_pure_pair_ok h)
+  | scanPre nm ax tc =>
+      by_cases he : tc.steps.isEmpty = true
+      · simp [he, bind, Except.bind] at h
+      · simp only [hg, Bool.not_true, he, pure_bind] at h
+        exact congrArg BrBaseP.degree (bind_pure_pair_ok h)
+
 /-- Track A (Option 1): every reindexing `StMatP` a `buildStep` emits is `wellFormed` — its `coeffs`
     is exactly `codLen × domLen` and `bias` has length `codLen`. Proved by construction: each is built
     from `idxToRow` rows (each `domLen`-wide, `reindexing_wellFormed`). Turns the `StMatP` shape
@@ -388,27 +431,25 @@ theorem buildStep_reindexings_wellFormed
     {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
     (h : buildStep ns ext stmts sc = .ok (b, w)) :
     ∀ m ∈ b.reindexings, m.wellFormed := by
-  have hg := buildStep_ok_guard h
-  have hb : b.reindexings = sc.inputReadFactors.map (fun rf =>
-      let degUids := sc.stepDegAxesMulti.map (·.uid)
-      let rows := rf.2.map (idxToRow degUids)
-      StMatP.mk degUids.length rf.2.length (rows.map (·.1)) (rows.map (·.2))) := by
-    unfold buildStep at h
-    cases sc with
-    | plain s => simp only [hg, Bool.not_true, pure_bind] at h
-                 exact congrArg BrBaseP.reindexings (bind_pure_pair_ok h)
-    | scan nm ax bs rs aff => simp only [hg, Bool.not_true, pure_bind] at h
-                              exact congrArg BrBaseP.reindexings (bind_pure_pair_ok h)
-    | scanPre nm ax tc =>
-        by_cases he : tc.steps.isEmpty = true
-        · simp [he, bind, Except.bind] at h
-        · simp only [hg, Bool.not_true, he, pure_bind] at h
-          exact congrArg BrBaseP.reindexings (bind_pure_pair_ok h)
-  rw [hb]
+  rw [buildStep_reindexings h]
   intro m hm
   simp only [List.mem_map] at hm
   obtain ⟨rf, _, rfl⟩ := hm
   exact reindexing_wellFormed _ _
+
+/-- Track A: every reindexing's domain rank equals the step's degree length — a reindexing maps
+    *from* the step degree, so its `domLen` (column count) must match `degree.length`. The typed
+    reindex-domain soundness (the presentation-level shadow of `StMat degree _`). -/
+theorem buildStep_reindexings_domLen
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
+    (h : buildStep ns ext stmts sc = .ok (b, w)) :
+    ∀ m ∈ b.reindexings, m.domLen = b.degree.length := by
+  rw [buildStep_degree h, buildStep_reindexings h]
+  intro m hm
+  simp only [List.mem_map] at hm
+  obtain ⟨rf, _, rfl⟩ := hm
+  simp [List.length_map]
 
 /-- Track A (Option 1), route level: every reindexing of every step in a routed program is
     `wellFormed`. Lifts `buildStep_reindexings_wellFormed` over `routeCore`'s `mapM buildStep`. -/
@@ -432,6 +473,30 @@ theorem routeCore_reindexings_wellFormed {sp : ScheduledProgram}
         obtain ⟨p, hp, rfl⟩ := hst
         obtain ⟨x, hx⟩ := mapM_ok_mem hm p hp
         exact buildStep_reindexings_wellFormed hx m hm2
+  · rw [if_neg hro] at h; simp at h
+
+/-- Track A, route level: every reindexing's domain rank equals its step's degree length across a
+    routed program. Lifts `buildStep_reindexings_domLen` over `routeCore`'s `mapM buildStep`. -/
+theorem routeCore_reindexings_domLen {sp : ScheduledProgram}
+    {steps : List BrBaseP} {routing : List (List Wire)}
+    (h : routeCore sp = .ok (steps, routing)) :
+    ∀ st ∈ steps, ∀ m ∈ st.reindexings, m.domLen = st.degree.length := by
+  unfold routeCore at h
+  by_cases hro : routableInOrder sp.stmts
+  · rw [if_pos hro] at h
+    cases hm : sp.stmts.mapM (buildStep (buildNameToStep sp.stmts)
+        (buildExtIndex sp.extNames sp.stmts) sp.stmts) with
+    | error e => rw [hm] at h; simp [bind, Except.bind] at h
+    | ok pairs =>
+        rw [hm] at h
+        simp only [bind, Except.bind, pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+        obtain ⟨hsteps, _⟩ := h
+        intro st hst m hm2
+        rw [← hsteps] at hst
+        simp only [List.mem_map] at hst
+        obtain ⟨p, hp, rfl⟩ := hst
+        obtain ⟨x, hx⟩ := mapM_ok_mem hm p hp
+        exact buildStep_reindexings_domLen hx m hm2
   · rw [if_neg hro] at h; simp at h
 
 /-! ## Lemma 5: `buildNameToStep` value bound -/
