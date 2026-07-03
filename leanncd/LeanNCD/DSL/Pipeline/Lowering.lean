@@ -245,6 +245,37 @@ def emptyStmt : Stmt := .assign "" [] { body := { terms := [] }, nonlin := .iden
 def dedupByUid (as : List AxisSpec) : List AxisSpec :=
   as.foldl (fun acc a => if acc.any (fun b => b.uid == a.uid) then acc else acc ++ [a]) []
 
+/-- `dedupByUid` produces a uid-distinct list: the uids of its output are `Nodup`. The "canonical
+    degree" invariant — a step's index space has exactly one column per distinct axis. -/
+theorem dedupByUid_uid_nodup (as : List AxisSpec) : ((dedupByUid as).map (·.uid)).Nodup := by
+  suffices h : ∀ (as acc : List AxisSpec), ((acc.map (·.uid)).Nodup) →
+      (((as.foldl (fun acc a => if acc.any (fun b => b.uid == a.uid) then acc else acc ++ [a]) acc)).map
+        (·.uid)).Nodup by
+    exact h as [] (by simp)
+  intro as
+  induction as with
+  | nil => intro acc hacc; simpa using hacc
+  | cons a t ih =>
+      intro acc hacc
+      simp only [List.foldl_cons]
+      apply ih
+      cases hb : acc.any (fun b => b.uid == a.uid) with
+      | true => simpa using hacc
+      | false =>
+          show ((acc ++ [a]).map (·.uid)).Nodup
+          rw [List.map_append, List.nodup_append]
+          refine ⟨hacc, List.nodup_singleton _, ?_⟩
+          intro u hu u' hu'
+          simp only [List.map_cons, List.map_nil, List.mem_singleton] at hu'
+          subst hu'
+          intro heq
+          subst heq
+          obtain ⟨b, hbmem, hbeq⟩ := List.mem_map.mp hu
+          have hcontra : acc.any (fun b => b.uid == a.uid) = true :=
+            List.any_eq_true.mpr ⟨b, hbmem, by simp [hbeq]⟩
+          rw [hb] at hcontra
+          exact absurd hcontra (by simp)
+
 /-- A stmt's published (retained) output axes, in LHS order (deduplicated by uid) — what a producer
     emits and a consumer receives. -/
 def tensorAxes (s : Stmt) : List AxisP :=
@@ -378,6 +409,14 @@ def ScanStmt.stepDegAxesMulti (sc : ScanStmt) : List AxisSpec :=
   let allRead := ss.flatMap (fun s => s.readFactors.flatMap (fun rf => rf.2.flatMap idxAxes))
   let contracted := allRead.filter (fun a => !(retained.map (·.uid)).contains a.uid)
   dedupByUid (retained ++ contracted)
+
+/-- Canonical degree (Track A): a step's index space (`stepDegAxesMulti`) has distinct uids — one
+    column per axis, no duplicates. Immediate from `dedupByUid_uid_nodup` since the degree ends in a
+    `dedupByUid`. This is what makes `degUids` a valid column index set for the reindexings. -/
+theorem ScanStmt.stepDegAxesMulti_uid_nodup (sc : ScanStmt) :
+    ((sc.stepDegAxesMulti).map (·.uid)).Nodup := by
+  unfold ScanStmt.stepDegAxesMulti
+  exact dedupByUid_uid_nodup _
 
 /-- The output weave of slot `s` over the step's combined `degree`: fixed on `writes[s]`'s retained
     (LHS) axes, tiled elsewhere. -/
