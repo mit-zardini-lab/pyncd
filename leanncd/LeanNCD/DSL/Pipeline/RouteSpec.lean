@@ -60,6 +60,28 @@ private theorem mapM_ok_getD {ε α β : Type} [Inhabited β] {f : α → Except
                   rw [List.getD_cons_succ, List.getD_cons_succ]
                   exact ih hft j d₁ d₂ (Nat.lt_of_succ_lt_succ hi)
 
+/-- If `l.mapM f = .ok r`, every output element `y ∈ r` is `f x` (`= .ok y`) for some input `x`. -/
+private theorem mapM_ok_mem {ε α β : Type} {f : α → Except ε β} :
+    ∀ {l : List α} {r : List β}, l.mapM f = .ok r → ∀ y ∈ r, ∃ x, f x = .ok y := by
+  intro l
+  induction l with
+  | nil => intro r h y hy
+           simp only [List.mapM_nil, pure, Except.pure, Except.ok.injEq] at h; subst h; simp at hy
+  | cons a t ih =>
+      intro r h y hy
+      rw [List.mapM_cons] at h
+      cases hfa : f a with
+      | error e => simp [hfa, bind, Except.bind] at h
+      | ok b =>
+          cases hft : t.mapM f with
+          | error e => simp [hfa, hft, bind, Except.bind] at h
+          | ok bs =>
+              simp only [hfa, hft, bind, Except.bind, pure, Except.pure, Except.ok.injEq] at h
+              subst h
+              rcases List.mem_cons.mp hy with rfl | hmem
+              · exact ⟨a, hfa⟩
+              · exact ih hft y hmem
+
 /-! ## Lemma 1: `routeCore` output lengths equal `sp.stmts.length` -/
 
 theorem routeCore_steps_length {sp : ScheduledProgram}
@@ -356,6 +378,61 @@ theorem buildStep_output_fixedAxes
   have hcons := of_decide_eq_true (List.all_eq_true.mp hg s (List.mem_range.mpr hs))
   rw [hcons]
   rfl
+
+/-- Track A (Option 1): every reindexing `StMatP` a `buildStep` emits is `wellFormed` — its `coeffs`
+    is exactly `codLen × domLen` and `bias` has length `codLen`. Proved by construction: each is built
+    from `idxToRow` rows (each `domLen`-wide, `reindexing_wellFormed`). Turns the `StMatP` shape
+    invariant from an unchecked field convention into a proved property of the routed output. -/
+theorem buildStep_reindexings_wellFormed
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
+    (h : buildStep ns ext stmts sc = .ok (b, w)) :
+    ∀ m ∈ b.reindexings, m.wellFormed := by
+  have hg := buildStep_ok_guard h
+  have hb : b.reindexings = sc.inputReadFactors.map (fun rf =>
+      let degUids := sc.stepDegAxesMulti.map (·.uid)
+      let rows := rf.2.map (idxToRow degUids)
+      StMatP.mk degUids.length rf.2.length (rows.map (·.1)) (rows.map (·.2))) := by
+    unfold buildStep at h
+    cases sc with
+    | plain s => simp only [hg, Bool.not_true, pure_bind] at h
+                 exact congrArg BrBaseP.reindexings (bind_pure_pair_ok h)
+    | scan nm ax bs rs aff => simp only [hg, Bool.not_true, pure_bind] at h
+                              exact congrArg BrBaseP.reindexings (bind_pure_pair_ok h)
+    | scanPre nm ax tc =>
+        by_cases he : tc.steps.isEmpty = true
+        · simp [he, bind, Except.bind] at h
+        · simp only [hg, Bool.not_true, he, pure_bind] at h
+          exact congrArg BrBaseP.reindexings (bind_pure_pair_ok h)
+  rw [hb]
+  intro m hm
+  simp only [List.mem_map] at hm
+  obtain ⟨rf, _, rfl⟩ := hm
+  exact reindexing_wellFormed _ _
+
+/-- Track A (Option 1), route level: every reindexing of every step in a routed program is
+    `wellFormed`. Lifts `buildStep_reindexings_wellFormed` over `routeCore`'s `mapM buildStep`. -/
+theorem routeCore_reindexings_wellFormed {sp : ScheduledProgram}
+    {steps : List BrBaseP} {routing : List (List Wire)}
+    (h : routeCore sp = .ok (steps, routing)) :
+    ∀ st ∈ steps, ∀ m ∈ st.reindexings, m.wellFormed := by
+  unfold routeCore at h
+  by_cases hro : routableInOrder sp.stmts
+  · rw [if_pos hro] at h
+    cases hm : sp.stmts.mapM (buildStep (buildNameToStep sp.stmts)
+        (buildExtIndex sp.extNames sp.stmts) sp.stmts) with
+    | error e => rw [hm] at h; simp [bind, Except.bind] at h
+    | ok pairs =>
+        rw [hm] at h
+        simp only [bind, Except.bind, pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+        obtain ⟨hsteps, _⟩ := h
+        intro st hst m hm2
+        rw [← hsteps] at hst
+        simp only [List.mem_map] at hst
+        obtain ⟨p, hp, rfl⟩ := hst
+        obtain ⟨x, hx⟩ := mapM_ok_mem hm p hp
+        exact buildStep_reindexings_wellFormed hx m hm2
+  · rw [if_neg hro] at h; simp at h
 
 /-! ## Lemma 5: `buildNameToStep` value bound -/
 

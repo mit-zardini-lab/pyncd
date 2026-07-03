@@ -283,6 +283,23 @@ def idxToRow (us : List UID) : IdxExpr → (List Int × Int)
   | .shift a n   => (us.map (fun u => if u == a.uid then 1 else 0), n)
   | .affine n xs => (us.map (fun u => (xs.foldl (fun acc p => if p.2.uid == u then acc + p.1 else acc) 0)), n)
 
+/-- Every `idxToRow` coefficient row has exactly one entry per degree axis (`us.map` in each case),
+    so its length is `us.length`. The load-bearing fact for `StMatP` well-formedness of reindexings
+    (Track A): a built reindexing's `coeffs` rows are `domLen`-wide. -/
+theorem idxToRow_fst_length (us : List UID) (e : IdxExpr) : (idxToRow us e).1.length = us.length := by
+  cases e <;> simp [idxToRow]
+
+/-- The reindexing `StMatP` built from a degree `us` and a read's index expressions `idxs` is
+    `wellFormed`: `coeffs` is `idxs.length × us.length` and `bias` has length `idxs.length`. This is
+    exactly the record `buildStep` constructs (with `us = degUids`, `idxs = rf.2`). -/
+theorem reindexing_wellFormed (us : List UID) (idxs : List IdxExpr) :
+    (StMatP.mk us.length idxs.length ((idxs.map (idxToRow us)).map (·.1))
+      ((idxs.map (idxToRow us)).map (·.2))).wellFormed := by
+  simp only [StMatP.wellFormed, List.length_map, beq_self_eq_true, Bool.true_and, Bool.and_true,
+    List.all_map, List.all_eq_true, Function.comp_apply]
+  intro e _
+  simp [idxToRow_fst_length]
+
 /-- A ScanStmt's representative stmt: for `.scan`, the first recurrence stmt (else the first
     base stmt); for `.plain`, the stmt itself. It carries the reads/axes used to build the step. -/
 def ScanStmt.repStmt : ScanStmt → Option Stmt

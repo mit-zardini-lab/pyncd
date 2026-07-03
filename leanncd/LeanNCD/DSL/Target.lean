@@ -1,5 +1,6 @@
 -- LeanNCD/DSL/Target.lean
 import LeanNCD.DSL.SizeExpr   -- SizeExpr
+import LeanNCD.Exec.Uid       -- CompileError (for StMatP.validate)
 import Lean                    -- Lean.ToExpr
 
 namespace LeanNCD
@@ -14,6 +15,22 @@ structure StMatP where
   coeffs : List (List Int)
   bias   : List Int
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
+
+/-- Well-formedness of the reindexing record: the shape invariant the fields document but do not
+    enforce — `coeffs` is exactly `codLen × domLen` (row-major) and `bias` has length `codLen`.
+    `route`/`buildStep` construct these correctly, so this is a checkable guard, not a fix. -/
+def StMatP.wellFormed (m : StMatP) : Bool :=
+  m.coeffs.length == m.codLen &&
+  m.coeffs.all (fun row => row.length == m.domLen) &&
+  m.bias.length == m.codLen
+
+/-- Fail-loud validation: the matrix unchanged when `wellFormed`, else a `shapeMismatch` reporting
+    the expected `codLen × domLen` (bias `codLen`) against the actual row/bias counts. -/
+def StMatP.validate (m : StMatP) : Except CompileError StMatP :=
+  if m.wellFormed then .ok m
+  else .error (.shapeMismatch
+    s!"coeffs {m.codLen}×{m.domLen}, bias {m.codLen}"
+    s!"coeffs {m.coeffs.length} rows, bias {m.bias.length}")
 
 /-- Computable presentation of `Axis` (§2.2): name + a `SizeExpr` (not `Numeric`). -/
 structure AxisP where
