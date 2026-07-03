@@ -523,6 +523,358 @@ def _root_.LeanNCD.ThreadedComposed.WellShaped (tc : ThreadedComposed) : Prop :=
       (∀ row ∈ m.coeffs, row.length = m.domLen) ∧
       m.bias.length = m.codLen
 
+/-! #### Machinery for the per-step inversion `decodeStep_eq` (steps 2–6). -/
+
+/-- `find?` returns the unique element satisfying a decidable predicate. -/
+theorem find?_unique {α} (l : List α) (P : α → Bool) (x : α)
+    (hx : x ∈ l) (hpx : P x) (huniq : ∀ y ∈ l, P y → y = x) : l.find? P = some x := by
+  induction l with
+  | nil => simp at hx
+  | cons a t ih =>
+    by_cases hpa : P a
+    · rw [List.find?_cons_of_pos hpa]
+      exact congrArg some (huniq a (List.mem_cons_self ..) hpa)
+    · rw [List.find?_cons_of_neg hpa]
+      have hxt : x ∈ t := by
+        rcases List.mem_cons.1 hx with h | h
+        · exact absurd (h ▸ hpx) (by simpa using hpa)
+        · exact h
+      exact ih hxt (fun y hy hpy => huniq y (List.mem_cons_of_mem _ hy) hpy)
+
+/-- `axisUidFor3` is injective in all three coordinates (`Nat.pair`, nested). -/
+theorem axisUidFor3_inj {i s p i' s' p' : Nat} (he : axisUidFor3 i s p = axisUidFor3 i' s' p') :
+    i = i' ∧ s = s' ∧ p = p' := by
+  simp only [axisUidFor3, AxisUID.mk.injEq, true_and] at he
+  rw [Nat.pair_eq_pair, Nat.pair_eq_pair] at he
+  exact ⟨he.1, he.2.1, he.2.2⟩
+
+/-- Every `encodeAxisSizes` entry is either a `.rawAxis` size entry or a `.normAxis` name entry, with
+    its uid/value pinned to a `fixed` position of the weave. -/
+theorem mem_encodeAxisSizes (i slot : Nat) (w : WeaveShapeP) (u : AxisUID) (sz : SizeExpr)
+    (hmem : (u, sz) ∈ encodeAxisSizes i slot w) :
+    (∃ p a, p < w.length ∧ w.getD p .tiled = .fixed a ∧ u = axisUidFor3 i slot p ∧ sz = a.size)
+    ∨ (∃ p a nm, p < w.length ∧ w.getD p .tiled = .fixed a ∧ a.name = some nm
+          ∧ u = nameUidFor3 i slot p ∧ sz = .var nm) := by
+  simp only [encodeAxisSizes, List.mem_flatMap, List.mem_range] at hmem
+  obtain ⟨p, hp, hpm⟩ := hmem
+  rcases hw : w.getD p .tiled with a | _
+  · simp only [hw] at hpm
+    rcases hn : a.name with _ | nm
+    · simp only [hn, List.mem_singleton, Prod.mk.injEq] at hpm
+      exact Or.inl ⟨p, a, hp, hw, hpm.1, hpm.2⟩
+    · simp only [hn, List.mem_cons, List.not_mem_nil,
+        or_false, Prod.mk.injEq] at hpm
+      rcases hpm with h | h
+      · exact Or.inl ⟨p, a, hp, hw, h.1, h.2⟩
+      · exact Or.inr ⟨p, a, nm, hp, hw, hn, h.1, h.2⟩
+  · simp only [hw] at hpm; simp at hpm
+
+/-- The weave `encodeStep` places at array slot `slot`: output slots `0..outLen-1`, input slots
+    `outLen..outLen+inLen-1`, degree slot `outLen+inLen`, else empty. -/
+def slotWeave (b : BrBaseP) (reads : List Wire) (slot : Nat) : WeaveShapeP :=
+  let outLen := b.outputWeaves.length
+  let inLen := reads.length
+  if slot < outLen then b.outputWeaves.getD slot []
+  else if slot < outLen + inLen then b.inputWeaves.getD (slot - outLen) []
+  else if slot = outLen + inLen then b.degree.map .fixed else []
+
+theorem encodeAxisRows_arraySlot (i slot : Nat) (w : WeaveShapeP) :
+    ∀ r ∈ encodeAxisRows i slot w, r.arraySlot = slot := by
+  intro r hr; simp only [encodeAxisRows, List.mem_map] at hr
+  obtain ⟨p, _, rfl⟩ := hr; split <;> rfl
+
+/-- Filtering a `flatMap` of `encodeAxisRows` groups (indexed at `base + j`) by `arraySlot = slot`
+    isolates the single matching group. -/
+theorem filterSlot_flatMap_off (i base n slot : Nat) (g : Nat → WeaveShapeP) :
+    ((List.range n).flatMap (fun j => encodeAxisRows i (base + j) (g j))).filter
+        (fun r => decide (r.arraySlot = slot))
+      = if base ≤ slot ∧ slot - base < n then encodeAxisRows i slot (g (slot - base)) else [] := by
+  have hmap : (List.range n).flatMap (fun j => encodeAxisRows i (base + j) (g j))
+      = ((List.range n).map (fun j => encodeAxisRows i (base + j) (g j))).flatten := by
+    rw [List.flatMap_def]
+  rw [hmap, List.filter_flatten]
+  have htag : ∀ k (hk : k < ((List.range n).map (fun j => encodeAxisRows i (base + j) (g j))).length),
+      ∀ r ∈ ((List.range n).map (fun j => encodeAxisRows i (base + j) (g j)))[k],
+        r.arraySlot = base + k := by
+    intro k hk r hr
+    rw [List.getElem_map, List.getElem_range] at hr
+    exact encodeAxisRows_arraySlot i (base + k) (g k) r hr
+  have := filter_flatten_tagged_aux (β := ArrayAxisRow) (·.arraySlot) slot (fun _ => true)
+    ((List.range n).map (fun j => encodeAxisRows i (base + j) (g j))) base (by simpa using htag)
+  simp only [Bool.and_true, List.filter_true] at this
+  rw [this]
+  by_cases hb : base ≤ slot
+  · rw [if_pos hb]
+    by_cases hlt : slot - base < n
+    · rw [List.getD_eq_getElem _ _ (by simpa using hlt), List.getElem_map, List.getElem_range,
+        if_pos ⟨hb, hlt⟩]
+      congr 1; omega
+    · rw [List.getD_eq_default _ _ (by simpa using hlt), if_neg (by tauto)]
+  · rw [if_neg hb, if_neg (by tauto)]
+
+/-- Base-0 specialisation of `filterSlot_flatMap_off` (groups indexed directly by `s`). -/
+theorem filterSlot_flatMap0 (i n slot : Nat) (g : Nat → WeaveShapeP) :
+    ((List.range n).flatMap (fun s => encodeAxisRows i s (g s))).filter
+        (fun r => decide (r.arraySlot = slot))
+      = if slot < n then encodeAxisRows i slot (g slot) else [] := by
+  have := filterSlot_flatMap_off i 0 n slot g
+  simpa using this
+
+/-- One step's `arrayAxes`, filtered by `arraySlot = slot`, is exactly `slot`'s `encodeAxisRows`. -/
+theorem encodeStep_arrayAxes_slot (i : Nat) (b : BrBaseP) (reads : List Wire) (slot : Nat) :
+    (encodeStep i b reads).arrayAxes.filter (fun r => decide (r.arraySlot = slot))
+      = encodeAxisRows i slot (slotWeave b reads slot) := by
+  simp only [encodeStep, List.filter_append]
+  rw [filterSlot_flatMap0 i _ slot (fun s => b.outputWeaves.getD s []),
+      filterSlot_flatMap_off i b.outputWeaves.length _ slot (fun j => b.inputWeaves.getD j [])]
+  have hdeg : (encodeAxisRows i (b.outputWeaves.length + reads.length) (b.degree.map .fixed)).filter
+      (fun r => decide (r.arraySlot = slot))
+      = if b.outputWeaves.length + reads.length = slot then
+          encodeAxisRows i (b.outputWeaves.length + reads.length) (b.degree.map .fixed) else [] := by
+    by_cases hd : b.outputWeaves.length + reads.length = slot
+    · rw [if_pos hd]; apply List.filter_eq_self.2
+      intro r hr; rw [encodeAxisRows_arraySlot _ _ _ r hr, hd]; simp
+    · rw [if_neg hd]; apply List.filter_eq_nil_iff.2
+      intro r hr hq; rw [encodeAxisRows_arraySlot _ _ _ r hr] at hq; simp at hq; omega
+  rw [hdeg]
+  unfold slotWeave
+  by_cases h1 : slot < b.outputWeaves.length
+  · rw [if_pos h1, if_neg (by omega), if_neg (by omega), List.append_nil, List.append_nil, if_pos h1]
+  · by_cases h2 : slot < b.outputWeaves.length + reads.length
+    · rw [if_neg h1, if_pos ⟨by omega, by omega⟩, if_neg (by omega), List.nil_append,
+        List.append_nil, if_neg h1, if_pos h2]
+    · by_cases h3 : b.outputWeaves.length + reads.length = slot
+      · rw [if_neg h1, if_neg (by omega), if_pos h3, List.nil_append, List.nil_append,
+          if_neg h1, if_neg (by omega), if_pos (by omega)]
+        rw [h3]
+      · rw [if_neg h1, if_neg (by omega), if_neg h3, List.append_nil, List.append_nil,
+          if_neg h1, if_neg (by omega), if_neg (by omega)]
+        simp [encodeAxisRows]
+
+/-- Membership in the flattened `axisSizes` is membership in some step's `axisSizes`. -/
+theorem mem_from_axisSizes (tc : ThreadedComposed) (x : AxisUID × SizeExpr) :
+    x ∈ (fromThreadedComposed tc).axisSizes ↔
+      ∃ i', ∃ (hi' : i' < tc.steps.length),
+        x ∈ (encodeStep i' (tc.steps[i']) (tc.routing.getD i' [])).axisSizes := by
+  simp only [fromThreadedComposed, List.mem_flatten, List.mem_map]
+  constructor
+  · rintro ⟨l, ⟨inst, hinst, rfl⟩, hx⟩
+    rw [stepInsts] at hinst
+    simp only [List.mem_map, List.mem_zipIdx_iff_getElem?] at hinst
+    obtain ⟨⟨bb, kk⟩, hget, rfl⟩ := hinst
+    rw [List.getElem?_eq_some_iff] at hget
+    obtain ⟨hk, he⟩ := hget
+    have hk' : kk < tc.steps.length := by simpa using hk
+    refine ⟨kk, hk', ?_⟩
+    rw [show bb = tc.steps[kk] from he.symm] at hx; exact hx
+  · rintro ⟨i', hi', hx⟩
+    refine ⟨_, ⟨(stepInsts tc)[i']'(by simp [stepInsts]; omega), List.getElem_mem _, rfl⟩, ?_⟩
+    rw [stepInsts_getElem tc i' hi']; exact hx
+
+/-- Every step-`axisSizes` entry comes from some slot's `encodeAxisSizes` (with the `slotWeave`). -/
+theorem mem_step_axisSizes_form (i : Nat) (b : BrBaseP) (reads : List Wire)
+    (x : AxisUID × SizeExpr) (hx : x ∈ (encodeStep i b reads).axisSizes) :
+    ∃ slot', x ∈ encodeAxisSizes i slot' (slotWeave b reads slot') := by
+  simp only [encodeStep] at hx
+  rcases List.mem_append.1 hx with h | h
+  · rcases List.mem_append.1 h with h | h
+    · rw [List.mem_flatMap] at h; obtain ⟨s, hs, hxs⟩ := h
+      rw [List.mem_range] at hs
+      refine ⟨s, ?_⟩; unfold slotWeave; rw [if_pos hs]; exact hxs
+    · rw [List.mem_flatMap] at h; obtain ⟨j, hj, hxj⟩ := h
+      rw [List.mem_range] at hj
+      refine ⟨b.outputWeaves.length + j, ?_⟩
+      unfold slotWeave; rw [if_neg (by omega), if_pos (by omega)]
+      simpa using hxj
+  · refine ⟨b.outputWeaves.length + reads.length, ?_⟩
+    unfold slotWeave; rw [if_neg (by omega), if_neg (by omega), if_pos rfl]; exact h
+
+/-- A slot's `encodeAxisSizes` (with `slotWeave`) sits inside the step's `axisSizes`. -/
+theorem encodeAxisSizes_slot_sub (i : Nat) (b : BrBaseP) (reads : List Wire) (slot : Nat)
+    (x : AxisUID × SizeExpr) (hx : x ∈ encodeAxisSizes i slot (slotWeave b reads slot)) :
+    x ∈ (encodeStep i b reads).axisSizes := by
+  simp only [encodeStep]
+  unfold slotWeave at hx
+  by_cases h1 : slot < b.outputWeaves.length
+  · rw [if_pos h1] at hx
+    apply List.mem_append.2; left; apply List.mem_append.2; left
+    rw [List.mem_flatMap]; exact ⟨slot, List.mem_range.2 h1, hx⟩
+  · by_cases h2 : slot < b.outputWeaves.length + reads.length
+    · rw [if_neg h1, if_pos h2] at hx
+      apply List.mem_append.2; left; apply List.mem_append.2; right
+      rw [List.mem_flatMap]
+      refine ⟨slot - b.outputWeaves.length, List.mem_range.2 (by omega), ?_⟩
+      rw [show b.outputWeaves.length + (slot - b.outputWeaves.length) = slot from by omega]
+      exact hx
+    · by_cases h3 : slot = b.outputWeaves.length + reads.length
+      · rw [if_neg h1, if_neg h2, if_pos h3] at hx
+        apply List.mem_append.2; right
+        rw [h3] at hx; exact hx
+      · rw [if_neg h1, if_neg h2, if_neg h3] at hx
+        simp [encodeAxisSizes] at hx
+
+theorem nameUidFor3_inj {i s p i' s' p' : Nat} (he : nameUidFor3 i s p = nameUidFor3 i' s' p') :
+    i = i' ∧ s = s' ∧ p = p' := by
+  simp only [nameUidFor3, AxisUID.mk.injEq, true_and] at he
+  rw [Nat.pair_eq_pair, Nat.pair_eq_pair] at he
+  exact ⟨he.1, he.2.1, he.2.2⟩
+
+theorem mem_encodeAxisSizes_size (i slot p : Nat) (w : WeaveShapeP) (a : AxisP)
+    (hp : p < w.length) (hw : w.getD p .tiled = .fixed a) :
+    (axisUidFor3 i slot p, a.size) ∈ encodeAxisSizes i slot w := by
+  simp only [encodeAxisSizes, List.mem_flatMap, List.mem_range]
+  refine ⟨p, hp, ?_⟩
+  simp only [hw]
+  split <;> simp
+
+theorem mem_encodeAxisSizes_name (i slot p : Nat) (w : WeaveShapeP) (a : AxisP) (nm : String)
+    (hp : p < w.length) (hw : w.getD p .tiled = .fixed a) (hnm : a.name = some nm) :
+    (nameUidFor3 i slot p, SizeExpr.var nm) ∈ encodeAxisSizes i slot w := by
+  simp only [encodeAxisSizes, List.mem_flatMap, List.mem_range]
+  refine ⟨p, hp, ?_⟩
+  simp only [hw, hnm]; simp
+
+/-- `lookupSize` recovers the stored `SizeExpr` of a fixed axis (step 2, size half). Uses global
+    uid uniqueness (`axisUidFor3` injective) + membership. -/
+theorem lookupSize_from (tc : ThreadedComposed) (i : Nat) (hi : i < tc.steps.length)
+    (slot p : Nat) (a : AxisP)
+    (hp : p < (slotWeave (tc.steps[i]) (tc.routing.getD i []) slot).length)
+    (hw : (slotWeave (tc.steps[i]) (tc.routing.getD i []) slot).getD p .tiled = .fixed a) :
+    lookupSize (fromThreadedComposed tc) (axisUidFor3 i slot p) = a.size := by
+  have hmem : (axisUidFor3 i slot p, a.size) ∈ (fromThreadedComposed tc).axisSizes := by
+    rw [mem_from_axisSizes]
+    exact ⟨i, hi, encodeAxisSizes_slot_sub i _ _ slot _ (mem_encodeAxisSizes_size i slot p _ a hp hw)⟩
+  have huniq : ∀ y ∈ (fromThreadedComposed tc).axisSizes,
+      decide (y.1 = axisUidFor3 i slot p) → y = (axisUidFor3 i slot p, a.size) := by
+    rintro ⟨u', sz'⟩ hy hyd
+    simp only [decide_eq_true_eq] at hyd
+    rw [mem_from_axisSizes] at hy
+    obtain ⟨i'', hi'', hy⟩ := hy
+    obtain ⟨slot'', hy⟩ := mem_step_axisSizes_form _ _ _ _ hy
+    rcases mem_encodeAxisSizes _ _ _ _ _ hy with
+      ⟨p'', a'', hp'', hw'', hu, hsz⟩ | ⟨p'', a'', nm, hp'', hw'', hnm, hu, hsz⟩
+    · rw [hu] at hyd
+      obtain ⟨rfl, rfl, rfl⟩ := axisUidFor3_inj hyd
+      rw [hw] at hw''
+      injection hw'' with ha
+      simp only [Prod.mk.injEq]
+      exact ⟨hu, by rw [hsz, ← ha]⟩
+    · rw [hu] at hyd
+      simp [nameUidFor3, axisUidFor3] at hyd
+  have := find?_unique (fromThreadedComposed tc).axisSizes
+    (fun y => decide (y.1 = axisUidFor3 i slot p)) (axisUidFor3 i slot p, a.size)
+    hmem (by simp) huniq
+  simp only [lookupSize, this, Option.map_some, Option.getD_some]
+
+/-- `lookupName` recovers a fixed axis's name (step 2, name half) — `some nm` from the dedicated
+    `.normAxis` entry, or `none` when unnamed (no such entry exists). -/
+theorem lookupName_from (tc : ThreadedComposed) (i : Nat) (hi : i < tc.steps.length)
+    (slot p : Nat) (a : AxisP)
+    (hp : p < (slotWeave (tc.steps[i]) (tc.routing.getD i []) slot).length)
+    (hw : (slotWeave (tc.steps[i]) (tc.routing.getD i []) slot).getD p .tiled = .fixed a) :
+    lookupName (fromThreadedComposed tc) (axisUidFor3 i slot p) = a.name := by
+  have hid : (⟨.normAxis, (axisUidFor3 i slot p).id⟩ : AxisUID) = nameUidFor3 i slot p := rfl
+  simp only [lookupName, hid]
+  rcases hn : a.name with _ | nm
+  · have hnone : (fromThreadedComposed tc).axisSizes.find?
+        (fun q => decide (q.1 = nameUidFor3 i slot p)) = none := by
+      rw [List.find?_eq_none]
+      rintro ⟨u', sz'⟩ hy hyd
+      simp only [decide_eq_true_eq] at hyd
+      rw [mem_from_axisSizes] at hy
+      obtain ⟨i'', hi'', hy⟩ := hy
+      obtain ⟨slot'', hy⟩ := mem_step_axisSizes_form _ _ _ _ hy
+      rcases mem_encodeAxisSizes _ _ _ _ _ hy with
+        ⟨p'', a'', hp'', hw'', hu, hsz⟩ | ⟨p'', a'', nm', hp'', hw'', hnm', hu, hsz⟩
+      · rw [hu] at hyd; simp [nameUidFor3, axisUidFor3] at hyd
+      · rw [hu] at hyd
+        obtain ⟨rfl, rfl, rfl⟩ := nameUidFor3_inj hyd
+        rw [hw] at hw''; injection hw'' with ha
+        rw [← ha] at hnm'; rw [hn] at hnm'; exact absurd hnm' (by simp)
+    rw [hnone]; rfl
+  · have hmem : (nameUidFor3 i slot p, SizeExpr.var nm) ∈ (fromThreadedComposed tc).axisSizes := by
+      rw [mem_from_axisSizes]
+      exact ⟨i, hi, encodeAxisSizes_slot_sub i _ _ slot _
+        (mem_encodeAxisSizes_name i slot p _ a nm hp hw hn)⟩
+    have huniq : ∀ y ∈ (fromThreadedComposed tc).axisSizes,
+        decide (y.1 = nameUidFor3 i slot p) → y = (nameUidFor3 i slot p, SizeExpr.var nm) := by
+      rintro ⟨u', sz'⟩ hy hyd
+      simp only [decide_eq_true_eq] at hyd
+      rw [mem_from_axisSizes] at hy
+      obtain ⟨i'', hi'', hy⟩ := hy
+      obtain ⟨slot'', hy⟩ := mem_step_axisSizes_form _ _ _ _ hy
+      rcases mem_encodeAxisSizes _ _ _ _ _ hy with
+        ⟨p'', a'', hp'', hw'', hu, hsz⟩ | ⟨p'', a'', nm', hp'', hw'', hnm', hu, hsz⟩
+      · rw [hu] at hyd; simp [nameUidFor3, axisUidFor3] at hyd
+      · rw [hu] at hyd
+        obtain ⟨rfl, rfl, rfl⟩ := nameUidFor3_inj hyd
+        rw [hw] at hw''; injection hw'' with ha
+        rw [← ha] at hnm'; rw [hn] at hnm'
+        simp only [Option.some.injEq] at hnm'
+        simp only [Prod.mk.injEq]
+        exact ⟨hu, by rw [hsz, hnm']⟩
+    have := find?_unique (fromThreadedComposed tc).axisSizes
+      (fun y => decide (y.1 = nameUidFor3 i slot p)) (nameUidFor3 i slot p, SizeExpr.var nm)
+      hmem (by simp) huniq
+    rw [this]; rfl
+
+theorem encodeAxisRows_length (i slot : Nat) (w : WeaveShapeP) :
+    (encodeAxisRows i slot w).length = w.length := by simp [encodeAxisRows]
+
+/-- `find?` on position `p` returns the `p`-th row (positions are the indices, all distinct). -/
+theorem encodeAxisRows_find (i slot : Nat) (w : WeaveShapeP) (p : Nat) (hp : p < w.length) :
+    (encodeAxisRows i slot w).find? (fun r => decide (r.position = p))
+      = some ((encodeAxisRows i slot w)[p]'(by rw [encodeAxisRows_length]; exact hp)) := by
+  apply find?_unique
+  · exact List.getElem_mem _
+  · have hb : p < (encodeAxisRows i slot w).length := by rw [encodeAxisRows_length]; exact hp
+    have hpos : ((encodeAxisRows i slot w)[p]'hb).position = p := by
+      simp only [encodeAxisRows, List.getElem_map, List.getElem_range]; split <;> rfl
+    simp [hpos]
+  · intro y hy hyd
+    simp only [decide_eq_true_eq] at hyd
+    simp only [encodeAxisRows, List.mem_map, List.mem_range] at hy
+    obtain ⟨q, hq, rfl⟩ := hy
+    have hqpos : (match w.getD q .tiled with
+        | .fixed _ => (⟨i, slot, axisUidFor3 i slot q, false, q⟩ : ArrayAxisRow)
+        | .tiled => ⟨i, slot, ⟨.natAxis, 0⟩, false, q⟩).position = q := by split <;> rfl
+    rw [hqpos] at hyd; subst hyd
+    simp only [encodeAxisRows, List.getElem_map, List.getElem_range]
+
+/-- Weave round trip (step 3): `decodeWeaveAt` recovers exactly the weave `encodeStep` put at `slot`
+    — the keystone, inverting `encodeAxisRows` position-by-position via the `lookup*` lemmas. -/
+theorem decodeWeaveAt_from (tc : ThreadedComposed) (i : Nat) (hi : i < tc.steps.length) (slot : Nat) :
+    decodeWeaveAt (fromThreadedComposed tc) i slot
+      = slotWeave (tc.steps[i]) (tc.routing.getD i []) slot := by
+  set w := slotWeave (tc.steps[i]) (tc.routing.getD i []) slot with hwdef
+  have hrows : (fromThreadedComposed tc).arrayAxes.filter
+      (fun r => decide (r.equationIdx = i ∧ r.arraySlot = slot)) = encodeAxisRows i slot w := by
+    rw [show (fun r : ArrayAxisRow => decide (r.equationIdx = i ∧ r.arraySlot = slot))
+          = (fun r => decide (r.equationIdx = i) && decide (r.arraySlot = slot)) from
+        by funext r; rw [Bool.decide_and]]
+    rw [from_field_filter tc i hi SBrInstance.arrayAxes (·.equationIdx)
+          (fun r => decide (r.arraySlot = slot)) rfl encodeStep_arrayAxes_eqIdx,
+        encodeStep_arrayAxes_slot]
+  simp only [decodeWeaveAt, hrows, encodeAxisRows_length]
+  apply List.ext_getElem
+  · simp [encodeAxisRows_length]
+  · intro k hk1 _
+    have hkw : k < w.length := by simpa using hk1
+    simp only [List.getElem_map, List.getElem_range]
+    rw [encodeAxisRows_find i slot w k hkw]
+    have hget : (encodeAxisRows i slot w)[k]'(by rw [encodeAxisRows_length]; exact hkw)
+        = (match w.getD k .tiled with
+            | .fixed _ => (⟨i, slot, axisUidFor3 i slot k, false, k⟩ : ArrayAxisRow)
+            | .tiled => ⟨i, slot, ⟨.natAxis, 0⟩, false, k⟩) := by
+      simp only [encodeAxisRows, List.getElem_map, List.getElem_range]
+    rw [hget, ← List.getD_eq_getElem w .tiled hkw]
+    rcases hwk : w.getD k .tiled with a | _
+    · simp only [hwk]
+      rw [lookupName_from tc i hi slot k a (by rw [← hwdef]; exact hkw) (by rw [← hwdef]; exact hwk),
+          lookupSize_from tc i hi slot k a (by rw [← hwdef]; exact hkw) (by rw [← hwdef]; exact hwk)]
+      simp only [axisUidFor3]
+    · simp only [hwk]
+
 /-- The per-step inversion (steps 1–6): decoding step `i` recovers exactly the encoded `BrBaseP`
     and its routing reads. Needs `WellFormed` (for `inputWeaves.length = reads.length`, conjunct 2)
     and `WellShaped` (for the reindexing dimensions). -/
