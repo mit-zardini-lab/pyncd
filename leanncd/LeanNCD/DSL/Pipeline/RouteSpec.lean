@@ -601,6 +601,60 @@ theorem buildStep_inputWeaves
       · simp only [hg, Bool.not_true, he, pure_bind] at h
         exact congrArg BrBaseP.inputWeaves (bind_pure_pair_ok h)
 
+/-- The `fixedAxesP` of an all-`fixed` weave (built as `l.map (·.fixed)`) has length `l.length`. -/
+private theorem fixedAxesP_length_map_fixed {α : Type} (l : List α) (g : α → AxisP) :
+    (fixedAxesP (l.map (fun x => WeaveSlotP.fixed (g x)))).length = l.length := by
+  simp [fixedAxesP, List.filterMap_map, Function.comp]
+
+/-- Track A (#1, unconditional half): every input weave `buildStep` emits is **all-`fixed`** — no
+    tiled slots, so `fixedAxesP` retains every slot (`(fixedAxesP w).length = w.length`). Tiling is an
+    OUTPUT-weave phenomenon (contracted axes); an input weave names every read coordinate, which is
+    what makes the reindexing codomain (`(inputWeaves i).targetAxes`) the read's full coordinate
+    space. (The remaining `codLen = (fixedAxesP w).length` tie holds for external reads by
+    construction; for internal reads it needs read-arity = producer-rank, an upstream
+    `checkReadRanks`/`env` invariant, not a `buildStep` property.) -/
+theorem buildStep_inputWeaves_allFixed
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w' : List Wire}
+    (h : buildStep ns ext stmts sc = .ok (b, w')) :
+    ∀ w ∈ b.inputWeaves, (fixedAxesP w).length = w.length := by
+  rw [buildStep_inputWeaves h]
+  intro w hw
+  simp only [List.mem_map] at hw
+  obtain ⟨rf, _, rfl⟩ := hw
+  cases hns : ns[rf.1]? with
+  | some p =>
+      obtain ⟨j, slot⟩ := p
+      simp only [List.length_map]
+      exact fixedAxesP_length_map_fixed _ id
+  | none =>
+      simp only [List.length_map]
+      exact fixedAxesP_length_map_fixed _ _
+
+/-- Track A (#1), route level: every input weave of every step in a routed program is all-`fixed`
+    (`(fixedAxesP w).length = w.length`). Lifts `buildStep_inputWeaves_allFixed` over `routeCore`. -/
+theorem routeCore_inputWeaves_allFixed {sp : ScheduledProgram}
+    {steps : List BrBaseP} {routing : List (List Wire)}
+    (h : routeCore sp = .ok (steps, routing)) :
+    ∀ st ∈ steps, ∀ w ∈ st.inputWeaves, (fixedAxesP w).length = w.length := by
+  unfold routeCore at h
+  by_cases hro : routableInOrder sp.stmts
+  · rw [if_pos hro] at h
+    cases hm : sp.stmts.mapM (buildStep (buildNameToStep sp.stmts)
+        (buildExtIndex sp.extNames sp.stmts) sp.stmts) with
+    | error e => rw [hm] at h; simp [bind, Except.bind] at h
+    | ok pairs =>
+        rw [hm] at h
+        simp only [bind, Except.bind, pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+        obtain ⟨hsteps, _⟩ := h
+        intro st hst w hw
+        rw [← hsteps] at hst
+        simp only [List.mem_map] at hst
+        obtain ⟨p, hp, rfl⟩ := hst
+        obtain ⟨x, hx⟩ := mapM_ok_mem hm p hp
+        exact buildStep_inputWeaves_allFixed hx w hw
+  · rw [if_neg hro] at h; simp at h
+
 /-- The wires from a successful `buildStep` equal the `mapM` of the per-read-factor wire builder. -/
 -- NOTE(phaseB): restated to the new `inputReadFactors` / `Wire.internal j slot` shape.
 theorem buildStep_wires_mapM
