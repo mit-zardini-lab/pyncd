@@ -315,6 +315,36 @@ further design surprises. Next: Task C, the formal proof of what was just checke
 
 ### Task C: round-trip lemma
 
+**▶▶ PAUSE / RESUME POINT (end of 2026-07-02 session) ◀◀**
+Both hard structural lemmas are PROVED and committed green; `AcsetCodec.lean` compiles with **one
+remaining `sorry`**: `decodeStep_eq` (line ~1306), the per-step `BrBaseP`+reads assembly. Two statement
+gaps were found & fixed by ADDING hypotheses (not touching `WellFormed`): the theorem is now
+`toThreadedComposed_fromThreadedComposed (tc) (h : tc.WellFormed) (hs : tc.WellShaped)`, where
+`WellShaped` bundles `routing.length = steps.length` + per-step reindexing-matrix shape constraints
+(both hold for all compiled programs; discharged in Task E via route lemmas).
+
+PROVEN (all in `AcsetCodec.lean`, committed): the isolation infra (`filter_flatten_tagged(_aux)`,
+`from_field_filter`), `stepInsts_*`, the four `encodeStep_*_eqIdx` tagging lemmas, two-slot name
+encoding (`nameUidFor3`/`lookupName`), `from_outLen`/`from_inLen`/`equations_length`, `from_nExternal`
+(the `WellFormed`-dependent `nExternal` reconstruction), the full `steps`/`routing`/`nExternal`
+top-level assembly of `toThreadedComposed_fromThreadedComposed` (reduces to `decodeStep_eq`),
+**`decodeWeaveAt_from`** (weave round trip — keystone) with `slotWeave`/`filterSlot_flatMap_off`/
+`find?_unique`/`lookupSize_from`/`lookupName_from`/`mem_from_axisSizes`, and **`decodeReindexing_from`**
+(reindexing/matrix round trip) with `mem_encodeReindexing_*`/`encodeReindexing_exists_tgt`/
+`fixedPositions_getD_inj`/`find?_map_getD`.
+
+REMAINING = just `decodeStep_eq` assembly (`simp only [decodeStep]` then field-by-field `Prod`/`BrBaseP`
+equality). Building blocks all exist: rewrite decoded `outLen`/`inLen` via `from_outLen`/`from_inLen`;
+`outputWeaves`/`inputWeaves`/`degree` fields via `decodeWeaveAt_from` + `slotWeave` case-eval at
+output/input/deg slots (+ the `WellFormed` conjunct-2 fact `inputWeaves.length = routing.length` for the
+inputWeaves length); `reindexings` field via `decodeReindexing_from` (its statement already matches
+`decodeStep`'s call exactly); `degree` also needs `(l.map .fixed).map (fixed→a|tiled→default) = l`. Two
+small NEW pieces to add: **op** recovery (`equations.find?` for eq `i` gives `some (natToUnary (brOpIdx
+op))` → `brOpOfIdx (unaryToNat …) = op` via `unaryToNat_natToUnary`+`brOpOfIdx_brOpIdx`) and **reads**
+recovery (input-row `find?` by `slot = outLen+j` → `wireLabel` → `parseWireLabel_wireLabel` → `routing[j]`).
+Use `List.ext_getElem` for the `(range …).map` fields. NOTE: two subagent runs stalled here on
+heavy tactics — work in small compile-checked steps, avoid `simp`/`decide` on large goals.
+
 **Files:**
 - Modify: `leanncd/LeanNCD/Bridge/AcsetCodec.lean`
 
