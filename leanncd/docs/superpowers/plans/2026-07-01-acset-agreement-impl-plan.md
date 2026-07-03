@@ -1,5 +1,15 @@
 # §8.2 acset agreement — `fromThreadedComposed` / `realizeSBr` / Prop 8 — Implementation Plan
 
+> **✅ COMPLETE (2026-07-03).** All of Tasks A–E landed; the three target sorries are closed and the
+> §8.2 agreement (`realize_fromThreadedComposed_agree`) is proved with axioms
+> `[propext, Classical.choice, Quot.sound]` (no `sorryAx`). `Bridge/AcsetCodec.lean` (new),
+> `Bridge/SBr.lean`, and the agreement declarations in `Agreement.lean` are all sorry-free; full
+> `lake build` green (8587). The theorem carries an added `(hs : tc.WellShaped)` hypothesis (shape
+> invariants `WellFormed` doesn't carry — `routing.length = steps.length` + per-step reindexing dims;
+> satisfied by every compiled program). Remaining project sorries are only the pre-existing
+> out-of-scope B+/G/H obligations (Br keystone, Algebra `Mat ℝ`), unrelated to this plan. Task F
+> (regression `#guard`s) optional — the round trip was empirically checked on all 5 §12.1 examples.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended)
 > or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`)
 > syntax for tracking. Verification is Lean-native (`lake build` / `lean_diagnostic_messages` /

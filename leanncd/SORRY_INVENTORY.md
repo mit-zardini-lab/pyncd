@@ -302,14 +302,28 @@ slots), not the categorical combinators. `RouteSpec.lean` and `LeanNCD/Bridge/Re
 fully sorry-free; `compile_wellFormed` (`Agreement.lean`) is proved sorry-free (Phases B–D of the same
 plan; axioms `[propext, Classical.choice, Quot.sound]`, verified via `lean_verify`).
 
-Named obligations (the remaining 2 literal `sorry`s in `Agreement.lean`, plus 1 in `Bridge/SBr.lean`):
-- `realizeSBr` (SBrInstance→BrMorph) body — still `sorry`. Per its own doc comment, this needs the
-  SAME routing-traversal work `realize` just had proved (see above), replayed over the acset tables
-  instead of `ThreadedComposed` directly — NOT gated on any `Br.tensorHom`/`Br.swap` obligation.
-- `fromThreadedComposed` — the §8.2 acset extraction algorithm (acset.md). Still `sorry`.
-- `realize_fromThreadedComposed_agree` (full Σ-equality of the two realized morphisms) — still `sorry`;
-  needs both of the above to exist first. `agree_dom`/`agree_cod` are NOT themselves `sorry` (real
-  `congr_arg` proofs) but transitively depend on `realize_fromThreadedComposed_agree`.
+**UPDATE (2026-07-03): the §8.2 acset agreement is now FULLY PROVED — all three obligations closed
+(`2026-07-01-acset-agreement-impl-plan.md`, Tasks A–E). `Bridge/AcsetCodec.lean` (new),
+`Bridge/SBr.lean`, and the `fromThreadedComposed`/`realizeSBr`/`realize_fromThreadedComposed_agree`/
+`agree_dom`/`agree_cod` declarations in `Agreement.lean` are all sorry-free; `lean_verify` on the
+agreement ⇒ `[propext, Classical.choice, Quot.sound]` (no `sorryAx`).**
+- `fromThreadedComposed` (encode) + `toThreadedComposed` (decode) — a systematic/synthetic
+  `ThreadedComposed ↔ Acset.SBrInstance` codec (`AcsetCodec.lean`); axis names stored in a dedicated
+  `.normAxis` slot (two-slot encoding) so the round trip is unconditional.
+- `toThreadedComposed_fromThreadedComposed` (Task C) — the round trip, under
+  `(h : WellFormed) (hs : WellShaped)`. `WellShaped` = `routing.length = steps.length` + per-step
+  reindexing-matrix shape (invariants `WellFormed` doesn't carry; every compiled program satisfies
+  them). Keystones: the general isolation lemma `filter_flatten_tagged`, `decodeWeaveAt_from`,
+  `decodeReindexing_from`.
+- `realizeSBr` (Task D) — decode + replay `realize`, gated on `WellFormed`.
+- `realize_fromThreadedComposed_agree` (Task E) — reduces to the round trip + proof irrelevance;
+  carries `(hs : WellShaped)`, as do `agree_dom`/`agree_cod`.
+
+**(historical, now resolved)** the remaining 2 literal `sorry`s in `Agreement.lean` + 1 in `Bridge/SBr.lean`:
+- `realizeSBr` (SBrInstance→BrMorph) body — DONE (Task D).
+- `fromThreadedComposed` — the §8.2 acset extraction algorithm (acset.md). DONE (Task A, `AcsetCodec`).
+- `realize_fromThreadedComposed_agree` (full Σ-equality of the two realized morphisms) — DONE (Task E).
+  `agree_dom`/`agree_cod` follow by `congr_arg`.
 
 Documented choice (NOT a sorry) / DEFERRED feedback:
 - `weaveToArrayType` defaults `dtype := .reals`. The E2a presentation (`BrBaseP`/`AxisP`) dropped
