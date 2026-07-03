@@ -306,19 +306,17 @@ def stepMkWeave (s : Stmt) : WeaveShapeP :=
     else WeaveSlotP.fixed (AxisP.mk (some a.name) (SizeExpr.var a.name)))
 
 /-- Express a read coordinate `IdxExpr` as an integer-affine combination of the degree axes
-    identified by uids `us` (column order = `us`): returns `(coeff-row, bias)`. -/
-def idxToRow (us : List UID) : IdxExpr → (List Int × Int)
-  | .axis a      => (us.map (fun u => if u == a.uid then 1 else 0), 0)
-  | .const n     => (us.map (fun _ => 0), n)
-  | .scale c a   => (us.map (fun u => if u == a.uid then c else 0), 0)
-  | .shift a n   => (us.map (fun u => if u == a.uid then 1 else 0), n)
-  | .affine n xs => (us.map (fun u => (xs.foldl (fun acc p => if p.2.uid == u then acc + p.1 else acc) 0)), n)
+    identified by uids `us` (column order = `us`): returns `(coeff-row, bias)`. The dense view of the
+    shared `idxAffineForm` primitive (M2 dedup, §6.2) — `coeffs = densify (affine coeffs) over us`,
+    `bias = affine const`. -/
+def idxToRow (us : List UID) (e : IdxExpr) : (List Int × Int) :=
+  (idxDensify (idxAffineForm e).2 us, (idxAffineForm e).1)
 
-/-- Every `idxToRow` coefficient row has exactly one entry per degree axis (`us.map` in each case),
-    so its length is `us.length`. The load-bearing fact for `StMatP` well-formedness of reindexings
-    (Track A): a built reindexing's `coeffs` rows are `domLen`-wide. -/
+/-- Every `idxToRow` coefficient row has exactly one entry per degree axis (`idxDensify` is a
+    `us.map`), so its length is `us.length`. The load-bearing fact for `StMatP` well-formedness of
+    reindexings (Track A): a built reindexing's `coeffs` rows are `domLen`-wide. -/
 theorem idxToRow_fst_length (us : List UID) (e : IdxExpr) : (idxToRow us e).1.length = us.length := by
-  cases e <;> simp [idxToRow]
+  simp [idxToRow, idxDensify]
 
 /-- The reindexing `StMatP` built from a degree `us` and a read's index expressions `idxs` is
     `wellFormed`: `coeffs` is `idxs.length × us.length` and `bias` has length `idxs.length`. This is
