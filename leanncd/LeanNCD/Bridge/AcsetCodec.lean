@@ -875,6 +875,427 @@ theorem decodeWeaveAt_from (tc : ThreadedComposed) (i : Nat) (hi : i < tc.steps.
       simp only [axisUidFor3]
     · simp only [hwk]
 
+/-- `(range l.length).map (l.getD · d) = l` — mapping `getD` over the index range rebuilds the list. -/
+theorem map_getD_range_self {α} (l : List α) (d : α) :
+    (List.range l.length).map (fun k => l.getD k d) = l := by
+  apply List.ext_getElem
+  · simp
+  · intro k h1 h2
+    simp only [List.getElem_map, List.getElem_range]
+    rw [List.getD_eq_getElem l d (by simpa using h1)]
+
+/-- Length fact (step 1): a step's input weave count equals its routing read count, from `WellFormed`
+    conjunct 2 (`routing.map wireType = inputWeaves.map weaveToArrayType`, equal-length images). -/
+theorem from_inputWeaves_length (tc : ThreadedComposed) (h : tc.WellFormed) (i : Nat)
+    (hi : i < tc.steps.length) :
+    (tc.steps[i]).inputWeaves.length = (tc.routing.getD i []).length := by
+  have hmap := h.2.1 i hi
+  have := congrArg List.length hmap
+  simp only [List.length_map] at this
+  rw [List.getD_eq_getElem _ _ hi] at this
+  omega
+
+/-- Output-weave field (step 3): decoding output slots `0..outLen-1` recovers `outputWeaves`. -/
+theorem decode_outputWeaves (tc : ThreadedComposed) (i : Nat) (hi : i < tc.steps.length) :
+    (List.range (tc.steps[i]).outputWeaves.length).map
+        (fun sN => decodeWeaveAt (fromThreadedComposed tc) i sN)
+      = (tc.steps[i]).outputWeaves := by
+  have hcong : (List.range (tc.steps[i]).outputWeaves.length).map
+        (fun sN => decodeWeaveAt (fromThreadedComposed tc) i sN)
+      = (List.range (tc.steps[i]).outputWeaves.length).map
+        (fun sN => (tc.steps[i]).outputWeaves.getD sN []) := by
+    apply List.map_congr_left
+    intro sN hsN
+    rw [List.mem_range] at hsN
+    rw [decodeWeaveAt_from tc i hi sN]
+    unfold slotWeave
+    rw [if_pos hsN]
+  rw [hcong, map_getD_range_self]
+
+/-- Input-weave field (step 3): decoding input slots `outLen..outLen+inLen-1` recovers `inputWeaves`. -/
+theorem decode_inputWeaves (tc : ThreadedComposed) (h : tc.WellFormed) (i : Nat)
+    (hi : i < tc.steps.length) :
+    (List.range (tc.routing.getD i []).length).map
+        (fun j => decodeWeaveAt (fromThreadedComposed tc) i ((tc.steps[i]).outputWeaves.length + j))
+      = (tc.steps[i]).inputWeaves := by
+  have hcong : (List.range (tc.routing.getD i []).length).map
+        (fun j => decodeWeaveAt (fromThreadedComposed tc) i ((tc.steps[i]).outputWeaves.length + j))
+      = (List.range (tc.routing.getD i []).length).map
+        (fun j => (tc.steps[i]).inputWeaves.getD j []) := by
+    apply List.map_congr_left
+    intro j hj
+    rw [List.mem_range] at hj
+    rw [decodeWeaveAt_from tc i hi]
+    unfold slotWeave
+    rw [if_neg (by omega), if_pos (by omega)]
+    congr 1
+    omega
+  rw [hcong, ← from_inputWeaves_length tc h i hi, map_getD_range_self]
+
+/-- Degree field (step 5): decoding the degree slot `outLen+inLen`, then stripping the `.fixed`
+    wrapper, recovers `degree` (`(l.map .fixed).map strip = l`). -/
+theorem decode_degree (tc : ThreadedComposed) (i : Nat) (hi : i < tc.steps.length) :
+    (decodeWeaveAt (fromThreadedComposed tc) i
+        ((tc.steps[i]).outputWeaves.length + (tc.routing.getD i []).length)).map
+        (fun x => match x with | WeaveSlotP.fixed a => a | WeaveSlotP.tiled => default)
+      = (tc.steps[i]).degree := by
+  rw [decodeWeaveAt_from tc i hi]
+  unfold slotWeave
+  rw [if_neg (by omega), if_neg (by omega), if_pos rfl]
+  rw [List.map_map]
+  conv_rhs => rw [← List.map_id (tc.steps[i]).degree]
+  apply List.map_congr_left
+  intro a _
+  rfl
+
+/-- Op field (step 3'): the single `EquationRow` for step `i` recovers `op` via `find?` uniqueness
+    plus `unaryToNat ∘ natToUnary = id` and `brOpOfIdx ∘ brOpIdx = id`. -/
+theorem decode_op (tc : ThreadedComposed) (i : Nat) (hi : i < tc.steps.length) :
+    brOpOfIdx (unaryToNat
+      ((((fromThreadedComposed tc).equations.find? (fun e => decide (e.equationIdx = i))).bind
+          (·.lhsName)).getD ""))
+      = (tc.steps[i]).op := by
+  set row : EquationRow :=
+    { equationIdx := i, lhsName := some (natToUnary (brOpIdx (tc.steps[i]).op)) } with hrow
+  have hff := from_field_filter tc i hi SBrInstance.equations (·.equationIdx)
+    (fun _ => true) rfl encodeStep_equations_eqIdx
+  simp only [Bool.and_true, List.filter_true, encodeStep] at hff
+  have hmem : row ∈ (fromThreadedComposed tc).equations := by
+    have : row ∈ (fromThreadedComposed tc).equations.filter (fun r => decide (r.equationIdx = i)) := by
+      rw [hff]; exact List.mem_singleton.2 rfl
+    exact List.mem_of_mem_filter this
+  have hfind : (fromThreadedComposed tc).equations.find? (fun e => decide (e.equationIdx = i))
+      = some row := by
+    apply find?_unique _ _ _ hmem (by simp [hrow])
+    intro y hy hyp
+    have : y ∈ (fromThreadedComposed tc).equations.filter (fun r => decide (r.equationIdx = i)) :=
+      List.mem_filter.2 ⟨hy, hyp⟩
+    rw [hff, List.mem_singleton] at this
+    exact this
+  rw [hfind]
+  simp [hrow]
+
+/-- Reads field (step 4): each input row's `wireLabel` recovers its routing wire, via `find?` on the
+    input `ArrayRow`s (unique per slot) and `parseWireLabel ∘ wireLabel = some`. -/
+theorem decode_reads (tc : ThreadedComposed) (i : Nat) (hi : i < tc.steps.length) :
+    (List.range (tc.routing.getD i []).length).map (fun j =>
+      match ((fromThreadedComposed tc).arrays.filter
+          (fun a => decide (a.equationIdx = i ∧ a.isInput = true))).find?
+          (fun a => decide (a.slot = (tc.steps[i]).outputWeaves.length + j)) with
+      | some a => (a.wireLabel.bind parseWireLabel).getD (Wire.external 0)
+      | none => Wire.external 0)
+      = tc.routing.getD i [] := by
+  set O := (tc.steps[i]).outputWeaves.length with hO
+  set reads := tc.routing.getD i [] with hreads
+  set rowFn : Nat → ArrayRow := fun j =>
+    { blankArrayRow i (O + j) true with
+        wireLabel := some (wireLabel (reads.getD j (Wire.external 0))) } with hrowFn
+  have hIR : (fromThreadedComposed tc).arrays.filter
+      (fun a => decide (a.equationIdx = i ∧ a.isInput = true))
+      = (List.range reads.length).map rowFn := from_inputRows tc i hi
+  have hcong : (List.range reads.length).map (fun j =>
+        match ((fromThreadedComposed tc).arrays.filter
+            (fun a => decide (a.equationIdx = i ∧ a.isInput = true))).find?
+            (fun a => decide (a.slot = O + j)) with
+        | some a => (a.wireLabel.bind parseWireLabel).getD (Wire.external 0)
+        | none => Wire.external 0)
+      = (List.range reads.length).map (fun j => reads.getD j (Wire.external 0)) := by
+    apply List.map_congr_left
+    intro j hj
+    rw [List.mem_range] at hj
+    rw [hIR]
+    have hfind : ((List.range reads.length).map rowFn).find?
+        (fun a => decide (a.slot = O + j)) = some (rowFn j) := by
+      apply find?_unique
+      · exact List.mem_map.2 ⟨j, List.mem_range.2 hj, rfl⟩
+      · simp [hrowFn, blankArrayRow]
+      · intro y hy hyp
+        simp only [decide_eq_true_eq] at hyp
+        rcases List.mem_map.1 hy with ⟨k, hk, rfl⟩
+        have hsl : (rowFn k).slot = O + k := by simp [hrowFn, blankArrayRow]
+        rw [hsl] at hyp
+        have : k = j := by omega
+        rw [this]
+    rw [hfind]
+    simp [hrowFn]
+  rw [hcong, map_getD_range_self]
+
+/-! #### Reindexing round trip (step 2) — the sample-table inversion. -/
+
+/-- Every `SampleRow` `encodeReindexing` emits carries its `arraySlot` as `reindexingSlot`. -/
+theorem encodeReindexing_reindexingSlot (i degSlot arraySlot : Nat) (inW : WeaveShapeP) (m : StMatP) :
+    ∀ r ∈ encodeReindexing i degSlot arraySlot inW m, r.reindexingSlot = arraySlot := by
+  intro r hr
+  simp only [encodeReindexing] at hr
+  rcases List.mem_flatMap.1 hr with ⟨c, _, hc⟩
+  split at hc
+  · simp only [List.mem_singleton] at hc; rw [hc]
+  · rcases List.mem_map.1 hc with ⟨d, _, rfl⟩; rfl
+
+/-- Isolate one input's reindexing group from a `flatMap` of `encodeReindexing`s by `reindexingSlot`
+    (the samples analogue of `filterSlot_flatMap_off`). -/
+theorem filterSlot_samples_off (i degSlot base n slot : Nat)
+    (g : Nat → WeaveShapeP) (mm : Nat → StMatP) :
+    ((List.range n).flatMap (fun j => encodeReindexing i degSlot (base + j) (g j) (mm j))).filter
+        (fun r => decide (r.reindexingSlot = slot))
+      = if base ≤ slot ∧ slot - base < n then
+          encodeReindexing i degSlot slot (g (slot - base)) (mm (slot - base))
+        else [] := by
+  have hmap : (List.range n).flatMap (fun j => encodeReindexing i degSlot (base + j) (g j) (mm j))
+      = ((List.range n).map (fun j => encodeReindexing i degSlot (base + j) (g j) (mm j))).flatten := by
+    rw [List.flatMap_def]
+  rw [hmap, List.filter_flatten]
+  have htag : ∀ k (hk : k < ((List.range n).map
+        (fun j => encodeReindexing i degSlot (base + j) (g j) (mm j))).length),
+      ∀ r ∈ ((List.range n).map (fun j => encodeReindexing i degSlot (base + j) (g j) (mm j)))[k],
+        r.reindexingSlot = base + k := by
+    intro k hk r hr
+    rw [List.getElem_map, List.getElem_range] at hr
+    exact encodeReindexing_reindexingSlot i degSlot (base + k) (g k) (mm k) r hr
+  have := filter_flatten_tagged_aux (β := SampleRow) (·.reindexingSlot) slot (fun _ => true)
+    ((List.range n).map (fun j => encodeReindexing i degSlot (base + j) (g j) (mm j))) base
+    (by simpa using htag)
+  simp only [Bool.and_true, List.filter_true] at this
+  rw [this]
+  by_cases hb : base ≤ slot
+  · rw [if_pos hb]
+    by_cases hlt : slot - base < n
+    · rw [List.getD_eq_getElem _ _ (by simpa using hlt), List.getElem_map, List.getElem_range,
+        if_pos ⟨hb, hlt⟩]
+      congr 1
+      omega
+    · rw [List.getD_eq_default _ _ (by simpa using hlt), if_neg (by tauto)]
+  · rw [if_neg hb, if_neg (by tauto)]
+
+/-- Step `i`'s samples for input `j`, isolated from `fromThreadedComposed`: exactly the
+    `encodeReindexing` for that input's matrix. -/
+theorem from_mySamples (tc : ThreadedComposed) (i : Nat) (hi : i < tc.steps.length)
+    (j : Nat) (hj : j < (tc.routing.getD i []).length) :
+    (fromThreadedComposed tc).samples.filter
+        (fun r => decide (r.equationIdx = i ∧
+          r.reindexingSlot = (tc.steps[i]).outputWeaves.length + j))
+      = encodeReindexing i
+          ((tc.steps[i]).outputWeaves.length + (tc.routing.getD i []).length)
+          ((tc.steps[i]).outputWeaves.length + j)
+          ((tc.steps[i]).inputWeaves.getD j []) ((tc.steps[i]).reindexings.getD j default) := by
+  have hpred : (fun r : SampleRow => decide (r.equationIdx = i ∧
+        r.reindexingSlot = (tc.steps[i]).outputWeaves.length + j))
+      = (fun r => decide (r.equationIdx = i) &&
+          decide (r.reindexingSlot = (tc.steps[i]).outputWeaves.length + j)) := by
+    funext r; rw [Bool.decide_and]
+  rw [hpred, from_field_filter tc i hi SBrInstance.samples (·.equationIdx)
+        (fun r => decide (r.reindexingSlot = (tc.steps[i]).outputWeaves.length + j)) rfl
+        encodeStep_samples_eqIdx]
+  simp only [encodeStep]
+  rw [filterSlot_samples_off i
+        ((tc.steps[i]).outputWeaves.length + (tc.routing.getD i []).length)
+        (tc.steps[i]).outputWeaves.length (tc.routing.getD i []).length
+        ((tc.steps[i]).outputWeaves.length + j)]
+  rw [if_pos ⟨by omega, by omega⟩]
+  congr 1 <;> · simp
+
+/-- Forward: any `SampleRow` in `encodeReindexing` pins its `tgtUid`/`offset` to some cod-index `c`,
+    and its `srcUid`/`coeff` are either the bias self-row (coeff 0) or a nonzero matrix entry `(c,d)`. -/
+theorem mem_encodeReindexing_forward (i degSlot arraySlot : Nat) (inW : WeaveShapeP) (m : StMatP)
+    (r : SampleRow) (hr : r ∈ encodeReindexing i degSlot arraySlot inW m) :
+    ∃ c, c < m.codLen ∧
+      r.tgtUid = axisUidFor3 i arraySlot ((fixedPositions inW).getD c 0) ∧
+      r.offset = m.bias.getD c 0 ∧
+      ( (r.srcUid = axisUidFor3 i arraySlot ((fixedPositions inW).getD c 0) ∧ r.coeff = 0)
+        ∨ (∃ d, d < m.domLen ∧ r.srcUid = axisUidFor3 i degSlot d
+             ∧ r.coeff = (m.coeffs.getD c []).getD d 0
+             ∧ (m.coeffs.getD c []).getD d 0 ≠ 0) ) := by
+  simp only [encodeReindexing] at hr
+  rcases List.mem_flatMap.1 hr with ⟨c, hcmem, hcr⟩
+  rw [List.mem_range] at hcmem
+  refine ⟨c, hcmem, ?_⟩
+  rcases hfilt : (List.range m.domLen).filter (fun d => decide ((m.coeffs.getD c []).getD d 0 ≠ 0))
+      with _ | ⟨e, es⟩
+  · rw [hfilt] at hcr
+    simp only [List.mem_singleton] at hcr
+    subst hcr
+    exact ⟨rfl, rfl, Or.inl ⟨rfl, rfl⟩⟩
+  · rw [hfilt] at hcr
+    simp only [List.mem_map] at hcr
+    obtain ⟨d, hd, rfl⟩ := hcr
+    rw [← hfilt, List.mem_filter, List.mem_range] at hd
+    refine ⟨rfl, rfl, Or.inr ⟨d, hd.1, rfl, rfl, ?_⟩⟩
+    simpa using hd.2
+
+/-- Backward: a nonzero matrix entry `(c,d)` produces its `SampleRow` in `encodeReindexing`. -/
+theorem mem_encodeReindexing_coeff (i degSlot arraySlot : Nat) (inW : WeaveShapeP) (m : StMatP)
+    (c d : Nat) (hc : c < m.codLen) (hd : d < m.domLen) (hnz : (m.coeffs.getD c []).getD d 0 ≠ 0) :
+    ({ equationIdx := i, reindexingSlot := arraySlot,
+        srcUid := axisUidFor3 i degSlot d,
+        tgtUid := axisUidFor3 i arraySlot ((fixedPositions inW).getD c 0),
+        coeff := (m.coeffs.getD c []).getD d 0, offset := m.bias.getD c 0 } : SampleRow)
+      ∈ encodeReindexing i degSlot arraySlot inW m := by
+  have hdmem : d ∈ (List.range m.domLen).filter
+      (fun d => decide ((m.coeffs.getD c []).getD d 0 ≠ 0)) := by
+    rw [List.mem_filter, List.mem_range]; exact ⟨hd, by simpa using hnz⟩
+  simp only [encodeReindexing]
+  rw [List.mem_flatMap]
+  refine ⟨c, List.mem_range.2 hc, ?_⟩
+  rcases hf : (List.range m.domLen).filter (fun d => decide ((m.coeffs.getD c []).getD d 0 ≠ 0))
+      with _ | ⟨e, es⟩
+  · rw [hf] at hdmem; simp at hdmem
+  · exact List.mem_map.2 ⟨d, by rw [hf] at hdmem; exact hdmem, rfl⟩
+
+/-- For each cod-index `c`, `encodeReindexing` emits at least one row carrying `tgtUid_c`/`bias c`
+    (whether the self-row or a nonzero entry) — the existence `decodeReindexing`'s bias `find?` needs. -/
+theorem encodeReindexing_exists_tgt (i degSlot arraySlot : Nat) (inW : WeaveShapeP) (m : StMatP)
+    (c : Nat) (hc : c < m.codLen) :
+    ∃ r ∈ encodeReindexing i degSlot arraySlot inW m,
+      r.tgtUid = axisUidFor3 i arraySlot ((fixedPositions inW).getD c 0) ∧
+      r.offset = m.bias.getD c 0 := by
+  rcases hf : (List.range m.domLen).filter (fun d => decide ((m.coeffs.getD c []).getD d 0 ≠ 0))
+      with _ | ⟨e, es⟩
+  · refine ⟨{ equationIdx := i, reindexingSlot := arraySlot,
+              srcUid := axisUidFor3 i arraySlot ((fixedPositions inW).getD c 0),
+              tgtUid := axisUidFor3 i arraySlot ((fixedPositions inW).getD c 0),
+              coeff := 0, offset := m.bias.getD c 0 }, ?_, rfl, rfl⟩
+    simp only [encodeReindexing]
+    rw [List.mem_flatMap]
+    exact ⟨c, List.mem_range.2 hc, by rw [hf]; exact List.mem_singleton.2 rfl⟩
+  · refine ⟨{ equationIdx := i, reindexingSlot := arraySlot,
+              srcUid := axisUidFor3 i degSlot e,
+              tgtUid := axisUidFor3 i arraySlot ((fixedPositions inW).getD c 0),
+              coeff := (m.coeffs.getD c []).getD e 0, offset := m.bias.getD c 0 }, ?_, rfl, rfl⟩
+    simp only [encodeReindexing]
+    rw [List.mem_flatMap]
+    refine ⟨c, List.mem_range.2 hc, ?_⟩
+    rw [hf]
+    exact List.mem_map.2 ⟨e, List.mem_cons_self .., rfl⟩
+
+/-- `fixedPositions` is duplicate-free (a filtered `List.range`). -/
+theorem fixedPositions_nodup (w : WeaveShapeP) : (fixedPositions w).Nodup :=
+  (List.nodup_range).filter _
+
+/-- Distinct in-range indices give distinct `fixedPositions` entries. -/
+theorem fixedPositions_getD_inj (w : WeaveShapeP) (c c' : Nat)
+    (hc : c < (fixedPositions w).length) (hc' : c' < (fixedPositions w).length)
+    (he : (fixedPositions w).getD c 0 = (fixedPositions w).getD c' 0) : c = c' := by
+  rw [List.getD_eq_getElem _ _ hc, List.getD_eq_getElem _ _ hc'] at he
+  exact (List.Nodup.getElem_inj_iff (fixedPositions_nodup w)).1 he
+
+/-- `find?`-then-project: the projected value of `find? p l` (defaulting to `d`) equals `v` whenever
+    every `p`-matching element projects to `v`, and either some element matches or `v = d`. -/
+theorem find?_map_getD {α γ} (l : List α) (p : α → Bool) (proj : α → γ) (d v : γ)
+    (hall : ∀ r ∈ l, p r → proj r = v)
+    (hex : (∃ r ∈ l, p r = true) ∨ v = d) :
+    ((l.find? p).map proj).getD d = v := by
+  rcases hfd : l.find? p with _ | r0
+  · rcases hex with ⟨r, hr, hpr⟩ | hvd
+    · rw [List.find?_eq_none] at hfd; exact absurd hpr (hfd r hr)
+    · simp [hvd]
+  · have hr0 := List.mem_of_find?_eq_some hfd
+    have hp0 := List.find?_some hfd
+    simp [hall r0 hr0 hp0]
+
+/-- Reindexing round trip (step 2): `decodeReindexing` recovers input `j`'s matrix. Uses `WellShaped`
+    for the matrix dimensions (`codLen`/`domLen`/`coeffs`/`bias` shapes) and the sample-table
+    inversion lemmas above. `coeffs`/`bias` are recovered entry-by-entry via `find?` uniqueness
+    (distinct `tgtUid`/`srcUid` per `(c,d)`; the degree slot `≠` the input slot since `j < reads`). -/
+theorem decodeReindexing_from (tc : ThreadedComposed) (hs : tc.WellShaped) (i : Nat)
+    (hi : i < tc.steps.length) (j : Nat) (hj : j < (tc.routing.getD i []).length) :
+    decodeReindexing (fromThreadedComposed tc) i
+        ((tc.steps[i]).outputWeaves.length + (tc.routing.getD i []).length)
+        ((tc.steps[i]).outputWeaves.length + j)
+        (tc.steps[i]).degree.length ((tc.steps[i]).inputWeaves.getD j [])
+      = (tc.steps[i]).reindexings.getD j default := by
+  have hstep : tc.steps.getD i default = tc.steps[i] := List.getD_eq_getElem _ _ hi
+  obtain ⟨hrlen, hshape⟩ := hs.2 i hi
+  rw [hstep] at hshape
+  obtain ⟨hcod, hdom, hcofflen, hrowlen, hbialen⟩ := hshape j hj
+  set O := (tc.steps[i]).outputWeaves.length with hOdef
+  set reads := tc.routing.getD i [] with hreadsdef
+  set inW := (tc.steps[i]).inputWeaves.getD j [] with hinWdef
+  set m := (tc.steps[i]).reindexings.getD j default with hmdef
+  set ER := encodeReindexing i (O + reads.length) (O + j) inW m with hERdef
+  have hmy : (fromThreadedComposed tc).samples.filter
+      (fun r => decide (r.equationIdx = i ∧ r.reindexingSlot = O + j)) = ER := by
+    rw [hERdef]; exact from_mySamples tc i hi j hj
+  -- Per-entry coefficient recovery.
+  have hcoeffEntry : ∀ c, c < m.codLen → ∀ d, d < m.domLen →
+      ((ER.find? (fun r => decide (r.tgtUid = axisUidFor3 i (O + j) ((fixedPositions inW).getD c 0)
+          ∧ r.srcUid = axisUidFor3 i (O + reads.length) d))).map (·.coeff)).getD 0
+        = (m.coeffs.getD c []).getD d 0 := by
+    intro c hc d hd
+    apply find?_map_getD
+    · intro r hr hpr
+      rw [decide_eq_true_eq] at hpr
+      obtain ⟨htgt, hsrc⟩ := hpr
+      obtain ⟨c', hc', htgt', hoff', hcase'⟩ :=
+        mem_encodeReindexing_forward i (O + reads.length) (O + j) inW m r hr
+      rw [htgt'] at htgt
+      obtain ⟨_, _, hfp⟩ := axisUidFor3_inj htgt
+      have hcc : c' = c :=
+        fixedPositions_getD_inj inW c' c (by rw [← hcod]; exact hc') (by rw [← hcod]; exact hc) hfp
+      rcases hcase' with ⟨hself, _⟩ | ⟨d', hd', hsrc', hcoeff', _⟩
+      · rw [hself] at hsrc
+        obtain ⟨_, hslot, _⟩ := axisUidFor3_inj hsrc
+        omega
+      · rw [hsrc'] at hsrc
+        obtain ⟨_, _, hdd⟩ := axisUidFor3_inj hsrc
+        rw [hcoeff', hcc, hdd]
+    · by_cases htz : (m.coeffs.getD c []).getD d 0 = 0
+      · exact Or.inr htz
+      · exact Or.inl ⟨_, mem_encodeReindexing_coeff i (O + reads.length) (O + j) inW m c d hc hd htz,
+          by simp⟩
+  -- Per-entry bias recovery.
+  have hbiasEntry : ∀ c, c < m.codLen →
+      ((ER.find? (fun r => decide (r.tgtUid = axisUidFor3 i (O + j) ((fixedPositions inW).getD c 0)))).map
+          (·.offset)).getD 0 = m.bias.getD c 0 := by
+    intro c hc
+    apply find?_map_getD
+    · intro r hr hpr
+      rw [decide_eq_true_eq] at hpr
+      obtain ⟨c', hc', htgt', hoff', _⟩ :=
+        mem_encodeReindexing_forward i (O + reads.length) (O + j) inW m r hr
+      rw [htgt'] at hpr
+      obtain ⟨_, _, hfp⟩ := axisUidFor3_inj hpr
+      have hcc : c' = c :=
+        fixedPositions_getD_inj inW c' c (by rw [← hcod]; exact hc') (by rw [← hcod]; exact hc) hfp
+      rw [hoff', hcc]
+    · obtain ⟨r0, hr0, htgt0, hoff0⟩ :=
+        encodeReindexing_exists_tgt i (O + reads.length) (O + j) inW m c hc
+      exact Or.inl ⟨r0, hr0, by simp [htgt0]⟩
+  -- Assemble the matrix field by field.
+  simp only [decodeReindexing]
+  rw [hmy]
+  have hCoeffs : (List.range (fixedPositions inW).length).map (fun c =>
+        (List.range (tc.steps[i]).degree.length).map (fun d =>
+          ((ER.find? (fun r => decide (r.tgtUid = axisUidFor3 i (O + j) ((fixedPositions inW).getD c 0)
+              ∧ r.srcUid = axisUidFor3 i (O + reads.length) d))).map (·.coeff)).getD 0))
+      = m.coeffs := by
+    apply List.ext_getElem
+    · rw [List.length_map, List.length_range, hcofflen, hcod]
+    · intro c h1 h2
+      rw [List.getElem_map, List.getElem_range]
+      have hcc : c < m.codLen := by
+        rw [List.length_map, List.length_range] at h1; rw [hcod]; exact h1
+      apply List.ext_getElem
+      · rw [List.length_map, List.length_range, hrowlen _ (List.getElem_mem h2), hdom]
+      · intro d hd1 hd2
+        rw [List.getElem_map, List.getElem_range]
+        have hdd : d < m.domLen := by
+          rw [List.length_map, List.length_range] at hd1; rw [hdom]; exact hd1
+        rw [hcoeffEntry c hcc d hdd,
+            List.getD_eq_getElem m.coeffs [] (by rw [hcofflen]; exact hcc),
+            List.getD_eq_getElem _ (0 : Int) (by rw [hrowlen _ (List.getElem_mem _)]; exact hdd)]
+  have hBias : (List.range (fixedPositions inW).length).map (fun c =>
+        ((ER.find? (fun r => decide (r.tgtUid = axisUidFor3 i (O + j) ((fixedPositions inW).getD c 0)))).map
+            (·.offset)).getD 0)
+      = m.bias := by
+    apply List.ext_getElem
+    · rw [List.length_map, List.length_range, hbialen, hcod]
+    · intro c h1 h2
+      rw [List.getElem_map, List.getElem_range]
+      have hcc : c < m.codLen := by
+        rw [List.length_map, List.length_range] at h1; rw [hcod]; exact h1
+      rw [hbiasEntry c hcc, List.getD_eq_getElem m.bias (0 : Int) (by rw [hbialen]; exact hcc)]
+  rw [hCoeffs, hBias, ← hdom, ← hcod]
+
 /-- The per-step inversion (steps 1–6): decoding step `i` recovers exactly the encoded `BrBaseP`
     and its routing reads. Needs `WellFormed` (for `inputWeaves.length = reads.length`, conjunct 2)
     and `WellShaped` (for the reindexing dimensions). -/
