@@ -411,19 +411,30 @@ def fromThreadedComposed (tc : ThreadedComposed) : Acset.SBrInstance :=
 
 /-- **Prop 8 (DSL/CSV agreement).** The DSL-path realization of `tc` and the CSV-path
     realization of its extracted `SBrInstance` are the SAME `Br` morphism (equal as
-    `Σ (dom cod : BrObj), BrMorph dom cod` values — same objects AND same morphism). -/
-theorem realize_fromThreadedComposed_agree (tc : ThreadedComposed) (h : tc.WellFormed) :
-    realize tc h = realizeSBr (fromThreadedComposed tc) := sorry
+    `Σ (dom cod : BrObj), BrMorph dom cod` values — same objects AND same morphism).
+
+    Proof: `realizeSBr` decodes the extracted instance and replays `realize`, so this reduces to the
+    round trip `toThreadedComposed (fromThreadedComposed tc) = tc` (Task C, `AcsetCodec`) plus
+    proof irrelevance on the `WellFormed` witness. The round trip needs `tc.WellShaped` (the shape
+    invariant `WellFormed` does not carry — `routing.length = steps.length` + per-step reindexing
+    dims); every compiled program satisfies it, so the agreement holds for all real programs. -/
+theorem realize_fromThreadedComposed_agree (tc : ThreadedComposed) (h : tc.WellFormed)
+    (hs : tc.WellShaped) :
+    realize tc h = realizeSBr (fromThreadedComposed tc) := by
+  have hrt : AcsetCodec.toThreadedComposed (AcsetCodec.fromThreadedComposed tc) = tc :=
+    AcsetCodec.toThreadedComposed_fromThreadedComposed tc h hs
+  unfold realizeSBr fromThreadedComposed
+  rw [hrt, dif_pos h]
 
 /-- **Prop 8′ (axis identity on the nose, §7.4).** Both paths share the §7.4 UID coequalizer,
     so the realized domain objects coincide. -/
-theorem agree_dom (tc : ThreadedComposed) (h : tc.WellFormed) :
+theorem agree_dom (tc : ThreadedComposed) (h : tc.WellFormed) (hs : tc.WellShaped) :
     (realize tc h).1 = (realizeSBr (fromThreadedComposed tc)).1 :=
-  congr_arg (·.1) (realize_fromThreadedComposed_agree tc h)
+  congr_arg (·.1) (realize_fromThreadedComposed_agree tc h hs)
 
 /-- Prop 8′ (cod). -/
-theorem agree_cod (tc : ThreadedComposed) (h : tc.WellFormed) :
+theorem agree_cod (tc : ThreadedComposed) (h : tc.WellFormed) (hs : tc.WellShaped) :
     (realize tc h).2.1 = (realizeSBr (fromThreadedComposed tc)).2.1 :=
-  congr_arg (·.2.1) (realize_fromThreadedComposed_agree tc h)
+  congr_arg (·.2.1) (realize_fromThreadedComposed_agree tc h hs)
 
 end LeanNCD
