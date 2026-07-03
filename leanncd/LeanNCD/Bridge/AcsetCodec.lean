@@ -1296,6 +1296,96 @@ theorem decodeReindexing_from (tc : ThreadedComposed) (hs : tc.WellShaped) (i : 
       rw [hbiasEntry c hcc, List.getD_eq_getElem m.bias (0 : Int) (by rw [hbialen]; exact hcc)]
   rw [hCoeffs, hBias, ← hdom, ← hcod]
 
+/-- `slotWeave` at an output slot. -/
+theorem slotWeave_out (b : BrBaseP) (reads : List Wire) (s : Nat)
+    (hs : s < b.outputWeaves.length) : slotWeave b reads s = b.outputWeaves.getD s [] := by
+  unfold slotWeave; simp only [hs, if_pos]
+
+/-- `slotWeave` at an input slot `outLen + j`. -/
+theorem slotWeave_in (b : BrBaseP) (reads : List Wire) (j : Nat) (hj : j < reads.length) :
+    slotWeave b reads (b.outputWeaves.length + j) = b.inputWeaves.getD j [] := by
+  unfold slotWeave
+  rw [if_neg (by omega), if_pos (by omega)]
+  congr 1; omega
+
+/-- `slotWeave` at the degree slot `outLen + inLen`. -/
+theorem slotWeave_deg (b : BrBaseP) (reads : List Wire) :
+    slotWeave b reads (b.outputWeaves.length + reads.length) = b.degree.map .fixed := by
+  unfold slotWeave
+  rw [if_neg (by omega), if_neg (by omega), if_pos rfl]
+
+/-- `decodeStep`'s degree reconstruction (`.map .fixed` then the `fixed→a` projection) is identity. -/
+theorem map_fixed_inv (l : StObjP) :
+    (l.map WeaveSlotP.fixed).map
+        (fun x => match x with | .fixed a => a | .tiled => default) = l := by
+  induction l with
+  | nil => rfl
+  | cons hd tl ih => simp only [List.map_cons]; rw [ih]
+
+/-- From `WellFormed` conjunct 2: a step's input-weave count equals its routing read count. -/
+theorem inputWeaves_len (tc : ThreadedComposed) (h : tc.WellFormed) (i : Nat)
+    (hi : i < tc.steps.length) :
+    (tc.steps[i]).inputWeaves.length = (tc.routing.getD i []).length := by
+  have hc := h.2.1 i hi
+  have hlen := congrArg List.length hc
+  simp only [List.length_map] at hlen
+  rw [List.getD_eq_getElem _ _ hi] at hlen
+  omega
+
+/-- Membership in the flattened equation table: every row is step `i'`'s single equation row. -/
+theorem mem_from_equations (tc : ThreadedComposed) (x : EquationRow) :
+    x ∈ (fromThreadedComposed tc).equations ↔
+      ∃ i', ∃ (_ : i' < tc.steps.length),
+        x = ⟨i', some (natToUnary (brOpIdx (tc.steps[i']).op))⟩ := by
+  simp only [fromThreadedComposed, List.mem_flatten, List.mem_map]
+  constructor
+  · rintro ⟨l, ⟨inst, hinst, rfl⟩, hx⟩
+    rw [stepInsts] at hinst
+    simp only [List.mem_map, List.mem_zipIdx_iff_getElem?] at hinst
+    obtain ⟨⟨bb, kk⟩, hget, rfl⟩ := hinst
+    rw [List.getElem?_eq_some_iff] at hget
+    obtain ⟨hk, he⟩ := hget
+    have hk' : kk < tc.steps.length := by simpa using hk
+    refine ⟨kk, hk', ?_⟩
+    simp only [encodeStep, List.mem_singleton] at hx
+    rw [show bb = tc.steps[kk] from he.symm] at hx; exact hx
+  · rintro ⟨i', hi', rfl⟩
+    refine ⟨_, ⟨(stepInsts tc)[i']'(by simp [stepInsts]; omega), List.getElem_mem _, rfl⟩, ?_⟩
+    rw [stepInsts_getElem tc i' hi']; simp [encodeStep]
+
+/-- The equation `find?` for step `i` recovers its single row (op index encoded in `lhsName`). -/
+theorem from_equation_find (tc : ThreadedComposed) (i : Nat) (hi : i < tc.steps.length) :
+    (fromThreadedComposed tc).equations.find? (fun e => decide (e.equationIdx = i))
+      = some ⟨i, some (natToUnary (brOpIdx (tc.steps[i]).op))⟩ := by
+  apply find?_unique
+  · rw [mem_from_equations]; exact ⟨i, hi, rfl⟩
+  · simp
+  · intro y hy hyd
+    rw [decide_eq_true_eq] at hyd
+    rw [mem_from_equations] at hy
+    obtain ⟨i', _, rfl⟩ := hy
+    simp only at hyd; subst hyd; rfl
+
+/-- The input-row `find?` by slot recovers exactly read `j`'s row (with its wire label). -/
+theorem from_inputRow_find (tc : ThreadedComposed) (i : Nat) (hi : i < tc.steps.length)
+    (j : Nat) (hj : j < (tc.routing.getD i []).length) :
+    ((fromThreadedComposed tc).arrays.filter
+        (fun a => decide (a.equationIdx = i ∧ a.isInput = true))).find?
+        (fun a => decide (a.slot = (tc.steps[i]).outputWeaves.length + j))
+      = some { blankArrayRow i ((tc.steps[i]).outputWeaves.length + j) true with
+                wireLabel := some (wireLabel ((tc.routing.getD i []).getD j (.external 0))) } := by
+  rw [from_inputRows tc i hi]
+  apply find?_unique
+  · exact List.mem_map.2 ⟨j, List.mem_range.2 hj, rfl⟩
+  · simp [blankArrayRow]
+  · intro y hy hyd
+    rw [decide_eq_true_eq] at hyd
+    simp only [List.mem_map, List.mem_range] at hy
+    obtain ⟨j', _, rfl⟩ := hy
+    simp only [blankArrayRow] at hyd
+    have : j' = j := by omega
+    subst this; rfl
+
 /-- The per-step inversion (steps 1–6): decoding step `i` recovers exactly the encoded `BrBaseP`
     and its routing reads. Needs `WellFormed` (for `inputWeaves.length = reads.length`, conjunct 2)
     and `WellShaped` (for the reindexing dimensions). -/
@@ -1303,7 +1393,72 @@ theorem decodeStep_eq (tc : ThreadedComposed) (h : tc.WellFormed) (hs : tc.WellS
     (i : Nat) (hi : i < tc.steps.length) :
     decodeStep (fromThreadedComposed tc) i = (tc.steps[i], tc.routing.getD i []) := by
   simp only [decodeStep]
-  sorry
+  rw [from_outLen tc i hi, from_inLen tc i hi]
+  have hout : List.map (fun sN => decodeWeaveAt (fromThreadedComposed tc) i sN)
+        (List.range tc.steps[i].outputWeaves.length) = tc.steps[i].outputWeaves := by
+    apply List.ext_getElem
+    · simp
+    · intro n h1 _
+      simp only [List.getElem_map, List.getElem_range]
+      have hn : n < tc.steps[i].outputWeaves.length := by simpa using h1
+      rw [decodeWeaveAt_from tc i hi n, slotWeave_out _ _ n hn, List.getD_eq_getElem _ _ hn]
+  have hin : List.map (fun j => decodeWeaveAt (fromThreadedComposed tc) i
+        (tc.steps[i].outputWeaves.length + j)) (List.range (tc.routing.getD i []).length)
+      = tc.steps[i].inputWeaves := by
+    apply List.ext_getElem
+    · simp [inputWeaves_len tc h i hi]
+    · intro j h1 _
+      simp only [List.getElem_map, List.getElem_range]
+      have hj : j < (tc.routing.getD i []).length := by simpa using h1
+      rw [decodeWeaveAt_from tc i hi _, slotWeave_in _ _ j hj,
+          List.getD_eq_getElem _ _ (by rw [inputWeaves_len tc h i hi]; exact hj)]
+  have hdeg : List.map (fun x => match x with
+        | WeaveSlotP.fixed a => a | WeaveSlotP.tiled => default)
+        (decodeWeaveAt (fromThreadedComposed tc) i
+          (tc.steps[i].outputWeaves.length + (tc.routing.getD i []).length))
+      = tc.steps[i].degree := by
+    rw [decodeWeaveAt_from tc i hi _, slotWeave_deg]; exact map_fixed_inv _
+  have hrlen : tc.steps[i].reindexings.length = (tc.routing.getD i []).length := by
+    have hw := (hs.2 i hi).1; rw [List.getD_eq_getElem _ _ hi] at hw; exact hw
+  have hreidx : List.map (fun j => decodeReindexing (fromThreadedComposed tc) i
+        (tc.steps[i].outputWeaves.length + (tc.routing.getD i []).length)
+        (tc.steps[i].outputWeaves.length + j)
+        (List.map (fun x => match x with
+              | WeaveSlotP.fixed a => a | WeaveSlotP.tiled => default)
+            (decodeWeaveAt (fromThreadedComposed tc) i
+              (tc.steps[i].outputWeaves.length + (tc.routing.getD i []).length))).length
+        ((List.map (fun j => decodeWeaveAt (fromThreadedComposed tc) i
+              (tc.steps[i].outputWeaves.length + j))
+            (List.range (tc.routing.getD i []).length)).getD j []))
+        (List.range (tc.routing.getD i []).length) = tc.steps[i].reindexings := by
+    apply List.ext_getElem
+    · simp [hrlen]
+    · intro j h1 _
+      simp only [List.getElem_map, List.getElem_range]
+      have hj : j < (tc.routing.getD i []).length := by simpa using h1
+      rw [hdeg, hin, decodeReindexing_from tc hs i hi j hj,
+          List.getD_eq_getElem _ _ (by rw [hrlen]; exact hj)]
+  have hop : brOpOfIdx (unaryToNat (((List.find? (fun e => decide (e.equationIdx = i))
+        (fromThreadedComposed tc).equations).bind fun x => x.lhsName).getD ""))
+      = tc.steps[i].op := by
+    rw [from_equation_find tc i hi]
+    simp only [Option.bind_some, Option.getD_some, unaryToNat_natToUnary, brOpOfIdx_brOpIdx]
+  have hreads : List.map (fun j => match List.find?
+          (fun a => decide (a.slot = tc.steps[i].outputWeaves.length + j))
+          (List.filter (fun a => decide (a.equationIdx = i ∧ a.isInput = true))
+            (fromThreadedComposed tc).arrays) with
+        | some a => (a.wireLabel.bind parseWireLabel).getD (Wire.external 0)
+        | none => Wire.external 0) (List.range (tc.routing.getD i []).length)
+      = tc.routing.getD i [] := by
+    apply List.ext_getElem
+    · simp
+    · intro j h1 _
+      simp only [List.getElem_map, List.getElem_range]
+      have hj : j < (tc.routing.getD i []).length := by simpa using h1
+      rw [from_inputRow_find tc i hi j hj]
+      simp only [Option.bind_some, parseWireLabel_wireLabel, Option.getD_some]
+      rw [List.getD_eq_getElem _ _ hj]
+  rw [hreidx, hdeg, hin, hout, hop, hreads]
 
 /-- Only external wires `< nExternal` live in any pool: the fold prepends internal output slots
     onto the external base `(range nExternal).map .external`. -/

@@ -315,7 +315,16 @@ further design surprises. Next: Task C, the formal proof of what was just checke
 
 ### Task C: round-trip lemma
 
-**▶▶ PAUSE / RESUME POINT (end of 2026-07-02 session) ◀◀**
+**▶▶ TASK C DONE (2026-07-03) ◀◀** `toThreadedComposed_fromThreadedComposed` is **PROVED sorry-free**,
+axioms `[propext, Classical.choice, Quot.sound]` (verified via `lean_verify`); full `lake build` green
+(8587). `decodeStep_eq` assembly closed with helpers `slotWeave_out/in/deg`, `map_fixed_inv`,
+`inputWeaves_len` (from WellFormed conj-2), `mem_from_equations`/`from_equation_find` (op recovery),
+`from_inputRow_find` (reads recovery), wiring `decodeWeaveAt_from`/`decodeReindexing_from`/counts via
+`List.ext_getElem`. `AcsetCodec.lean` is now sorry-free. NEXT: Task D (`realizeSBr`) then Task E
+(`realize_fromThreadedComposed_agree`), threading the `(hs : tc.WellShaped)` hypothesis (discharge it for
+compiled programs via `routeCore`/route length + shape lemmas).
+
+**(historical) PAUSE / RESUME POINT (end of 2026-07-02 session):**
 Both hard structural lemmas are PROVED and committed green; `AcsetCodec.lean` compiles with **one
 remaining `sorry`**: `decodeStep_eq` (line ~1306), the per-step `BrBaseP`+reads assembly. Two statement
 gaps were found & fixed by ADDING hypotheses (not touching `WellFormed`): the theorem is now
