@@ -20,16 +20,30 @@ That separation is required because the current axis size story is symbolic (`Nu
 `SizeExpr`) during compilation, while the affine solver learns concrete extents only when
 runtime input tensor shapes are available.
 
-> **Prerequisite / sequencing.** Do not start this in parallel with the active multi-output
-> `BrBase` + `compile_wellFormed` effort (`docs/superpowers/plans/2026-06-26-multioutput-impl-plan.md`).
-> This plan touches the categorical core and, near-term, *adds* surface area before removing
-> sorries. Begin with the [minimum viable integration](#minimum-viable-integration) once the
-> well-formedness proof lands. The projected proof savings in
-> [NaperianTyping.md §6](./NaperianTyping.md) are a **hypothesis to validate at Milestone 2**,
-> and are gated on the [Milestone 1.5 circularity spike](#milestone-15--circularity-spike-s1-gate-for-track-b-spike)
-> succeeding — not a committed deliverable.
+> **Prerequisite / sequencing — UPDATED 2026-07-03: prerequisite MET.** The multi-output `BrBase`
+> + `compile_wellFormed` effort (`docs/superpowers/plans/2026-06-26-multioutput-impl-plan.md`) is
+> **complete**, and the follow-on §8.2 acset agreement work
+> (`docs/superpowers/plans/2026-07-01-acset-agreement-impl-plan.md`, Tasks A–E) has also landed:
+> `compile_wellFormed`, `realize`, and `realize_fromThreadedComposed_agree` are all sorry-free.
+> **Track A of this plan can start now.** Track B remains gated — `act` and all ten coherence
+> fields on `instDGradedStBr` are unchanged, still bare `sorry` (`LeanNCD/Instances/StBr.lean`),
+> so spike S0 has not been run and nothing in the projected proof savings of
+> [NaperianTyping.md §6](./NaperianTyping.md) should be treated as validated. Run **S0** before
+> committing to any Track-B milestone.
 
 ## 0. Code audit findings (2026-07-01) — read this first
+
+> **Re-audit, 2026-07-03.** Findings 1–4 and 6 below were re-checked against the current tree and
+> are **unchanged**: `act` and the ten `instDGradedStBr` coherence fields are still bare `sorry`
+> (`LeanNCD/Instances/StBr.lean`); the `Br`/`BrMorph` quotient is still sorry-free; `brCancelPoint`
+> is still an isolated, off-critical-path `sorry`; the `actV` impossibility still stands; Mathlib
+> still has no `Representable`/`Foldable` base classes. **Finding 5 is superseded — see the update
+> appended to it below.**
+>
+> **Also 2026-07-03 (after spike S0):** the `sh_act` *class field* in `Core/Graded.lean` was relaxed
+> from a strict `=` to a canonical iso `≅` (the object-level blocker S0 surfaced — see §0.2 result
+> box). The `instDGradedStBr.sh_act` *instance* field is still `:= sorry` (finding 1's count is
+> unchanged), but its target type is now the iso; `lake build` is green.
 
 A ground-truth audit of the LeanNCD **code** (not the design docs) reshapes this plan:
 
@@ -59,9 +73,18 @@ A ground-truth audit of the LeanNCD **code** (not the design docs) reshapes this
    wire-dispatch / `List.length` bookkeeping; `realize` merely *consumes* `WellFormed`. Naperian's
    only possible contribution is to the shape-*order*-matching sorries (`buildStep_output_fixedAxes`,
    `wf_typeMatch`, `internal_pointwise`) — and *only* if weaves are re-typed from `List`-with-`.getD`
-   to representable/`Fin`-indexed functions. The hardest multi-output blockers (`topo_bound`'s
-   false-as-stated modeling gap; `stepPiece`/`finalPiece` pool reconciliation) are untouched by
-   better shape types.
+   to representable/`Fin`-indexed functions.
+
+   **UPDATE (2026-07-03): this entire surface is now DONE, by hand, without Naperian.**
+   `compile_wellFormed`, `wf_typeMatch`, `internal_pointwise`, and `buildStep_output_fixedAxes` are
+   all proved (zero `sorry` in `Bridge/Agreement.lean`, `DSL/Pipeline/RouteSpec.lean`). The
+   `topo_bound` modeling gap (cycles + scan self-reads) was fixed by restating the theorem to take
+   `routeCore` success (`hrc : routableInOrder`) rather than by re-typing weaves — confirming the
+   original prediction that Naperian/representable re-typing was orthogonal to what actually
+   unblocked multi-output. **Spike S2 (dependent-weave re-typing, Milestone 4.5) is now MOOT for
+   this surface** — the lemmas it would have simplified are already closed by hand. S2 could still
+   be run speculatively for its own sake (a cleaner shape representation going forward), but it no
+   longer has a blocked-proof payoff to justify it.
 6. **Naperian is greenfield and Mathlib does not supply the base classes.** No `Naperian`/`El`/
    `ev_p`-as-Naperian scaffolding exists. Mathlib has no Haskell-style `Representable`/`Log` or
    `Foldable` class (verified against the pinned `v4.30.0` toolchain) — these must be defined locally.
@@ -75,24 +98,56 @@ The findings split this plan into two tracks with very different risk/value prof
   core (§2, §3, §5 M2–M4). Orthogonal to `act`, to the coherence tower, and to the multi-output
   work. It hardens the compiler (typed reindex rank/codomain, canonical degree, early law checks).
   Its wins are the **"reindex soundness"** items in §4.1 — **not** the 50–70% coherence figure.
-- **Track B — categorical / representability payoff (gated, expensive, speculative).** The
+- **Track B — categorical / representability payoff (gates now cleared; expensive).** The
   `NaperianAxis`/`NaperianFamily`/`naperian_jointly_monic` layer meant to shrink the coherence
-  sorries. **Blocked on `act` (finding 1)** and on the circularity spike. The projected 50–70%
-  reduction lives here and is unvalidated. Do not begin Track B until (a) multi-output lands, (b)
-  `act` is defined or scoped by spike S0, and (c) spikes S0/S1 pass.
+  sorries. **Gate status (2026-07-03):** (a) multi-output has landed; (b) `act` scoped by S0 and its
+  `sh_act` blocker resolved; (c) **both S0 and S1 pass** — S1 gave `jointly_monic` a Lean-verified
+  acyclic route (no `broadcast_gen`; residual reroutes to the proved `St.elemental`). The projected
+  50–70% reduction is no longer *blocked*, though it is still *unmeasured* until `act` + the coherence
+  proofs are actually built. Track B is now a funded cost/benefit decision, not a feasibility gamble.
 
 ### 0.2 Spikes to run before committing
 
 | Spike | Question | Exit criterion | Detail |
 | --- | --- | --- | --- |
-| **S0 — `act` definability** | Can `act` be a `Quotient.lift` over `Br.Hom` respecting every `Rel` constructor, and how large is that proof? | A skeleton `act` with the `Rel`-respecting obligations enumerated + a size estimate; or a named blocker. | §5 Milestone 0.5 |
-| **S1 — `jointly_monic` circularity** | Is there an acyclic proof of `naperian_jointly_monic` (not routed through `broadcast_gen`)? | Acyclic proof/skeleton, or the explicit extra assumption it needs. | §5 Milestone 1.5 |
+| **S0 — `act` definability** ✅ RUN 2026-07-03 | Can `act` be a `Quotient.lift` over `Br.Hom` respecting every `Rel` constructor, and how large is that proof? | ✅ DONE — morphism level tractable (20/21 `Rel` cases reuse proved `BrMorph` laws, ~400–650 lines for `act` alone). The object-level blocker it surfaced (strict `sh_act` unsatisfiable for ≥2-array bundles) is **RESOLVED**: `sh_act` relaxed `=` → `≅` in `Core/Graded.lean` (build green, zero proof consumers). `act` now has no design gate. Full report: [`leanncd/docs/superpowers/plans/2026-07-03-s0-act-definability-spike.md`](../leanncd/docs/superpowers/plans/2026-07-03-s0-act-definability-spike.md). | §5 Milestone 0.5 |
+| **S1 — `jointly_monic` circularity** ✅ RUN 2026-07-03 | Is there an acyclic proof of `naperian_jointly_monic` (not routed through `broadcast_gen`)? | ✅ POSITIVE — acyclic route Lean-verified: `jointly_monic ⟸ representability (lifted object is the El P-power, legs = ev_p)` via `IsLimit.hom_ext`, axioms `[propext, Classical.choice, Quot.sound]`, no `broadcast_gen`, off `brCancelPoint`. **Residual probe refined the cost:** closing it for real is a *commitment-sized build* (reindex-half of `act` + concrete finite-`El` representability), NOT a cheap spike — `El P` isn't enumerable symbolically and a faithful `evSlice` is part of `act`. Still non-circular. Report: [`leanncd/docs/superpowers/plans/2026-07-03-s1-jointly-monic-spike.md`](../leanncd/docs/superpowers/plans/2026-07-03-s1-jointly-monic-spike.md). | §5 Milestone 1.5 |
 | **S2 — dependent-weave re-typing** | Would re-typing weaves as `Fin`-indexed/representable make `wf_typeMatch`/`buildStep_output_fixedAxes` definitional, and what does it cost the executable path? | A spike branch re-typing ONE weave/shape and re-proving one shape-match lemma; a cost/benefit note. | §5 Milestone 4.5 |
 | **S3 — `actV` impossibility** | Confirm the `FGModuleCat ℝ` obstruction; is any eval-side actegory work in scope? | Written confirmation + a decision on semimodule redesign scope. | §6.6 |
 
 **S0 is pivotal.** If `act` turns out far larger than Track B's projected savings, Track B is
 net-negative and the effort should stop at Track A + the [minimum viable
 integration](#minimum-viable-integration).
+
+> **S0 RESULT (2026-07-03).** The literal S0 question is answered **yes, tractably** — `act.map` is a
+> well-posed `Quotient.lift`, and 20 of 21 `Rel` constructors discharge against `BrMorph` theorems
+> that are *already proved* (the free-strict-SMC laws that made `Br : ColoredPROP` sorry-free). The
+> `gen` leaf (batch-lift of one `BrBase`) is a bounded definition, not a `Rel` obligation. Estimate:
+> **~400–650 lines for `act` alone** (functor + well-definedness + reindex + `map_id`/`map_comp`),
+> excluding the `δ`/`δ0`/`υ`/`α`/`broadcast_gen` tower that sits on top of it.
+>
+> **The object-level blocker S0 surfaced is now RESOLVED (option 1 implemented).** The strict
+> `sh_act` field (`sh*(X ⊛ P) = sh*(X) ⊗ P`) was unsatisfiable for ≥2-array bundles under per-array
+> broadcast (the concatenated `sh_star` carries `|X|` copies of `P`, not one; a strict `=` admits no
+> iso freedom). It has been **relaxed from `=` to a canonical braiding iso `≅`** in
+> `Core/Graded.lean` — `lake build` green, and the re-trace found **zero proof consumers** (the field
+> was referenced only by its declaration, doc comment, and the still-`sorry` instance). `act` now has
+> **no remaining design gate**. (**Update: S1 has since also passed — see the S1 RESULT box below.**)
+> Whether to build `act` is now a cost/benefit call (~400–650 lines + the coherence tower vs. Track
+> B's projected savings), not a feasibility one.
+>
+> **S1 RESULT (2026-07-03).** `naperian_jointly_monic` has a **Lean-verified acyclic route**:
+> `jointly_monic ⟸ representability (lifted object is the El P-power, legs = ev_p)` via
+> `IsLimit.hom_ext`, axioms `[propext, Classical.choice, Quot.sound]`, **no `broadcast_gen`**. The
+> reduction reroutes the obligation (it does not eliminate it) to St-slice separation, which reduces
+> to the proved `St.elemental` — **not** `brCancelPoint`. The circularity hazard is avoided:
+> `jointly_monic ← representability`, never `← broadcast_gen`. **Residual (refined by the residual
+> probe — a commitment-sized build, NOT a cheap spike):** a faithful `evSlice` is the reindex-half of
+> `act`, and `El P` is not enumerable symbolically (`Fintype (BrMorph [] P)` has no instance), so
+> closing `jointly_monic` needs the `act` build + the concrete finite-`El` representability
+> (`tabulate`/`lookup`) — real work, but still non-circular. Report:
+> `leanncd/docs/superpowers/plans/2026-07-03-s1-jointly-monic-spike.md`. **Both Track-B gates are now
+> cleared.**
 
 ## 1. Current pipeline and staging constraint
 
@@ -391,13 +446,12 @@ The strongest immediate benefit is around **reindex soundness**, and it does **n
 This follows from moving affine rows into a typed/symbolic core before evaluation. These are the
 *only* wins this plan can promise without the Track-B prerequisites landing.
 
-**Possible (not automatic) Track-A win on the multi-output shape-match sorries.** Per the audit
-(finding 5), `buildStep_output_fixedAxes`, `wf_typeMatch`, and `internal_pointwise` are all "two
-weaves have the same `fixedAxesP` (same axes, same order) ⇒ same `ArrayType`", proved today with
-`List.getD … default` positional bookkeeping. If weaves were re-typed as `Fin`-indexed/representable
-functions, these become near-definitional. That is a genuine but **localized** simplification, it
-requires re-typing the executable weave representation, and it is **not** what unblocks multi-output
-(see §4.2). Validate it with **spike S2** before assuming it.
+**Multi-output shape-match sorries — RESOLVED (2026-07-03), moot for Track A.** Per the original
+audit (finding 5), `buildStep_output_fixedAxes`, `wf_typeMatch`, and `internal_pointwise` were
+candidates for Naperian re-typing (they are "two weaves have the same `fixedAxesP` ⇒ same
+`ArrayType`"). They are now proved directly, with `List.getD … default` positional bookkeeping
+intact — no re-typing was needed. Spike S2 (weave re-typing) is therefore optional, not a pending
+decision blocking anything.
 
 ### 4.2 What does NOT get solved (and what Naperian is orthogonal to)
 
@@ -412,13 +466,16 @@ Substantial and **gating Track B** (audit findings 1–2):
 Naperian gives a better *proof shape* for these, but does not discharge them, and cannot even be
 stated usefully until `act` exists.
 
-Explicitly **orthogonal** to Naperian typing (audit findings 3–5) — do not expect Naperian to touch
-these:
+Explicitly **orthogonal** to Naperian typing (audit findings 3–4, and historically 5) —
+**confirmed, not just predicted:**
 
-- The multi-output blockers `topo_bound` (false-as-stated modeling gap: cycles + scan self-reads)
-  and `stepPiece`/`finalPiece` pool reconciliation — `Wire`-list membership/order, not shape types.
-- `brCancelPoint`/`weave_unique` — isolated, off the executable path, no consumers.
+- The multi-output blockers `topo_bound` (was a false-as-stated modeling gap: cycles + scan
+  self-reads) and `stepPiece`/`finalPiece` pool reconciliation — `Wire`-list membership/order, not
+  shape types. **RESOLVED 2026-07-03** by restating `topo_bound` over `routeCore` success, exactly
+  as predicted: better shape types would not have helped, and didn't need to.
+- `brCancelPoint`/`weave_unique` — isolated, off the executable path, no consumers. Unchanged.
 - The `actV` (`FGModuleCat ℝ`) impossibility — an eval-side semantic-algebra redesign (spike S3).
+  Unchanged.
 
 ### 4.3 Why the solver split matters for proofs
 
@@ -433,16 +490,26 @@ That separation is cleaner both logically and implementation-wise.
 
 ## 5. Milestone sequencing
 
-**Top-level order (revised per the §0 findings):**
+**Top-level order (revised 2026-07-03 — step 1 is now DONE):**
 
-1. **Finish the multi-output `compile_wellFormed` effort first, to completion.** It is orthogonal
-   to everything here (audit finding 5) and in-flight; do not interleave. Accept that if spike S2
-   later succeeds, a few shape-match lemmas may be re-typed — a bounded, acceptable "prove-twice"
-   risk that is cheaper than blocking real work on a speculative refactor.
-2. **Track A (M0 → M2 → M3 → M4)** — the symbolic typed-reindexing layer. Deliverable and valuable
-   regardless of Track B. Run spike **S2** (M4.5) here to decide the weave re-typing.
-3. **Spikes S0 (M0.5) and S1 (M1.5)** — gate Track B. Run S0 early; it is pivotal.
-4. **Track B (M6 coherence work)** — only if S0 and S1 pass and `act` is defined.
+1. ~~Finish the multi-output `compile_wellFormed` effort first, to completion.~~ **DONE.** The
+   multi-output effort and the §8.2 acset agreement (Tasks A–E) are both complete and sorry-free;
+   see the 2026-07-03 audit update in §0 above. `topo_bound` was fixed by restating it over
+   `routeCore` success, not by re-typing weaves, so spike S2's original "prove-twice" justification
+   for this surface no longer applies.
+2. **Track A (M0 → M2 → M3 → M4) — start now.** The symbolic typed-reindexing layer. Deliverable
+   and valuable regardless of Track B. S2 (M4.5) is now optional/speculative (see the finding-5
+   update in §0) rather than a decision this surface is waiting on.
+3. **Spikes S0 (M0.5) and S1 (M1.5)** — gate Track B. **Both DONE (2026-07-03).** S0: the `Rel`-lift
+   is tractable (~400–650 lines) and its object-level `sh_act` blocker is **resolved** (`=` → `≅` in
+   `Core/Graded.lean`, build green). S1: **POSITIVE** — `jointly_monic` has a Lean-verified acyclic
+   route (via representability / `IsLimit.hom_ext`, no `broadcast_gen`); the residual reroutes to
+   St-slice separation ⇒ the proved `St.elemental`, needing concrete `act` to close.
+4. **Track B (M6 coherence work)** — both feasibility gates cleared. The next concrete step is a
+   **commitment-sized build, not a further probe** (the residual probe confirmed there is no cheaper
+   de-risking left): build `act.obj`/`act.map`/`ev_p` for `Br` *and* the concrete finite-`El`
+   representability (`tabulate`/`lookup`), which together close the S1 residual (`jointly_monic`) and
+   underpin the coherence tower. It is a funded cost/benefit call, not blocked.
 
 Milestones are tagged **[A]** / **[B]** / **[spike]** below.
 
@@ -452,20 +519,32 @@ Milestones are tagged **[A]** / **[B]** / **[spike]** below.
 - keep `inferAxisSizes` exactly where it is,
 - add tests documenting the symbolic-vs-concrete split.
 
-### Milestone 0.5 — `act`-definability spike (S0, GATE for Track B) **[spike]**
+### Milestone 0.5 — `act`-definability spike (S0, GATE for Track B) **[spike — ✅ DONE 2026-07-03]**
 
-**Run before committing to any Track-B milestone.** `act` is currently a bare `sorry`
-(`Instances/StBr.lean:15`); the `Br`/`BrMorph` quotient it must lift over is done and sorry-free
-(`Base/Br.lean:390`), so the task is well-posed but unmeasured.
+**Full report:** [`leanncd/docs/superpowers/plans/2026-07-03-s0-act-definability-spike.md`](../leanncd/docs/superpowers/plans/2026-07-03-s0-act-definability-spike.md).
 
-- Sketch `act` as `Quotient.lift` over `Br.Hom`; enumerate the `Rel` constructors it must respect
-  (congruence, category/bifunctor laws, interchange, braid involution/naturality/hexagons, the
-  cast-crossing unit/assoc coherences, CD comonoid laws) and the functor laws (`map_id`/`map_comp`).
-- Estimate the proof size and identify any constructor that looks intractable.
+**Verdict: SPLIT.**
 
-**Exit criterion:** a skeleton `act` with the obligations listed and a size estimate, **or** a named
-blocker. **If `act` dwarfs Track B's projected savings, stop at Track A + the [minimum viable
-integration](#minimum-viable-integration).**
+- **Morphism level (the literal question) — TRACTABLE.** `act.map` is a well-posed `Quotient.lift`
+  factored as `act.map (f,η) = [f,P] ; [Y,η]`; well-definedness reduces to `Rel f g → liftAt P f =
+  liftAt P g` on the batch lift. Of the 21 `Rel` constructors, **20 map to already-proved `BrMorph`
+  theorems** (`id_comp`/`assoc`/`tensor_comp`/`braid_braid`/`braid_natural`/the `*_heq` cast lemmas/
+  the `copyW_*` comonoid laws). The `gen` leaf is a bounded `BrBase` construction, not a `Rel`
+  obligation. Confirmed technical tax: `List.map` is **not** defeq-distributive over `++` (checked
+  via `lean_run_code`), so every `tensor`/`braid` case carries a `List.map_append` cast — friction,
+  not a wall (singleton `copyW`/`delW` objects stay defeq-clean). **Estimate: ~400–650 lines for
+  `act` alone**, excluding `δ`/`δ0`/`υ`/`α`/`broadcast_gen`.
+- **Object level — was a NAMED BLOCKER, now RESOLVED (option 1).** Strict `sh_act`
+  (`sh*(X ⊛ P) = sh*(X) ⊗ P`, a `=`) was **unsatisfiable for ≥2-array bundles** under per-array
+  broadcast: the concatenated `sh_star` carries `|X|` copies of `P`, not one, and a strict `=`
+  admits no iso freedom. **Fixed by relaxing `sh_act` to a canonical braiding iso `≅`** in
+  `Core/Graded.lean` (keeps the per-array `List.map` action, which makes `δ`/`δ0` near-definitional).
+  Build green; blast radius was zero proof consumers, so it was a one-field change.
+
+**Consequence for the gate:** the `Rel` proof was never what made `act` expensive or risky — the
+`sh_act` design question was, and it is now decided and implemented. `act` is a bounded, mechanical
+build; Track B is fundable pending S1. `brCancelPoint` / the `Br` free-SMC quotient are confirmed
+off this path.
 
 ### Milestone 1 — Core symbolic API **[A/B boundary]**
 
@@ -473,25 +552,40 @@ integration](#minimum-viable-integration).**
 - state the mixin classes and key laws (statements only; no `act` dependence yet),
 - no runtime point enumeration yet.
 
-### Milestone 1.5 — circularity spike (S1, GATE for Track B) **[spike]**
+### Milestone 1.5 — circularity spike (S1, GATE for Track B) **[spike — ✅ DONE 2026-07-03, POSITIVE]**
 
-**This is a gate, not optional.** Before building any typeclass scaffolding on top of it,
-establish an **acyclic** proof route for `naperian_jointly_monic` (lifted `P`-indexed families
-are separated by their `ev_p` coordinate evaluations). The hazard: proving it *from*
-`broadcast_gen` while also using it to prove `broadcast_gen` proves neither.
+**Full report:** [`leanncd/docs/superpowers/plans/2026-07-03-s1-jointly-monic-spike.md`](../leanncd/docs/superpowers/plans/2026-07-03-s1-jointly-monic-spike.md).
 
-Concretely, in this spike:
+**Verdict: acyclic route established, `broadcast_gen` not needed.** The Lean-verified reduction (in
+the real project, axioms `[propext, Classical.choice, Quot.sound]`) is:
 
-- attempt a **direct** proof over `St` evaluations that does **not** reference `broadcast_gen`
-  (e.g. via the finite point enumeration of `El` and function extensionality on coordinates), OR
-- if no direct proof is found, write down the **explicit extra assumption** it requires and
-  confirm that assumption does not itself depend on `broadcast_gen`.
+```lean
+theorem naperian_jointly_monic_of_repr (X : C) (P : Dᵒᵖ)
+    (hrepr : Limits.IsLimit (evFan X P))          -- lifted object is the El P-power, legs = ev_p
+    {W} (f g : W ⟶ act.obj (X, P))
+    (h : ∀ p : ElP P, f ≫ ev_p p X = g ≫ ev_p p X) : f = g := by
+  apply hrepr.hom_ext; rintro ⟨p⟩; exact h p
+```
 
-**Exit criterion:** either an acyclic proof/skeleton of `naperian_jointly_monic`, or a precise
-statement of the assumption it needs. **If neither is achievable, stop at the
-[minimum viable integration](#minimum-viable-integration)** — the projected proof savings in
-[NaperianTyping.md §6](./NaperianTyping.md) do not hold, and Milestones 2+ should not be funded on
-the expectation of them.
+**Honest nuance:** `IsLimit.hom_ext` gives `jointly_monic` *from* the power structure, but
+constructing `IsLimit (evFan)` needs its `uniq` field, which *is* `jointly_monic`. So the reduction
+**reroutes** the obligation rather than eliminating it — the point is *where*: to representability /
+**St-slice separation** (which reduces to the proved `St.elemental`, `Base/St.lean:364`), and
+verifiably **away from `broadcast_gen`**. That is precisely the cycle S1 tests for, and it is avoided:
+`jointly_monic ← representability`, never `← broadcast_gen`.
+
+**Residual (a commitment-sized build, NOT a spike — refined by the 2026-07-03 residual probe).** A
+follow-on probe checked whether the residual could be de-risked cheaply. It cannot: (i) a faithful
+`evSlice` morphism is the reindex-half of `act` (needs the `degree`/weave/`reindexings` apparatus),
+so even *stating* the concrete lemma requires part of the ~400–650-line `act` build; (ii) `El P` is
+not finitely enumerable symbolically (`Fintype (BrMorph [] P)` has no instance), so the clean product
+route (`X ⊛ P ≅ ∏_{El P} X`) is a **concrete / post-solver** fact needing the `tabulate`/`lookup`
+representability construction; (iii) the `St.elemental` reduction is clean only for single-`BrBase`
+morphisms — a general `BrMorph` composite inducts into the same `trans`-case wall as `brCancelPoint`,
+and the escape is precisely the representability route. **Net:** the residual stays non-circular (no
+`broadcast_gen`, and off `brCancelPoint` via representability), but it is real work sized with the
+`act` + concrete finite-`El` build — there is no cheaper probe that retires it. The projected savings
+are **not** blocked by a hidden cycle; they are gated on committing to that build.
 
 ### Milestone 2 — Symbolic affine elaboration **[A]**
 
@@ -511,7 +605,12 @@ the expectation of them.
 - introduce the typed `StMat` bridge,
 - preserve the existing executable `ThreadedComposed` output.
 
-### Milestone 4.5 — dependent-weave re-typing spike (S2) **[spike]**
+### Milestone 4.5 — dependent-weave re-typing spike (S2) **[spike, now OPTIONAL — 2026-07-03]**
+
+**Status update:** the lemmas this spike targeted (`buildStep_output_fixedAxes`, `wf_typeMatch`,
+`internal_pointwise`) are already proved by hand — see the finding-5 update in §0. This spike no
+longer unblocks anything; it would only be worth running if a cleaner weave representation is
+wanted for its own sake going forward.
 
 Decides whether the *one* place Naperian could touch the multi-output proofs is worth it (§4.1).
 
@@ -645,35 +744,36 @@ Mitigation:
 - do not quote the 50–70% figure as a plan deliverable until S0 + S1 have passed and `act` is
   defined.
 
-### 6.8 "Prove-twice" risk on multi-output shape lemmas
+### 6.8 "Prove-twice" risk on multi-output shape lemmas — RESOLVED, risk did not materialize
 
-Risk:
-
-- Finishing multi-output first means proving `wf_typeMatch`/`buildStep_output_fixedAxes` by hand;
-  a later successful S2 weave re-typing could make some of them near-definitional, redoing work.
-
-Mitigation:
-
-- accept it — the rework is bounded and localized, and is far cheaper than blocking the in-flight
-  verified-compiler work on a speculative refactor. Let S2's cost/benefit note decide whether the
-  re-typing ever happens.
+Multi-output finished (2026-07-03): `wf_typeMatch`/`buildStep_output_fixedAxes` are proved by hand,
+`List`-based. Nothing has re-typed the weaves, so there was no rework to redo. If S2 is ever run
+for other reasons and succeeds, revisit whether re-proving these is worth it then — but it is not
+a live risk today.
 
 ## 7. Summary
 
-After the 2026-07-01 code audit (§0), the plan is:
+After the 2026-07-03 re-audit (§0), the plan is:
 
-- **Finish the multi-output `compile_wellFormed` effort first.** It is orthogonal to everything
-  here; Naperian offers it almost nothing (at most the one shape-match simplification, spike S2).
-- **Ship Track A** — the symbolic typed-reindexing layer — as the real, ungated deliverable:
+- **Multi-output `compile_wellFormed` is DONE** (as is the follow-on §8.2 acset agreement). It
+  turned out orthogonal to Naperian, as predicted; Naperian offered it nothing in the end — the
+  shape-match lemmas were closed by hand, and spike S2 is now optional rather than load-bearing.
+- **Ship Track A now** — the symbolic typed-reindexing layer — as the real, ungated deliverable:
   - do symbolic Naperian typing before the affine solver,
   - keep the affine solver as the runtime/value-level source of concrete extents,
   - instantiate concrete finite Naperian point data only after solving extents.
   This hardens the compiler (typed reindex rank/codomain, canonical degree, early law checks)
   without breaking the padded-semantics evaluation model.
-- **Gate Track B on spikes.** The coherence/representability payoff (the projected 50–70% sorry
-  reduction) sits on top of `act`, which is currently a `sorry`. Run spike **S0** (`act`
-  definability) and **S1** (`jointly_monic` circularity) before committing; if either fails, stop
-  at Track A + the minimum viable integration. Do not treat the 50–70% figure as a deliverable.
+- **Track B gates are now CLEARED (2026-07-03).** Both spikes have run: **S0** — `act` is a tractable
+  ~400–650-line build (20/21 `Rel` cases reuse proved `BrMorph` laws) and its `sh_act` blocker is
+  resolved (`=` → `≅`); **S1 — POSITIVE** — `jointly_monic` has a Lean-verified acyclic route (via
+  representability / `IsLimit.hom_ext`, no `broadcast_gen`; residual reroutes to the proved
+  `St.elemental`). The projected coherence reduction is no longer blocked — but still **unmeasured**
+  until `act` + the coherence proofs are built, so don't quote the percentage as a delivered result.
+  The 2026-07-03 residual probe confirmed there is **no cheaper de-risking left**: closing the S1
+  residual (`jointly_monic`) needs the reindex-half of `act` + the concrete finite-`El`
+  representability (`El P` isn't enumerable symbolically), i.e. a **commitment-sized build, not a
+  further spike**. Next concrete step for Track B is therefore that build itself.
 
-In one line: **Track A is worth doing on its own merits; Track B is a bet on `act` that must be
-priced by spike S0 before it is funded — and neither should delay the multi-output work.**
+In one line: **Multi-output is done and orthogonal to Naperian; Track A can start today; Track B's
+feasibility gates (S0, S1) have both passed — it is now a funded cost/benefit decision, not a bet.**

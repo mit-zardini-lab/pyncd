@@ -168,6 +168,14 @@ Notes:
 - `Instances/StBr.lean`: the `sh` field is **concrete** (`fun a => a.shape`, sorry-free); the 10
   fields above (`act`/`δ`/`δ0`/`υ`/`α`/`sh_act`/`act_unit_assoc`/`υ_nat`/`dist_coh`/`broadcast_gen`)
   are deferred §10.1 content.
+  - **`act` definability scoped (spike S0, 2026-07-03)** —
+    `docs/superpowers/plans/2026-07-03-s0-act-definability-spike.md`. Verdict SPLIT: `act.map` is a
+    well-posed `Quotient.lift` and 20/21 `Rel` cases reuse already-proved `BrMorph` laws (~400–650
+    lines for `act` alone, excluding the coherence tower). The object-level blocker (strict `sh_act`
+    unsatisfiable for ≥2-array bundles: concatenated `sh_star` carries `|X|` copies of `P`, not one)
+    is **RESOLVED** — the `sh_act` *class* field in `Core/Graded.lean` was relaxed from `=` to a
+    canonical iso `≅` (2026-07-03; build green, zero proof consumers). The `instDGradedStBr.sh_act`
+    instance field remains `sorry` (now targeting the iso). `act` has no remaining design gate.
 - §9 props 8.3/8.4/8.5/8.6: 8.3 is `grothendieck_split` (in `Grothendieck/Split.lean`, not restated);
   8.4 (equivariance), 8.5, and 8.6 (obstruction species) are **OMITTED** — not vacuous, but no class
   field carries faithful content to state yet (EM-machinery / pushout / obstruction datum gated for

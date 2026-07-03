@@ -57,15 +57,26 @@ So this is not an imposed abstraction; it formalizes the semantics Tensor Logic 
 
 The rollout is staged and backward-compatible (see [§4.2](#42-staged-rollout-plan-low-risk-implementation) for stages and [§5.3](#53-staged-dependent-type-introduction) for the dependent-type introduction order). One sequencing point matters up front:
 
-> **Sequencing relative to in-flight work.** This is a forward-looking design; it is **not**
-> scheduled to start now. The active LeanNCD proof effort is the multi-output `BrBase` +
-> `compile_wellFormed` work (see `leanncd/docs/superpowers/plans/2026-06-26-multioutput-impl-plan.md`).
-> This integration should be sequenced **after** that lands — it touches the categorical core
-> (`Graded.lean`, `ColoredPROP.lean`, `StBr.lean`) and, honestly, in the near term it *adds*
-> surface area (six new typeclasses with coherence-law fields) before it removes any sorries. Do
-> not open this in parallel with the well-formedness proof; treat the [minimum viable
-> integration](NaperianTypingIntegrationPlan.md) as the first thing to attempt once that work is
-> complete.
+> **Sequencing relative to in-flight work (UPDATED 2026-07-03).** The multi-output `BrBase` +
+> `compile_wellFormed` work that formerly gated this integration is now **complete** —
+> `Bridge/Agreement.lean`'s `compile_wellFormed` and `Bridge/Realize.lean` are sorry-free, and the
+> follow-on §8.2 acset agreement (`fromThreadedComposed`/`realizeSBr`/
+> `realize_fromThreadedComposed_agree`, Tasks A–E) is also fully proved. The sequencing
+> prerequisite is satisfied: **Track A** (the symbolic typed-reindexing layer; see
+> [NaperianTypingIntegrationPlan.md](NaperianTypingIntegrationPlan.md)) can begin now. **Track B**
+> (the coherence/representability payoff) — **both feasibility spikes have now passed (2026-07-03).**
+> **S0:** defining `act` is tractable (~400–650 lines; 20/21 `Rel` cases reuse proved `BrMorph`
+> laws), and the object-level `sh_act` blocker it surfaced is resolved — `sh_act` relaxed from `=` to
+> a canonical braiding iso `≅` in `LeanNCD/Core/Graded.lean` (build green, zero proof consumers).
+> **S1:** `naperian_jointly_monic` has a Lean-verified acyclic route (via representability /
+> `IsLimit.hom_ext`, axioms `[propext, Classical.choice, Quot.sound]`, no `broadcast_gen`); the
+> residual reroutes to St-slice separation, which reduces to the proved `St.elemental` (not
+> `brCancelPoint`). The ten `instDGradedStBr` coherence fields remain bare `sorry`s. Track B is now a
+> funded cost/benefit call, not a feasibility gamble — but do not quote the projected 50–70% figure
+> as a delivered result until `act` + the coherence proofs are actually built. See
+> [NaperianTypingIntegrationPlan.md §5 M0.5/M1.5](NaperianTypingIntegrationPlan.md) and the spike
+> reports `leanncd/docs/superpowers/plans/2026-07-03-s0-act-definability-spike.md` and
+> `…-s1-jointly-monic-spike.md`.
 
 ---
 
@@ -820,7 +831,7 @@ The strategies described in §5.1–5.4 are elaborated into a concrete, file-by-
 - **Modifications to existing files**: minimal changes to `Core/Graded.lean`, `Base/ColoredPROP.lean`, `Instances/StBr.lean`, and `LeanNCD.lean`; all backward-compatible.
 - **Pass ordering guidance**: symbolic affine/Naperian elaboration and law checks should occur before `inferAxisSizes`, while concrete finite-point instantiation should occur after size solving.
 - **The `NaperianAxis StObj` instance strategy**: using an auxiliary `AxisPointData` typeclass to supply concrete finite point types without mutating the existing `Axis` structure (necessary because `Axis.size : Numeric` is symbolic and does not determine a `Fintype` on its own).
-- **Sorry-impact analysis**: which of the 16 open sorries become easier, which become closeable, and which remain independent. Key result: `δ`/`δ0`/`υ`/`α` get an intended pointwise proof strategy via coherent `El` equivalences once `act` and extensionality are available; `broadcast_gen` and `weave_unique` can be reframed as Naperian normal-form theorems without depending on `brCancelPoint`.
+- **Sorry-impact analysis**: which of the ~12 open sorries (2026-07-03 baseline; was ~16–18 before the multi-output/acset bridge work closed independently of Naperian) become easier, which become closeable, and which remain independent. Key result: `δ`/`δ0`/`υ`/`α` get an intended pointwise proof strategy via coherent `El` equivalences once `act` and extensionality are available; `broadcast_gen` and `weave_unique` can be reframed as Naperian normal-form theorems without depending on `brCancelPoint`.
 - **Milestone sequencing**: seven milestones from baseline confirmation through weave uniqueness, with a clearly identified minimum viable integration (three steps).
 - **Risks**: the symbolic-size blocker, quotient-`Br` interaction, instance diamond risks, and the `α` tensor-order convention.
 
@@ -905,9 +916,9 @@ the enabling spike has landed.
 | Reindex identity/composition | scattered | ~0 | Dependent rank eliminates dimension checks |
 | Weave uniqueness (`weave_unique`) | 1 | 0–1 | `weave_unique_naperian` (new theorem over `St` evaluations) avoids `brCancelPoint`; existing `weave_unique` via `Elemental Br` path unchanged |
 | Scan/temporal laws | ~0 current | 0 future | Type-level causality barrier |
-| Bridge/compilation (`E2b` bridge) | 6 | 1–2 | Well-formedness *by construction* in a hypothetical typed redesign. **Caveat:** the in-flight `compile_wellFormed` effort (`2026-06-26-multioutput-impl-plan.md`) is currently proving well-formedness is a *substantial* obligation, not free — so this row assumes a redesign that has not happened and is the most speculative in the table. |
+| Bridge/compilation (`E2b` bridge) | 0 (RESOLVED 2026-07-03) | n/a | **Retired from the projection.** The multi-output `BrBase` effort plus the §8.2 acset agreement (Tasks A–E) closed `compile_wellFormed`, `realize`, and `realize_fromThreadedComposed_agree` sorry-free — by direct proof, not by a typed Naperian redesign. This confirms the caveat that used to be attached to this row: well-formedness was a substantial obligation, and it was paid directly. |
 | Point cancellation (`brCancelPoint`) | 1 | 0–1 | NbE/semantic Br rebuild; Naperian makes it less critical if consumers switch to `weave_unique_naperian` via `naperian_jointly_monic` (distinct from (Elem-C): this separates lifted morphisms by D-point evaluations, not C-morphisms by C-points) |
-| **Subtotal** | **~18–20** | **3–6** | **PROJECTED 50–70% reduction — unvalidated. Holds only if (a) the object-level `act` is defined and (b) the Milestone 1.5 circularity spike gives an acyclic proof of `naperian_jointly_monic`. If either fails, expect little net reduction (the easy dimension/rank sorries still go, but they are few).** |
+| **Subtotal** | **~12 (2026-07-03 baseline; was ~18–20 before the bridge row closed)** | **3–5** | **PROJECTED reduction — unvalidated, and smaller in absolute terms than originally quoted because the bridge row's 6 sorries are already gone (closed independently of Naperian, not by it). Holds only if (a) the object-level `act` is defined and (b) the Milestone 1.5 circularity spike gives an acyclic proof of `naperian_jointly_monic`. If either fails, expect little net reduction (the easy dimension/rank sorries still go, but they are few).** |
 
 **Key proof simplifications:**
 
@@ -915,7 +926,7 @@ the enabling spike has landed.
 
 2. **Reindex soundness (scattered → ~0):** Dependent `StMatP dom cod` encodes domain/codomain ranks in the type, making identity law `reindex id = id` structural (identity matrix on canonical rank) and composition law (`reindex (η ≫ θ) = reindex θ ≫ reindex η`) standard matrix algebra.
 
-3. **Bridge correctness (6 → 1–2):** Typed `ThreadedComposed` carries well-formedness by construction; `realize` becomes structural recursion over a well-formed routed DAG. Validation for CSV input (external data) remains the main overhead.
+3. **Bridge correctness — RESOLVED independently of Naperian (2026-07-03):** `compile_wellFormed`, `realize`, and the §8.2 acset agreement are now sorry-free via the multi-output `BrBase` effort and direct proof, not via a typed Naperian redesign. This row is retired from the projection table above.
 
 4. **Scan laws (unchanged now, 0 future):** Type-level causality barrier (prefix-restricted inputs in type signature) prevents future-reads and makes trace shape explicit, eliminating scan correctness sorries as features evolve.
 
