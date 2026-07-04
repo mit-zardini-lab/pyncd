@@ -134,6 +134,36 @@ declared-rank publishing + reader-side reindexing + eval, OR a decision to scope
 (documenting `Y[i,i]`-then-read as unsupported and having Task A reject *it too* for declared tensors
 whose read arity ≠ published rank). Pick one before B1.
 
+### B0 RESULT (2026-07-03, empirically probed)
+
+- **Route already publishes a scatter output at its slot rank.** `Out[2*i,2*j]` routes to a `scatter`
+  step with `outputWeaves len = [2]` — so **B2 is essentially free**: reclassifying a diagonal write to
+  a scatter would publish rank 2 automatically.
+- **But eval CANNOT read a scatter output.** `Out[2*i,2*j]:=X; Z[a,b]:=Out[a,b]` fails at eval:
+  `"output axis b has no inferable size (it appears in no read position)"`. `inferAxisSizes` sizes
+  axes from read positions; a scatter output carries no size source for the reader's axes. **Reading
+  a scatter output at declared rank is unsupported end-to-end — the missing piece is eval-side (B3):
+  size the reader's axes from the producer's declared/output shape + gather from the materialized
+  tensor.** This is the real cost, and it spans `Eval/Shape.lean` (`inferAxisSizes`) + `Eval/Eval.lean`.
+- **The diagonal `Y[i,i]` case is a DECLARED tensor**, so Task A's undeclared-only guard does not catch
+  it: `tensor Y(a,b); Y[i,i]:=X[i]; Z[a,b]:=Y[a,b]` currently *compiles* (passes `checkReadRanks` via
+  the declaration, 2=2) but is silently broken (producer publishes dedup rank 1; route mismatch + eval
+  size error). A second, declared-tensor variant of the same gap.
+- **B0 also caught + fixed a Task A bug** (`stmtLhsRank` used free-axis count → falsely rejected
+  affine-scatter-output reads; fixed to slot-count for affine LHS, commit `8d771ac`).
+
+**Decision (surfaced to the owner):**
+- **Build** the feature: B1 (diagonal→scatter, small) + **B3 (eval read-path for scatter outputs:
+  size reader axes from the producer shape + gather — medium, spans `Eval/Shape`+`Eval`)** + B4. Enables
+  `Y[i,i]` rank-2 reads soundly.
+- **Defer** the feature: document reading-scatter/declared-diagonal-outputs as unsupported, and extend
+  the guard to reject the declared-tensor case too (a declared tensor whose producer publishes fewer
+  axes than the read arity → reject with a clean error). Smaller; makes `readArityOk` hold by rejection
+  rather than by supporting the read. `Y[i,i]` rank-2 reads stay disallowed.
+
+Recommendation: **defer unless a real program needs diagonal/scatter-output reads** — no §12.1 example
+does, and B3 is a genuine eval feature. Deferring still closes #1 soundly (by rejection).
+
 ---
 
 ## Tasks B1–B4 (diagonal-scatter reads) — outline; flesh out after B0
