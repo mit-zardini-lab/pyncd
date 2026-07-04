@@ -1,8 +1,6 @@
 to do:
 
-Cross-scan coupling is a hard wall. Two coupled recurrences over the same axis (G and H both recur over l) are handled. But per-step intermediates depending on more than one scan axis throw a shapeMismatch error rather than attempting to schedule them. Coupled differential equations or multi-scale recurrences hit this. This is the hardest gap — it requires expressing coupled recurrences as a single morphism, which pushes into the weave structure.
-
-The realize bridge is formally broken. ThreadedComposed → BrMorph in Bridge/Realize.lean is a sorry citing tensorHom/swap as B+ obligations. Until those close, there's no formal path from a compiled program to a Br morphism — the categorical model and the executable layer are disconnected at the proof level. This is the single biggest gap for the project's core claim (formalizability, not just execution).
+Cross-scan coupling is a hard wall. Two coupled recurrences over the same axis (G and H both recur over l) are handled. But per-step intermediates depending on more than one scan axis throw a shapeMismatch error rather than attempting to schedule them (`DSL/Pipeline/Structural.lean`, the `dep.getD s.lhsName [] |>.length > 1` guard). Coupled differential equations or multi-scale recurrences hit this. This is the hardest gap — it requires expressing coupled recurrences as a single morphism, which pushes into the weave structure.
 
 # Lean 4 Encoding of the `D`-Graded Colored PROP Framework
 

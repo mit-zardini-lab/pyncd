@@ -16,4 +16,30 @@ run_cmd do
   pure ()
 #guard (Wire.internal 0 1) ≠ (Wire.internal 1 0)
 #guard (Wire.external 0) ≠ (Wire.internal 0 0)   -- the disambiguation the inductive guarantees
+
+/-! ## Track A (Option 1): `StMatP` well-formedness — the reindexing record's shape invariants.
+    `coeffs` must be `codLen × domLen` and `bias` length `codLen`; these are unenforced by the
+    record type, so `StMatP.wellFormed`/`StMatP.validate` make them checkable + fail-loud. -/
+
+-- a well-formed 2×3 reindexing (codLen = 2 rows, each domLen = 3, bias length 2):
+#guard (StMatP.mk 3 2 [[1,0,0],[0,1,0]] [0,0]).wellFormed
+-- wrong number of rows (coeffs.length ≠ codLen):
+#guard ! (StMatP.mk 3 2 [[1,0,0]] [0,0]).wellFormed
+-- a row of the wrong width (≠ domLen):
+#guard ! (StMatP.mk 3 2 [[1,0,0],[0,1]] [0,0]).wellFormed
+-- bias of the wrong length (≠ codLen):
+#guard ! (StMatP.mk 3 2 [[1,0,0],[0,1,0]] [0]).wellFormed
+-- `validate` returns the matrix on success, `shapeMismatch` on failure:
+#guard ((StMatP.mk 3 2 [[1,0,0],[0,1,0]] [0,0]).validate).toOption.isSome
+#guard ((StMatP.mk 3 2 [[1,0,0]] [0,0]).validate).toOption.isNone
+
+/-! ## Track A (M4b): typed `StMatP'` — rank in the type, so materializing to the executable
+    `StMatP` is well-formed by construction (no predicate needed). -/
+
+-- a typed 3→2 reindexing (all-ones coeffs, zero bias); materialized shape + auto well-formedness:
+#guard (StMatP'.toStMatP (⟨fun _ _ => 1, fun _ => 0⟩ : StMatP' 3 2)).domLen == 3
+#guard (StMatP'.toStMatP (⟨fun _ _ => 1, fun _ => 0⟩ : StMatP' 3 2)).codLen == 2
+#guard (StMatP'.toStMatP (⟨fun _ _ => 1, fun _ => 0⟩ : StMatP' 3 2)).wellFormed
+-- structural well-formedness of the typed form, for any dims:
+example (d c : Nat) (m : StMatP' d c) : m.toStMatP.wellFormed := StMatP'.toStMatP_wellFormed m
 end LeanNCD

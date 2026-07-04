@@ -19,9 +19,10 @@ open CategoryTheory in
     distributivity isos `δ`/`δ0` (lift preserves `⊗`/`I` in the `C`-variable); and right-actegory
     coherence isos `υ` (unit) and `α` (associativity).
 
-    Laws (all genuine `Prop`s): `sh_act` (the lift shifts the shape by `P`); `act_unit_assoc`
-    (the actegory triangle + pentagon); `dist_coh` (`δ`/`δ0` naturality); and `broadcast_gen`
-    (every generator factors through a lift). Proofs are supplied by instances (Milestone C). -/
+    Laws: `sh_act` (the lift shifts the shape by `P`, up to a canonical braiding iso — see the field
+    note); `act_unit_assoc` (the actegory triangle + pentagon); `dist_coh` (`δ`/`δ0` naturality); and
+    `broadcast_gen` (every generator factors through a lift). Proofs are supplied by instances
+    (Milestone C). -/
 class DGradedColoredPROP (D C : Type) [ColoredPROP D] [ColoredPROP C] where
   sh    : ColoredPROP.gen (ob := C) → D
   act   : (C × Dᵒᵖ) ⥤ C
@@ -33,8 +34,14 @@ class DGradedColoredPROP (D C : Type) [ColoredPROP D] [ColoredPROP C] where
   α     : ∀ (X : C) (P Q : Dᵒᵖ),
             act.obj (act.obj (X, P), Q) ≅
               act.obj (X, Opposite.op (ColoredPROP.tensor Q.unop P.unop))
+  -- (Sh-⊛) up to a canonical iso. Stated as `≅` (not `=`) because the flagship `C = Br` model lifts
+  -- a bundle per array — each of the `|X|` arrays gains its own copy of `P` — so the concatenated
+  -- `sh_star` carries `|X|` copies of `P`, a *permutation* of `sh_star X ⊗ P` rather than that exact
+  -- list. A strict `=` is unsatisfiable for `|X| ≥ 2` bundles; the iso is the symmetric-monoidal
+  -- braiding in `D` that gathers the copies of `P` to the tail. (Was `=` through 2026-07-03; relaxed
+  -- per spike S0 — see `docs/superpowers/plans/2026-07-03-s0-act-definability-spike.md`.)
   sh_act : ∀ (X : C) (P : Dᵒᵖ),
-             sh_star sh (act.obj (X, P)) = ColoredPROP.tensor (sh_star sh X) P.unop
+             sh_star sh (act.obj (X, P)) ≅ ColoredPROP.tensor (sh_star sh X) P.unop
   -- (Act-unit / Act-assoc): `C` is a right `D`-actegory.
   --  • Triangle: reassociating a lift by the unit `P ⊗ I` and applying the unitor at the inner
   --    `I` agrees with the outer unitor (the `eqToHom` bridges `I ⊗ P = P`).

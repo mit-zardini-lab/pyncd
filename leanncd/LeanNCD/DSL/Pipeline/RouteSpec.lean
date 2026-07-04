@@ -60,6 +60,28 @@ private theorem mapM_ok_getD {ε α β : Type} [Inhabited β] {f : α → Except
                   rw [List.getD_cons_succ, List.getD_cons_succ]
                   exact ih hft j d₁ d₂ (Nat.lt_of_succ_lt_succ hi)
 
+/-- If `l.mapM f = .ok r`, every output element `y ∈ r` is `f x` (`= .ok y`) for some input `x`. -/
+private theorem mapM_ok_mem {ε α β : Type} {f : α → Except ε β} :
+    ∀ {l : List α} {r : List β}, l.mapM f = .ok r → ∀ y ∈ r, ∃ x, f x = .ok y := by
+  intro l
+  induction l with
+  | nil => intro r h y hy
+           simp only [List.mapM_nil, pure, Except.pure, Except.ok.injEq] at h; subst h; simp at hy
+  | cons a t ih =>
+      intro r h y hy
+      rw [List.mapM_cons] at h
+      cases hfa : f a with
+      | error e => simp [hfa, bind, Except.bind] at h
+      | ok b =>
+          cases hft : t.mapM f with
+          | error e => simp [hfa, hft, bind, Except.bind] at h
+          | ok bs =>
+              simp only [hfa, hft, bind, Except.bind, pure, Except.pure, Except.ok.injEq] at h
+              subst h
+              rcases List.mem_cons.mp hy with rfl | hmem
+              · exact ⟨a, hfa⟩
+              · exact ih hft y hmem
+
 /-! ## Lemma 1: `routeCore` output lengths equal `sp.stmts.length` -/
 
 theorem routeCore_steps_length {sp : ScheduledProgram}
@@ -357,6 +379,158 @@ theorem buildStep_output_fixedAxes
   rw [hcons]
   rfl
 
+/-- `fixedAxesP` collects exactly the fixed slots, so its length is the fixed-slot count
+    (`weaveRank`). -/
+theorem fixedAxesP_length_eq_weaveRank (w : WeaveShapeP) :
+    (fixedAxesP w).length = weaveRank w := by
+  unfold fixedAxesP weaveRank
+  rw [List.length_filterMap_eq_countP]
+  congr 1
+  funext s
+  cases s <;> rfl
+
+/-- Track A (M3, "reduction removes only contracted axes"): a step's output weave keeps exactly the
+    retained (LHS) axes — `weaveRank = |retained|` — so the slots it tiles (reduces) are exactly the
+    contracted (degree-minus-retained) axes. The count form of `buildStep_output_fixedAxes`. -/
+theorem buildStep_output_reducesOnlyContracted
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w : List Wire} {s : Nat}
+    (h : buildStep ns ext stmts sc = .ok (b, w)) (hs : s < sc.outputs.length) :
+    weaveRank (b.outputWeaves.getD s []) = (tensorAxes (sc.slotStmt s)).length := by
+  rw [← fixedAxesP_length_eq_weaveRank, buildStep_output_fixedAxes h hs]
+
+/-- M2 bridge: a built step's reindexings are exactly the pre-route artifact `elaborateReindexings`.
+    `route` is thus provably faithful to the standalone elaboration (whose invariants — well-formed,
+    domain-rank — are proved independently in `Lowering.lean`); consuming the artifact is M4. -/
+theorem buildStep_reindexings
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
+    (h : buildStep ns ext stmts sc = .ok (b, w)) :
+    b.reindexings = sc.elaborateReindexings := by
+  have hg := buildStep_ok_guard h
+  unfold buildStep at h
+  cases sc with
+  | plain s => simp only [hg, Bool.not_true, pure_bind] at h
+               exact congrArg BrBaseP.reindexings (bind_pure_pair_ok h)
+  | scan nm ax bs rs aff => simp only [hg, Bool.not_true, pure_bind] at h
+                            exact congrArg BrBaseP.reindexings (bind_pure_pair_ok h)
+  | scanPre nm ax tc =>
+      by_cases he : tc.steps.isEmpty = true
+      · simp [he, bind, Except.bind] at h
+      · simp only [hg, Bool.not_true, he, pure_bind] at h
+        exact congrArg BrBaseP.reindexings (bind_pure_pair_ok h)
+
+/-- The degree of a built step is `stepDegAxesMulti` (retained ++ contracted, uid-deduplicated). -/
+theorem buildStep_degree
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
+    (h : buildStep ns ext stmts sc = .ok (b, w)) :
+    b.degree = sc.stepDegAxesMulti.map (fun a => AxisP.mk (some a.name) (SizeExpr.var a.name)) := by
+  have hg := buildStep_ok_guard h
+  unfold buildStep at h
+  cases sc with
+  | plain s => simp only [hg, Bool.not_true, pure_bind] at h
+               exact congrArg BrBaseP.degree (bind_pure_pair_ok h)
+  | scan nm ax bs rs aff => simp only [hg, Bool.not_true, pure_bind] at h
+                            exact congrArg BrBaseP.degree (bind_pure_pair_ok h)
+  | scanPre nm ax tc =>
+      by_cases he : tc.steps.isEmpty = true
+      · simp [he, bind, Except.bind] at h
+      · simp only [hg, Bool.not_true, he, pure_bind] at h
+        exact congrArg BrBaseP.degree (bind_pure_pair_ok h)
+
+/-- Track A (Option 1): every reindexing `StMatP` a `buildStep` emits is `wellFormed` — its `coeffs`
+    is exactly `codLen × domLen` and `bias` has length `codLen`. Proved by construction: each is built
+    from `idxToRow` rows (each `domLen`-wide, `reindexing_wellFormed`). Turns the `StMatP` shape
+    invariant from an unchecked field convention into a proved property of the routed output. -/
+theorem buildStep_reindexings_wellFormed
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
+    (h : buildStep ns ext stmts sc = .ok (b, w)) :
+    ∀ m ∈ b.reindexings, m.wellFormed := by
+  rw [buildStep_reindexings h]; exact sc.elaborateReindexings_wellFormed
+
+/-- Track A: every reindexing's domain rank equals the step's degree length — a reindexing maps
+    *from* the step degree, so its `domLen` (column count) must match `degree.length`. The typed
+    reindex-domain soundness (the presentation-level shadow of `StMat degree _`). -/
+theorem buildStep_reindexings_domLen
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
+    (h : buildStep ns ext stmts sc = .ok (b, w)) :
+    ∀ m ∈ b.reindexings, m.domLen = b.degree.length := by
+  rw [buildStep_degree h]
+  intro m hm
+  rw [buildStep_reindexings h] at hm
+  rw [sc.elaborateReindexings_domLen m hm]
+  simp [List.length_map]
+
+/-- Track A (Option 1), route level: every reindexing of every step in a routed program is
+    `wellFormed`. Lifts `buildStep_reindexings_wellFormed` over `routeCore`'s `mapM buildStep`. -/
+theorem routeCore_reindexings_wellFormed {sp : ScheduledProgram}
+    {steps : List BrBaseP} {routing : List (List Wire)}
+    (h : routeCore sp = .ok (steps, routing)) :
+    ∀ st ∈ steps, ∀ m ∈ st.reindexings, m.wellFormed := by
+  unfold routeCore at h
+  by_cases hro : routableInOrder sp.stmts
+  · rw [if_pos hro] at h
+    cases hm : sp.stmts.mapM (buildStep (buildNameToStep sp.stmts)
+        (buildExtIndex sp.extNames sp.stmts) sp.stmts) with
+    | error e => rw [hm] at h; simp [bind, Except.bind] at h
+    | ok pairs =>
+        rw [hm] at h
+        simp only [bind, Except.bind, pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+        obtain ⟨hsteps, _⟩ := h
+        intro st hst m hm2
+        rw [← hsteps] at hst
+        simp only [List.mem_map] at hst
+        obtain ⟨p, hp, rfl⟩ := hst
+        obtain ⟨x, hx⟩ := mapM_ok_mem hm p hp
+        exact buildStep_reindexings_wellFormed hx m hm2
+  · rw [if_neg hro] at h; simp at h
+
+/-- Track A, route level: every reindexing's domain rank equals its step's degree length across a
+    routed program. Lifts `buildStep_reindexings_domLen` over `routeCore`'s `mapM buildStep`. -/
+theorem routeCore_reindexings_domLen {sp : ScheduledProgram}
+    {steps : List BrBaseP} {routing : List (List Wire)}
+    (h : routeCore sp = .ok (steps, routing)) :
+    ∀ st ∈ steps, ∀ m ∈ st.reindexings, m.domLen = st.degree.length := by
+  unfold routeCore at h
+  by_cases hro : routableInOrder sp.stmts
+  · rw [if_pos hro] at h
+    cases hm : sp.stmts.mapM (buildStep (buildNameToStep sp.stmts)
+        (buildExtIndex sp.extNames sp.stmts) sp.stmts) with
+    | error e => rw [hm] at h; simp [bind, Except.bind] at h
+    | ok pairs =>
+        rw [hm] at h
+        simp only [bind, Except.bind, pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+        obtain ⟨hsteps, _⟩ := h
+        intro st hst m hm2
+        rw [← hsteps] at hst
+        simp only [List.mem_map] at hst
+        obtain ⟨p, hp, rfl⟩ := hst
+        obtain ⟨x, hx⟩ := mapM_ok_mem hm p hp
+        exact buildStep_reindexings_domLen hx m hm2
+  · rw [if_neg hro] at h; simp at h
+
+/-- M2 route-level bridge: a routed program's step reindexings are **exactly** the pre-route artifact
+    `elaborateAffineReindexings sp`. `route` is provably faithful to the standalone elaboration — the
+    "single source of truth" made precise. (Consuming the artifact instead of recomputing is M4.) -/
+theorem routeCore_reindexings_eq {sp : ScheduledProgram}
+    {steps : List BrBaseP} {routing : List (List Wire)}
+    (h : routeCore sp = .ok (steps, routing)) :
+    steps.map (·.reindexings) = elaborateAffineReindexings sp := by
+  unfold elaborateAffineReindexings
+  have hlen : steps.length = sp.stmts.length := routeCore_steps_length h
+  apply List.ext_getElem
+  · rw [List.length_map, List.length_map, hlen]
+  · intro i h1 h2
+    have hi : i < sp.stmts.length := by rw [List.length_map] at h2; exact h2
+    have hbr := buildStep_reindexings (routeCore_getD h i hi)
+    rw [List.getD_eq_getElem steps default (by rw [hlen]; exact hi),
+        List.getD_eq_getElem sp.stmts default hi] at hbr
+    rw [List.getElem_map, List.getElem_map]
+    exact hbr
+
 /-! ## Lemma 5: `buildNameToStep` value bound -/
 
 -- NOTE(phaseB): the old helpers `foldl_insert_val_lt`/`foldl_zipIdx_val_lt` were written for the
@@ -458,6 +632,60 @@ theorem buildStep_inputWeaves
       · simp [he, bind, Except.bind] at h
       · simp only [hg, Bool.not_true, he, pure_bind] at h
         exact congrArg BrBaseP.inputWeaves (bind_pure_pair_ok h)
+
+/-- The `fixedAxesP` of an all-`fixed` weave (built as `l.map (·.fixed)`) has length `l.length`. -/
+private theorem fixedAxesP_length_map_fixed {α : Type} (l : List α) (g : α → AxisP) :
+    (fixedAxesP (l.map (fun x => WeaveSlotP.fixed (g x)))).length = l.length := by
+  simp [fixedAxesP, List.filterMap_map, Function.comp]
+
+/-- Track A (#1, unconditional half): every input weave `buildStep` emits is **all-`fixed`** — no
+    tiled slots, so `fixedAxesP` retains every slot (`(fixedAxesP w).length = w.length`). Tiling is an
+    OUTPUT-weave phenomenon (contracted axes); an input weave names every read coordinate, which is
+    what makes the reindexing codomain (`(inputWeaves i).targetAxes`) the read's full coordinate
+    space. (The remaining `codLen = (fixedAxesP w).length` tie holds for external reads by
+    construction; for internal reads it needs read-arity = producer-rank, an upstream
+    `checkReadRanks`/`env` invariant, not a `buildStep` property.) -/
+theorem buildStep_inputWeaves_allFixed
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w' : List Wire}
+    (h : buildStep ns ext stmts sc = .ok (b, w')) :
+    ∀ w ∈ b.inputWeaves, (fixedAxesP w).length = w.length := by
+  rw [buildStep_inputWeaves h]
+  intro w hw
+  simp only [List.mem_map] at hw
+  obtain ⟨rf, _, rfl⟩ := hw
+  cases hns : ns[rf.1]? with
+  | some p =>
+      obtain ⟨j, slot⟩ := p
+      simp only [List.length_map]
+      exact fixedAxesP_length_map_fixed _ id
+  | none =>
+      simp only [List.length_map]
+      exact fixedAxesP_length_map_fixed _ _
+
+/-- Track A (#1), route level: every input weave of every step in a routed program is all-`fixed`
+    (`(fixedAxesP w).length = w.length`). Lifts `buildStep_inputWeaves_allFixed` over `routeCore`. -/
+theorem routeCore_inputWeaves_allFixed {sp : ScheduledProgram}
+    {steps : List BrBaseP} {routing : List (List Wire)}
+    (h : routeCore sp = .ok (steps, routing)) :
+    ∀ st ∈ steps, ∀ w ∈ st.inputWeaves, (fixedAxesP w).length = w.length := by
+  unfold routeCore at h
+  by_cases hro : routableInOrder sp.stmts
+  · rw [if_pos hro] at h
+    cases hm : sp.stmts.mapM (buildStep (buildNameToStep sp.stmts)
+        (buildExtIndex sp.extNames sp.stmts) sp.stmts) with
+    | error e => rw [hm] at h; simp [bind, Except.bind] at h
+    | ok pairs =>
+        rw [hm] at h
+        simp only [bind, Except.bind, pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+        obtain ⟨hsteps, _⟩ := h
+        intro st hst w hw
+        rw [← hsteps] at hst
+        simp only [List.mem_map] at hst
+        obtain ⟨p, hp, rfl⟩ := hst
+        obtain ⟨x, hx⟩ := mapM_ok_mem hm p hp
+        exact buildStep_inputWeaves_allFixed hx w hw
+  · rw [if_neg hro] at h; simp at h
 
 /-- The wires from a successful `buildStep` equal the `mapM` of the per-read-factor wire builder. -/
 -- NOTE(phaseB): restated to the new `inputReadFactors` / `Wire.internal j slot` shape.

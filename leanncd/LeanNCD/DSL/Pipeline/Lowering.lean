@@ -245,6 +245,37 @@ def emptyStmt : Stmt := .assign "" [] { body := { terms := [] }, nonlin := .iden
 def dedupByUid (as : List AxisSpec) : List AxisSpec :=
   as.foldl (fun acc a => if acc.any (fun b => b.uid == a.uid) then acc else acc ++ [a]) []
 
+/-- `dedupByUid` produces a uid-distinct list: the uids of its output are `Nodup`. The "canonical
+    degree" invariant — a step's index space has exactly one column per distinct axis. -/
+theorem dedupByUid_uid_nodup (as : List AxisSpec) : ((dedupByUid as).map (·.uid)).Nodup := by
+  suffices h : ∀ (as acc : List AxisSpec), ((acc.map (·.uid)).Nodup) →
+      (((as.foldl (fun acc a => if acc.any (fun b => b.uid == a.uid) then acc else acc ++ [a]) acc)).map
+        (·.uid)).Nodup by
+    exact h as [] (by simp)
+  intro as
+  induction as with
+  | nil => intro acc hacc; simpa using hacc
+  | cons a t ih =>
+      intro acc hacc
+      simp only [List.foldl_cons]
+      apply ih
+      cases hb : acc.any (fun b => b.uid == a.uid) with
+      | true => simpa using hacc
+      | false =>
+          show ((acc ++ [a]).map (·.uid)).Nodup
+          rw [List.map_append, List.nodup_append]
+          refine ⟨hacc, List.nodup_singleton _, ?_⟩
+          intro u hu u' hu'
+          simp only [List.map_cons, List.map_nil, List.mem_singleton] at hu'
+          subst hu'
+          intro heq
+          subst heq
+          obtain ⟨b, hbmem, hbeq⟩ := List.mem_map.mp hu
+          have hcontra : acc.any (fun b => b.uid == a.uid) = true :=
+            List.any_eq_true.mpr ⟨b, hbmem, by simp [hbeq]⟩
+          rw [hb] at hcontra
+          exact absurd hcontra (by simp)
+
 /-- A stmt's published (retained) output axes, in LHS order (deduplicated by uid) — what a producer
     emits and a consumer receives. -/
 def tensorAxes (s : Stmt) : List AxisP :=
@@ -275,13 +306,28 @@ def stepMkWeave (s : Stmt) : WeaveShapeP :=
     else WeaveSlotP.fixed (AxisP.mk (some a.name) (SizeExpr.var a.name)))
 
 /-- Express a read coordinate `IdxExpr` as an integer-affine combination of the degree axes
-    identified by uids `us` (column order = `us`): returns `(coeff-row, bias)`. -/
-def idxToRow (us : List UID) : IdxExpr → (List Int × Int)
-  | .axis a      => (us.map (fun u => if u == a.uid then 1 else 0), 0)
-  | .const n     => (us.map (fun _ => 0), n)
-  | .scale c a   => (us.map (fun u => if u == a.uid then c else 0), 0)
-  | .shift a n   => (us.map (fun u => if u == a.uid then 1 else 0), n)
-  | .affine n xs => (us.map (fun u => (xs.foldl (fun acc p => if p.2.uid == u then acc + p.1 else acc) 0)), n)
+    identified by uids `us` (column order = `us`): returns `(coeff-row, bias)`. The dense view of the
+    shared `idxAffineForm` primitive (M2 dedup, §6.2) — `coeffs = densify (affine coeffs) over us`,
+    `bias = affine const`. -/
+def idxToRow (us : List UID) (e : IdxExpr) : (List Int × Int) :=
+  (idxDensify (idxAffineForm e).2 us, (idxAffineForm e).1)
+
+/-- Every `idxToRow` coefficient row has exactly one entry per degree axis (`idxDensify` is a
+    `us.map`), so its length is `us.length`. The load-bearing fact for `StMatP` well-formedness of
+    reindexings (Track A): a built reindexing's `coeffs` rows are `domLen`-wide. -/
+theorem idxToRow_fst_length (us : List UID) (e : IdxExpr) : (idxToRow us e).1.length = us.length := by
+  simp [idxToRow, idxDensify]
+
+/-- The reindexing `StMatP` built from a degree `us` and a read's index expressions `idxs` is
+    `wellFormed`: `coeffs` is `idxs.length × us.length` and `bias` has length `idxs.length`. This is
+    exactly the record `buildStep` constructs (with `us = degUids`, `idxs = rf.2`). -/
+theorem reindexing_wellFormed (us : List UID) (idxs : List IdxExpr) :
+    (StMatP.mk us.length idxs.length ((idxs.map (idxToRow us)).map (·.1))
+      ((idxs.map (idxToRow us)).map (·.2))).wellFormed := by
+  simp only [StMatP.wellFormed, List.length_map, beq_self_eq_true, Bool.true_and, Bool.and_true,
+    List.all_map, List.all_eq_true, Function.comp_apply]
+  intro e _
+  simp [idxToRow_fst_length]
 
 /-- A ScanStmt's representative stmt: for `.scan`, the first recurrence stmt (else the first
     base stmt); for `.plain`, the stmt itself. It carries the reads/axes used to build the step. -/
@@ -362,6 +408,47 @@ def ScanStmt.stepDegAxesMulti (sc : ScanStmt) : List AxisSpec :=
   let contracted := allRead.filter (fun a => !(retained.map (·.uid)).contains a.uid)
   dedupByUid (retained ++ contracted)
 
+/-- Canonical degree (Track A): a step's index space (`stepDegAxesMulti`) has distinct uids — one
+    column per axis, no duplicates. Immediate from `dedupByUid_uid_nodup` since the degree ends in a
+    `dedupByUid`. This is what makes `degUids` a valid column index set for the reindexings. -/
+theorem ScanStmt.stepDegAxesMulti_uid_nodup (sc : ScanStmt) :
+    ((sc.stepDegAxesMulti).map (·.uid)).Nodup := by
+  unfold ScanStmt.stepDegAxesMulti
+  exact dedupByUid_uid_nodup _
+
+/-- M2 (`elaborateAffineReindexings`): the affine reindexing artifact for a step, lifted out of
+    `buildStep` as the single source of truth. One `StMatP` per input read factor: columns indexed by
+    the canonical step degree (`stepDegAxesMulti` uids, `stepDegAxesMulti_uid_nodup`), rows the read's
+    `idxToRow` coordinates. `buildStep` produces exactly this (`buildStep_reindexings`, the bridge);
+    `route` is unchanged for now (consuming it is M4). `IdxExpr` is affine by construction, so there
+    is no non-affine case to reject. -/
+def ScanStmt.elaborateReindexings (sc : ScanStmt) : List StMatP :=
+  let degUids := sc.stepDegAxesMulti.map (·.uid)
+  sc.inputReadFactors.map (fun rf =>
+    let rows := rf.2.map (idxToRow degUids)
+    StMatP.mk degUids.length rf.2.length (rows.map (·.1)) (rows.map (·.2)))
+
+/-- The M2 artifact is well-formed: every elaborated reindexing has `coeffs` `codLen × domLen` and
+    `bias` length `codLen` (from `reindexing_wellFormed`). A property of the artifact itself,
+    independent of `route`. -/
+theorem ScanStmt.elaborateReindexings_wellFormed (sc : ScanStmt) :
+    ∀ m ∈ sc.elaborateReindexings, m.wellFormed := by
+  unfold ScanStmt.elaborateReindexings
+  intro m hm
+  simp only [List.mem_map] at hm
+  obtain ⟨rf, _, rfl⟩ := hm
+  exact reindexing_wellFormed _ _
+
+/-- Every elaborated reindexing's domain rank equals the canonical degree length (its column count is
+    the number of distinct degree axes). A property of the artifact itself. -/
+theorem ScanStmt.elaborateReindexings_domLen (sc : ScanStmt) :
+    ∀ m ∈ sc.elaborateReindexings, m.domLen = (sc.stepDegAxesMulti.map (·.uid)).length := by
+  unfold ScanStmt.elaborateReindexings
+  intro m hm
+  simp only [List.mem_map] at hm
+  obtain ⟨rf, _, rfl⟩ := hm
+  rfl
+
 /-- The output weave of slot `s` over the step's combined `degree`: fixed on `writes[s]`'s retained
     (LHS) axes, tiled elsewhere. -/
 def ScanStmt.slotWeave (sc : ScanStmt) (s : Nat) : WeaveShapeP :=
@@ -433,11 +520,8 @@ def buildStep (nameToStep : Std.HashMap String (Nat × Nat)) (extIndex : Std.Has
                       (SizeExpr.var (rf.1 ++ "_" ++ toString pos)))))
   -- one output weave per true output (base∩recur for scans), in `outputs` order.
   let outputWeaves : List WeaveShapeP := (List.range sc.outputs.length).map sc.slotWeave
-  let degUids : List UID := degAxes.map (·.uid)
-  let reindexings : List StMatP := readFactors.map (fun rf =>
-    let rows := rf.2.map (idxToRow degUids)
-    { domLen := degUids.length, codLen := rf.2.length,
-      coeffs := rows.map (·.1), bias := rows.map (·.2) })
+  -- M4: consume the pre-route artifact (single source of truth) instead of recomputing the rows.
+  let reindexings : List StMatP := sc.elaborateReindexings
   let op : BrOp :=
     if sc.isScanPre then .scanPre
     else if sc.isScan then (if sc.isAffineScan then .scanAffine else .scan)
@@ -476,6 +560,13 @@ def routableInOrder (stmts : List ScanStmt) : Bool :=
       match ns[rf.1]? with
       | some (j, _) => decide (j < i)
       | none        => true))
+
+/-- M2 (`elaborateAffineReindexings`): the program-level affine reindexing artifact — each step's
+    `elaborateReindexings`. A pre-route, `Except`-free compile-time artifact (no routing/cyclicity
+    concerns), the single source of truth for reindex rows that `route` is shown to reproduce
+    (`routeCore` step reindexings = this; per-step bridge `buildStep_reindexings`). -/
+def elaborateAffineReindexings (sp : ScheduledProgram) : List (List StMatP) :=
+  sp.stmts.map (·.elaborateReindexings)
 
 /-- Pure core of Phase 8: compute the step list and routing table from a `ScheduledProgram`.
     Computes `nameToStep` and `extIndex` once (PASS 1), then folds `buildStep` over `stmts`

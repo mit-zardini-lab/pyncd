@@ -30,6 +30,22 @@ inductive IdxExpr
   | affine : Int → List (Int × AxisSpec) → IdxExpr
   deriving DecidableEq, Repr, Lean.ToExpr
 
+/-- Normalize an `IdxExpr` to canonical integer-affine form `(c0, [(coef, uid)])`. The single
+    affine-lowering primitive shared by the compile path (`idxToRow`, dense over a degree basis) and
+    the eval size solver (`Eval/Shape.lean`, sparse) — see `idxDensify`. -/
+def idxAffineForm : IdxExpr → Int × List (Int × UID)
+  | .axis a      => (0, [(1, a.uid)])
+  | .const n     => (n, [])
+  | .scale c a   => (0, [(c, a.uid)])
+  | .shift a n   => (n, [(1, a.uid)])
+  | .affine n xs => (n, xs.map (fun (c, a) => (c, a.uid)))
+
+/-- Densify a sparse affine coefficient list over a degree basis `us` (column order = `us`): the
+    `u`-th entry is the sum of the coefficients whose uid is `u`. The bridge from `idxAffineForm`
+    (basis-free) to the dense row `idxToRow` needs. -/
+def idxDensify (cf : List (Int × UID)) (us : List UID) : List Int :=
+  us.map (fun u => cf.foldl (fun acc p => if p.2 == u then acc + p.1 else acc) 0)
+
 inductive PredArith
   | embed : IdxExpr → PredArith
   | mul   : PredArith → PredArith → PredArith

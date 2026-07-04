@@ -19,13 +19,8 @@ def Stmt.readsOf : Stmt → List (String × List IdxExpr)
         | .iverson _  => none))
   | .recurMorphism _ _ _ => []
 
-/-- Normalize an `IdxExpr` to a canonical integer-affine form `(c0, [(coef, uid)])`. -/
-def idxAffineForm : IdxExpr → Int × List (Int × UID)
-  | .axis a      => (0, [(1, a.uid)])
-  | .const n     => (n, [])
-  | .scale c a   => (0, [(c, a.uid)])
-  | .shift a n   => (n, [(1, a.uid)])
-  | .affine n xs => (n, xs.map (fun (c, a) => (c, a.uid)))
+-- `idxAffineForm` (the shared affine-lowering primitive) now lives in `DSL/Ast.lean`; the
+-- unqualified name below resolves to `LeanNCD.idxAffineForm` (M2 dedup, §6.2).
 
 structure SizeConstraint where
   coeffs : List (Int × UID)
