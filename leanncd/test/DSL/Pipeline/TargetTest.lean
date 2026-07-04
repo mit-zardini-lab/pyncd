@@ -32,4 +32,14 @@ run_cmd do
 -- `validate` returns the matrix on success, `shapeMismatch` on failure:
 #guard ((StMatP.mk 3 2 [[1,0,0],[0,1,0]] [0,0]).validate).toOption.isSome
 #guard ((StMatP.mk 3 2 [[1,0,0]] [0,0]).validate).toOption.isNone
+
+/-! ## Track A (M4b): typed `StMatP'` — rank in the type, so materializing to the executable
+    `StMatP` is well-formed by construction (no predicate needed). -/
+
+-- a typed 3→2 reindexing (all-ones coeffs, zero bias); materialized shape + auto well-formedness:
+#guard (StMatP'.toStMatP (⟨fun _ _ => 1, fun _ => 0⟩ : StMatP' 3 2)).domLen == 3
+#guard (StMatP'.toStMatP (⟨fun _ _ => 1, fun _ => 0⟩ : StMatP' 3 2)).codLen == 2
+#guard (StMatP'.toStMatP (⟨fun _ _ => 1, fun _ => 0⟩ : StMatP' 3 2)).wellFormed
+-- structural well-formedness of the typed form, for any dims:
+example (d c : Nat) (m : StMatP' d c) : m.toStMatP.wellFormed := StMatP'.toStMatP_wellFormed m
 end LeanNCD

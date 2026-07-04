@@ -520,11 +520,8 @@ def buildStep (nameToStep : Std.HashMap String (Nat × Nat)) (extIndex : Std.Has
                       (SizeExpr.var (rf.1 ++ "_" ++ toString pos)))))
   -- one output weave per true output (base∩recur for scans), in `outputs` order.
   let outputWeaves : List WeaveShapeP := (List.range sc.outputs.length).map sc.slotWeave
-  let degUids : List UID := degAxes.map (·.uid)
-  let reindexings : List StMatP := readFactors.map (fun rf =>
-    let rows := rf.2.map (idxToRow degUids)
-    { domLen := degUids.length, codLen := rf.2.length,
-      coeffs := rows.map (·.1), bias := rows.map (·.2) })
+  -- M4: consume the pre-route artifact (single source of truth) instead of recomputing the rows.
+  let reindexings : List StMatP := sc.elaborateReindexings
   let op : BrOp :=
     if sc.isScanPre then .scanPre
     else if sc.isScan then (if sc.isAffineScan then .scanAffine else .scan)
