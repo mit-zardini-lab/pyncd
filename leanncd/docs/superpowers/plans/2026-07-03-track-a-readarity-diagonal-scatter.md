@@ -161,29 +161,41 @@ whose read arity ≠ published rank). Pick one before B1.
   axes than the read arity → reject with a clean error). Smaller; makes `readArityOk` hold by rejection
   rather than by supporting the read. `Y[i,i]` rank-2 reads stay disallowed.
 
-Recommendation: **defer unless a real program needs diagonal/scatter-output reads** — no §12.1 example
-does, and B3 is a genuine eval feature. Deferring still closes #1 soundly (by rejection).
+Recommendation: **~~defer~~ BUILD B3 (corrected 2026-07-03).** Empirically, reading a scatter output
+over its full output grid (fresh axes) fails ("no inferable size"), while a strided read-back aligned
+to the scatter source works. Real decoder/GNN patterns hit the failing case: zero-insertion upsampling
++ conv (U-Net decoders / transposed-conv decomposition), GNN scatter-add then read node features,
+max-unpool + conv, and any pointwise op on an upsampled feature map — all read the scatter output over
+its full extent. §12.1 masks this only because its one scatter (`upsample`) is a terminal output. So
+B3 (propagate a scatter's output shape into `inferAxisSizes` so downstream readers can size their
+axes) is load-bearing for realistic multi-layer models, not niche. Build it.
 
 ---
 
-## Tasks B1–B4 (diagonal-scatter reads) — outline; flesh out after B0
+## Tasks B1–B4 — FINAL STATUS (2026-07-03)
 
-> Concrete steps depend on B0's design decision; do not pre-write code for these.
-
-- **B1 — reclassify diagonal writes to scatter** (`lowerArith`, `Structural.lean`): detect an
-  `assign` whose free LHS slots contain a duplicate axis uid and reclassify to `Stmt.scatter` with
-  `{ fill := 0, reduce := none }` (mirror the affine-LHS branch; add a `LHSSlot`/`Stmt` predicate
-  `hasRepeatedFreeAxis`). Test: such a program lowers to a `scatter` step.
-- **B2 — publish scatter output at declared rank** (per B0): producer's output weave has declared-rank
-  fixed axes. Test: routing a diagonal producer gives `outputWeaves` length = declared rank.
-- **B3 — reader gather + `inferAxisSizes` for scatter outputs** (per B0): `Z[a,b] := Y[a,b]` evaluates
-  to the diagonal; the extra axis is sized from `Y`'s declared shape. Test (end-to-end eval): the
-  `tensor Y(a,b); Y[i,i]:=X[i]; Z[a,b]:=Y[a,b]` program yields `Z = [[X0,0],[0,X1]]`.
-- **B4 — readArityOk holds for declared reads:** with B1–B3, a declared producer publishes declared
-  rank, so declared reads satisfy `readArityOk`. Combined with Task A (undeclared reads), prove
-  `readArityOk` unconditionally for compiled programs and drop the hypothesis from
-  `buildStep_reindexings_codLen_eq_inputRank` (make #1 unconditional). Test: axiom check + the
-  #1 theorem re-stated without `harity`.
+- **B1 — DONE** (commit `34f1a9c`): diagonal writes (repeated free axis) reclassify to scatter via the
+  shared `slotsBecomeScatter` predicate (affine OR repeated-free), used by both `lowerArith` and
+  `checkReadRanks`'s `stmtLhsRank` so they agree on the published rank. `Y[i,i]:=X[i]; Z[a,b]:=Y[a,b]`
+  evals to the 2×2 diagonal (test in `EvalExamplesTest`). A degenerate-uid test shortcut was fixed
+  (matmul used uid=1 for all axes ⇒ i/j collided ⇒ looked diagonal).
+- **B2 — was ~free** (B0 finding): a scatter already publishes its output at slot rank; B1's
+  reclassification inherits that.
+- **B3 — DONE** (commit `57d333f`): `inferAxisSizes` derives scatter output shapes
+  (`scatterOutDim`/`scatterOutputShapes`) and sizes downstream reads of scatter outputs — the eval
+  read-path for scatter/decoder/GNN patterns. Test in `EvalExamplesTest`.
+- **B4 — RESOLVED as "sound operationally; formal capstone deferred" (option 1, owner decision).**
+  Soundness is already achieved: **Task A rejects arity-mismatched programs at compile time**, so any
+  program that compiles satisfies the arity invariant, and the conditional `#1`
+  (`buildStep_reindexings_codLen_eq_inputRank`, hypothesis `readArityOk`) is a correct route-level
+  theorem whose hypothesis Task A enforces. Making `#1` *unconditional* (proving `readArityOk` for all
+  compiled programs) is a **large multi-pass proof**: it must thread the arity=rank invariant from
+  `checkReadRanks` (`ResolvedProgram`) to `readArityOk` (scheduled program) through `unifyAxes`,
+  `lowerArith`, `finalizeScans`, `splitNonlins` (which *splits* stmts), and `schedule` — comparable in
+  size to `compile_wellFormed`, and `wf_typeMatch` doesn't shortcut it (wire-types vs reindexing-codLen
+  indexing). Deferred as its own effort; the cheaper alt (a redundant `readArityOk` validation in
+  `routeCore`, mirroring `wellFormedDom`) was declined to avoid disturbing the proved chain for a
+  formal-only gain. **Net: #1 stays conditional; soundness holds via Task A.**
 
 ---
 
