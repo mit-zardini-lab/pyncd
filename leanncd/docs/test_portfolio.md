@@ -55,16 +55,39 @@ Per the agreed scope:
 **Resolved decisions (2026-07-04):**
 
 - **Volume:** author the full catalog (~130 entries incl. the advanced/creative domains below) — do not tighten.
-- **File layout:** split by domain — one test file per section
-  (`test/Eval/Portfolio/LinAlgTest.lean`, `AttentionTest.lean`, `ConvPoolTest.lean`,
-  `GnnTest.lean`, `RelationalTest.lean`, `RecurrenceTest.lean`, `GenerativeTest.lean`
-  (diffusion/MoE/SSM/positional/contrastive), `ClassicalMLTest.lean` (distance/FM/RL/probabilistic),
-  `RejectTest.lean`, `KnownGapTest.lean`, `EdgeCaseTest.lean`).
+- **File layout:** split by domain — one test file per section.
 - **Expected-fail mechanism:** each `[R]`/`[F]` case asserts the **exact** `.error` inside a
   `run_cmd do` (match on the specific `CompileError`/`EvalError`; `throwError` otherwise). No
   reliance on a `#expect_failure`-style macro (Lean has none).
 - **Advanced/generative domains added** (§12b): diffusion, mixture-of-experts, state-space
   models, positional encodings, contrastive — all core programs probed against HEAD.
+
+**Implemented (2026-07-04):** all 17 files below are written, registered in `lakefile.toml`,
+and build green via `lake build Tests` (105 `run_cmd` assertions total; every numeric value was
+hand-computed independently, then confirmed correct by the green build).
+
+| File | Section | IDs implemented | IDs skipped ([✔]/[F]/parse-fail) |
+|------|---------|------------------|-----------------------------------|
+| [`Harness.lean`](../test/Eval/Portfolio/Harness.lean) | — | shared helpers: `assertEval`, `assertEvalError`, `assertCompileError`, `assertEvalPred`, `assertShape`, `rowsSumToOne`, `tl` | — |
+| [`LinAlgTest.lean`](../test/Eval/Portfolio/LinAlgTest.lean) | §2 | LA1, LA3–LA9 | LA2 `[✔]` |
+| [`FeedforwardTest.lean`](../test/Eval/Portfolio/FeedforwardTest.lean) | §3 | FF1–FF4 | — |
+| [`AttentionTest.lean`](../test/Eval/Portfolio/AttentionTest.lean) | §4 | AT1, AT3–AT12 | AT2 `[✔]` |
+| [`ConvPoolTest.lean`](../test/Eval/Portfolio/ConvPoolTest.lean) | §5 | CV1, CV2, CV4–CV9 | CV3 `[✔]` |
+| [`NormTest.lean`](../test/Eval/Portfolio/NormTest.lean) | §6 | NM1–NM5 | — |
+| [`RecurrenceTest.lean`](../test/Eval/Portfolio/RecurrenceTest.lean) | §7 | RC2–RC6 (RC4 reject; RC5/RC6 pin known-gap wrong output) | RC1 `[✔]` |
+| [`GnnScatterTest.lean`](../test/Eval/Portfolio/GnnScatterTest.lean) | §8, §8b | GN1–GN4, SC1–SC8 | GN5/GN6 `[F]` (comment) |
+| [`RelationalTest.lean`](../test/Eval/Portfolio/RelationalTest.lean) | §9 | RL1–RL4, RL6–RL8 | RL5 `[✔]` |
+| [`StatsLossTest.lean`](../test/Eval/Portfolio/StatsLossTest.lean) | §10 | ST1–ST5 | ST6 `[F]` (comment) |
+| [`TropicalTest.lean`](../test/Eval/Portfolio/TropicalTest.lean) | §11 | TR3 | TR1/TR2/TR4 `[✔]`; TR5 `[F]` (comment) |
+| [`TensorNetTest.lean`](../test/Eval/Portfolio/TensorNetTest.lean) | §12 | TN1–TN4 | — |
+| [`GenerativeTest.lean`](../test/Eval/Portfolio/GenerativeTest.lean) | §12b | DF1–DF3, ME1–ME3, SS1–SS3, PE1, CL1–CL2 | DF4/PE2/PE3 `[F]` trig; ME4 `[F]` gather; CL3 `[F]` l2norm; CL4 `[F]` log; SS4 → `RejectTest` (comments) |
+| [`ClassicalMLTest.lean`](../test/Eval/Portfolio/ClassicalMLTest.lean) | §12c | CM1–CM6 | CM7–CM9 `[F]` (comment) |
+| [`RejectTest.lean`](../test/Eval/Portfolio/RejectTest.lean) | §13 | RJ3, RJ4, RJ7, SS4/RC4 | RJ1/RJ2/RJ5/RJ8/RJ10 (parse-fail or unconstructible — comment); RJ6/RJ9 dropped (don't reject) |
+| [`KnownGapTest.lean`](../test/Eval/Portfolio/KnownGapTest.lean) | §14 | documentation only — cross-references all 19 `KG-*` gaps to their live regression test (if any) | — |
+| [`EdgeCaseTest.lean`](../test/Eval/Portfolio/EdgeCaseTest.lean) | §15 | EC1–EC7, EC10–EC15 | EC8 `[✔]`; EC9 parse-fail (comment) |
+
+Run the whole portfolio with `cd leanncd && lake build Tests` (builds the full pre-existing suite
+too) or target one file, e.g. `lake build Eval.Portfolio.AttentionTest`.
 
 ### Legend
 
@@ -88,6 +111,12 @@ Per the agreed scope:
 - Confirmed evaluator semantics used in expected outputs below: `relu = max(0,x)`;
   `softmax` is max-subtracted, masked entries → 0; `normalize` is **L1** (`x / Σx` over the marked axis);
   `maxreduce` unit = `-∞`; contraction sums every RHS-only axis.
+- **Naming hazard:** never name a tensor/predicate exactly `c` — `c[` is a globally-reserved
+  token from Mathlib's `Equiv.Perm` cycle notation (`c[0,1,2]`), so `c[k]` fails to parse with
+  `unexpected token 'c['`. `cc`, `c2`, and uppercase `C` are all unaffected — see EC15.
+- **Look-back reads are `n+shift` long, not `n`:** `X[i-1]` on a length-`n` input yields a
+  length-`n+1` output (leading zero-pad), per the "maximal padded extent" shape-solver rule —
+  see EC1/EC2 (this corrects an arithmetic error in an earlier draft of this doc).
 
 ---
 
@@ -363,12 +392,18 @@ DSL's intended boundaries; if a future change accepts them silently, the test fa
 | RJ2 | `Y[i] := X[i / j]` | parse error — `/` requires a **literal** divisor | `[R]` |
 | RJ3 | `predicate P(i)` … `P[i] := maxreduce(edge[i,j])` | `checkDtypes` → `predicateAgg` (bool output + non-sum agg) | `[R]` |
 | RJ4 | `A[q,s] := softmax(Q[q,d]·K[s,d])` (no `.` marker) | eval error — softmax with no marked reduction axis | `[R]` |
-| RJ5 | over-indexed read of an undeclared intermediate (e.g. `T[i,j,k]` where `T` was written rank-2) | Task-A rejection of over-indexed undeclared read | `[R]` |
-| RJ6 | scan step with no input and no `axis l:ℕ=N` pin | size solver → underdetermined loop axis | `[R]` |
-| RJ7 | `s[] := A[i] · B[i]` with A length 3, B length 2 | eval size error — axis `i` unified to two sizes | `[R]` |
-| RJ8 | `A[q, d.] := softmax(...)` where `d` is contracted (not an output axis) | eval error — marked norm axis not among outputs | `[R]` |
-| RJ9 | `Y[i] := X[i - 5]` with a short input and no `axis` pin | Issue-D purely-negative constraint → "add explicit axis declaration" | `[R]` |
-| RJ10 | scatter whose output axis is unsized | `scatterOutShape` fail-loud on unsized axis | `[R]` |
+| RJ5 | over-indexed read of an undeclared intermediate (e.g. `T[i,j,k]` where `T` was written rank-2) | Task-A rejection of over-indexed undeclared read | `[R]` (not automated) |
+| ~~RJ6~~ | ~~scan step with no input and no `axis l:ℕ=N` pin~~ | **DROPPED — does NOT reject** (probed: evaluates to a 0-step/defaulted result, no error) | — |
+| RJ7 | `s[] := A[i] · B[i]` with A length 3, B length 2 | eval error — affine size system inconsistent (`0 = -1`) — **confirmed** | `[R]` |
+| RJ8 | `A[q, d.] := softmax(...)` where `d` is contracted (not an output axis) | not constructible via surface syntax (marking always places the slot on the LHS) | `[R]` (not automated) |
+| ~~RJ9~~ | ~~`Y[i] := X[i - 5]` short input~~ | **DROPPED — does NOT reject** (probed: evaluates, zero-padded; no Issue-D error at this size) | — |
+| RJ10 | scatter whose output axis is unsized | `scatterOutShape` fail-loud on unsized axis | `[R]` (not readily constructible) |
+
+> **Implemented (`RejectTest.lean`):** RJ3 (`predicateAgg`, compile), RJ4 (eval), RJ7 (eval),
+> and SS4/RC4 (`causalityViolation`, compile). RJ1/RJ2 fail at **parse time** — a hard parse
+> error fails the build and `#guard_msgs` does not validate parse errors, so they are kept as
+> documentation comments in the reject file rather than live tests. RJ6/RJ9 were dropped after
+> probing showed they don't reject. RJ5/RJ8/RJ10 aren't readily constructible via surface syntax.
 
 ## 14. Adversarial — known gaps / expected-fail
 
@@ -408,8 +443,8 @@ gap is closed — a built-in regression alarm. Cross-referenced above by `KG-*`.
 
 | ID | Prog | Data → Expected | Probes | Tag |
 |----|------|-----------------|--------|-----|
-| EC1 | `Y[i] := X[i - 1]` | X=`[10,20,30]` → `[0,10,20]` | boundary read → **zero-pad** | `[N]` `[E]` |
-| EC2 | `Y[i] := X[i - 3]` | deep look-back | multi-step look-back + padding | `[N]` `[E]` |
+| EC1 | `Y[i] := X[i - 1]` | X=`[10,20,30]` → `[0,10,20,30]` (shape **4**, not 3) | boundary read → **zero-pad**; **CORRECTED**: the shape solver's "maximal padded extent" gives length `n+shift` (confirmed against HEAD; the original `[0,10,20]`/length-3 draft was wrong) | `[N]` `[E]` |
+| EC2 | `Y[i] := X[i - 3]` | X=`[10,20,30]` → `[0,0,0,10,20,30]` (shape **6**) | multi-step look-back + padding; same `n+shift` rule as EC1 | `[N]` `[E]` |
 | EC3 | `Y[i,j] := A[i,k] · B[k,j]` with `k` size 1 | A 2×1, B 1×2 | **size-1** contracted axis (rank-1 outer via matmul) | `[N]` `[E]` |
 | EC4 | `Y[i] := A[i,j] · B[j]` with a **size-1** free axis `i` | 1×3, 3 → 1 | singleton free dim | `[N]` `[E]` |
 | EC5 | `d[i] := M[i,i]` | M=`[[1,2],[3,4]]` → `[1,4]` | **diagonal read** (repeated axis on RHS) — *confirmed valid* | `[N]` `[E]` |
@@ -419,10 +454,10 @@ gap is closed — a built-in regression alarm. Cross-referenced above by `KG-*`.
 | EC9 | ~~`Out[i + j] := X[i,j]`~~ | — | **CONFIRMED does not parse** — LHS slots are single-axis affine only (`i + num`, `2*i`); `i + j` (two axes → one slot) is rejected. See KG-reshape (§14); overlapping-accumulate scatter is unreachable via surface syntax | `[F]` |
 | EC10 | `Y[i,j,k,l] := A[i,j,m] · B[m,k,l]` | small | **high-rank** (4 free + 1 contracted) tensor contraction | `[N]` `[E]` |
 | EC11 | `Z := A · B · C · D` (n-ary product, all scalar reads) | → product | n-ary `·` associativity | `[N]` `[E]` |
-| EC12 | `Y[i] := X[2*i + 3*j - 1]` chained affine | multi-term affine read index | general integer-affine reindex | `[N]`/`[S]` |
-| EC13 | `Y[i,j] := (A[i,k]·B[k,j]) + (C[i,l]·D[l,j])` | precedence check | `·` binds tighter than `+`; two contractions summed | `[N]` `[E]` |
+| EC12 | `Y[i] := X[2*i + 3*j - 1]` chained affine | multi-term affine read index; **CORRECTION**: both `i` and `j` are unconstrained by any input shape (the read is the only occurrence of either), so this needs `axis i : ℕ = 2, j : ℕ = 2` pins to evaluate; `j` is RHS-only so it's summed | general integer-affine reindex | `[N]` |
+| EC13 | `Y[i,j] := A[i,k]·B[k,j] + C[i,l]·D[l,j]` (**no parens** — `(…)` around a sub-product is **not** surface syntax; parenthesizing a `tl_prod_term` fails to parse) | small, size-1 `k`/`l` (to avoid the EC15 equation-level-summation confound) | `·` binds tighter than `+`; two contractions summed | `[N]` `[E]` |
 | EC14 | `s[] := A[i,j,k,l,m]` | rank-5 full contraction | many contracted axes at once | `[N]` `[E]` |
-| EC15 | **equation-level summation** `Y[i] := a[i]·u[] + b[i,k]·c[k]` | `k` is summed over the *whole* RHS ⇒ `a[i]` broadcast by `\|k\|` | pins the gotcha behavior (see §12c callout); asserts the *observed* semantics so a future per-term change is caught | `[N]` `[E]` |
+| EC15 | **equation-level summation** `Y[i] := a[i]·u[] + W[i,k]·v[k]` | `k` is summed over the *whole* RHS ⇒ `a[i]·u[]` broadcast by `\|k\|` | pins the gotcha behavior (see §12c callout); asserts the *observed* semantics so a future per-term change is caught. **Naming hazard found while authoring:** a tensor/predicate named exactly `c` immediately followed by `[` (e.g. `c[k]`) fails to parse — NOT a DSL bug, but a **global token collision**: Mathlib's `Equiv.Perm` cycle notation (`Mathlib.GroupTheory.Perm.Cycle.Concrete`) registers `c[` as a single reserved token (`c[0,1,2]` = a permutation cycle), and Lean's tokenizer binds it greedily ahead of `ident` + `[`. Confirmed scoped to exactly the identifier `c` (verified `cc`, `c2`, uppercase `C` all parse fine). Avoid naming any tensor/predicate `c` in DSL programs | `[N]` `[E]` |
 
 ---
 
