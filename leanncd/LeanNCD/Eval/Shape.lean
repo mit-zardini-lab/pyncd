@@ -369,6 +369,37 @@ private def solveSizeConstraints (constraints : List SizeConstraint) :
         , mlHints := hints })
   return solved
 
+/-- The `IdxExpr` an LHS slot places its value at (mirrors `Eval/Scatter.lhsSlotIdx`; kept local to
+    avoid an import cycle with `Scatter.lean`). -/
+private def slotOutIdx : LHSSlot → IdxExpr
+  | .affine e   => e
+  | .free a     => .axis a
+  | .freeNorm a => .axis a
+  | .iterAt _ n => .const n
+  | .iterNext a => .shift a 1
+
+/-- Output dim of one scatter LHS slot at the current `sizes`: the affine upper-envelope max index
+    `+1`, if every source axis in the slot is sized (else `none`). Padded-semantics convention (same
+    as the read solver): the output holds every scattered position; exact over-padding needs a decl. -/
+private def scatterOutDim (sizes : HashMap UID Nat) (e : IdxExpr) : Option Nat :=
+  let (c0, coeffs) := idxAffineForm e
+  if coeffs.all (fun (_, u) => sizes.contains u) then
+    let maxIdx : Int := c0 + coeffs.foldl
+      (fun acc (c, u) => acc + max c 0 * (Int.ofNat ((sizes[u]?).getD 0) - 1)) 0
+    some (max (maxIdx + 1) 0).toNat
+  else none
+
+/-- Output shapes of the scatter stmts whose source axes are all sized, keyed by output name. Lets
+    downstream reads of a scatter-produced tensor size their own axes (B3 — the eval read-path for
+    scatter outputs, e.g. an upsampling decoder feeding a subsequent layer). -/
+def scatterOutputShapes (sizes : HashMap UID Nat) (stmts : List Stmt) : HashMap String (List Nat) :=
+  stmts.foldl (fun m s => match s with
+    | .scatter nm slots _ _ =>
+        match slots.mapM (fun sl => scatterOutDim sizes (slotOutIdx sl)) with
+        | some dims => m.insert nm dims
+        | none      => m
+    | _ => m) {}
+
 /-- Infer axis-UID → concrete size from the input tensors + read positions.
     For a read `name[e₁,…,eₘ]` whose input `env[name]` has shape `[d₁,…,dₘ]`, each `eᵢ`
     is treated as the integer-affine map `c0 + Σ cₖ·aₖ`. A bare `.axis a` (the common case)
@@ -400,10 +431,21 @@ def inferAxisSizes (seed : HashMap UID Nat) (env : HashMap String DenseTensor)
   let mut sizes : HashMap UID Nat := seed
   let mut warns : List String := []
   -- fixpoint: build upper-envelope constraints for all unknown positions, solve jointly,
-  -- then loop until no new sizes are learned.
-  for _ in List.range (positions.length + 1) do
+  -- then loop until no new sizes are learned. Each iteration also derives scatter OUTPUT shapes
+  -- from the sizes learned so far (B3) and adds read positions for downstream reads of those
+  -- outputs — so e.g. an upsample's scatter output can size a subsequent layer's read axes. The
+  -- extra `stmts.length` iterations let sizes flow through scatter-produce → read phases.
+  for _ in List.range (positions.length + stmts.length + 1) do
+    let producedShapes := scatterOutputShapes sizes stmts
+    let scatterPositions : List AffinePosition := stmts.flatMap (fun s =>
+      (Stmt.readsOf s).flatMap (fun (nm, es) =>
+        match producedShapes[nm]? with
+        | none       => []
+        | some shape => (es.zip shape).map (fun (e, d) =>
+            let (const, coeffs) := idxAffineForm e
+            { coeffs := normalizeCoeffs coeffs, const, dim := d, source := s!"{nm}[{repr e}] (scatter-out)" })))
     let mut deferred : List SizeConstraint := []
-    for pos in positions do
+    for pos in positions ++ scatterPositions do
       let maxCoeffs := upperEnvelopeCoeffs pos.coeffs
       let unknown := maxCoeffs.filter (fun (_, u) => ! (sizes.contains u))
       match unknown with

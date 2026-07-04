@@ -316,4 +316,23 @@ run_cmd do
   | .ok s    => throwError s!"scatterOutShape sized case wrong: {repr s}"
   | .error e => throwError e
 
+/- B3 — reading a SCATTER OUTPUT across layers (the decoder pattern §12.1 never exercises).
+   `Out[2i,2j] := X[i,j]` upsamples X (2×2) into a scatter output; the next layer reads the full
+   upsampled grid `Y[a,b] := Out[a,b]·Out[a,b]`. Before B3 this failed size inference ("output axis
+   has no inferable size"); now `Out`'s shape (3×3, tight envelope — scattered at even positions)
+   sizes the reader's axes. Y = Out² = [1,0,4; 0,0,0; 9,0,16]. -/
+run_cmd do
+  let env : HashMap String DenseTensor :=
+    ({} : HashMap String DenseTensor).insert "X" (tensorOf [2,2] [1,2,3,4])
+  match TLProgram.eval (tlprog!{
+    Out[2 * i, 2 * j] := X[i, j]
+    Y[a, b] := Out[a, b] · Out[a, b]
+  }) env with
+  | .error e => throwError s!"scatter-output read: {e}"
+  | .ok out => match out["Y"]? with
+    | some Y =>
+        unless DenseTensor.approxEq Y (tensorOf [3,3] [1,0,4, 0,0,0, 9,0,16]) do
+          throwError s!"scatter-output read wrong: shape={repr Y.shape} data={repr Y.data}"
+    | none => throwError "scatter-output read: no Y"
+
 end LeanNCD.Eval
