@@ -1,0 +1,493 @@
+# Tensor-Logic DSL Test Portfolio (proposal for review)
+
+**Status:** Draft for review — this is the *catalog* of example programs we intend to turn
+into Lean test cases. Nothing here is implemented yet. Review, cut, and annotate before we
+author the actual `.lean` tests.
+
+**Target:** the Lean DSL under `leanncd/` — surface grammar in
+[`DSL/Syntax.lean`](../LeanNCD/DSL/Syntax.lean), evaluator in [`Eval/`](../LeanNCD/Eval/),
+entry points `tlprog!{…}` (parse), `tl!{…}` (parse+compile), `TLProgram.eval env` (run on
+concrete `DenseTensor`).
+
+---
+
+## Contents
+
+- [1. Goals & how to read this](#1-goals--how-to-read-this)
+- [2. Core linear algebra](#2-core-linear-algebra)
+- [3. Feedforward / MLP](#3-feedforward--mlp)
+- [4. Attention & transformers](#4-attention--transformers)
+- [5. Convolution & pooling](#5-convolution--pooling)
+- [6. Normalization](#6-normalization)
+- [7. Recurrence & scans](#7-recurrence--scans)
+- [8. Graph / message passing (GNN)](#8-graph--message-passing-gnn)
+- [8b. Consuming scatter outputs (upsampling decoders / GNN readback)](#8b-consuming-scatter-outputs-upsampling-decoders--gnn-readback)
+- [9. Relational / logic (tensor-logic's logic side)](#9-relational--logic-tensor-logics-logic-side)
+- [10. Losses, reductions & statistics](#10-losses-reductions--statistics)
+- [11. Tropical / max-times semiring](#11-tropical--max-times-semiring)
+- [12. Tensor networks / decomposition](#12-tensor-networks--decomposition)
+- [12b. Advanced & generative domains](#12b-advanced--generative-domains)
+- [12c. Classical ML, probabilistic & RL](#12c-classical-ml-probabilistic--rl)
+- [13. Adversarial — reject tests (assert an error)](#13-adversarial--reject-tests-assert-an-error)
+- [14. Adversarial — known gaps / expected-fail](#14-adversarial--known-gaps--expected-fail)
+- [15. Adversarial — tricky-but-valid edge cases (should pass)](#15-adversarial--tricky-but-valid-edge-cases-should-pass)
+- [16. Coverage matrix (feature × where exercised)](#16-coverage-matrix-feature--where-exercised)
+- [17. Decisions (resolved) & follow-ups](#17-decisions-resolved--follow-ups)
+
+---
+
+## 1. Goals & how to read this
+
+We already have ~13 end-to-end examples in
+[`test/Eval/EvalExamplesTest.lean`](../test/Eval/EvalExamplesTest.lean) plus parse/compile
+tests. This portfolio broadens coverage across ML use cases and deliberately probes the DSL's
+limits.
+
+Per the agreed scope:
+
+- **Both test styles, numeric-weighted.** Most examples run on a tiny dataset and assert the
+  output with `DenseTensor.approxEq`; a minority assert compile-time structure with `#guard`
+  when that's the interesting property.
+- **Ground truth is hand-computed and shown in-doc.** Every `[N]` entry lists its input
+  tensors and the worked-out expected output right here, so review = checking arithmetic.
+- **Adversarial cases in three flavors:** reject-tests, known-gaps, and tricky-but-valid.
+
+**Resolved decisions (2026-07-04):**
+
+- **Volume:** author the full catalog (~130 entries incl. the advanced/creative domains below) — do not tighten.
+- **File layout:** split by domain — one test file per section
+  (`test/Eval/Portfolio/LinAlgTest.lean`, `AttentionTest.lean`, `ConvPoolTest.lean`,
+  `GnnTest.lean`, `RelationalTest.lean`, `RecurrenceTest.lean`, `GenerativeTest.lean`
+  (diffusion/MoE/SSM/positional/contrastive), `ClassicalMLTest.lean` (distance/FM/RL/probabilistic),
+  `RejectTest.lean`, `KnownGapTest.lean`, `EdgeCaseTest.lean`).
+- **Expected-fail mechanism:** each `[R]`/`[F]` case asserts the **exact** `.error` inside a
+  `run_cmd do` (match on the specific `CompileError`/`EvalError`; `throwError` otherwise). No
+  reliance on a `#expect_failure`-style macro (Lean has none).
+- **Advanced/generative domains added** (§12b): diffusion, mixture-of-experts, state-space
+  models, positional encodings, contrastive — all core programs probed against HEAD.
+
+### Legend
+
+| Tag | Meaning | Assertion |
+|-----|---------|-----------|
+| `[N]` | Numeric eval | `TLProgram.eval` → `approxEq` against the stated expected tensor |
+| `[S]` | Structural | `#guard` on the compiled `tl!{…}` (step count, op, shape) |
+| `[E]` | Edge case (should pass) | usually `[N]`; probes a legal-but-tricky corner |
+| `[R]` | Reject | assert a specific `CompileError`/`EvalError` is thrown |
+| `[F]` | Known gap / expected-fail | documents a construct that does *not* work today |
+| `[✔]` | Already covered | exists in current tests; listed for the coverage map, not re-authored |
+
+### DSL syntax reminders (gotchas that bit us before)
+
+- Products use `·` (U+00B7 middle dot), **not** `*`. `*` only appears in `num*ident` index/size terms.
+- Softmax/normalize **must** mark their reduction axis with a trailing dot on the LHS slot: `A[q, s.]`.
+- Scan-step LHS is written **spaced**: `G[j, l +1]` (not `l+1`).
+- Boolean tensors are declared `predicate P(i, j)`; masks are Iverson factors `[bool]`.
+- Pin otherwise-unconstrained axes (e.g. a loop bound) with `axis l : ℕ = N`.
+- Repeated free axis (`Y[i,i]`) or affine LHS (`Out[2*i, 2*j]`) ⇒ the write is reclassified to a **scatter**.
+- Confirmed evaluator semantics used in expected outputs below: `relu = max(0,x)`;
+  `softmax` is max-subtracted, masked entries → 0; `normalize` is **L1** (`x / Σx` over the marked axis);
+  `maxreduce` unit = `-∞`; contraction sums every RHS-only axis.
+
+---
+
+## 2. Core linear algebra
+
+| ID | Prog | Data → Expected | Probes | Tag |
+|----|------|-----------------|--------|-----|
+| LA1 | `y[i] := A[i,j] · x[j]` | A=`[[1,2],[3,4]]`, x=`[1,1]` → y=`[3,7]` | mat-vec; contract to vector | `[N]` |
+| LA2 | `Y[i,j] := W[i,k] · X[k,j]` | — | matmul | `[✔]` |
+| LA3 | `Y[b,i,j] := A[b,i,k] · X[b,k,j]` | A=`[[[1,0],[0,1]]]` (1×2×2), X=`[[[5,6],[7,8]]]` → Y=`[[[5,6],[7,8]]]` | **batched** matmul (batch axis shared+free) | `[N]` |
+| LA4 | `Y[i,j] := a[i] · b[j]` | a=`[1,2]`, b=`[3,4]` → `[[3,4],[6,8]]` | outer product (no contraction) | `[N]` |
+| LA5 | `s[] := x[i] · y[i]` | x=`[1,2,3]`, y=`[1,1,1]` → `6` | inner product → scalar (full contraction) | `[N]` |
+| LA6 | `G[i,j] := X[i,k] · X[j,k]` | X=`[[1,0],[0,1],[1,1]]` (3×2) → `[[1,0,1],[0,1,1],[1,1,2]]` | **aliasing** (same tensor twice); Gram = X Xᵀ | `[N]` `[E]` |
+| LA7 | `s[] := x[i] · W[i,j] · y[j]` | x=`[1,1]`, W=`[[1,2],[3,4]]`, y=`[1,0]` → `4` | bilinear form (3-factor scalar) | `[N]` |
+| LA8 | `Z[i,j] := A[i,j] · B[i,j]` | A=`[[1,2],[3,4]]`, B=`[[1,0],[0,1]]` → `[[1,0],[0,4]]` | Hadamard (all axes free-shared, none contracted) | `[N]` `[E]` |
+| LA9 | `s[i] := A[i,j,k] · B[j,k]` | A=`ones(2,2,2)`, B=`[[1,2],[3,4]]` → `[10,10]` | **multiple** contracted axes (j,k) | `[N]` `[E]` |
+
+## 3. Feedforward / MLP
+
+| ID | Prog | Data → Expected | Probes | Tag |
+|----|------|-----------------|--------|-----|
+| FF1 | `H[q,f] := relu(W_in[f,d] · X[q,d])` `Out[q,d] := W_out[d,f] · H[q,f]` (with `linear W_in(f,d), W_out(d,f) bias`) | small 1×2 → hand-check | 2-layer MLP with intermediate `H`; `linear`+`bias` decls | `[N]` |
+| FF2 | `H[i] := relu(W[i,j] · x[j])` | W=`[[1,-1],[-2,1]]`, x=`[1,1]` → pre=`[0,-1]` → `[0,0]` | relu clamps negatives (both go ≤0) | `[N]` |
+| FF3 | `H[i] := relu(W[i,j] · x[j])` | W=`[[1,1],[-1,-1]]`, x=`[2,1]` → pre=`[3,-3]` → `[3,0]` | relu asymmetric | `[N]` |
+| FF4 | affine layer `Y[i] := W[i,j]·x[j] + b[i]` | check bias add path | bias term as separate product/sum | `[N]` `[E]` |
+
+## 4. Attention & transformers
+
+| ID | Prog | Data → Expected | Probes | Tag |
+|----|------|-----------------|--------|-----|
+| AT1 | `A[q, s.] := softmax(Q[q,d]·K[s,d])` | Q=K=I₂ → row-wise softmax of scores `[[1,0],[0,1]]` | **unmasked** self-attention scores→softmax | `[N]` |
+| AT2 | `A[q, s.] := softmax(where s ≤ q)(Q[q,d]·K[s,d])` | Q=K=I₂ → `[[1,0],[0.2689,0.7311]]` | causal mask; masked entry exactly 0 | `[✔]` |
+| AT3 | `O[q,e] := A[q,s]·V[s,e]` (chain from AT1's A) | attention·values | full attention output (values mix) | `[N]` |
+| AT4 | `A[b,h,q,s.] := softmax(Q[b,h,q,d]·K[b,h,s,d])` | 1×1×2×2 → same as AT1 | **multi-head/batched** attention (b,h free) | `[N]` `[E]` |
+| AT5 | cross-attention: `A[q, s.] := softmax(Q[q,d]·K[s,d])` with `q`≠`s` lengths | Q 2×2, K 3×2 → 2×3 rows sum to 1 | distinct query/key sequence lengths | `[N]` `[E]` |
+| AT6 | scaled scores `A[q,s.] := softmax(Q[q,d]·K[s,d]·scale[])` | scale=`[0.5]` (rank-0 tensor) | scalar scaling via **rank-0** tensor read `scale[]` | `[N]` `[E]` |
+| AT7 | full 1-layer transformer block (attn + MLP + residual path) | small pinned dims | end-to-end composite; residual add | `[N]` (large) |
+| AT8 | **generalized cross-attention** `A[q, s.] := softmax(Q[q,h]·K[s,h])` `O[q,g] := A[q,s]·V[s,g]` | Q=I₂, K=`[[1,0],[0,1],[1,1]]`, V=`[[2,0],[0,2],[1,1]]` → A rows sum to 1, O=`[[1.267,0.733],[0.733,1.267]]` | **confirmed** — four fully-decoupled axes: query-pos `q`, key/val-pos `s`, score-feature `h` (Q/K only), value-feature `g` (K/V only, `h`≠`g` as roles). Q/K may come from a different source than V | `[N]` `[E]` |
+| AT9 | **linear attention** (O(N), kernelized) `M[h,e] := PhiK[s,h]·V[s,e]` `O[q,e] := PhiQ[q,h]·M[h,e]` | Φ=I₂, V=`[[1,2],[3,4]]` → O=`[[1,2],[3,4]]` | **confirmed** — contraction **reassociation**: sum keys first (`M[h,e]`) so cost is O(N) not O(N²); relu as the feature map φ | `[N]` `[E]` |
+| AT10 | **bilinear attention** `S[q, s.] := softmax(Q[q,a]·W[a,b]·K[s,b])` | I₂ inputs → rows sum to 1 | **confirmed** — learned bilinear scoring `qᵀWk` (3-factor contraction inside softmax) | `[N]` |
+| AT11 | **grouped/multi-query attention** `A[h, q, s.] := softmax(Q[h,q,d]·K[s,d])` | K has no `h` → shared across heads | **confirmed** — K/V **broadcast across heads** (GQA/MQA) | `[N]` `[E]` |
+| AT12 | **sparse attention** (Longformer local+global) `A[q, s.] := softmax(where \|q−s\| ≤ 1 ∨ s = 0)(Q[q,d]·K[s,d])` | Q=K=I₃ → `A[0,2]=0` (out of window), global token `s=0` attended from every `q` (`A[2,0]>0`) | **confirmed** — first use of `∨` in a mask; local window OR a global token | `[N]` `[E]` |
+
+> Attention variants that hit gaps: **GAT** (graph attention) needs a *data-driven* masked
+> softmax (`where edge[i,j]`) — not expressible, masks are index-predicates only (KG-datamask);
+> **additive/Bahdanau** needs `tanh` (KG-activation); **ALiBi / relative-position numeric bias**
+> needs an index-derived numeric value `−m·|q−s|` — index arithmetic only yields booleans via
+> Iverson, not tensor values (KG-idxvalue).
+
+> **AT8 (generalized cross-attention)** is the einsum realization of the Glaive "Generalized
+> Transformers from Applicative Functors" `attention` combinator
+> (`fmap softmax (queries ·mulMMT· keys) ·mulMM· values`), where `queries : f(h)`,
+> `keys : i(h)`, `values : i(g)`, `output : f(g)`. The flat DSL captures the full *axis
+> decoupling* (q, s, h, g independent; Q/K cross-source from V). What it **cannot** express is
+> the article's deeper generality — the index spaces `f, g, h, i` being arbitrary *applicative
+> functors* (trees, functions, nested containers) rather than flat `Fin n` axes. That
+> structured-index generalization is a known gap: **KG-functor** (§14) — a good pointer to the
+> Naperian/`act` typing work in `papers/NaperianTypingIntegrationPlan.md`.
+
+> Note AT6/residuals: because the RHS sum has **no tensor subtraction** and no scalar literals,
+> "scale by 1/√d" and "x + sublayer(x)" both rely on carrying a helper tensor. AT6 tests that a
+> rank-0 tensor read is legal; if it isn't, this becomes an `[F]` (see KG-scale).
+
+## 5. Convolution & pooling
+
+| ID | Prog | Data → Expected | Probes | Tag |
+|----|------|-----------------|--------|-----|
+| CV1 | `Y[i] := W[p] · X[i+p]` | W=`[1,1]`, X=`[1,2,3,4]` → `[3,5,7]` | 1-D valid convolution (affine read) | `[N]` |
+| CV2 | `Y[i,j] := W[p,q] · X[i+p, j+q]` | W=I₂, X=`[[1,2,3],[4,5,6],[7,8,9]]` → `[[6,8],[12,14]]` | 2-D convolution | `[N]` |
+| CV3 | `Y[i,j] := W[p,r] · X[i+p, 2*j+r]` | conv with stride 2 | strided conv (literal stride in read) | `[✔]` |
+| CV4 | `Y[i] := W[p] · X[i + 2*p]` | W=`[1,1]`, X=`[0,1,2,3,4]` → `[2,4,6]` (X[i]+X[i+2]) | **dilated** conv (dilation 2) | `[N]` `[E]` |
+| CV5 | `P[i] := maxreduce(X[2*i + p])` | X=`[1,3,2,5]`, p∈{0,1} → `[3,5]` | **max-pool** stride-2 window-2 | `[N]` |
+| CV6 | `P[i] := X[2*i+p] · w[p]` | w=`[0.5,0.5]`, X=`[2,4,6,8]` → `[3,7]` | **avg-pool** as weighted sum | `[N]` |
+| CV7 | `s[] := X[i]` | X=`[1,2,3,4]` → `10` | global sum-pool (contract all) | `[N]` `[E]` |
+| CV8 | **depthwise / grouped conv** `Y[c,i] := W[c,p]·X[c,i+p]` | W=`[[1,1],[1,-1]]`, X=`[[1,2,3],[4,5,6]]` → `[[3,5],[-1,-1]]` | **confirmed** — channel `c` is **free on both** W and X (not contracted); per-channel kernel | `[N]` `[E]` |
+| CV9 | **full multi-channel conv** `Y[co,i] := W[co,ci,p]·X[ci,i+p]` | W=`[[[1,0],[0,1]]]` (1×2×2), X=`[[1,2,3],[4,5,6]]` → `[[6,8]]` | **confirmed** — contracts **input-channel `ci` AND kernel `p` together**, output-channel `co` free (contrast CV8 depthwise) | `[N]` `[E]` |
+
+## 6. Normalization
+
+| ID | Prog | Data → Expected | Probes | Tag |
+|----|------|-----------------|--------|-----|
+| NM1 | `Y[q, s.] := normalize(A[q,s])` | A=`[[1,3],[2,2]]` → `[[0.25,0.75],[0.5,0.5]]` | L1 normalize over marked axis | `[✔]`-ish |
+| NM2 | `Y[q, s.] := softmax(A[q,s])` | A=`[[0,0],[0,ln3]]` → `[[.5,.5],[.25,.75]]` | plain softmax → distribution | `[N]` |
+| NM3 | `Y[q, s.] := softmax(A[q,s])` | A=`[[1000,1001]]` → `[[0.2689,0.7311]]` | **numerical stability** (max-subtraction; no overflow) | `[N]` `[E]` |
+| NM4 | `Y[q,s.] := normalize(where s ≠ 0)(A[q,s])` | masked entry → 0, rest renormalized | masked L1 normalize | `[N]` `[E]` |
+| NM5 | **softmax over a non-last axis** (column softmax / axial attn) `A[s., q] := softmax(Q[q,d]·K[s,d])` | Q=K=I₂ → `[[0.731,0.269],[0.269,0.731]]`, each **column** sums to 1 | **confirmed** — reduction axis marked at slot **position 0**, not the last; exercises `axisPos ≠ last` | `[N]` `[E]` |
+
+## 7. Recurrence & scans
+
+| ID | Prog | Data → Expected | Probes | Tag |
+|----|------|-----------------|--------|-----|
+| RC1 | coupled scan `G/H` (relu step) | all-ones → G=`[1,3,6]`, H=`[2,3,6]` | coupled scan; `axis l : ℕ = 3` pin | `[✔]` |
+| RC2 | simple RNN `S[j,0]:=X0[j]` `S[j,l +1] := relu(S[j,l]·W[j,k])` | 1-feature, W=1 | single scan, self-recurrence | `[N]` |
+| RC3 | prefix-sum via mask `C[i] := X[j] · [j ≤ i]` | X=`[1,2,3]`, `axis i,j = 3` → `[1,3,6]` | **cumulative sum without a scan** (triangular Iverson) | `[N]` `[E]` |
+| RC4 | `S[j, l +1] := S[j, l] + X[j, l + 1]` (scan step reads external at advancing index) | `X=[[1,2,3]]` | **CONFIRMED GAP**: compile → `causalityViolation "S"` | `[R]` |
+| RC5 | `M[j, l +1] := maxreduce(M[j,l] · W[j,k])` (`maxreduce` in a scan step) | `X=[2], W=[[1,3]]` → returns `[2,8,32]`, but max-semantics is `[2,6,18]` | **CONFIRMED SILENT-WRONG**: the `maxreduce` agg is dropped; the step sums | `[F]` |
+| RC6 | **2D / nested recurrence** (grid-DP / PixelRNN) `G[r +1, c +1] := G[r,c] + A[r,c]` | base G=0, A=ones → returns `[[0,1],[0,1]]`, correct 2D DP is `[[0,0],[0,1]]` | **CONFIRMED SILENT-WRONG**: two advancing iteration axes collapse to a 1-D scan over one axis (base case on the other axis is overwritten) | `[F]` (KG-2dscan) |
+
+> RC4/RC5 were the "verify" cases — now confirmed against HEAD (2026-07-04).
+> **RC4**: a scan step reading an external at the advancing index `l + 1` is rejected with
+> `CompileError.causalityViolation` (the compiler treats any next-index read as a future
+> dependency, even for non-state externals). Author as a reject-test asserting that error.
+> **RC5**: `maxreduce` inside a scan step is **silently ignored** — the step performs a sum
+> contraction and returns `2·(1+3)=8` rather than `max(2·1,2·3)=6`. No error is raised. This
+> is a fail-loud violation (see KG-scanagg in §14); the test should pin the *current* wrong
+> output and be flipped to the correct expected output when the gap is fixed.
+
+## 8. Graph / message passing (GNN)
+
+| ID | Prog | Data → Expected | Probes | Tag |
+|----|------|-----------------|--------|-----|
+| GN1 | `H[i,f] := A[i,j] · X[j,f]` | A=adjacency `[[0,1],[1,0]]`, X=`[[1,2],[3,4]]` → `[[3,4],[1,2]]` | dense message passing (A·X) | `[N]` |
+| GN2 | `H[i,f] := edge[i,j] · X[j,f]` (`predicate edge`) | edge booleanizes | message passing over a **predicate** adjacency | `[N]` |
+| GN3 | `deg[i] := edge[i,j]` | edge=`[[0,1,1],[1,0,0]]` → `[2,1]` | node degree = contract over neighbors | `[N]` |
+| GN4 | `H[i,f] := maxreduce(edge[i,j] · X[j,f])` | max-aggregation GNN (GraphSAGE-max) | `maxreduce` neighbor aggregation | `[N]` `[E]` |
+| GN5 | degree-normalized `Ĥ = D⁻¹ A X` | needs division by `deg[i]` | **no per-node division** ⇒ expected gap | `[F]` (KG-div) |
+| GN6 | edge-list scatter-add `Msg[dst[e]] += X[src[e]]` | index tensors `src/dst` | data-dependent gather/scatter | `[F]` (KG-gather) |
+
+## 8b. Consuming scatter outputs (upsampling decoders / GNN readback)
+
+Reading the output of a scatter statement in *later* statements — the decoder/GNN pattern added
+by commits `57d333f`/`fc10d70` (B3). This was **unsupported end-to-end before B3**, so the whole
+block doubles as a regression suite. All eight consumers **probed against HEAD (2026-07-04)** and
+numerically correct. The shared base is a 2× upsample `Out[2*i,2*j] := X[i,j]` with X=`[[1,2],[3,4]]`
+(⇒ `Out` is 4×4 with the input values at even coordinates, 0 elsewhere).
+
+| ID | Consumer of the scatter output `Out` | Data → Expected | Probes | Tag |
+|----|--------------------------------------|-----------------|--------|-----|
+| SC1 | reduce `total[] := Out[a,b]` | → `10` (Σ of X) | contract a scatter output to a scalar | `[N]` |
+| SC2 | elementwise square `Sq[a,b] := Out[a,b]·Out[a,b]` | → `[1,0,4,0; 0…; 9,0,16,0; 0…]` (Σ=30) | pointwise op on a scatter output | `[N]` |
+| SC3 | `R[a,b] := relu(Out[a,b])` (X=`[[1,−2],[−3,4]]`) | negatives clamped → `1,0,0,4` at evens | nonlinearity on a scatter output | `[N]` |
+| SC4 | matmul `Z[a,c] := Out[a,b]·W[b,c]` (W=ones 4×2) | → col = row-sums `[3,0,7,0]` | **contraction** consuming a scatter output | `[N]` |
+| SC5 | conv `Y[a,b] := Wk[p]·Out[a+p,b]` (Wk=`[1,1]`) | shape `[3,4]`, `Y[0]=[1,0,2,0]`, `Y[1]=Y[2]=[3,0,4,0]` | **affine/strided read** of a scatter output (shape solver over a scattered tensor) | `[N]` `[E]` |
+| SC6 | scatter-of-scatter `Out2[2*a,2*b] := Out[a,b]` | 8×8, values `1,2,3,4` at `(0,0),(0,4),(4,0),(4,4)` | a scatter **reading another scatter** (stacked upsampling) | `[N]` `[E]` |
+| SC7 | diagonal-scatter then matmul `D[i,i]:=v[i]`; `Y[i,j]:=D[i,k]·M[k,j]` | v=`[2,3]`, M=ones → `[[2,2],[3,3]]` | a **diagonal-write** scatter consumed in a contraction (row scaling) | `[N]` `[E]` |
+| SC8 | `P[a, b.] := softmax(Out[a,b])` | rows sum to 1; all-zero rows → uniform `[¼,¼,¼,¼]` | softmax over a scatter output (its structural 0s are real values, not masked) | `[N]` `[E]` |
+
+> SC8 is a subtle one worth calling out in review: a scatter output's padding is genuine `0.0`,
+> so `softmax`/`normalize` treat those cells as real entries (an all-zero row becomes uniform,
+> not undefined). If a decoder wants padding excluded from a softmax, it needs an explicit mask —
+> the scatter fill value doesn't propagate as "masked".
+
+## 9. Relational / logic (tensor-logic's logic side)
+
+| ID | Prog | Data → Expected | Probes | Tag |
+|----|------|-----------------|--------|-----|
+| RL1 | `I[i,j] := [i = j]` with `axis i:ℕ=3, j:ℕ=3` | → 3×3 identity | pure-Iverson tensor; **sizes from decls only** (no read binds i,j) | `[N]` `[E]` |
+| RL2 | `R[i,k] := E1[i,j] · E2[j,k]` (`predicate`) | relational **join** / composition; counts 2-paths | boolean semiring product | `[N]` |
+| RL3 | `U[i,j] := E[i,j] · [i < j]` | strict-upper-triangular selection | Iverson **selection** predicate | `[N]` |
+| RL4 | `P2[i,k] := E[i,j] · E[j,k]` | E=`[[0,1],[0,0]]` → path counts | length-2 reachability (path count) | `[N]` |
+| RL5 | band mask `Band[i,j] := A[i,j] · [\|i − j\| ≤ 1]` | tri-diagonal keep | `iabs` predicate arithmetic | `[✔]` |
+| RL6 | `S[i,j] := A[i,j] · [i ≤ j ∧ j ≤ i + 2]` | local window | **compound** boolean (`∧`) mask | `[N]` `[E]` |
+| RL7 | `M[i,j] := A[i,j] · [ieq(imul(i,2), j)]` | keep where `2i = j` | `ieq`/`imul` predicate builtins | `[N]` `[E]` |
+| RL8 | **negated mask** (exclude-self) `M[i,j] := A[i,j] · [¬(i = j)]` | A=`[[1,2],[3,4]]` → `[[0,2],[3,0]]` | **confirmed** — first use of `¬`; zeroes the diagonal | `[N]` `[E]` |
+
+## 10. Losses, reductions & statistics
+
+| ID | Prog | Data → Expected | Probes | Tag |
+|----|------|-----------------|--------|-----|
+| ST1 | `sse[] := r[i] · r[i]` | r=`[1,-2,2]` → `9` | sum-of-squares (given residual `r`) | `[N]` |
+| ST2 | `C[i,j] := X[k,i] · X[k,j]` | X=`[[1,2],[3,4]]` (2 samples×2 feat) → `[[10,14],[14,20]]` | uncentered covariance / scatter matrix | `[N]` |
+| ST3 | `m[j] := X[k,j] · invn[]` | X=`[[2,4],[6,8]]`, invn=`[0.5]` → `[4,6]` | mean over samples via rank-0 `1/n` | `[N]` `[E]` |
+| ST4 | `p[i] := joint[i,j]` | marginalize out `j` | probabilistic marginalization = sum | `[N]` |
+| ST5 | residual via `−1` scalar `r[i] := Yhat[i] + m1[]·Y[i]` (`m1=−1`) | Yhat=`[5,3]`, Y=`[2,1]` → `[3,2]` | **CONFIRMED**: no `−` operator, but subtraction works via a rank-0 `−1` (⇒ MSE `sse[]:=r[i]·r[i]` is expressible) | `[N]` `[E]` |
+| ST6 | cross-entropy `L[] := − Y[i] · log(P[i])` | — | **no standalone `log`** (the `−` part is fine via ST5's trick) | `[F]` (KG-log) |
+
+## 11. Tropical / max-times semiring
+
+| ID | Prog | Data → Expected | Probes | Tag |
+|----|------|-----------------|--------|-----|
+| TR1 | `C[i] := maxreduce(A[i,k])` | A=`[[3,1,4],[1,5,9]]` → `[4,9]` | basic max-reduction | `[✔]` |
+| TR2 | `C[i] := maxreduce(A[i,k] · B[k])` | max of products | max-times combine | `[✔]` |
+| TR3 | `R[i,k] := maxreduce(P[i,j] · P[j,k])` | P=reliability `[[0,0.9],[0.8,0]]` → most-reliable 2-hop | max-times "best path" | `[N]` `[E]` |
+| TR4 | all-negative input max | A=`[[-2,-5,-1]]` → `[-1]` | `-∞` unit doesn't pollute | `[✔]` |
+| TR5 | min-plus shortest path (Viterbi/Bellman step) | — | **no `min` agg, no `+` combine** ⇒ gap | `[F]` (KG-min) |
+
+## 12. Tensor networks / decomposition
+
+| ID | Prog | Data → Expected | Probes | Tag |
+|----|------|-----------------|--------|-----|
+| TN1 | `Y[a,d] := G1[a,b] · G2[b,c] · G3[c,d]` | 3 identity cores → identity | tensor-train / chain contraction | `[N]` |
+| TN2 | `T[i,j,k] := A[i,r] · B[j,r] · C[k,r]` | rank-1 factors → outer product | **CP reconstruction** (shared contracted `r`) | `[N]` `[E]` |
+| TN3 | `s[] := A[i,j] · B[i,j]` | A=`[[1,2],[3,4]]`, B=I₂ → `5` | Frobenius inner product (full contract, 2 axes) | `[N]` |
+| TN4 | **third-order moment** (method of moments) `M[i,j,k] := X[t,i]·X[t,j]·X[t,k]` | X=`[[1,0],[0,1]]` (t=2) → diagonal 3-tensor `M[0,0,0]=M[1,1,1]=1` | **confirmed** — **3× aliasing** of one tensor (Gram is 2×) with a shared contracted `t`, rank-3 output | `[N]` `[E]` |
+
+## 12b. Advanced & generative domains
+
+Core programs of each domain were **probed against HEAD (2026-07-04)** so tags are grounded.
+Recurring finding: the DSL's missing scalar/transcendental ops (subtraction workaround, no
+`log`/`sin`) determine which parts are expressible.
+
+### Diffusion
+
+| ID | Prog | Data → Expected | Probes | Tag |
+|----|------|-----------------|--------|-----|
+| DF1 | forward process `Xt[i] := alpha[]·x0[i] + beta[]·eps[i]` | α=`0.6`, β=`0.8`, x0=`[1,0]`, ε=`[0,1]` → `[0.6,0.8]` | **confirmed** — rank-0 scalar scaling + 2-term sum | `[N]` |
+| DF2 | DDPM posterior mean `Xp[i] := c1[]·Xt[i] + c2[]·e[i]` (`c2<0`) | another scaled combo | reverse-step linear combination (uses `−` scalar) | `[N]` |
+| DF3 | denoising loss `sse[] := r[i]·r[i]` with `r[i]:=eps[i]+m1[]·ehat[i]` | ε,ε̂ small → hand-check | **expressible** via ST5 subtraction trick + sum-of-squares | `[N]` |
+| DF4 | sinusoidal timestep embedding `te[t,2i]:=sin(t·ω^i)` | — | **no `sin`/`cos`** | `[F]` (KG-trig) |
+
+### Mixture of Experts
+
+| ID | Prog | Data → Expected | Probes | Tag |
+|----|------|-----------------|--------|-----|
+| ME1 | gating `g[t, e.] := softmax(X[t,d]·Wg[d,e])` | rows sum to 1 | softmax router over experts | `[N]` |
+| ME2 | batched expert MLP `Y[t,e,f] := relu(We[e,f,d]·X[t,d])` | — | rank-3 expert weight, expert axis `e` free | `[N]` |
+| ME3 | combine `Out[t,f] := g[t,e]·Y[t,e,f]` (chained on ME1/ME2) | **confirmed** evals end-to-end (shape `[1,1]`) | gated weighted sum over experts | `[N]` |
+| ME4 | top-k routing (keep k highest-gated experts) | — | **no argmax / top-k gather** | `[F]` (KG-gather) |
+
+### State-space / sequence models (SSM, S4/Mamba-style)
+
+| ID | Prog | Data → Expected | Probes | Tag |
+|----|------|-----------------|--------|-----|
+| SS1 | linear recurrence `h[j,l +1] := A[j,k]·h[k,l] + B[j]·u[l]` | A=`[[1]]`, B=`[1]`, u=`[1,1,1]` → h=`[1,2,3]` | **confirmed** — scan reading input at the **current** index `u[l]` | `[N]` |
+| SS2 | output map `y[j,l] := C[j,k]·h[k,l]` (chained on SS1) | — | per-step output projection off the scan state | `[N]` |
+| SS3 | diagonal SSM `h[j,l +1] := a[j]·h[j,l] + B[j]·u[l]` | diagonal `A` (Mamba-ish) | elementwise (diagonal) state transition | `[N]` `[E]` |
+| SS4 | input at advancing index `… + B[j]·u[l + 1]` | — | **rejected** — `causalityViolation` (cf. RC4); convention matters | `[R]` |
+
+### Positional encodings
+
+| ID | Prog | Data → Expected | Probes | Tag |
+|----|------|-----------------|--------|-----|
+| PE1 | learned additive `Out[p,d] := X[p,d] + PE[p,d]` | X=`[[1,2],[3,4]]`, PE=`[[10,20],[30,40]]` → `[[11,22],[33,44]]` | **confirmed** — elementwise add of same-shape reads | `[N]` |
+| PE2 | sinusoidal `pe[p,2i] := sin(p·ω^i)`, `pe[p,2i+1]:=cos(…)` | — | **no `sin`/`cos`** | `[F]` (KG-trig) |
+| PE3 | RoPE rotation of `(q_2i, q_2i+1)` by `θ_p` | — | needs `sin`/`cos` + paired rotation | `[F]` (KG-trig) |
+
+### Contrastive / metric learning
+
+| ID | Prog | Data → Expected | Probes | Tag |
+|----|------|-----------------|--------|-----|
+| CL1 | similarity matrix `S[i,j] := Z1[i,d]·Z2[j,d]` | Z1=Z2=I₂ → `[[1,0],[0,1]]` | pairwise dot-product similarity (matmul) | `[N]` |
+| CL2 | `P[i, j.] := softmax(S[i,j])` (chained) | rows sum to 1 | InfoNCE softmax over the negatives | `[N]` |
+| CL3 | cosine similarity (L2-normalize embeddings first) | — | **only L1 `normalize`, no L2** | `[F]` (KG-l2norm) |
+| CL4 | InfoNCE loss `L := − log P[i,i]` | — | **no `log`** (subtraction fine via ST5) | `[F]` (KG-log) |
+
+## 12c. Classical ML, probabilistic & RL
+
+Less-obvious use cases, all probed against HEAD. Several are **multi-statement by necessity**
+because of the equation-level summation rule (see the callout after this section) — a single
+RHS sum can't mix terms with different contracted axes, so each contraction is materialized into
+its own intermediate first.
+
+| ID | Prog | Data → Expected | Probes | Tag |
+|----|------|-----------------|--------|-----|
+| CM1 | **pairwise squared distance** (k-NN / RBF kernel numerator): `sq[i]:=X[i,d]·X[i,d]`; `cross[i,j]:=X[i,d]·X[j,d]`; `D[i,j] := sq[i]·one[j] + one[i]·sq[j] + m2[]·cross[i,j]` | X=`[[0,0],[3,4]]`, one=`[1,1]`, m2=`−2` → `[[0,25],[25,0]]` | **confirmed** — broadcast (`sq[i]·one[j]`) + subtraction scalar + materialized cross term | `[N]` `[E]` |
+| CM2 | **factorization machine** 2nd-order: `sqsum[f]:=V[i,f]·x[i]·V[j,f]·x[j]`; `sumsq[f]:=V[i,f]·x[i]·V[i,f]·x[i]`; `fm[f]:=hp[]·sqsum[f]+hm[]·sumsq[f]` | V=`[[1],[2]]`, x=`[1,1]`, hp=`0.5`, hm=`−0.5` → `[2]` | **confirmed** — the `½((Σ)²−Σ()²)` identity; distinguishes **reused dummy `i`** (Σ()²) from **fresh dummy `j`** (Σ)² | `[N]` `[E]` |
+| CM3 | **value iteration / Bellman backup**: `EV[s,a]:=gamma[]·P[s,a,s2]·V[s2]`; `Q[s,a]:=R[s,a]+EV[s,a]`; `Vn[s]:=maxreduce(Q[s,a])` | R=I₂, γ=`0.9`, P=`½` unif, V=`[1,1]` → `[1.9,1.9]` | **confirmed** — `maxreduce` over actions + discounted expectation (rank-0 γ). *Iterated* VI hits KG-scanagg (maxreduce-in-scan) | `[N]` |
+| CM4 | **power iteration / Markov / HMM-forward (sum-product)**: `p[j,0]:=p0[j]`; `p[j,l +1]:=p[i,l]·M[i,j]` | p0=`[1,0]`, M=swap → p=`[[1,0,1],[0,1,0]]` | **confirmed** — **contraction inside a scan** works correctly (contrast RC5: `maxreduce`-in-scan does not) | `[N]` |
+| CM5 | **matrix factorization** `Rhat[u,i] := P[u,f]·Q[i,f]` | small | recommender dot-product model | `[N]` |
+| CM6 | **VAE reparameterization** `z[i] := mu[i] + sigma[i]·eps[i]` | Hadamard + add | elementwise `μ+σ⊙ε`; the KL term needs `log` (KG-log) | `[N]` `[E]` |
+| CM7 | k-means assignment / nearest-centroid (argmin over centroids) | — | **no `argmin`** (only `max` value, no index) | `[F]` (KG-min) |
+| CM8 | closed-form linear regression `β = (XᵀX)⁻¹Xᵀy` | XᵀX, Xᵀy expressible; the solve is not | **no linear solve / inverse** | `[F]` (KG-solve) |
+| CM9 | logistic regression / GRU-LSTM gates (`σ`, `tanh`) | — | **only relu** activation | `[F]` (KG-activation) |
+
+> **⚠ Equation-level summation (a semantic gotcha, confirmed 2026-07-04).** Tensor logic sums
+> over *every* index variable not on the LHS, applied to the **whole RHS** — not per product
+> term. So `Y[i] := a[i] + b[i,k]·c[k]` sums `k` over the entire equation and **broadcasts the
+> `k`-less term** `a[i]` by `|k|`. This silently gave wrong results in first drafts of CM1
+> (`[[0,50],[50,50]]` instead of `[[0,25],[25,0]]`) and CM3 (`[2.9,2.9]` instead of
+> `[1.9,1.9]`). **Safe pattern:** materialize each differently-contracted subexpression into its
+> own intermediate whose index set matches the LHS, then sum intermediates that all share the
+> same free axes. This is arguably the *defined* Datalog/Einstein-at-equation-scope semantics,
+> not a bug — but it is a sharp edge worth a dedicated test (EC15) and a prominent doc note.
+
+## 13. Adversarial — reject tests (assert an error)
+
+Each asserts a **specific** `CompileError`/`EvalError` (or a parse failure). These lock in the
+DSL's intended boundaries; if a future change accepts them silently, the test fails.
+
+| ID | Prog | Expected failure | Tag |
+|----|------|------------------|-----|
+| RJ1 | `Y[i] := W[p] · X[s * j]` | parse error — symbolic-coefficient stride `s*j` not in `IdxExpr` | `[R]` |
+| RJ2 | `Y[i] := X[i / j]` | parse error — `/` requires a **literal** divisor | `[R]` |
+| RJ3 | `predicate P(i)` … `P[i] := maxreduce(edge[i,j])` | `checkDtypes` → `predicateAgg` (bool output + non-sum agg) | `[R]` |
+| RJ4 | `A[q,s] := softmax(Q[q,d]·K[s,d])` (no `.` marker) | eval error — softmax with no marked reduction axis | `[R]` |
+| RJ5 | over-indexed read of an undeclared intermediate (e.g. `T[i,j,k]` where `T` was written rank-2) | Task-A rejection of over-indexed undeclared read | `[R]` |
+| RJ6 | scan step with no input and no `axis l:ℕ=N` pin | size solver → underdetermined loop axis | `[R]` |
+| RJ7 | `s[] := A[i] · B[i]` with A length 3, B length 2 | eval size error — axis `i` unified to two sizes | `[R]` |
+| RJ8 | `A[q, d.] := softmax(...)` where `d` is contracted (not an output axis) | eval error — marked norm axis not among outputs | `[R]` |
+| RJ9 | `Y[i] := X[i - 5]` with a short input and no `axis` pin | Issue-D purely-negative constraint → "add explicit axis declaration" | `[R]` |
+| RJ10 | scatter whose output axis is unsized | `scatterOutShape` fail-loud on unsized axis | `[R]` |
+
+## 14. Adversarial — known gaps / expected-fail
+
+Documented constructs that a user might reasonably expect but that do **not** work today.
+Author as expected-fail so that (a) the gap is visible and (b) the test flips green the day the
+gap is closed — a built-in regression alarm. Cross-referenced above by `KG-*`.
+
+| ID | Gap | Where it bites | Tag |
+|----|-----|----------------|-----|
+| KG-sub | no `−` operator in the RHS sum — **but** subtraction is achievable via a rank-0 `−1` scalar (`a[i] + neg[]·b[i]`, *confirmed* — see ST5). Only a *soft* gap: the ergonomic form is missing, the capability is not | residuals, MSE, centering | `[F]` (soft) |
+| KG-log | standalone `log`/`exp` (only relu/softmax/normalize) | cross-entropy, log-likelihood, GELU | `[F]` |
+| KG-trig | no `sin`/`cos`/transcendental fns | sinusoidal PE, RoPE, diffusion timestep embeddings | `[F]` |
+| KG-l2norm | only **L1** `normalize` (`x/Σx`); no L2 / `√Σx²` | cosine similarity, RMSNorm, unit-norm embeddings | `[F]` |
+| KG-functor | axes are flat `Fin n` only — no **structured/applicative-functor index spaces** (trees, functions, nested containers) | generalized transformers over non-sequence data (parsing, image→function); see AT8 & `NaperianTypingIntegrationPlan.md` | `[F]` |
+| KG-reshape | LHS index slots are **single-axis affine only** (`2*i`, `i+num`); no multi-axis-into-one-slot (`i+j`, `2*i+k`) — *confirmed parse-fail* | reshape/flatten, Kronecker product, im2col, overlapping-accumulate scatter (also unreachable via surface syntax) | `[F]` |
+| KG-datamask | `where` masks are **index predicates only** — cannot read a data tensor (`where edge[i,j] > 0`) — *confirmed parse-fail* | GAT / any graph-structured masked softmax over a runtime adjacency | `[F]` |
+| KG-solve | no linear **solve / inverse / eigendecomp / determinant** (only contraction) | closed-form regression, PCA, spectral GCN, normalizing-flow log-det | `[F]` |
+| KG-activation | only **relu** (+ softmax/normalize) — no `sigmoid`/`tanh`/`gelu`/`leakyrelu` | LSTM/GRU gates, logistic regression, GAT, GELU transformers | `[F]` |
+| KG-idxvalue | index arithmetic yields **booleans only** (via Iverson) — never a numeric tensor value | ALiBi, relative-position numeric bias, distance-decay weights | `[F]` |
+| KG-sqrt | no `sqrt` | true Euclidean distance (vs squared), std / RMSNorm, unit-norm (cf. KG-l2norm) | `[F]` |
+| KG-min | `min` aggregation and additive-combine (min-plus semiring) | shortest path, Viterbi, DTW | `[F]` |
+| KG-div | division by a tensor / per-element reciprocal (only whole-axis `normalize`) | D⁻¹AX GNN norm, layernorm variance, softmax-free attention | `[F]` |
+| KG-gather | data-dependent gather/scatter with an **index tensor** (indices must be affine) | embedding lookup by ids, edge-list scatter-add, top-k | `[F]` |
+| KG-scale | free scalar literal on the RHS (e.g. `· 0.5`) | 1/√d attention scaling (workaround: rank-0 tensor, see AT6) | `[F]`? |
+| KG-multiout | multiple outputs **not** at the tail statement | multi-head split, aux losses | `[F]` |
+| KG-recur | `recurMorphism` / `scanPre` escape hatch (AST-only) | programmatic recurrences | `[F]` |
+| KG-scanagg | **`maxreduce` inside a scan step is silently summed** (agg dropped; no error) — *confirmed, see RC5* | max/argmax recurrences (Viterbi, running-max) | `[F]` ⚠ soundness |
+| KG-2dscan | **2-D / nested recurrence collapses to a 1-D scan** (two advancing axes silently reduced to one; no error) — *confirmed, see RC6* | grid-DP, PixelRNN, edit-distance/NW, CTC alignment tables | `[F]` ⚠ soundness |
+
+> Verification note: some of these may already be partially addressed (e.g. reading scatter
+> outputs across layers was **recently closed** by commits `57d333f`/`fc10d70` — that one belongs
+> in §15 as a passing regression test, not here). Each `KG-*` needs a 30-second confirmation
+> against `HEAD` before we commit to "expected-fail", so we don't ship a red test for something
+> that actually works.
+
+## 15. Adversarial — tricky-but-valid edge cases (should pass)
+
+| ID | Prog | Data → Expected | Probes | Tag |
+|----|------|-----------------|--------|-----|
+| EC1 | `Y[i] := X[i - 1]` | X=`[10,20,30]` → `[0,10,20]` | boundary read → **zero-pad** | `[N]` `[E]` |
+| EC2 | `Y[i] := X[i - 3]` | deep look-back | multi-step look-back + padding | `[N]` `[E]` |
+| EC3 | `Y[i,j] := A[i,k] · B[k,j]` with `k` size 1 | A 2×1, B 1×2 | **size-1** contracted axis (rank-1 outer via matmul) | `[N]` `[E]` |
+| EC4 | `Y[i] := A[i,j] · B[j]` with a **size-1** free axis `i` | 1×3, 3 → 1 | singleton free dim | `[N]` `[E]` |
+| EC5 | `d[i] := M[i,i]` | M=`[[1,2],[3,4]]` → `[1,4]` | **diagonal read** (repeated axis on RHS) — *confirmed valid* | `[N]` `[E]` |
+| EC6 | `t[] := M[i,i]` | M above → `5` | trace (diagonal read + full contraction) — *confirmed valid* | `[N]` `[E]` |
+| EC7 | `D[i,i] := v[i]` | v=`[5,6]` → `[[5,0],[0,6]]` | **diagonal write** (scatter reclassification) | `[N]` `[E]` |
+| EC8 | `Out[2*i,2*j] := X[i,j]` | 2×2 → 4×4 placement | upsample scatter | `[✔]` |
+| EC9 | ~~`Out[i + j] := X[i,j]`~~ | — | **CONFIRMED does not parse** — LHS slots are single-axis affine only (`i + num`, `2*i`); `i + j` (two axes → one slot) is rejected. See KG-reshape (§14); overlapping-accumulate scatter is unreachable via surface syntax | `[F]` |
+| EC10 | `Y[i,j,k,l] := A[i,j,m] · B[m,k,l]` | small | **high-rank** (4 free + 1 contracted) tensor contraction | `[N]` `[E]` |
+| EC11 | `Z := A · B · C · D` (n-ary product, all scalar reads) | → product | n-ary `·` associativity | `[N]` `[E]` |
+| EC12 | `Y[i] := X[2*i + 3*j - 1]` chained affine | multi-term affine read index | general integer-affine reindex | `[N]`/`[S]` |
+| EC13 | `Y[i,j] := (A[i,k]·B[k,j]) + (C[i,l]·D[l,j])` | precedence check | `·` binds tighter than `+`; two contractions summed | `[N]` `[E]` |
+| EC14 | `s[] := A[i,j,k,l,m]` | rank-5 full contraction | many contracted axes at once | `[N]` `[E]` |
+| EC15 | **equation-level summation** `Y[i] := a[i]·u[] + b[i,k]·c[k]` | `k` is summed over the *whole* RHS ⇒ `a[i]` broadcast by `\|k\|` | pins the gotcha behavior (see §12c callout); asserts the *observed* semantics so a future per-term change is caught | `[N]` `[E]` |
+
+---
+
+## 16. Coverage matrix (feature × where exercised)
+
+| DSL feature | Existing | New in this portfolio |
+|-------------|----------|-----------------------|
+| Contraction (einsum) | matmul | LA1,LA5,LA7,LA9,TN* |
+| Broadcasting / outer | — | LA4, TN2 |
+| Hadamard (no contraction) | — | LA8 |
+| Aliasing (same tensor twice) | — | LA6, ST2 |
+| relu | scan, MLP | FF2, FF3 |
+| softmax (± mask) | causal attn | AT1, AT4, AT5, NM2, NM3 |
+| normalize (± mask) | normalize | NM1, NM4 |
+| maxreduce | max-pool | CV5, GN4, TR3 |
+| Iverson / predicates | band, masked-agg | RL1–RL7, RC3 |
+| Affine reads (conv/dilation/look-back) | strided conv, look-back | CV1,CV2,CV4, EC1,EC2,EC12 |
+| Scatter (affine/diagonal write) | upsample | EC7, EC9 |
+| Scans / recurrence | coupled scan | RC2, RC4, RC5 |
+| `linear` + `bias` | parse only | FF1, FF4 |
+| Rank-0 tensors / scalar scale | — | AT6, ST3, DF1, DF2, ST5 |
+| Size inference from decls | — | RL1 |
+| Scan reading input at index `l` | — | SS1, SS3, CM4 (SS4 = reject at `l+1`) |
+| Contraction inside a scan | coupled scan | CM4 (works; RC5/RC6 show `maxreduce`-in-scan & 2-D scans do NOT) |
+| Attention variants | causal attn | AT8 (generalized), AT9 (linear), AT10 (bilinear), AT11 (GQA), AT12 (sparse ∨) |
+| Consuming scatter outputs (B3) | — | §8b SC1–SC8 (reduce/pointwise/relu/matmul/conv/scatter-of-scatter/diag/softmax) |
+| Softmax/normalize over non-last axis | — | NM5 |
+| `∨` / `¬` in masks | — | AT12 (∨), RL8 (¬) |
+| Full vs depthwise conv | — | CV9 (contract channel+kernel) vs CV8 (channel free) |
+| 3× aliasing / high-order moment | — | TN4 |
+| Broadcast + subtraction-scalar patterns | — | CM1, CM2, CM3, DF*, ST5 |
+| Equation-level summation gotcha | — | EC15 (+ §12c callout; CM1/CM3 need materialization) |
+| Diffusion / MoE / SSM / PE / contrastive | — | §12b (DF*, ME*, SS*, PE*, CL*) |
+| Classical ML / probabilistic / RL | — | §12c (CM1–CM9) |
+| **Reject** paths | (a few) | RJ1–RJ10, SS4 |
+| **Known gaps** | — | KG-* (§14): sub(soft), log, trig, l2norm, sqrt, min, div, gather, multiout, recur, scanagg, functor, reshape, datamask, solve, activation, idxvalue |
+
+## 17. Decisions (resolved) & follow-ups
+
+All reviewer questions are resolved (2026-07-04):
+
+1. **Volume** — author the full catalog; do not tighten. (~130 entries incl. §12b, §12c.)
+2. **File layout** — split by domain; one file per section (see the list in §1).
+3. **Expected-fail** — assert the exact `.error` in a `run_cmd do`.
+4. **"verify" entries** — probed against HEAD: EC5/EC6 valid `[N]`; RC4/SS4 reject
+   (`causalityViolation`); RC5 confirmed silent-wrong → **KG-scanagg**.
+5. **Added domains** — diffusion, MoE, SSM, positional, contrastive (§12b), all probed.
+
+Follow-ups for the implementation plan:
+
+- **Surface the RC5/KG-scanagg soundness issue** (`maxreduce` silently summed inside a scan)
+  to the scan-lowering owners as a bug, separate from the test work — a step that can't honor
+  a non-sum agg should reject, not switch aggregation silently.
+- **KG-2dscan (RC6)** is a third silent-wrong trap alongside KG-scanagg: a 2-D/nested
+  recurrence collapses to a 1-D scan with no error. Same recommendation — reject multi-axis
+  advancing recurrences until they're genuinely supported.
+- **Equation-level summation (§12c callout)** is the other silent-wrong trap: a multi-term RHS
+  with heterogeneous contracted axes broadcasts the shorter terms. Whether this is intended
+  Datalog semantics or should warn/reject deserves a decision from the language owners; either
+  way EC15 pins current behavior. Consider a lint that flags a `+` whose terms have unequal
+  free-axis sets.
+- **`[R]`/`[F]` needs the exact error constructors.** Before authoring, enumerate the actual
+  `CompileError`/`EvalError` variants each reject case throws (we've confirmed
+  `causalityViolation`, `predicateAgg`; the parse-failure cases (RJ1, RJ2) fail at
+  *elaboration*, so they need a different harness — likely a `#guard`-style negative parse test
+  or documentation-only, since a parse error can't be caught by `run_cmd`).
+- **Read-vs-LHS look-ahead asymmetry** (`l + 1` in reads vs `l +1` in scan-LHS) is a real
+  gotcha worth its own tiny `[S]` test + a note in the DSL docs.

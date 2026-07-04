@@ -149,6 +149,50 @@ integration](#minimum-viable-integration).
 > `leanncd/docs/superpowers/plans/2026-07-03-s1-jointly-monic-spike.md`. **Both Track-B gates are now
 > cleared.**
 
+### 0.3 Resuming this work after a delay
+
+If you are picking this plan back up after days away, read only this box — it tells you where
+things stand and what the next single action is, without re-reading §0–§0.2.
+
+**Status as of 2026-07-03:**
+
+- Track A is **done and merged to `main`** (see §8). Nothing to resume there.
+- Track B's two feasibility gates (S0, S1) are **both cleared**. Track B is unblocked but
+  **nothing has been built yet** — no lines of `act` exist beyond the `sorry`.
+- The next concrete action is a **commitment-sized build**, not another spike: implement `act`
+  in `LeanNCD/Instances/StBr.lean`.
+
+**Where to start:**
+
+1. Open `LeanNCD/Instances/StBr.lean` and find `instDGradedStBr : DGradedColoredPROP StObj BrObj`
+   (currently line ~13). The `act` field (and 9 other coherence fields — `δ`, `δ0`, `υ`, `α`,
+   `sh_act`, `act_unit_assoc`, `υ_nat`, `dist_coh`, `broadcast_gen`) are `:= sorry`. **Only `act`
+   is in scope right now** — leave the other 9 alone.
+2. Read the two spike reports in full before writing any code — they contain the actual proof
+   sketch, not just the summary here:
+   - [`leanncd/docs/superpowers/plans/2026-07-03-s0-act-definability-spike.md`](../leanncd/docs/superpowers/plans/2026-07-03-s0-act-definability-spike.md)
+   - [`leanncd/docs/superpowers/plans/2026-07-03-s1-jointly-monic-spike.md`](../leanncd/docs/superpowers/plans/2026-07-03-s1-jointly-monic-spike.md)
+3. Build in this order (per the S0 sketch):
+   - `act.obj` — the batch-lift over `BrBase` (the `gen` leaf). Plain definition, no `Rel`
+     obligation.
+   - `act.map (f, η) := [f, P] ; [Y, η]` as a `Quotient.lift` over `Br.Hom`. The well-definedness
+     side condition is `Rel f g → liftAt P f = liftAt P g`. Of the 21 `Rel` constructors, 20
+     should discharge directly against existing `BrMorph` theorems (`id_comp`, `assoc`,
+     `tensor_comp`, `braid_braid`, `braid_natural`, the `*_heq` cast lemmas, the `copyW_*`
+     comonoid laws) — do not re-derive these, reuse them.
+   - Expect a `List.map`/`List.map_append` cast tax on every `tensor`/`braid` case (confirmed via
+     `lean_run_code` in the S0 spike — `List.map` is not defeq-distributive over `++`).
+   - `map_id` / `map_comp` functor laws last.
+   - Budget ~400–650 lines total for this field alone.
+4. **Do not** touch: `brCancelPoint`/`weave_unique` (off-path, no consumers, §0 finding 3),
+   `actV`/`FGModuleCat ℝ` (recorded impossibility, §6.6/S3), or the multi-output
+   `compile_wellFormed` surface (already done, §0 finding 5).
+
+**Sanity check before trusting this box:** confirm `act := sorry` is still true in
+`LeanNCD/Instances/StBr.lean` and that `sh_act`'s type is still the `≅` form (not reverted to
+`=`) in `LeanNCD/Core/Graded.lean`. If either has changed, the ground under this plan has moved —
+re-read §0 in full rather than proceeding from this summary.
+
 ## 1. Current pipeline and staging constraint
 
 Today the compile/eval split is already:
