@@ -777,3 +777,42 @@ After the 2026-07-03 re-audit (§0), the plan is:
 
 In one line: **Multi-output is done and orthogonal to Naperian; Track A can start today; Track B's
 feasibility gates (S0, S1) have both passed — it is now a funded cost/benefit decision, not a bet.**
+
+## 8. Track A — final status (2026-07-03)
+
+Track A landed on `main` (merge `b0bc15a` + follow-ups). Routing-layer invariants proved (all
+additive, axiom-clean, `route`/`compile_wellFormed` untouched): `StMatP.wellFormed`/`validate` +
+`routeCore_reindexings_wellFormed`; `routeCore_reindexings_domLen` (domain rank = degree);
+`stepDegAxesMulti_uid_nodup` (canonical degree); `buildStep_inputWeaves_allFixed` (input weaves
+full-rank); M2 `elaborateAffineReindexings` artifact + faithful bridges + one affine primitive (§6.2
+dedup); M4 route consumes the artifact + typed `StMatP'` (structural well-formedness); M3
+`buildStep_output_reducesOnlyContracted`; #1 `buildStep_reindexings_codLen_eq_inputRank` (codomain
+rank = input weave rank, conditional on `readArityOk`).
+
+### 8.1 Remaining items — definitive resolution (NOT soundly closeable as routing-layer theorems)
+
+Investigated against the actual pipeline; each is **upstream or structural**, and forcing a
+routing-layer proof would be unsound or vacuous. Their honest status:
+
+- **`readArityOk` from `checkReadRanks`/`env` — NOT PROVABLE (design gap, cf. `topo_bound`).** Two
+  independent reasons in-code: (i) `resolveDecls` puts only *declared* tensors in `env`, so a
+  produced-but-undeclared **intermediate** is neither in `env` nor external and `checkReadRanks`
+  never checks its read arity — arity=producer-rank is simply unenforced; (ii) even for declared
+  producers, `checkReadRanks` pins arity to `decl.axisCount`, but the producer publishes
+  `dedupByUid(LHS)` — a **repeated-LHS** program (`Y[i,i]`: decl 2, published 1) makes `readArityOk`
+  *false*. So #1's internal-read case correctly stays a hypothesis (`readArityOk`); closing it needs
+  a frontend/design decision (reject `Y[i,i]`-style reads; require intermediates declared), not a
+  proof.
+- **pointwise-preserves-degree — UPSTREAM (`splitNonlins`), conditional only.** A pointwise op's
+  step has `contracted = ∅` (reads = LHS axes) *by `splitNonlins` construction*, and only for
+  well-formed programs. Routing has no witness of this; it could at best be a conditional theorem
+  whose entire content is the hypothesis "this step's reads are its LHS axes" — thin, and genuinely
+  a `splitNonlins`-level fact, not a routing one.
+- **scan-separation — STRUCTURAL, not a crisp theorem.** "Scan iteration arithmetic stays separate
+  from static reindexing" is an architectural property of how `finalizeScans`/the scan generator
+  handle the iteration axis (it is not a reindexing), not a stateable routing invariant.
+
+**Conclusion:** the routing-layer content of Track A is complete and proved. The three residual
+items are upstream/structural and are *closed* here as documented design assumptions/gaps — not as
+theorems, because sound theorems do not exist for them at this layer. Any further progress on them
+is frontend/`splitNonlins`/`checkReadRanks`-level work with its own design decisions.
