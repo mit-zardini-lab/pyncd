@@ -378,16 +378,20 @@ private def slotOutIdx : LHSSlot → IdxExpr
   | .iterAt _ n => .const n
   | .iterNext a => .shift a 1
 
-/-- Output dim of one scatter LHS slot at the current `sizes`: the affine upper-envelope max index
-    `+1`, if every source axis in the slot is sized (else `none`). Padded-semantics convention (same
-    as the read solver): the output holds every scattered position; exact over-padding needs a decl. -/
+/-- Output dim of one scatter LHS slot at the current `sizes` (`none` if a source axis is unsized).
+    MUST match `Eval.scatterOutShape`'s per-slot formula exactly — that is the shape `evalScatter`
+    actually materializes, so sizing a downstream reader by anything else would read a wrong-extent
+    (cropped/over-long) view. Kept in sync by mirroring its constructor cases (can't import `Eval`). -/
 private def scatterOutDim (sizes : HashMap UID Nat) (e : IdxExpr) : Option Nat :=
-  let (c0, coeffs) := idxAffineForm e
-  if coeffs.all (fun (_, u) => sizes.contains u) then
-    let maxIdx : Int := c0 + coeffs.foldl
-      (fun acc (c, u) => acc + max c 0 * (Int.ofNat ((sizes[u]?).getD 0) - 1)) 0
-    some (max (maxIdx + 1) 0).toNat
-  else none
+  match e with
+  | .axis a       => sizes[a.uid]?
+  | .const n      => some (n + 1).toNat
+  | .scale c a    => (sizes[a.uid]?).map (fun s => (c * Int.ofNat s).toNat)
+  | .shift a c    => (sizes[a.uid]?).map (fun s => (Int.ofNat s + c).toNat)
+  | .affine c0 xs =>
+      if xs.all (fun (_, a) => sizes.contains a.uid) then
+        some (xs.foldl (fun acc (c, a) => acc + c * Int.ofNat ((sizes[a.uid]?).getD 0)) c0).toNat
+      else none
 
 /-- Output shapes of the scatter stmts whose source axes are all sized, keyed by output name. Lets
     downstream reads of a scatter-produced tensor size their own axes (B3 — the eval read-path for
