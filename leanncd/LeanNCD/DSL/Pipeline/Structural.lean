@@ -149,15 +149,23 @@ private def stmtReads (s : Stmt) : List (String × Nat) :=
         | .iverson _  => none))
   | .recurMorphism _ _ _ => []
 
-/-- The produced (published) rank of a stmt's LHS — what a reader's arity must match. An affine LHS
-    becomes a `scatter` in `lowerArith` (predicate `LHSSlot.isAffine`) that publishes its full
-    placement rank (`ls.length`, e.g. `Out[2*i,2*j]` ⇒ 2); a non-affine LHS publishes the dedup'd
-    free-axis count (what `tensorAxes` emits, e.g. `Y[i,i]` ⇒ 1). Used to arity-check reads of
-    produced-but-undeclared intermediates. -/
+/-- Will this LHS be lowered to a `scatter` (publishing its full slot-count rank)? True for an affine
+    LHS (`Out[2*i,2*j]`) or a diagonal LHS with a repeated free axis (`Y[i,i]`). Shared by the
+    read-rank guard (`stmtLhsRank`) and `lowerArith` so they agree on the published rank. -/
+def slotsBecomeScatter (slots : List LHSSlot) : Bool :=
+  slots.any (fun sl => match sl with | .affine _ => true | _ => false)
+  || (let us := slots.filterMap (fun sl => match sl with | .free a => some a.uid | _ => none)
+      us.length ≠ us.eraseDups.length)
+
+/-- The produced (published) rank of a stmt's LHS — what a reader's arity must match. A LHS that
+    becomes a `scatter` (`slotsBecomeScatter`: affine `Out[2*i,2*j]` ⇒ 2, or diagonal `Y[i,i]` ⇒ 2)
+    publishes its full placement rank (`ls.length`); otherwise it publishes the dedup'd free-axis
+    count (what `tensorAxes` emits). Used to arity-check reads of produced-but-undeclared
+    intermediates. -/
 private def stmtLhsRank (s : Stmt) : Nat :=
   match s with
   | .assign _ ls _ | .scatter _ ls _ _ =>
-      if ls.any (fun sl => match sl with | .affine _ => true | _ => false) then ls.length
+      if slotsBecomeScatter ls then ls.length
       else (ls.filterMap (fun
         | .free a | .freeNorm a | .iterNext a => some a.uid
         | .iterAt a _ => some a.uid
@@ -291,7 +299,11 @@ def lowerArith (cp : CanonicalProgram) : FreshM LoweredProgram := do
   let stmts' ← cp.stmts.mapM (fun s => do
     match s with
     | .assign nm slots rhs =>
-        if slots.any LHSSlot.isAffine then
+        -- Reclassify affine (Out[2*i,2*j]) OR diagonal (Y[i,i], a repeated free axis) LHS to a
+        -- scatter that publishes its full placement rank — so declared/full-rank reads of it are
+        -- sound (B1). `collapses` only guards affine `.const` dimension-collapse; a diagonal is
+        -- injective (i ↦ (i,i)) so it passes.
+        if slotsBecomeScatter slots then
           if slots.any LHSSlot.collapses then throw (CompileError.overlappingScatter nm)
           else return Stmt.scatter nm slots rhs { fill := 0, reduce := none }
         else return s

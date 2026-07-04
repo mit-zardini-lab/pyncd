@@ -83,9 +83,11 @@ run_cmd do
       | _ => throwError s!"expected one Stmt.scatter for Out, got {repr lp.stmts}"
   | .error e _ => throwError s!"lowerArith errored: {repr e}"
 
--- Plain matmul assign is left as Stmt.assign.
+-- Plain matmul assign is left as Stmt.assign. (Distinct uids per axis, as `assignUIDs` produces —
+-- i/j must NOT share a uid, else the LHS `Y[i,j]` looks like a diagonal `Y[i,i]` write.)
 run_cmd do
-  let ax (nm : String) : AxisSpec := { name := nm, uid := 1, kind := .real none }
+  let ax (nm : String) : AxisSpec :=
+    { name := nm, uid := (if nm == "i" then 1 else if nm == "j" then 2 else 3), kind := .real none }
   let mm : Stmt := .assign "Y" [ .free (ax "i"), .free (ax "j") ]
     { body := { terms := [ { factors := [ .read "W" [.axis (ax "i"), .axis (ax "k")],
                                             .read "X" [.axis (ax "k"), .axis (ax "j")] ] } ] },

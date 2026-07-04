@@ -335,4 +335,21 @@ run_cmd do
           throwError s!"scatter-output read wrong: shape={repr Y.shape} data={repr Y.data}"
     | none => throwError "scatter-output read: no Y"
 
+/- B1 — diagonal write read at full rank. `Y[i,i]:=X[i]` (a repeated free axis) is reclassified to a
+   scatter that materializes the rank-2 diagonal; reading it `Z[a,b]:=Y[a,b]` then works via B3.
+   X=[1,2] ⇒ Z = diag = [[1,0],[0,2]]. -/
+run_cmd do
+  let env : HashMap String DenseTensor :=
+    ({} : HashMap String DenseTensor).insert "X" (tensorOf [2] [1,2])
+  match TLProgram.eval (tlprog!{
+    Y[i, i] := X[i]
+    Z[a, b] := Y[a, b]
+  }) env with
+  | .error e => throwError s!"diagonal read: {e}"
+  | .ok out => match out["Z"]? with
+    | some Z =>
+        unless DenseTensor.approxEq Z (tensorOf [2,2] [1,0, 0,2]) do
+          throwError s!"diagonal read wrong: shape={repr Z.shape} data={repr Z.data}"
+    | none => throwError "diagonal read: no Z"
+
 end LeanNCD.Eval
