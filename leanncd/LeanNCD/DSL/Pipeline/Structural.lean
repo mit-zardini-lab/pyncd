@@ -149,12 +149,16 @@ private def stmtReads (s : Stmt) : List (String × Nat) :=
         | .iverson _  => none))
   | .recurMorphism _ _ _ => []
 
-/-- The produced (dedup'd free-axis uid) rank of a stmt's LHS — matches what `tensorAxes` publishes
-    for its producer step. Used to arity-check reads of produced-but-undeclared intermediates. -/
+/-- The produced (published) rank of a stmt's LHS — what a reader's arity must match. An affine LHS
+    becomes a `scatter` in `lowerArith` (predicate `LHSSlot.isAffine`) that publishes its full
+    placement rank (`ls.length`, e.g. `Out[2*i,2*j]` ⇒ 2); a non-affine LHS publishes the dedup'd
+    free-axis count (what `tensorAxes` emits, e.g. `Y[i,i]` ⇒ 1). Used to arity-check reads of
+    produced-but-undeclared intermediates. -/
 private def stmtLhsRank (s : Stmt) : Nat :=
   match s with
   | .assign _ ls _ | .scatter _ ls _ _ =>
-      (ls.filterMap (fun
+      if ls.any (fun sl => match sl with | .affine _ => true | _ => false) then ls.length
+      else (ls.filterMap (fun
         | .free a | .freeNorm a | .iterNext a => some a.uid
         | .iterAt a _ => some a.uid
         | .affine _   => none)).eraseDups.length

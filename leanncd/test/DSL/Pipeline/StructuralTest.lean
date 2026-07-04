@@ -230,6 +230,25 @@ run_cmd do
   | .ok _ _    => pure ()
   | .error e _ => throwError s!"correct-arity intermediate read should pass: {repr e}"
 
+-- checkReadRanks: reading an affine-LHS (→ scatter) producer at its SLOT rank passes the guard —
+-- the produced rank of an affine LHS is its slot count (e.g. Out[2*i,2*i] ⇒ 2), not its free-axis
+-- count (0). Regression for the guard's scatter-rank handling.
+run_cmd do
+  let i : AxisSpec := { name := "i", uid := 0, kind := .real none }
+  let a : AxisSpec := { name := "a", uid := 2, kind := .real none }
+  let b : AxisSpec := { name := "b", uid := 3, kind := .real none }
+  let rp : ResolvedProgram := {
+    decls := [], env := {}, extNames := insert "X" ∅,
+    stmts := [
+      .assign "Out" [.affine (.scale 2 i), .affine (.scale 2 i)]
+        { body := { terms := [{ factors := [.read "X" [.axis i]] }] }, nonlin := .identity },
+      .assign "Z" [.free a, .free b]
+        { body := { terms := [{ factors := [.read "Out" [.axis a, .axis b]] }] }, nonlin := .identity } ],
+    extraStmts := #[] }
+  match checkReadRanks rp |>.run 0 with
+  | .ok _ _    => pure ()
+  | .error e _ => throwError s!"reading affine-scatter output at slot rank should pass: {repr e}"
+
 -- checkDtypes: real-kinded axis in iterAt slot ⇒ iterAxisNotNat.
 run_cmd do
   let l : AxisSpec := { name := "l", uid := 1, kind := .real none }  -- ← real, not nat
