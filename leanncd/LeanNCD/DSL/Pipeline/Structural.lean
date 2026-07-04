@@ -149,6 +149,17 @@ private def stmtReads (s : Stmt) : List (String × Nat) :=
         | .iverson _  => none))
   | .recurMorphism _ _ _ => []
 
+/-- The produced (dedup'd free-axis uid) rank of a stmt's LHS — matches what `tensorAxes` publishes
+    for its producer step. Used to arity-check reads of produced-but-undeclared intermediates. -/
+private def stmtLhsRank (s : Stmt) : Nat :=
+  match s with
+  | .assign _ ls _ | .scatter _ ls _ _ =>
+      (ls.filterMap (fun
+        | .free a | .freeNorm a | .iterNext a => some a.uid
+        | .iterAt a _ => some a.uid
+        | .affine _   => none)).eraseDups.length
+  | .recurMorphism _ _ _ => 0
+
 def checkReadRanks (rp : ResolvedProgram) : FreshM ResolvedProgram := do
   let reads : List (String × Nat) := rp.stmts.flatMap stmtReads
   -- declared tensors: check against DeclEnv
@@ -163,6 +174,16 @@ def checkReadRanks (rp : ResolvedProgram) : FreshM ResolvedProgram := do
       match extRanks[nm]? with
       | none   => extRanks := extRanks.insert nm arity
       | some r => if arity != r then throw (.rankMismatch nm r arity)
+  -- produced-but-undeclared intermediates: no declaration justifies over-indexing, so a read whose
+  -- arity ≠ the produced (dedup'd) rank is malformed (Track A #1). FAIL LOUD rather than route an
+  -- ill-typed reindexing / silently broadcast at eval.
+  let producedRank : HashMap String Nat :=
+    rp.stmts.foldl (fun m s => m.insert s.lhsName (stmtLhsRank s)) {}
+  for (nm, arity) in reads do
+    unless rp.env.contains nm || decide (nm ∈ rp.extNames) do
+      match producedRank[nm]? with
+      | some r => if arity != r then throw (.rankMismatch nm r arity)
+      | none   => pure ()
   return rp
 
 /-! ## The `checkDtypes` phase

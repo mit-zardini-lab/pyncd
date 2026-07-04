@@ -197,6 +197,39 @@ run_cmd do
   | .error e _                       => throwError s!"wrong error: {repr e}"
   | .ok _ _                          => throwError "expected rankMismatch for inconsistent external reads"
 
+-- checkReadRanks: over-indexed read of a produced-but-undeclared intermediate ⇒ rankMismatch
+-- (Track A #1 guard: T produced rank 1, read at arity 2, no declaration to justify the higher rank).
+run_cmd do
+  let i : AxisSpec := { name := "i", uid := 0, kind := .real none }
+  let k : AxisSpec := { name := "k", uid := 1, kind := .real none }
+  let rp : ResolvedProgram := {
+    decls := [], env := {}, extNames := insert "A" ∅,
+    stmts := [
+      .assign "T" [.free i]
+        { body := { terms := [{ factors := [.read "A" [.axis i]] }] }, nonlin := .identity },
+      .assign "Y" [.free i, .free k]
+        { body := { terms := [{ factors := [.read "T" [.axis i, .axis k]] }] }, nonlin := .identity } ],
+    extraStmts := #[] }
+  match checkReadRanks rp |>.run 0 with
+  | .error (.rankMismatch "T" 1 2) _ => pure ()
+  | .error e _                       => throwError s!"wrong error: {repr e}"
+  | .ok _ _                          => throwError "expected rankMismatch for over-indexed intermediate read"
+
+-- checkReadRanks: reading the produced intermediate at its produced rank passes.
+run_cmd do
+  let i : AxisSpec := { name := "i", uid := 0, kind := .real none }
+  let rp : ResolvedProgram := {
+    decls := [], env := {}, extNames := insert "A" ∅,
+    stmts := [
+      .assign "T" [.free i]
+        { body := { terms := [{ factors := [.read "A" [.axis i]] }] }, nonlin := .identity },
+      .assign "Y" [.free i]
+        { body := { terms := [{ factors := [.read "T" [.axis i]] }] }, nonlin := .identity } ],
+    extraStmts := #[] }
+  match checkReadRanks rp |>.run 0 with
+  | .ok _ _    => pure ()
+  | .error e _ => throwError s!"correct-arity intermediate read should pass: {repr e}"
+
 -- checkDtypes: real-kinded axis in iterAt slot ⇒ iterAxisNotNat.
 run_cmd do
   let l : AxisSpec := { name := "l", uid := 1, kind := .real none }  -- ← real, not nat
