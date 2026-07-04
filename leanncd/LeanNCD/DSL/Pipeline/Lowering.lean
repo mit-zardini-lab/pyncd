@@ -449,6 +449,18 @@ theorem ScanStmt.elaborateReindexings_domLen (sc : ScanStmt) :
   obtain ⟨rf, _, rfl⟩ := hm
   rfl
 
+/-- Read-arity well-formedness (Track A #1): every INTERNAL read `rf` (routed to producer step `j`,
+    slot `slot`) provides as many index positions as the producer publishes axes. This is an UPSTREAM
+    property — `checkReadRanks` pins read arity to the declaration, and the producer's published rank
+    (`tensorAxes (slotStmt slot)`) is that declaration's axis count — NOT a routing invariant, so it
+    is carried as an explicit hypothesis (cf. the acset `WellShaped` and `topo_bound`'s `hrc`). Its
+    full derivation from `checkReadRanks`/`env` is a separate effort (edge cases: repeated LHS axes,
+    undeclared intermediates). -/
+def ScanStmt.readArityOk (ns : Std.HashMap String (Nat × Nat)) (stmts : List ScanStmt)
+    (sc : ScanStmt) : Prop :=
+  ∀ rf ∈ sc.inputReadFactors, ∀ j slot, ns[rf.1]? = some (j, slot) →
+    rf.2.length = (tensorAxes ((stmts.getD j default).slotStmt slot)).length
+
 /-- The output weave of slot `s` over the step's combined `degree`: fixed on `writes[s]`'s retained
     (LHS) axes, tiled elsewhere. -/
 def ScanStmt.slotWeave (sc : ScanStmt) (s : Nat) : WeaveShapeP :=

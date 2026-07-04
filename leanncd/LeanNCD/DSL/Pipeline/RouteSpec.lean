@@ -663,6 +663,30 @@ theorem buildStep_inputWeaves_allFixed
       simp only [List.length_map]
       exact fixedAxesP_length_map_fixed _ _
 
+/-- Track A #1 (codomain half): every reindexing's `codLen` equals the rank (`fixedAxesP` length) of
+    its input weave — i.e. the reindexing is well-typed against the weave it feeds (`StMat degree
+    (inputWeaves i).targetAxes`). External reads hold by construction; internal reads use the upstream
+    `readArityOk` (read arity = producer rank). Closes #1 at the routing layer, modulo the
+    explicitly-stated arity hypothesis. -/
+theorem buildStep_reindexings_codLen_eq_inputRank
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w : List Wire}
+    (h : buildStep ns ext stmts sc = .ok (b, w)) (harity : sc.readArityOk ns stmts) :
+    b.reindexings.map (·.codLen) = b.inputWeaves.map (fun w => (fixedAxesP w).length) := by
+  rw [buildStep_reindexings h, buildStep_inputWeaves h]
+  unfold ScanStmt.elaborateReindexings
+  rw [List.map_map, List.map_map]
+  apply List.map_congr_left
+  intro rf hrf
+  simp only [Function.comp_apply]
+  cases hns : ns[rf.1]? with
+  | none =>
+      rw [fixedAxesP_length_map_fixed, List.length_range]
+  | some p =>
+      obtain ⟨j, slot⟩ := p
+      rw [fixedAxesP_length_map_fixed]
+      exact harity rf hrf j slot hns
+
 /-- Track A (#1), route level: every input weave of every step in a routed program is all-`fixed`
     (`(fixedAxesP w).length = w.length`). Lifts `buildStep_inputWeaves_allFixed` over `routeCore`. -/
 theorem routeCore_inputWeaves_allFixed {sp : ScheduledProgram}
