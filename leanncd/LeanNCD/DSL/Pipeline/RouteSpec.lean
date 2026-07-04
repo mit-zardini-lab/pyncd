@@ -379,6 +379,26 @@ theorem buildStep_output_fixedAxes
   rw [hcons]
   rfl
 
+/-- `fixedAxesP` collects exactly the fixed slots, so its length is the fixed-slot count
+    (`weaveRank`). -/
+theorem fixedAxesP_length_eq_weaveRank (w : WeaveShapeP) :
+    (fixedAxesP w).length = weaveRank w := by
+  unfold fixedAxesP weaveRank
+  rw [List.length_filterMap_eq_countP]
+  congr 1
+  funext s
+  cases s <;> rfl
+
+/-- Track A (M3, "reduction removes only contracted axes"): a step's output weave keeps exactly the
+    retained (LHS) axes — `weaveRank = |retained|` — so the slots it tiles (reduces) are exactly the
+    contracted (degree-minus-retained) axes. The count form of `buildStep_output_fixedAxes`. -/
+theorem buildStep_output_reducesOnlyContracted
+    {ns : Std.HashMap String (Nat × Nat)} {ext : Std.HashMap String Nat} {stmts : List ScanStmt}
+    {sc : ScanStmt} {b : BrBaseP} {w : List Wire} {s : Nat}
+    (h : buildStep ns ext stmts sc = .ok (b, w)) (hs : s < sc.outputs.length) :
+    weaveRank (b.outputWeaves.getD s []) = (tensorAxes (sc.slotStmt s)).length := by
+  rw [← fixedAxesP_length_eq_weaveRank, buildStep_output_fixedAxes h hs]
+
 /-- M2 bridge: a built step's reindexings are exactly the pre-route artifact `elaborateReindexings`.
     `route` is thus provably faithful to the standalone elaboration (whose invariants — well-formed,
     domain-rank — are proved independently in `Lowering.lean`); consuming the artifact is M4. -/
