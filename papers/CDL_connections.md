@@ -72,6 +72,15 @@ and then formalize those examples with local and monadic equivariance laws.
 After that, we transition to other useful `D`-monad families that are
 index-structural but not symmetry monads.
 
+Companion container-indexed view: [generalized_tensors.md §10](../generalized_tensors.md#10-symmetry-actions-on-container-positions).
+Useful crosswalk:
+- core action-on-indices idea: [§10.1](../generalized_tensors.md#101-core-idea-symmetries-act-on-poscs),
+- permutation/set symmetry: [§10.2](../generalized_tensors.md#102-setlist-symmetry-permutation-equivariance),
+- translation/grid symmetry: [§10.3](../generalized_tensors.md#103-grid-symmetry-translation-equivariance),
+- graph automorphism symmetry: [§10.4](../generalized_tensors.md#104-graphcontainer-automorphism-symmetry),
+- scoped mask/sum constraints: [§10.5](../generalized_tensors.md#105-masksum-containers-and-scoped-symmetry),
+- compiler obligations/checks: [§10.6](../generalized_tensors.md#106-compiler-obligations-from-the-combined-view).
+
 #### Invariance/equivariance under a symmetry monad
 
 **Without extra structure.** Without imposing a global target monad, a program
@@ -111,6 +120,10 @@ This is often enough for DSL checking: axis declarations specify admissible
 `D`-morphisms, tensor declarations specify how each object transforms, and a
 statement assertion asks the generated `C`-morphism or compiled map in `V` to
 commute with those chosen maps.
+
+Connection to generalized containers: this is the same commuting-law notion used
+in [generalized_tensors.md §10.1](../generalized_tensors.md#101-core-idea-symmetries-act-on-poscs),
+where actions are phrased directly on `Pos(C,s)`.
 
 **Extra structure.** To turn these local laws into a uniform monadic semantics,
 impose extra structure. Let `T_D` be the chosen `D`-side symmetry monad. A
@@ -189,6 +202,12 @@ The surface DSL should stay generic, with symmetry claims scoped to the chosen
 - **Statement assertions constrain the operation obligation.** They require a
   definition, contraction, reduction, `Scan`, or `Route` to commute with the
   declared actions and generate the proof/lowering side conditions.
+
+This same scoped split is mirrored in the container-focused presentation:
+[generalized_tensors.md §10.2](../generalized_tensors.md#102-setlist-symmetry-permutation-equivariance)
+through [§10.5](../generalized_tensors.md#105-masksum-containers-and-scoped-symmetry),
+with explicit treatment of permutation, translation, graph automorphisms, and
+mask/sum scope boundaries.
 
 For example, a permutation-scoped DSL could look like this. Write `ρ(π)`
 for the `D`-morphism induced by a permutation `π`.
@@ -318,6 +337,11 @@ operator-by-operator.
 Place it after structural lowering/unification and before final backend
 lowering.
 
+Direct companion checklist:
+[generalized_tensors.md §10.6](../generalized_tensors.md#106-compiler-obligations-from-the-combined-view),
+which enumerates typed action checks, commuting checks, invariance checks,
+scatter coherence, scoped-branch checks, and diagnostics.
+
 Typical local checks:
 
 - elementwise ops: preserve when input/output actions match;
@@ -352,6 +376,10 @@ Common symmetry-oriented choices for `T_D` are:
 
 These snippets use proposed extension syntax; exact DSL spelling remains
 unsettled.
+
+For worked container-indexed examples in the same style (GNN permutation
+equivariance/invariance and 2D CNN translation equivariance), see
+[generalized_tensors.md §10.6](../generalized_tensors.md#106-compiler-obligations-from-the-combined-view).
 
 **Group action (translations).**
 ```lean
