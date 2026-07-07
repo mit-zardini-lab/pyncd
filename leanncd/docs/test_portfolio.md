@@ -33,6 +33,7 @@ concrete `DenseTensor`).
 - [15. Adversarial — tricky-but-valid edge cases (should pass)](#15-adversarial--tricky-but-valid-edge-cases-should-pass)
 - [16. Coverage matrix (feature × where exercised)](#16-coverage-matrix-feature--where-exercised)
 - [17. Decisions (resolved) & follow-ups](#17-decisions-resolved--follow-ups)
+- [18. What needs fixing](#18-what-needs-fixing-as-of-2026-07-07)
 
 ---
 
@@ -59,22 +60,26 @@ Per the agreed scope:
 - **Expected-fail mechanism:** each `[R]`/`[F]` case asserts the **exact** `.error` inside a
   `run_cmd do` (match on the specific `CompileError`/`EvalError`; `throwError` otherwise). No
   reliance on a `#expect_failure`-style macro (Lean has none).
+- **Test framework (2026-07-07):** adopted a **hybrid LSpec strategy**. Numeric/property/shape
+  `[N]`/`[E]` assertions use `#lspec group "§N — …"` with named `test "ID" (evalEqB/evalPredB/evalShapeB …)` entries (LSpec reports all failures in a group, not just the first). Exact `CompileError`/`EvalError` constructor matches stay as `run_cmd do` — LSpec cannot catch elaboration-layer errors. Parse-level rejects remain documentation comments. `Harness.lean` exposes both layers from one import.
 - **Advanced/generative domains added** (§12b): diffusion, mixture-of-experts, state-space
   models, positional encodings, contrastive — all core programs probed against HEAD.
 
-**Implemented (2026-07-04):** all 17 files below are written, registered in `lakefile.toml`,
-and build green via `lake build Tests` (105 `run_cmd` assertions total; every numeric value was
-hand-computed independently, then confirmed correct by the green build).
+**Implemented (2026-07-04, updated 2026-07-07):** all 17 files below are written, registered in `lakefile.toml`,
+and build green via `lake build Tests`. 105 assertions total; every numeric value was hand-computed
+independently. Migrated to a **hybrid LSpec strategy** (2026-07-07): 14 runtime test files use
+`#lspec group` with named `test` entries for grouped, named failure reporting; `RejectTest` and `KnownGapTest`
+are unchanged; `RecurrenceTest` is hybrid (RC4 stays `run_cmd do`, remainder in `#lspec group`).
 
 | File | Section | IDs implemented | IDs skipped ([✔]/[F]/parse-fail) |
 |------|---------|------------------|-----------------------------------|
-| [`Harness.lean`](../test/Eval/Portfolio/Harness.lean) | — | shared helpers: `assertEval`, `assertEvalError`, `assertCompileError`, `assertEvalPred`, `assertShape`, `rowsSumToOne`, `tl` | — |
+| [`Harness.lean`](../test/Eval/Portfolio/Harness.lean) | — | shared helpers — `run_cmd` layer: `assertEval`, `assertEvalError`, `assertCompileError`, `assertEvalPred`, `assertShape`; LSpec layer: `evalEqB`, `evalPredB`, `evalShapeB`; shared: `rowsSumToOne`, `tl`; `import LSpec`, `open LSpec` | — |
 | [`LinAlgTest.lean`](../test/Eval/Portfolio/LinAlgTest.lean) | §2 | LA1, LA3–LA9 | LA2 `[✔]` |
 | [`FeedforwardTest.lean`](../test/Eval/Portfolio/FeedforwardTest.lean) | §3 | FF1–FF4 | — |
 | [`AttentionTest.lean`](../test/Eval/Portfolio/AttentionTest.lean) | §4 | AT1, AT3–AT12 | AT2 `[✔]` |
 | [`ConvPoolTest.lean`](../test/Eval/Portfolio/ConvPoolTest.lean) | §5 | CV1, CV2, CV4–CV9 | CV3 `[✔]` |
 | [`NormTest.lean`](../test/Eval/Portfolio/NormTest.lean) | §6 | NM1–NM5 | — |
-| [`RecurrenceTest.lean`](../test/Eval/Portfolio/RecurrenceTest.lean) | §7 | RC2–RC6 (RC4 reject; RC5/RC6 pin known-gap wrong output) | RC1 `[✔]` |
+| [`RecurrenceTest.lean`](../test/Eval/Portfolio/RecurrenceTest.lean) | §7 | RC2–RC6 (RC4 reject via `run_cmd do`; RC5/RC6 pin known-gap wrong output via `#lspec`) — **hybrid file** | RC1 `[✔]` |
 | [`GnnScatterTest.lean`](../test/Eval/Portfolio/GnnScatterTest.lean) | §8, §8b | GN1–GN4, SC1–SC8 | GN5/GN6 `[F]` (comment) |
 | [`RelationalTest.lean`](../test/Eval/Portfolio/RelationalTest.lean) | §9 | RL1–RL4, RL6–RL8 | RL5 `[✔]` |
 | [`StatsLossTest.lean`](../test/Eval/Portfolio/StatsLossTest.lean) | §10 | ST1–ST5 | ST6 `[F]` (comment) |
@@ -82,12 +87,13 @@ hand-computed independently, then confirmed correct by the green build).
 | [`TensorNetTest.lean`](../test/Eval/Portfolio/TensorNetTest.lean) | §12 | TN1–TN4 | — |
 | [`GenerativeTest.lean`](../test/Eval/Portfolio/GenerativeTest.lean) | §12b | DF1–DF3, ME1–ME3, SS1–SS3, PE1, CL1–CL2 | DF4/PE2/PE3 `[F]` trig; ME4 `[F]` gather; CL3 `[F]` l2norm; CL4 `[F]` log; SS4 → `RejectTest` (comments) |
 | [`ClassicalMLTest.lean`](../test/Eval/Portfolio/ClassicalMLTest.lean) | §12c | CM1–CM6 | CM7–CM9 `[F]` (comment) |
-| [`RejectTest.lean`](../test/Eval/Portfolio/RejectTest.lean) | §13 | RJ3, RJ4, RJ7, SS4/RC4 | RJ1/RJ2/RJ5/RJ8/RJ10 (parse-fail or unconstructible — comment); RJ6/RJ9 dropped (don't reject) |
+| [`RejectTest.lean`](../test/Eval/Portfolio/RejectTest.lean) | §13 | RJ3, RJ4, RJ7, SS4/RC4 — **unchanged, `run_cmd do` only** (exact `CompileError`/`EvalError` constructor matches) | RJ1/RJ2/RJ5/RJ8/RJ10 (parse-fail or unconstructible — comment); RJ6/RJ9 dropped (don't reject) |
 | [`KnownGapTest.lean`](../test/Eval/Portfolio/KnownGapTest.lean) | §14 | documentation only — cross-references all 19 `KG-*` gaps to their live regression test (if any) | — |
 | [`EdgeCaseTest.lean`](../test/Eval/Portfolio/EdgeCaseTest.lean) | §15 | EC1–EC7, EC10–EC15 | EC8 `[✔]`; EC9 parse-fail (comment) |
 
 Run the whole portfolio with `cd leanncd && lake build Tests` (builds the full pre-existing suite
-too) or target one file, e.g. `lake build Eval.Portfolio.AttentionTest`.
+too) or target one file, e.g. `lake build Eval.Portfolio.AttentionTest`. LSpec groups emit named
+`✓ ∃: ID` lines per test case; `run_cmd` failures surface as build errors as before.
 
 ### Legend
 
@@ -526,3 +532,66 @@ Follow-ups for the implementation plan:
   or documentation-only, since a parse error can't be caught by `run_cmd`).
 - **Read-vs-LHS look-ahead asymmetry** (`l + 1` in reads vs `l +1` in scan-LHS) is a real
   gotcha worth its own tiny `[S]` test + a note in the DSL docs.
+
+---
+
+## 18. What needs fixing (as of 2026-07-07)
+
+`lake build Tests` exits 0, but that does **not** mean the DSL is correct in all cases. Some
+tests deliberately pin *wrong* evaluator output as regression alarms. This section distinguishes
+what genuinely needs to be fixed from what is an accepted limitation.
+
+### A. Soundness bugs — silent wrong output, no error raised ⚠
+
+These are the most dangerous issues: the evaluator accepts the program, produces output, but the
+output is mathematically wrong. The test suite pins the current wrong value so the test turns red
+the moment the bug is fixed — treat them as **failing tests in disguise**.
+
+| ID | Bug | Live regression test | Current (wrong) output | Correct output |
+|----|-----|---------------------|------------------------|----------------|
+| **KG-scanagg** | `maxreduce` inside a scan step is silently replaced by a sum — the aggregation operator is dropped with no error | `RC5` in `RecurrenceTest` | `[2, 8, 32]` (sum-step `M×4`) | `[2, 6, 18]` (max-step `M×3`) |
+| **KG-2dscan** | A 2-D / nested recurrence (two advancing axes) collapses to a 1-D scan with no error — the base case on the second axis is overwritten | `RC6` in `RecurrenceTest` | `[[0,1],[0,1]]` | `[[0,0],[0,1]]` (correct grid-DP) |
+
+**Recommended fix for both:** the scan-lowering pass should **reject** programs that hit these
+cases (`causalityViolation` or a new `unsupportedScanAgg` / `unsupportedMultiAxisScan` error)
+rather than silently degrading. Accepting a program and computing the wrong answer is worse than
+refusing it.
+
+### B. Semantic sharp edge — silent unexpected behavior, arguably by design
+
+| ID | Issue | Live test | Recommended action |
+|----|-------|-----------|--------------------|
+| **Equation-level summation** | A multi-term RHS sums *every* free variable not on the LHS across the **whole** equation, not per product term — so a `k`-less term like `a[i]` in `Y[i] := a[i] + W[i,k]·v[k]` is broadcast by `|k|`. This silently gave wrong results in CM1 and CM3 first drafts. | `EC15` in `EdgeCaseTest` (pins current behavior) | Decide whether this is intended Datalog semantics or a bug. If intended, add a **lint warning** whenever `+` joins terms with unequal free-axis sets. If unintended, fix the evaluator and update EC15. |
+
+### C. Missing primitives — features the DSL cannot express at all
+
+These are **not** bugs in the evaluator — the evaluator is correct for what it accepts. They are
+gaps in the DSL's expressive power. Each is documented in §14 (`KG-*`). No live test can cover
+them (there is no expressible program to test). Priority order for practical ML coverage:
+
+| Priority | Gap | Blocks |
+|----------|-----|--------|
+| High | **KG-log** — no `log`/`exp` | Cross-entropy loss, log-likelihood, GELU, InfoNCE |
+| High | **KG-activation** — only `relu`; no `sigmoid`/`tanh` | LSTM/GRU gates, logistic regression, GAT |
+| High | **KG-gather** — no data-dependent gather/scatter | Embedding lookup, edge-list scatter-add, top-k routing |
+| High | **KG-div** — no per-element division | Degree-normalized GNN (D⁻¹AX), LayerNorm variance |
+| Medium | **KG-trig** — no `sin`/`cos` | Sinusoidal PE, RoPE, diffusion timestep embeddings |
+| Medium | **KG-l2norm** — only L1 `normalize` | Cosine similarity, RMSNorm, unit-norm embeddings |
+| Medium | **KG-sqrt** — no `sqrt` | Euclidean distance, std dev, batch-norm scaling |
+| Medium | **KG-min** — no `min` aggregation / additive-combine | Shortest path, Viterbi, DTW, k-means argmin |
+| Lower | **KG-solve** — no linear solve/inverse | Closed-form regression, PCA, normalizing-flow log-det |
+| Lower | **KG-idxvalue** — index arithmetic yields booleans only | ALiBi, relative-position numeric bias |
+| Lower | **KG-datamask** — `where` clauses are index predicates only | GAT data-driven masked softmax |
+| Lower | **KG-reshape** — no multi-axis-into-one-slot LHS | Reshape/flatten, Kronecker, im2col |
+| Lower | **KG-functor** — axes are flat `Fin n` only | Generalized transformers over non-sequence data |
+| Lower | **KG-multiout** — outputs must be at the tail statement | Multi-head split, auxiliary losses |
+| Lower | **KG-recur** — `recurMorphism`/`scanPre` AST-only | Programmatic recurrences |
+
+### D. How to track progress
+
+- **A (soundness bugs):** fix the scan-lowering pass; the live `RC5`/`RC6` tests will flip from
+  passing to failing, then be updated to assert the correct output.
+- **B (sharp edge):** a language-owner decision on equation-level summation semantics; update
+  `EC15` accordingly.
+- **C (missing primitives):** each closed gap should have a new `[N]` test added and its `KG-*`
+  entry moved from §14 to "Confirmed NON-gaps" at the bottom of §14.
