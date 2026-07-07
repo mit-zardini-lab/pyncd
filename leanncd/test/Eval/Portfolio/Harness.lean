@@ -1,4 +1,5 @@
 import LeanNCD.Eval.Eval
+import LSpec
 /-!
 # Portfolio test harness
 
@@ -16,6 +17,7 @@ caught by `run_cmd`.
 -/
 namespace LeanNCD.Eval
 open Std Lean Elab Command
+open LSpec
 
 /-- A dense tensor from a shape and row-major data. -/
 def tl (shape : List Nat) (xs : List Float) : DenseTensor := ⟨shape, xs.toArray⟩
@@ -79,5 +81,28 @@ def rowsSumToOne (t : DenseTensor) : Bool :=
       (List.range n).all (fun r =>
         let s := (List.range w).foldl (fun acc c => acc + t.data.getD (r*w+c) 0.0) 0.0
         Float.abs (s - 1.0) < 1e-6)
+
+/-- Pure Bool checker for LSpec `test` blocks: eval and compare output. -/
+def evalEqB (prog : TLProgram) (env : HashMap String DenseTensor)
+    (key : String) (expect : DenseTensor) : Bool :=
+  match TLProgram.eval prog env with
+  | .error _ => false
+  | .ok out => match out[key]? with
+    | some t => t.shape == expect.shape && DenseTensor.approxEq t expect
+    | none => false
+
+/-- Pure Bool checker for LSpec `test` blocks: eval and apply a predicate. -/
+def evalPredB (prog : TLProgram) (env : HashMap String DenseTensor)
+    (key : String) (p : DenseTensor → Bool) : Bool :=
+  match TLProgram.eval prog env with
+  | .error _ => false
+  | .ok out => (out[key]?.map p).getD false
+
+/-- Pure Bool checker for LSpec `test` blocks: eval and check output shape. -/
+def evalShapeB (prog : TLProgram) (env : HashMap String DenseTensor)
+    (key : String) (shape : List Nat) : Bool :=
+  match TLProgram.eval prog env with
+  | .error _ => false
+  | .ok out => (out[key]?.map (·.shape == shape)).getD false
 
 end LeanNCD.Eval
