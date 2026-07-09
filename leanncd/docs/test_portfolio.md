@@ -79,7 +79,7 @@ are unchanged; `RecurrenceTest` is hybrid (RC4 stays `run_cmd do`, remainder in 
 | [`AttentionTest.lean`](../test/Eval/Portfolio/AttentionTest.lean) | §4 | AT1, AT3–AT12 | AT2 `[✔]` |
 | [`ConvPoolTest.lean`](../test/Eval/Portfolio/ConvPoolTest.lean) | §5 | CV1, CV2, CV4–CV9 | CV3 `[✔]` |
 | [`NormTest.lean`](../test/Eval/Portfolio/NormTest.lean) | §6 | NM1–NM5 | — |
-| [`RecurrenceTest.lean`](../test/Eval/Portfolio/RecurrenceTest.lean) | §7 | RC2–RC8 (RC4 reject via `run_cmd do`; RC5 asserts correct output — KG-scanagg fixed; RC6 asserts correct output — KG-2dscan fixed; RC6-compile checks (via `run_cmd do`) that the 2-D scan lowers to a single well-formed rank-2 Br `.scan` step; RC7 `minreduce`-in-scan; RC8 3-D nested scan) — **hybrid file** | RC1 `[✔]` |
+| [`RecurrenceTest.lean`](../test/Eval/Portfolio/RecurrenceTest.lean) | §7 | RC2–RC10 (RC4/RC9 reject via `run_cmd do`; RC5 asserts correct output — KG-scanagg fixed; RC6 asserts correct output — KG-2dscan fixed; RC6-compile checks (via `run_cmd do`) that the 2-D scan lowers to a single well-formed rank-2 Br `.scan` step; RC7 `minreduce`-in-scan; RC8 3-D nested scan; RC9 rejects a heterogeneous coupled multi-axis scan (`inconsistentScanAxes`); RC10 multi-axis `maxreduce`) — **hybrid file** | RC1 `[✔]` |
 | [`GnnScatterTest.lean`](../test/Eval/Portfolio/GnnScatterTest.lean) | §8, §8b | GN1–GN4, SC1–SC8 | GN5/GN6 `[F]` (comment) |
 | [`RelationalTest.lean`](../test/Eval/Portfolio/RelationalTest.lean) | §9 | RL1–RL4, RL6–RL8 | RL5 `[✔]` |
 | [`StatsLossTest.lean`](../test/Eval/Portfolio/StatsLossTest.lean) | §10 | ST1–ST5 | ST6 `[F]` (comment) |
@@ -222,6 +222,8 @@ too) or target one file, e.g. `lake build Eval.Portfolio.AttentionTest`. LSpec g
 | RC6 | **2D / nested recurrence** (grid-DP / PixelRNN) `G[r +1, c +1] := G[r,c] + A[r,c]` | base G=0, A=ones(2×2) → `[[0,0],[0,1]]` (only the fully-advanced cell `G[1,1]` is written; boundary cells `r=0`/`c=0` keep the zero-default) | **FIXED (KG-2dscan)**: both advancing iteration axes are now tracked through the scan; was silently collapsing to a 1-D scan (`[[0,1],[0,1]]`, overwriting the second axis's base case) before the fix | `[N]` |
 | RC7 | `M[j, l +1] := minreduce(M[j,l] · W[j,k])` (`minreduce` in a scan step) | `X=[2], W=[[2,3]]` → `[2,4,8]` (min-step `M×2`) | **min-agg in a scan** (KG-min; mirrors RC5) — the scan step honors `minreduce` via the KG-scanagg plumbing | `[N]` |
 | RC8 | **3-D nested scan** `G[a +1, b +1, d +1] := G[a,b,d] + T[a,b,d]` | axes a,b,d size 2; base S=0, T=ones(2×2×2) → 2×2×2 tensor with a single `1` at `[1,1,1]`, all boundary cells `0` | **generality of n-D support** (KG-2dscan): confirms multi-axis scans generalize past the 2-D case (RC6) to 3 axes, with the same zero-default boundary semantics | `[N]` |
+| RC9 | **heterogeneous coupled multi-axis scan** — `H[j, c +1]` (advances over `{c}`) coupled via shared `c` with `G[r +1, c +1]` (over `{r,c}`) | compile → `inconsistentScanAxes "H"` | **FAIL-LOUD guard (design §5)**: coupled state tensors advancing over *different* axis sets are rejected, not silently mis-addressed. Homogeneous couplings (RC1, both over `l`) and single-tensor multi-axis scans (RC6/RC8) are unaffected | `[R]` |
+| RC10 | **multi-axis scan with a tropical step** `G[r +1, c +1] := maxreduce(G[r,c] · W[r,c,k])` | Z=`[2,5]` (c=0 column base), W[0,0,:]=`[1,3]` → `[[2,0],[5,6]]` (`G[1,1]=max(2·1,2·3)=6`, not sum `8`) | **KG-scanagg × KG-2dscan interaction**: `maxreduce` agg inside a 2-D scan (agg-in-scan + multi-axis together); tropical max honored under zero-default boundaries | `[N]` `[E]` |
 
 > RC4/RC5/RC6 were the "verify" cases — confirmed against HEAD (2026-07-04); RC5 and RC6 fixed
 > 2026-07-08.
@@ -241,6 +243,11 @@ too) or target one file, e.g. `lake build Eval.Portfolio.AttentionTest`. LSpec g
 > generalizes to 3 axes. `RC6-compile` additionally checks at the compile level that the 2-D scan
 > lowers to a single well-formed Br step with `.op = .scan` and `degree.length == 2`, i.e. both
 > iteration axes survive lowering.
+> **RC9/RC10 (2026-07-08 follow-up):** RC9 pins the fail-loud guard (design §5) — a *heterogeneous*
+> coupled multi-axis scan (coupled tensors advancing over different axis sets) is rejected with
+> `inconsistentScanAxes` rather than silently mis-addressed. RC10 exercises the two fixes together
+> — a `maxreduce` step inside a 2-D scan — confirming tropical aggregation and multi-axis nesting
+> compose (tropical max honored, zero-default boundaries).
 
 ## 8. Graph / message passing (GNN)
 
@@ -505,7 +512,7 @@ gap is closed — a built-in regression alarm. Cross-referenced above by `KG-*`.
 | relu | scan, MLP | FF2, FF3 |
 | softmax (± mask) | causal attn | AT1, AT4, AT5, NM2, NM3 |
 | normalize (± mask) | normalize | NM1, NM4 |
-| maxreduce / minreduce | max-pool | CV5, GN4, TR3 (max); TR6, TR7, RC7 (min) |
+| maxreduce / minreduce | max-pool | CV5, GN4, TR3 (max); TR6, TR7, RC7 (min); RC5 (max-in-1-D-scan), RC10 (max-in-multi-axis-scan) |
 | Iverson / predicates | band, masked-agg | RL1–RL7, RC3 |
 | Affine reads (conv/dilation/look-back) | strided conv, look-back | CV1,CV2,CV4, EC1,EC2,EC12 |
 | Scatter (affine/diagonal write) | upsample | EC7, EC9 |
