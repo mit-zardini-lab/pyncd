@@ -80,11 +80,13 @@ inductive BrOp
   | scan       -- recurrent scan (general)
   | scanAffine -- nonlinearity-free scan (Prop 8.7, O(log N) parallel prefix)
   | scanPre    -- scan step from recurMorphism escape hatch
+  | minreduce  -- tropical min contraction (×, min, +∞)
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
 
 def BrOp.toString : BrOp → String
   | .contract   => "contract"
   | .maxreduce  => "maxreduce"
+  | .minreduce  => "minreduce"
   | .scatter    => "scatter"
   | .relu       => "relu"
   | .softmax    => "softmax"

@@ -100,6 +100,10 @@ def Combine.bool : Combine := ⟨min, max, 0.0⟩
     across terms and contracted axes. Identity is `−∞` so all-negative inputs reduce correctly. -/
 def Combine.max : Combine := ⟨(· * ·), fun (a b : Float) => Max.max a b, -1.0 / 0.0⟩
 
+/-- The tropical min contraction `(×, min, +∞)`: multiply factors within a term, then take min
+    across terms and contracted axes. Identity is `+∞` so all-positive inputs reduce correctly. -/
+def Combine.min : Combine := ⟨(· * ·), fun (a b : Float) => Min.min a b, 1.0 / 0.0⟩
+
 /-- The declared name of a `Decl`. -/
 def declName : Decl → String
   | .tensor n _      => n
@@ -108,10 +112,11 @@ def declName : Decl → String
   | .axis ax _       => ax.name
 
 /-- Pick the `Combine` for an output given its decl and the RHS aggregation op.
-    Priority: `agg = .max` ⇒ tropical max; `predicate` ⇒ bool; else real. -/
+    Priority: `agg = .max` ⇒ tropical max; `agg = .min` ⇒ tropical min; `predicate` ⇒ bool; else real. -/
 def combineFor (decls : List Decl) (nm : String) (agg : AggOp) : Combine :=
   match agg with
   | .max => Combine.max
+  | .min => Combine.min
   | .sum => match decls.find? (fun d => declName d == nm) with
       | some (.predicate _ _) => Combine.bool
       | _                     => Combine.real
@@ -131,8 +136,10 @@ def evalAssignDtyped (decls : List Decl)
     (e.g. the iteration axis of a scan, pinned to the current slice `l`). The seeded UIDs are
     excluded from BOTH the free (output) axes and the contracted axes; every per-output coord is
     seeded with these fixed values. Output shape/order follows the NON-seeded free slots.
-    Reuses the ℝ contraction `(*, +, 0)`. -/
-def evalAssignSeeded (env : HashMap String DenseTensor) (sizes : HashMap UID Nat)
+    Uses the caller-supplied contraction `(mul, combine, unit0)`, so a `maxreduce` scan step
+    reduces with tropical max — not the ℝ sum (KG-scanagg). -/
+def evalAssignSeeded (mul : Float → Float → Float) (combine : Float → Float → Float) (unit0 : Float)
+    (env : HashMap String DenseTensor) (sizes : HashMap UID Nat)
     (seed : HashMap UID Int) (nm : String) (slots : List LHSSlot) (rhs : RHSExpr) :
     Except EvalError (String × DenseTensor) := do
   for rn in (readNames rhs).eraseDups do
@@ -151,16 +158,16 @@ def evalAssignSeeded (env : HashMap String DenseTensor) (sizes : HashMap UID Nat
     Id.run do
       let baseCoord : HashMap UID Int :=
         (frees.zip fcoord).foldl (fun m (u, v) => m.insert u (Int.ofNat v)) seed
-      let mut acc := 0.0
+      let mut acc := unit0
       for t in rhs.body.terms do
         for cc in cartesian contrSizes do
           let coord := (contr.zip cc).foldl (fun m (u, v) => m.insert u (Int.ofNat v)) baseCoord
           let mut prod := 1.0
           for f in t.factors do
             match gather env coord f with
-            | .ok v    => prod := prod * v
-            | .error _ => prod := prod * 0.0
-          acc := acc + prod
+            | .ok v    => prod := mul prod v
+            | .error _ => prod := mul prod 0.0
+          acc := combine acc prod
       pure acc)
   return (nm, out)
 

@@ -79,11 +79,11 @@ are unchanged; `RecurrenceTest` is hybrid (RC4 stays `run_cmd do`, remainder in 
 | [`AttentionTest.lean`](../test/Eval/Portfolio/AttentionTest.lean) | §4 | AT1, AT3–AT12 | AT2 `[✔]` |
 | [`ConvPoolTest.lean`](../test/Eval/Portfolio/ConvPoolTest.lean) | §5 | CV1, CV2, CV4–CV9 | CV3 `[✔]` |
 | [`NormTest.lean`](../test/Eval/Portfolio/NormTest.lean) | §6 | NM1–NM5 | — |
-| [`RecurrenceTest.lean`](../test/Eval/Portfolio/RecurrenceTest.lean) | §7 | RC2–RC6 (RC4 reject via `run_cmd do`; RC5/RC6 pin known-gap wrong output via `#lspec`) — **hybrid file** | RC1 `[✔]` |
+| [`RecurrenceTest.lean`](../test/Eval/Portfolio/RecurrenceTest.lean) | §7 | RC2–RC7 (RC4 reject via `run_cmd do`; RC5 asserts correct output — KG-scanagg fixed; RC6 pins known-gap wrong output via `#lspec`; RC7 `minreduce`-in-scan) — **hybrid file** | RC1 `[✔]` |
 | [`GnnScatterTest.lean`](../test/Eval/Portfolio/GnnScatterTest.lean) | §8, §8b | GN1–GN4, SC1–SC8 | GN5/GN6 `[F]` (comment) |
 | [`RelationalTest.lean`](../test/Eval/Portfolio/RelationalTest.lean) | §9 | RL1–RL4, RL6–RL8 | RL5 `[✔]` |
 | [`StatsLossTest.lean`](../test/Eval/Portfolio/StatsLossTest.lean) | §10 | ST1–ST5 | ST6 `[F]` (comment) |
-| [`TropicalTest.lean`](../test/Eval/Portfolio/TropicalTest.lean) | §11 | TR3 | TR1/TR2/TR4 `[✔]`; TR5 `[F]` (comment) |
+| [`TropicalTest.lean`](../test/Eval/Portfolio/TropicalTest.lean) | §11 | TR3, TR6, TR7 (`minreduce` added) | TR1/TR2/TR4 `[✔]`; TR5 `[F]` (min-plus half, comment) |
 | [`TensorNetTest.lean`](../test/Eval/Portfolio/TensorNetTest.lean) | §12 | TN1–TN4 | — |
 | [`GenerativeTest.lean`](../test/Eval/Portfolio/GenerativeTest.lean) | §12b | DF1–DF3, ME1–ME3, SS1–SS3, PE1, CL1–CL2 | DF4/PE2/PE3 `[F]` trig; ME4 `[F]` gather; CL3 `[F]` l2norm; CL4 `[F]` log; SS4 → `RejectTest` (comments) |
 | [`ClassicalMLTest.lean`](../test/Eval/Portfolio/ClassicalMLTest.lean) | §12c | CM1–CM6 | CM7–CM9 `[F]` (comment) |
@@ -218,17 +218,19 @@ too) or target one file, e.g. `lake build Eval.Portfolio.AttentionTest`. LSpec g
 | RC2 | simple RNN `S[j,0]:=X0[j]` `S[j,l +1] := relu(S[j,l]·W[j,k])` | 1-feature, W=1 | single scan, self-recurrence | `[N]` |
 | RC3 | prefix-sum via mask `C[i] := X[j] · [j ≤ i]` | X=`[1,2,3]`, `axis i,j = 3` → `[1,3,6]` | **cumulative sum without a scan** (triangular Iverson) | `[N]` `[E]` |
 | RC4 | `S[j, l +1] := S[j, l] + X[j, l + 1]` (scan step reads external at advancing index) | `X=[[1,2,3]]` | **CONFIRMED GAP**: compile → `causalityViolation "S"` | `[R]` |
-| RC5 | `M[j, l +1] := maxreduce(M[j,l] · W[j,k])` (`maxreduce` in a scan step) | `X=[2], W=[[1,3]]` → returns `[2,8,32]`, but max-semantics is `[2,6,18]` | **CONFIRMED SILENT-WRONG**: the `maxreduce` agg is dropped; the step sums | `[F]` |
+| RC5 | `M[j, l +1] := maxreduce(M[j,l] · W[j,k])` (`maxreduce` in a scan step) | `X=[2], W=[[1,3]]` → `[2,6,18]` (max-step `M×3`) | **FIXED (KG-scanagg)**: the scan step now honors the `maxreduce` agg (tropical max); was silently summed to `[2,8,32]` before the fix | `[N]` |
 | RC6 | **2D / nested recurrence** (grid-DP / PixelRNN) `G[r +1, c +1] := G[r,c] + A[r,c]` | base G=0, A=ones → returns `[[0,1],[0,1]]`, correct 2D DP is `[[0,0],[0,1]]` | **CONFIRMED SILENT-WRONG**: two advancing iteration axes collapse to a 1-D scan over one axis (base case on the other axis is overwritten) | `[F]` (KG-2dscan) |
+| RC7 | `M[j, l +1] := minreduce(M[j,l] · W[j,k])` (`minreduce` in a scan step) | `X=[2], W=[[2,3]]` → `[2,4,8]` (min-step `M×2`) | **min-agg in a scan** (KG-min; mirrors RC5) — the scan step honors `minreduce` via the KG-scanagg plumbing | `[N]` |
 
-> RC4/RC5 were the "verify" cases — now confirmed against HEAD (2026-07-04).
+> RC4/RC5 were the "verify" cases — confirmed against HEAD (2026-07-04); RC5 fixed 2026-07-08.
 > **RC4**: a scan step reading an external at the advancing index `l + 1` is rejected with
 > `CompileError.causalityViolation` (the compiler treats any next-index read as a future
 > dependency, even for non-state externals). Author as a reject-test asserting that error.
-> **RC5**: `maxreduce` inside a scan step is **silently ignored** — the step performs a sum
-> contraction and returns `2·(1+3)=8` rather than `max(2·1,2·3)=6`. No error is raised. This
-> is a fail-loud violation (see KG-scanagg in §14); the test should pin the *current* wrong
-> output and be flipped to the correct expected output when the gap is fixed.
+> **RC5 (KG-scanagg, FIXED 2026-07-08)**: `maxreduce` inside a scan step used to be silently
+> ignored — the step performed a sum contraction and returned `2·(1+3)=8` rather than
+> `max(2·1,2·3)=6`. Fixed by threading the aggregator's `Combine` through `evalStmtSlice` /
+> `evalAssignSeeded` (`Eval/Scan.lean`, `Eval/Contract.lean`) so a `maxreduce` step reduces with
+> tropical max `(×, max, −∞)`; RC5 now asserts the correct `[2,6,18]`.
 
 ## 8. Graph / message passing (GNN)
 
@@ -297,7 +299,9 @@ numerically correct. The shared base is a 2× upsample `Out[2*i,2*j] := X[i,j]` 
 | TR2 | `C[i] := maxreduce(A[i,k] · B[k])` | max of products | max-times combine | `[✔]` |
 | TR3 | `R[i,k] := maxreduce(P[i,j] · P[j,k])` | P=reliability `[[0,0.9],[0.8,0]]` → most-reliable 2-hop | max-times "best path" | `[N]` `[E]` |
 | TR4 | all-negative input max | A=`[[-2,-5,-1]]` → `[-1]` | `-∞` unit doesn't pollute | `[✔]` |
-| TR5 | min-plus shortest path (Viterbi/Bellman step) | — | **no `min` agg, no `+` combine** ⇒ gap | `[F]` (KG-min) |
+| TR6 | `C[i] := minreduce(A[i,k])` | A=`[[3,1,4],[1,5,9]]` → `[1,1]` | **basic min-reduction** (min analog of TR1); tropical min `(×, min, +∞)`, added 2026-07-08 | `[N]` |
+| TR7 | `C[i] := minreduce(A[i,k] · B[k])` | A=`[[3,1,4],[2,2,2]]`, B=`[2,5,1]` → `[4,2]` | **min-times combine** (min analog of TR2) | `[N]` |
+| TR5 | min-*plus* shortest path (Viterbi/Bellman step) | — | `minreduce` supplies the `min` agg, but min-plus still needs `+` as the within-term combine ⇒ **partial gap** | `[F]` (KG-min, min-plus half) |
 
 ## 12. Tensor networks / decomposition
 
@@ -430,13 +434,13 @@ gap is closed — a built-in regression alarm. Cross-referenced above by `KG-*`.
 | KG-activation | only **relu** (+ softmax/normalize) — no `sigmoid`/`tanh`/`gelu`/`leakyrelu` | LSTM/GRU gates, logistic regression, GAT, GELU transformers | `[F]` |
 | KG-idxvalue | index arithmetic yields **booleans only** (via Iverson) — never a numeric tensor value | ALiBi, relative-position numeric bias, distance-decay weights | `[F]` |
 | KG-sqrt | no `sqrt` | true Euclidean distance (vs squared), std / RMSNorm, unit-norm (cf. KG-l2norm) | `[F]` |
-| KG-min | `min` aggregation and additive-combine (min-plus semiring) | shortest path, Viterbi, DTW | `[F]` |
+| KG-min | **min aggregation FIXED 2026-07-08** (`minreduce`, tropical min-times `(×, min, +∞)` — see TR6/TR7, RC7). Still open: **additive within-term combine** (min-*plus* semiring, `+` instead of `×`) and **argmin** (index output, cf. KG-idxvalue) | shortest path, Viterbi, DTW (need min-plus); k-means (needs argmin) | `[F]` (partial) |
 | KG-div | division by a tensor / per-element reciprocal (only whole-axis `normalize`) | D⁻¹AX GNN norm, layernorm variance, softmax-free attention | `[F]` |
 | KG-gather | data-dependent gather/scatter with an **index tensor** (indices must be affine) | embedding lookup by ids, edge-list scatter-add, top-k | `[F]` |
 | KG-scale | free scalar literal on the RHS (e.g. `· 0.5`) | 1/√d attention scaling (workaround: rank-0 tensor, see AT6) | `[F]`? |
 | KG-multiout | multiple outputs **not** at the tail statement | multi-head split, aux losses | `[F]` |
 | KG-recur | `recurMorphism` / `scanPre` escape hatch (AST-only) | programmatic recurrences | `[F]` |
-| KG-scanagg | **`maxreduce` inside a scan step is silently summed** (agg dropped; no error) — *confirmed, see RC5* | max/argmax recurrences (Viterbi, running-max) | `[F]` ⚠ soundness |
+| ~~KG-scanagg~~ | **FIXED 2026-07-08** — `maxreduce` inside a scan step now reduces with tropical max (was silently summed). Scan steps thread the agg's `Combine` through `evalStmtSlice`/`evalAssignSeeded`. Live test: RC5 (now `[N]`, asserts `[2,6,18]`) | max recurrences (running-max); *argmax* still blocked by KG-min (no index output) | ✓ fixed |
 | KG-2dscan | **2-D / nested recurrence collapses to a 1-D scan** (two advancing axes silently reduced to one; no error) — *confirmed, see RC6* | grid-DP, PixelRNN, edit-distance/NW, CTC alignment tables | `[F]` ⚠ soundness |
 
 > Verification note: some of these may already be partially addressed (e.g. reading scatter
@@ -444,6 +448,19 @@ gap is closed — a built-in regression alarm. Cross-referenced above by `KG-*`.
 > in §15 as a passing regression test, not here). Each `KG-*` needs a 30-second confirmation
 > against `HEAD` before we commit to "expected-fail", so we don't ship a red test for something
 > that actually works.
+
+> **Design direction — general semiring notation (planned, not yet implemented).** The remaining
+> tropical/semiring gaps (KG-min's min-*plus* half, and future max-plus / log-sum-exp) should be
+> closed by adopting a **general semiring selector** rather than adding one bespoke `AggOp`
+> keyword per combination. The intended surface form names both operations explicitly — an
+> aggregate `⊕` and a within-term combine `⊗`, e.g. `D[i,k] := agg(min, +)(D[i,j] · W[j,k])`
+> — where inside the form `·` denotes `⊗` and the reduction/`+` across terms denotes `⊕`. This
+> subsumes the current `maxreduce`/`minreduce` (= `agg(max, ·)` / `agg(min, ·)`) and covers
+> min-plus `agg(min, +)`, max-plus `agg(max, +)`, min-times `agg(min, ·)`, etc. Adopt this
+> notation **where appropriate** when the min-plus work is scheduled. Implementation note: a
+> non-`×` within-term combine requires the product accumulator to start at the `⊗`-identity
+> (`0` for `+`, `1` for `·`), so `Combine` needs a `⊗`-unit field (today the product init is
+> hardcoded to `1.0`).
 
 ## 15. Adversarial — tricky-but-valid edge cases (should pass)
 
@@ -478,16 +495,16 @@ gap is closed — a built-in regression alarm. Cross-referenced above by `KG-*`.
 | relu | scan, MLP | FF2, FF3 |
 | softmax (± mask) | causal attn | AT1, AT4, AT5, NM2, NM3 |
 | normalize (± mask) | normalize | NM1, NM4 |
-| maxreduce | max-pool | CV5, GN4, TR3 |
+| maxreduce / minreduce | max-pool | CV5, GN4, TR3 (max); TR6, TR7, RC7 (min) |
 | Iverson / predicates | band, masked-agg | RL1–RL7, RC3 |
 | Affine reads (conv/dilation/look-back) | strided conv, look-back | CV1,CV2,CV4, EC1,EC2,EC12 |
 | Scatter (affine/diagonal write) | upsample | EC7, EC9 |
-| Scans / recurrence | coupled scan | RC2, RC4, RC5 |
+| Scans / recurrence | coupled scan | RC2, RC4, RC5 (maxreduce-in-scan) |
 | `linear` + `bias` | parse only | FF1, FF4 |
 | Rank-0 tensors / scalar scale | — | AT6, ST3, DF1, DF2, ST5 |
 | Size inference from decls | — | RL1 |
 | Scan reading input at index `l` | — | SS1, SS3, CM4 (SS4 = reject at `l+1`) |
-| Contraction inside a scan | coupled scan | CM4 (works; RC5/RC6 show `maxreduce`-in-scan & 2-D scans do NOT) |
+| Contraction inside a scan | coupled scan | CM4 (sum), RC5 (`maxreduce`, fixed); RC6 shows 2-D scans still collapse |
 | Attention variants | causal attn | AT8 (generalized), AT9 (linear), AT10 (bilinear), AT11 (GQA), AT12 (sparse ∨) |
 | Consuming scatter outputs (B3) | — | §8b SC1–SC8 (reduce/pointwise/relu/matmul/conv/scatter-of-scatter/diag/softmax) |
 | Softmax/normalize over non-last axis | — | NM5 |
@@ -514,12 +531,12 @@ All reviewer questions are resolved (2026-07-04):
 
 Follow-ups for the implementation plan:
 
-- **Surface the RC5/KG-scanagg soundness issue** (`maxreduce` silently summed inside a scan)
-  to the scan-lowering owners as a bug, separate from the test work — a step that can't honor
-  a non-sum agg should reject, not switch aggregation silently.
-- **KG-2dscan (RC6)** is a third silent-wrong trap alongside KG-scanagg: a 2-D/nested
-  recurrence collapses to a 1-D scan with no error. Same recommendation — reject multi-axis
-  advancing recurrences until they're genuinely supported.
+- ~~**Surface the RC5/KG-scanagg soundness issue**~~ **RESOLVED 2026-07-08.** The scan step now
+  honors the aggregator: `evalStmtSlice`/`evalAssignSeeded` thread the agg's `Combine`, so a
+  `maxreduce` step reduces with tropical max. RC5 asserts `[2,6,18]`.
+- **KG-2dscan (RC6)** remains a silent-wrong trap (KG-scanagg is now fixed): a 2-D/nested
+  recurrence collapses to a 1-D scan with no error. Recommendation — support the second
+  advancing axis, or reject multi-axis advancing recurrences until they're genuinely supported.
 - **Equation-level summation (§12c callout)** is the other silent-wrong trap: a multi-term RHS
   with heterogeneous contracted axes broadcasts the shorter terms. Whether this is intended
   Datalog semantics or should warn/reject deserves a decision from the language owners; either
@@ -547,15 +564,16 @@ These are the most dangerous issues: the evaluator accepts the program, produces
 output is mathematically wrong. The test suite pins the current wrong value so the test turns red
 the moment the bug is fixed — treat them as **failing tests in disguise**.
 
-| ID | Bug | Live regression test | Current (wrong) output | Correct output |
-|----|-----|---------------------|------------------------|----------------|
-| **KG-scanagg** | `maxreduce` inside a scan step is silently replaced by a sum — the aggregation operator is dropped with no error | `RC5` in `RecurrenceTest` | `[2, 8, 32]` (sum-step `M×4`) | `[2, 6, 18]` (max-step `M×3`) |
-| **KG-2dscan** | A 2-D / nested recurrence (two advancing axes) collapses to a 1-D scan with no error — the base case on the second axis is overwritten | `RC6` in `RecurrenceTest` | `[[0,1],[0,1]]` | `[[0,0],[0,1]]` (correct grid-DP) |
+(KG-scanagg was the other entry here — `maxreduce` silently summed inside a scan — **fixed
+2026-07-08**; see §14 / §17. RC5 now asserts the correct output.)
 
-**Recommended fix for both:** the scan-lowering pass should **reject** programs that hit these
-cases (`causalityViolation` or a new `unsupportedScanAgg` / `unsupportedMultiAxisScan` error)
-rather than silently degrading. Accepting a program and computing the wrong answer is worse than
-refusing it.
+| ID | Bug | Live regression test | Status |
+|----|-----|---------------------|--------|
+| **KG-2dscan** | A 2-D / nested recurrence (two advancing axes) collapses to a 1-D scan with no error — the base case on the second axis is overwritten. `RC6`: current wrong `[[0,1],[0,1]]`, correct `[[0,0],[0,1]]` | `RC6` in `RecurrenceTest` (pins wrong output) | **OPEN** ⚠ |
+
+**KG-2dscan recommendation:** the scan-lowering pass should either support the second advancing
+axis or **reject** it (a new `unsupportedMultiAxisScan` error) rather than silently degrading —
+computing the wrong answer is worse than refusing.
 
 ### B. Semantic sharp edge — silent unexpected behavior, arguably by design
 
@@ -578,7 +596,7 @@ them (there is no expressible program to test). Priority order for practical ML 
 | Medium | **KG-trig** — no `sin`/`cos` | Sinusoidal PE, RoPE, diffusion timestep embeddings |
 | Medium | **KG-l2norm** — only L1 `normalize` | Cosine similarity, RMSNorm, unit-norm embeddings |
 | Medium | **KG-sqrt** — no `sqrt` | Euclidean distance, std dev, batch-norm scaling |
-| Medium | **KG-min** — no `min` aggregation / additive-combine | Shortest path, Viterbi, DTW, k-means argmin |
+| Medium | **KG-min** (partial) — `min` aggregation DONE (`minreduce`, 2026-07-08); still missing additive within-term combine (min-plus) and argmin | Shortest path, Viterbi, DTW (min-plus); k-means argmin |
 | Lower | **KG-solve** — no linear solve/inverse | Closed-form regression, PCA, normalizing-flow log-det |
 | Lower | **KG-idxvalue** — index arithmetic yields booleans only | ALiBi, relative-position numeric bias |
 | Lower | **KG-datamask** — `where` clauses are index predicates only | GAT data-driven masked softmax |
@@ -589,8 +607,9 @@ them (there is no expressible program to test). Priority order for practical ML 
 
 ### D. How to track progress
 
-- **A (soundness bugs):** fix the scan-lowering pass; the live `RC5`/`RC6` tests will flip from
-  passing to failing, then be updated to assert the correct output.
+- **A (soundness bugs):** `RC5`/KG-scanagg fixed 2026-07-08 (RC5 now asserts correct output).
+  `RC6`/KG-2dscan still open — the live `RC6` test pins the wrong output and will flip from
+  passing to failing when fixed, then be updated to assert the correct output.
 - **B (sharp edge):** a language-owner decision on equation-level summation semantics; update
   `EC15` accordingly.
 - **C (missing primitives):** each closed gap should have a new `[N]` test added and its `KG-*`

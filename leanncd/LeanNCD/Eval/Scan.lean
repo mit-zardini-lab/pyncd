@@ -30,7 +30,12 @@ def evalStmtSlice (env : HashMap String DenseTensor) (sizes : HashMap UID Nat)
   match s with
   | .assign nm slots rhs =>
       let seed : HashMap UID Int := ({} : HashMap UID Int).insert iterUID (Int.ofNat l)
-      let (_, slice) ← evalAssignSeeded env sizes seed nm slots rhs
+      -- honor the contraction aggregator (KG-scanagg): `maxreduce`/`minreduce` ⇒ tropical max/min, else ℝ sum.
+      let c : Combine := match rhs.agg with
+        | .max => Combine.max
+        | .min => Combine.min
+        | .sum => Combine.real
+      let (_, slice) ← evalAssignSeeded c.mul c.combine c.unit0 env sizes seed nm slots rhs
       let sliceUids := (slots.filterMap lhsAxisUID?).filter (· != iterUID)
       let pos ← match rhs.nonlin with
         | .identity | .relu => pure 0     -- pointwise: reduction axis irrelevant

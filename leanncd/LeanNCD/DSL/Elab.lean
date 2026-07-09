@@ -179,6 +179,7 @@ partial def elabTLSumExpr (stx : Syntax) : MetaM SumExpr :=
 
 def elabTLAgg : Syntax → MetaM AggOp
   | `(tl_agg| maxreduce) => return .max
+  | `(tl_agg| minreduce) => return .min
   | _ => throwUnsupportedSyntax
 
 partial def elabTLRHS : Syntax → MetaM RHSExpr

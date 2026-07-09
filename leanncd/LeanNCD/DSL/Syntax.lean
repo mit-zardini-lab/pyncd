@@ -139,6 +139,7 @@ syntax "normalize" atomic("(" "where") tl_bool_expr ")" : tl_nonlin
 
 -- Aggregation operations: change the contraction from sum to another reduction.
 syntax "maxreduce" : tl_agg
+syntax "minreduce" : tl_agg
 
 syntax tl_nonlin "(" tl_sum_expr ")"   : tl_rhs
 syntax tl_agg    "(" tl_sum_expr ")"   : tl_rhs

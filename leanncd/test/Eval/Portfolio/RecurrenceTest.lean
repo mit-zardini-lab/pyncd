@@ -43,16 +43,15 @@ test "RC3 prefix-sum"
       (HashMap.ofList [("X", tl [3] [1,2,3])])
       "C" (tl [3] [1,3,6])) $
 
--- RC5  KNOWN GAP (KG-scanagg): `maxreduce` inside a scan step is SILENTLY summed (agg dropped).
---   X0 = 2, W = [1,3].  Correct max-semantics: Mₗ₊₁ = max(Mₗ·1, Mₗ·3) = 3·Mₗ ⇒ [2,6,18].
---   Current (wrong) output: the step SUMS ⇒ Mₗ₊₁ = Mₗ·(1+3) = 4·Mₗ ⇒ [2,8,32]. Pinning the
---   wrong value; flip to [2,6,18] when KG-scanagg is fixed.
-test "RC5 maxreduce-in-scan (KG-scanagg, current wrong)"
+-- RC5  KG-scanagg (FIXED): `maxreduce` inside a scan step now reduces with tropical max.
+--   X0 = 2, W = [1,3].  Max-semantics: Mₗ₊₁ = max(Mₗ·1, Mₗ·3) = 3·Mₗ ⇒ [2,6,18].
+--   (Was silently summed to 4·Mₗ ⇒ [2,8,32] before the fix — see §14 KG-scanagg / git history.)
+test "RC5 maxreduce-in-scan (KG-scanagg, fixed)"
     (evalEqB (tlprog!{ axis l : ℕ = 3
             M[j, 0]    := X0[j]
             M[j, l +1] := maxreduce(M[j, l] · W[j, k]) })
       (HashMap.ofList [("X0", tl [1] [2]), ("W", tl [1,2] [1,3])])
-      "M" (tl [1,3] [2,8,32])) $
+      "M" (tl [1,3] [2,6,18])) $
 
 -- RC6  KNOWN GAP (KG-2dscan): a 2-D / nested recurrence collapses to a 1-D scan over one axis;
 --   the base case on the other axis is overwritten. Base G = 0, A = ones(2×2).
@@ -63,6 +62,16 @@ test "RC6 2d-scan (KG-2dscan, current wrong)"
             G[r, 0]       := Z[r]
             G[r +1, c +1] := G[r, c] + A[r, c] })
       (HashMap.ofList [("Z", tl [2] [0,0]), ("A", tl [2,2] [1,1,1,1])])
-      "G" (tl [2,2] [0,1, 0,1]))
+      "G" (tl [2,2] [0,1, 0,1])) $
+
+-- RC7  `minreduce` inside a scan step (KG-min in a scan; mirrors RC5's maxreduce case).
+--   X0 = 2, W = [2,3].  Min-semantics: Mₗ₊₁ = min(Mₗ·2, Mₗ·3) = 2·Mₗ ⇒ [2,4,8].
+--   Confirms the scan step honors `minreduce` (tropical min), not sum, via the KG-scanagg plumbing.
+test "RC7 minreduce-in-scan"
+    (evalEqB (tlprog!{ axis l : ℕ = 3
+            M[j, 0]    := X0[j]
+            M[j, l +1] := minreduce(M[j, l] · W[j, k]) })
+      (HashMap.ofList [("X0", tl [1] [2]), ("W", tl [1,2] [2,3])])
+      "M" (tl [1,3] [2,4,8]))
 
 end LeanNCD.Eval

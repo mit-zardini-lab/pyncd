@@ -70,8 +70,8 @@ inductive Nonlin
   | normalize : Option BoolExpr → Nonlin
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
 
--- Reduction operation for contraction (sum is standard; max is tropical).
-inductive AggOp | sum | max
+-- Reduction operation for contraction (sum is standard; max/min are tropical).
+inductive AggOp | sum | max | min
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
 
 inductive Factor

@@ -545,6 +545,7 @@ def buildStep (nameToStep : Std.HashMap String (Nat × Nat)) (extIndex : Std.Has
           | .scatter .. => .scatter
           | .assign ..  => match s.agg with
               | .max => .maxreduce
+              | .min => .minreduce
               | .sum => .contract
           | .recurMorphism .. => .contract   -- unreachable: scanPre handled above
   let step : BrBaseP := { op, degree, inputWeaves, outputWeaves, reindexings }
