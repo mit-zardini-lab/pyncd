@@ -53,16 +53,15 @@ test "RC5 maxreduce-in-scan (KG-scanagg, fixed)"
       (HashMap.ofList [("X0", tl [1] [2]), ("W", tl [1,2] [1,3])])
       "M" (tl [1,3] [2,6,18])) $
 
--- RC6  KNOWN GAP (KG-2dscan): a 2-D / nested recurrence collapses to a 1-D scan over one axis;
---   the base case on the other axis is overwritten. Base G = 0, A = ones(2×2).
---   Correct 2-D DP (G[r+1,c+1] = G[r,c] + A[r,c]) is [[0,0],[0,1]]. Current (wrong) output is
---   [[0,1],[0,1]] (collapses to a 1-D scan). Pinning the wrong value; flip when KG-2dscan is fixed.
-test "RC6 2d-scan (KG-2dscan, current wrong)"
+-- RC6  2-D / nested recurrence (grid-DP / PixelRNN). Base G=0, A=ones(2×2).
+--   Only the fully-advanced cell G[1,1] = G[0,0]+A[0,0] = 1 is written; boundary cells (r=0 or
+--   c=0) keep their zero-default. Correct grid-DP ⇒ [[0,0],[0,1]]. (KG-2dscan fixed 2026-07-08.)
+test "RC6 2d-scan (KG-2dscan, fixed)"
     (evalEqB (tlprog!{ axis r : ℕ = 2, c : ℕ = 2
             G[r, 0]       := Z[r]
             G[r +1, c +1] := G[r, c] + A[r, c] })
       (HashMap.ofList [("Z", tl [2] [0,0]), ("A", tl [2,2] [1,1,1,1])])
-      "G" (tl [2,2] [0,1, 0,1])) $
+      "G" (tl [2,2] [0,0, 0,1])) $
 
 -- RC7  `minreduce` inside a scan step (KG-min in a scan; mirrors RC5's maxreduce case).
 --   X0 = 2, W = [2,3].  Min-semantics: Mₗ₊₁ = min(Mₗ·2, Mₗ·3) = 2·Mₗ ⇒ [2,4,8].
