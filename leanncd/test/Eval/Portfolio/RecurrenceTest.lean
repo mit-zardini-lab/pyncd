@@ -25,6 +25,26 @@ run_cmd do
   | .error e _ => throwError s!"RC4: wrong CompileError: {repr e}"
   | .ok _ _    => throwError "RC4: expected causalityViolation, compile succeeded"
 
+-- RC6-compile  Task 3 / KG-2dscan: the 2-D scan (RC6, below) lowers through the Br layer to
+--   exactly ONE well-formed scan step, and that step's `degree` carries BOTH iteration axes
+--   (r, c) — a rank-2 output, not rank-1. This is the compile-level proof that the Br step
+--   builder is arity-agnostic: it builds from the representative statement's slots
+--   (`retainedOutputSpecs`/`degree`/`reindexings`), so a 2-D scan is not silently truncated to
+--   a 1-D one. `.op = .scan` (not `.scanAffine`) since multi-axis recurrences are forced
+--   sequential.
+run_cmd do
+  match TLProgram.compile (tlprog!{ axis r : ℕ = 2, c : ℕ = 2
+                                    G[r, 0]       := Z[r]
+                                    G[r +1, c +1] := G[r, c] + A[r, c] }) |>.run 0 with
+  | .ok tc _ =>
+      let scanSteps := tc.steps.filter (fun st => match st.op with | .scan => true | _ => false)
+      unless scanSteps.length == 1 do
+        throwError s!"RC6-compile: expected 1 scan step, got {scanSteps.length}"
+      let deg := (scanSteps.head!).degree.length
+      unless deg == 2 do
+        throwError s!"RC6-compile: expected scan-step degree 2 (r,c), got {deg}"
+  | .error e _ => throwError s!"RC6-compile: multi-axis compile failed: {repr e}"
+
 #lspec group "§7 — Recurrence & scans" <|
 -- RC2  simple RNN: single scan, self-recurrence. 1 feature, W = 1, X0 = 1.
 --   S₀ = 1; S₁ = relu(1·1) = 1; S₂ = relu(1·1) = 1  ⇒  S = [1,1,1].
