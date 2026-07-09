@@ -79,7 +79,7 @@ are unchanged; `RecurrenceTest` is hybrid (RC4 stays `run_cmd do`, remainder in 
 | [`AttentionTest.lean`](../test/Eval/Portfolio/AttentionTest.lean) | §4 | AT1, AT3–AT12 | AT2 `[✔]` |
 | [`ConvPoolTest.lean`](../test/Eval/Portfolio/ConvPoolTest.lean) | §5 | CV1, CV2, CV4–CV9 | CV3 `[✔]` |
 | [`NormTest.lean`](../test/Eval/Portfolio/NormTest.lean) | §6 | NM1–NM5 | — |
-| [`RecurrenceTest.lean`](../test/Eval/Portfolio/RecurrenceTest.lean) | §7 | RC2–RC7 (RC4 reject via `run_cmd do`; RC5 asserts correct output — KG-scanagg fixed; RC6 pins known-gap wrong output via `#lspec`; RC7 `minreduce`-in-scan) — **hybrid file** | RC1 `[✔]` |
+| [`RecurrenceTest.lean`](../test/Eval/Portfolio/RecurrenceTest.lean) | §7 | RC2–RC8 (RC4 reject via `run_cmd do`; RC5 asserts correct output — KG-scanagg fixed; RC6 asserts correct output — KG-2dscan fixed; RC6-compile checks (via `run_cmd do`) that the 2-D scan lowers to a single well-formed rank-2 Br `.scan` step; RC7 `minreduce`-in-scan; RC8 3-D nested scan) — **hybrid file** | RC1 `[✔]` |
 | [`GnnScatterTest.lean`](../test/Eval/Portfolio/GnnScatterTest.lean) | §8, §8b | GN1–GN4, SC1–SC8 | GN5/GN6 `[F]` (comment) |
 | [`RelationalTest.lean`](../test/Eval/Portfolio/RelationalTest.lean) | §9 | RL1–RL4, RL6–RL8 | RL5 `[✔]` |
 | [`StatsLossTest.lean`](../test/Eval/Portfolio/StatsLossTest.lean) | §10 | ST1–ST5 | ST6 `[F]` (comment) |
@@ -219,10 +219,12 @@ too) or target one file, e.g. `lake build Eval.Portfolio.AttentionTest`. LSpec g
 | RC3 | prefix-sum via mask `C[i] := X[j] · [j ≤ i]` | X=`[1,2,3]`, `axis i,j = 3` → `[1,3,6]` | **cumulative sum without a scan** (triangular Iverson) | `[N]` `[E]` |
 | RC4 | `S[j, l +1] := S[j, l] + X[j, l + 1]` (scan step reads external at advancing index) | `X=[[1,2,3]]` | **CONFIRMED GAP**: compile → `causalityViolation "S"` | `[R]` |
 | RC5 | `M[j, l +1] := maxreduce(M[j,l] · W[j,k])` (`maxreduce` in a scan step) | `X=[2], W=[[1,3]]` → `[2,6,18]` (max-step `M×3`) | **FIXED (KG-scanagg)**: the scan step now honors the `maxreduce` agg (tropical max); was silently summed to `[2,8,32]` before the fix | `[N]` |
-| RC6 | **2D / nested recurrence** (grid-DP / PixelRNN) `G[r +1, c +1] := G[r,c] + A[r,c]` | base G=0, A=ones → returns `[[0,1],[0,1]]`, correct 2D DP is `[[0,0],[0,1]]` | **CONFIRMED SILENT-WRONG**: two advancing iteration axes collapse to a 1-D scan over one axis (base case on the other axis is overwritten) | `[F]` (KG-2dscan) |
+| RC6 | **2D / nested recurrence** (grid-DP / PixelRNN) `G[r +1, c +1] := G[r,c] + A[r,c]` | base G=0, A=ones(2×2) → `[[0,0],[0,1]]` (only the fully-advanced cell `G[1,1]` is written; boundary cells `r=0`/`c=0` keep the zero-default) | **FIXED (KG-2dscan)**: both advancing iteration axes are now tracked through the scan; was silently collapsing to a 1-D scan (`[[0,1],[0,1]]`, overwriting the second axis's base case) before the fix | `[N]` |
 | RC7 | `M[j, l +1] := minreduce(M[j,l] · W[j,k])` (`minreduce` in a scan step) | `X=[2], W=[[2,3]]` → `[2,4,8]` (min-step `M×2`) | **min-agg in a scan** (KG-min; mirrors RC5) — the scan step honors `minreduce` via the KG-scanagg plumbing | `[N]` |
+| RC8 | **3-D nested scan** `G[a +1, b +1, d +1] := G[a,b,d] + T[a,b,d]` | axes a,b,d size 2; base S=0, T=ones(2×2×2) → 2×2×2 tensor with a single `1` at `[1,1,1]`, all boundary cells `0` | **generality of n-D support** (KG-2dscan): confirms multi-axis scans generalize past the 2-D case (RC6) to 3 axes, with the same zero-default boundary semantics | `[N]` |
 
-> RC4/RC5 were the "verify" cases — confirmed against HEAD (2026-07-04); RC5 fixed 2026-07-08.
+> RC4/RC5/RC6 were the "verify" cases — confirmed against HEAD (2026-07-04); RC5 and RC6 fixed
+> 2026-07-08.
 > **RC4**: a scan step reading an external at the advancing index `l + 1` is rejected with
 > `CompileError.causalityViolation` (the compiler treats any next-index read as a future
 > dependency, even for non-state externals). Author as a reject-test asserting that error.
@@ -231,6 +233,14 @@ too) or target one file, e.g. `lake build Eval.Portfolio.AttentionTest`. LSpec g
 > `max(2·1,2·3)=6`. Fixed by threading the aggregator's `Combine` through `evalStmtSlice` /
 > `evalAssignSeeded` (`Eval/Scan.lean`, `Eval/Contract.lean`) so a `maxreduce` step reduces with
 > tropical max `(×, max, −∞)`; RC5 now asserts the correct `[2,6,18]`.
+> **RC6/RC8 (KG-2dscan, FIXED 2026-07-08)**: multi-axis (n-D) recurrences now evaluate correctly
+> — positional base recovery plus nested evaluation track every advancing axis, and a scan step
+> writes only fully-advanced cells (boundary cells keep their zero-allocated/base value —
+> **zero-default** boundary semantics). RC6 (2-D) now asserts the correct `[[0,0],[0,1]]`
+> (previously collapsed to a 1-D scan giving `[[0,1],[0,1]]`); RC8 (3-D) confirms the fix
+> generalizes to 3 axes. `RC6-compile` additionally checks at the compile level that the 2-D scan
+> lowers to a single well-formed Br step with `.op = .scan` and `degree.length == 2`, i.e. both
+> iteration axes survive lowering.
 
 ## 8. Graph / message passing (GNN)
 
@@ -441,7 +451,7 @@ gap is closed — a built-in regression alarm. Cross-referenced above by `KG-*`.
 | KG-multiout | multiple outputs **not** at the tail statement | multi-head split, aux losses | `[F]` |
 | KG-recur | `recurMorphism` / `scanPre` escape hatch (AST-only) | programmatic recurrences | `[F]` |
 | ~~KG-scanagg~~ | **FIXED 2026-07-08** — `maxreduce` inside a scan step now reduces with tropical max (was silently summed). Scan steps thread the agg's `Combine` through `evalStmtSlice`/`evalAssignSeeded`. Live test: RC5 (now `[N]`, asserts `[2,6,18]`) | max recurrences (running-max); *argmax* still blocked by KG-min (no index output) | ✓ fixed |
-| KG-2dscan | **2-D / nested recurrence collapses to a 1-D scan** (two advancing axes silently reduced to one; no error) — *confirmed, see RC6* | grid-DP, PixelRNN, edit-distance/NW, CTC alignment tables | `[F]` ⚠ soundness |
+| ~~KG-2dscan~~ | **FIXED 2026-07-08** — n-D scans (2-D and beyond) are now supported: positional base recovery plus nested evaluation track every advancing axis, and a scan step writes only fully-advanced cells (zero-default boundary semantics). Was: 2-D/nested recurrences silently collapsed to a 1-D scan (two advancing axes reduced to one; no error). Live tests: RC6 (2-D, asserts `[[0,0],[0,1]]`), RC8 (3-D generality), and `RC6-compile` (compile-level check that the 2-D scan lowers to a well-formed rank-2 Br `.scan` step) | grid-DP, PixelRNN, edit-distance/NW, CTC alignment tables | ✓ fixed |
 
 > Verification note: some of these may already be partially addressed (e.g. reading scatter
 > outputs across layers was **recently closed** by commits `57d333f`/`fc10d70` — that one belongs
@@ -504,7 +514,7 @@ gap is closed — a built-in regression alarm. Cross-referenced above by `KG-*`.
 | Rank-0 tensors / scalar scale | — | AT6, ST3, DF1, DF2, ST5 |
 | Size inference from decls | — | RL1 |
 | Scan reading input at index `l` | — | SS1, SS3, CM4 (SS4 = reject at `l+1`) |
-| Contraction inside a scan | coupled scan | CM4 (sum), RC5 (`maxreduce`, fixed); RC6 shows 2-D scans still collapse |
+| Contraction inside a scan | coupled scan | CM4 (sum), RC5 (`maxreduce`, fixed); RC6 (2-D) and RC8 (3-D) now work — n-D scans fixed (KG-2dscan) |
 | Attention variants | causal attn | AT8 (generalized), AT9 (linear), AT10 (bilinear), AT11 (GQA), AT12 (sparse ∨) |
 | Consuming scatter outputs (B3) | — | §8b SC1–SC8 (reduce/pointwise/relu/matmul/conv/scatter-of-scatter/diag/softmax) |
 | Softmax/normalize over non-last axis | — | NM5 |
@@ -534,9 +544,10 @@ Follow-ups for the implementation plan:
 - ~~**Surface the RC5/KG-scanagg soundness issue**~~ **RESOLVED 2026-07-08.** The scan step now
   honors the aggregator: `evalStmtSlice`/`evalAssignSeeded` thread the agg's `Combine`, so a
   `maxreduce` step reduces with tropical max. RC5 asserts `[2,6,18]`.
-- **KG-2dscan (RC6)** remains a silent-wrong trap (KG-scanagg is now fixed): a 2-D/nested
-  recurrence collapses to a 1-D scan with no error. Recommendation — support the second
-  advancing axis, or reject multi-axis advancing recurrences until they're genuinely supported.
+- ~~**KG-2dscan (RC6) remains a silent-wrong trap**~~ **RESOLVED 2026-07-08.** n-D scans are now
+  supported: every advancing axis is tracked via positional base recovery plus nested
+  evaluation, and a scan step writes only fully-advanced cells (zero-default boundary
+  semantics). RC6 (2-D) asserts `[[0,0],[0,1]]`; RC8 (3-D) confirms the fix generalizes.
 - **Equation-level summation (§12c callout)** is the other silent-wrong trap: a multi-term RHS
   with heterogeneous contracted axes broadcasts the shorter terms. Whether this is intended
   Datalog semantics or should warn/reject deserves a decision from the language owners; either
@@ -564,16 +575,12 @@ These are the most dangerous issues: the evaluator accepts the program, produces
 output is mathematically wrong. The test suite pins the current wrong value so the test turns red
 the moment the bug is fixed — treat them as **failing tests in disguise**.
 
-(KG-scanagg was the other entry here — `maxreduce` silently summed inside a scan — **fixed
-2026-07-08**; see §14 / §17. RC5 now asserts the correct output.)
-
-| ID | Bug | Live regression test | Status |
-|----|-----|---------------------|--------|
-| **KG-2dscan** | A 2-D / nested recurrence (two advancing axes) collapses to a 1-D scan with no error — the base case on the second axis is overwritten. `RC6`: current wrong `[[0,1],[0,1]]`, correct `[[0,0],[0,1]]` | `RC6` in `RecurrenceTest` (pins wrong output) | **OPEN** ⚠ |
-
-**KG-2dscan recommendation:** the scan-lowering pass should either support the second advancing
-axis or **reject** it (a new `unsupportedMultiAxisScan` error) rather than silently degrading —
-computing the wrong answer is worse than refusing.
+(Both scan soundness bugs that used to live in this table are now fixed. **KG-scanagg** —
+`maxreduce` silently summed inside a scan — fixed 2026-07-08. **KG-2dscan** — a 2-D/nested
+recurrence collapsing to a 1-D scan (two advancing axes reduced to one, no error) — also fixed
+2026-07-08: n-D scans are now supported via positional base recovery plus nested evaluation, with
+zero-default boundary semantics. See §14 / §17. RC5, RC6, and RC8 now assert the correct output.
+No soundness bugs are currently open in this table.)
 
 ### B. Semantic sharp edge — silent unexpected behavior, arguably by design
 
@@ -608,8 +615,8 @@ them (there is no expressible program to test). Priority order for practical ML 
 ### D. How to track progress
 
 - **A (soundness bugs):** `RC5`/KG-scanagg fixed 2026-07-08 (RC5 now asserts correct output).
-  `RC6`/KG-2dscan still open — the live `RC6` test pins the wrong output and will flip from
-  passing to failing when fixed, then be updated to assert the correct output.
+  `RC6`/`RC8`/KG-2dscan also fixed 2026-07-08 (RC6 now asserts `[[0,0],[0,1]]`; RC8 confirms the
+  fix generalizes to 3 axes). No soundness bugs remain open in §A.
 - **B (sharp edge):** a language-owner decision on equation-level summation semantics; update
   `EC15` accordingly.
 - **C (missing primitives):** each closed gap should have a new `[N]` test added and its `KG-*`
