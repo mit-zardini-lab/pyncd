@@ -91,6 +91,16 @@ test "RC7 minreduce-in-scan"
             M[j, 0]    := X0[j]
             M[j, l +1] := minreduce(M[j, l] · W[j, k]) })
       (HashMap.ofList [("X0", tl [1] [2]), ("W", tl [1,2] [2,3])])
-      "M" (tl [1,3] [2,4,8]))
+      "M" (tl [1,3] [2,4,8])) $
+
+-- RC8  3-D nested scan (generality of n-D support). Axes a,b,d each size 2. Base S = 0 on the
+--   d=0 plane; step adds T=ones. Only the fully-advanced cell G[1,1,1] = G[0,0,0]+T[0,0,0] = 1
+--   is written; all boundary cells keep 0. ⇒ a 2×2×2 tensor with a single 1 at [1,1,1].
+test "RC8 3d-scan"
+    (evalEqB (tlprog!{ axis a : ℕ = 2, b : ℕ = 2, d : ℕ = 2
+            G[a, b, 0]        := S[a, b]
+            G[a +1, b +1, d +1] := G[a, b, d] + T[a, b, d] })
+      (HashMap.ofList [("S", tl [2,2] [0,0,0,0]), ("T", tl [2,2,2] [1,1,1,1,1,1,1,1])])
+      "G" (tl [2,2,2] [0,0, 0,0, 0,0, 0,1]))
 
 end LeanNCD.Eval
