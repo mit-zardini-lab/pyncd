@@ -14,7 +14,7 @@ abbrev DeclEnv := HashMap String Decl
     the trailing `Bool` on `scan` is the ScanAffine flag. -/
 inductive ScanStmt
   | plain   : Stmt → ScanStmt
-  | scan    : String → AxisSpec → List Stmt → List Stmt → Bool → ScanStmt  -- final Bool = isAffine
+  | scan    : String → List AxisSpec → List Stmt → List Stmt → Bool → ScanStmt  -- axis list, final Bool = isAffine
   | scanPre : String → AxisSpec → ThreadedComposed → ScanStmt              -- recurMorphism case
   deriving Inhabited
 

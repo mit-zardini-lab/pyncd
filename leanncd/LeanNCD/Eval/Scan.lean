@@ -75,7 +75,10 @@ def evalScan (env : HashMap String DenseTensor) (sizes : HashMap UID Nat) :
     ScanStmt → Except EvalError (List (String × DenseTensor))
   | .plain _      => .error "evalScan: plain handled by evalScheduled, not here"
   | .scanPre nm _ _ => .error s!"evalScan: scanPre (recurMorphism escape hatch) evaluation unsupported ({nm})"
-  | .scan _ ax base recur _ => do
+  | .scan _ axes base recur _ => do
+      let ax ← match axes.head? with
+        | some a => pure a
+        | none   => .error "evalScan: scan node has no iteration axis"
       let L := (sizes[ax.uid]?).getD 0
       -- per state name, find the (iterPos) and full state shape from its base slots
       let stateNames := (base.map stmtName).eraseDups

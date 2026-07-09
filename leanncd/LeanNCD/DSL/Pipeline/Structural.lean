@@ -338,12 +338,12 @@ def Stmt.nonlinOf : Stmt → Nonlin
   | .scatter _ _ r _ => r.nonlin
   | .recurMorphism _ _ _ => .identity
 
-/-- `(iteration-axis uid, axis, isRecur)` if this stmt is a scan base/recur stmt. A stmt has
-    at most one iteration slot, so the first match is the only one. -/
-def Stmt.iterInfo (s : Stmt) : Option (UID × AxisSpec × Bool) :=
-  s.slots.findSome? (fun
-    | .iterAt a _ => some (a.uid, a, false)
-    | .iterNext a => some (a.uid, a, true)
+/-- All iteration slots of a stmt: `(uid, axis, isRecur, slot-position)` for each `iterAt`/`iterNext`.
+    A 1-D scan yields a single-element list; multi-axis scans yield one entry per advancing slot. -/
+def Stmt.iterInfo (s : Stmt) : List (UID × AxisSpec × Bool × Nat) :=
+  s.slots.zipIdx.filterMap (fun (sl, i) => match sl with
+    | .iterAt a _ => some (a.uid, a, false, i)
+    | .iterNext a => some (a.uid, a, true, i)
     | _           => none)
 
 /-- All `IdxExpr`s read on the RHS of a stmt. -/
@@ -381,12 +381,12 @@ def Stmt.adoptBaseIterAxis (ax : AxisSpec) : Stmt → Stmt
 def finalizeScans (lp : LoweredProgram) : FreshM ScanProgram := do
   -- Recover each base case's iteration axis from the matching (same-name) recurrence.
   let recurAxisFor (nm : String) : Option AxisSpec :=
-    lp.stmts.findSome? (fun s => match s.iterInfo with
-      | some (_, a, true) => if s.lhsName == nm then some a else none
-      | _                 => none)
+    lp.stmts.findSome? (fun s => match s.iterInfo.head? with
+      | some (_, a, true, _) => if s.lhsName == nm then some a else none
+      | _                    => none)
   let stmts0 := lp.stmts.map (fun s =>
-    match s.iterInfo with
-    | some (_, _, false) => match recurAxisFor s.lhsName with
+    match s.iterInfo.head? with
+    | some (_, _, false, _) => match recurAxisFor s.lhsName with
                             | some ax => s.adoptBaseIterAxis ax
                             | none    => s
     | _                  => s)
@@ -396,8 +396,8 @@ def finalizeScans (lp : LoweredProgram) : FreshM ScanProgram := do
     | .recurMorphism nm ax tc => some (ScanStmt.scanPre nm ax tc)
     | _                       => none)
   let nonPre     := lp.stmts.filter (fun s => match s with | .recurMorphism _ _ _ => false | _ => true)
-  let iterStmts  := nonPre.filter (fun s => s.iterInfo.isSome)
-  let uids := (iterStmts.filterMap (fun s => s.iterInfo.map (·.1))).eraseDups
+  let iterStmts  := nonPre.filter (fun s => !s.iterInfo.isEmpty)
+  let uids := (iterStmts.filterMap (fun s => s.iterInfo.head?.map (·.1))).eraseDups
   -- DEPENDENCY ANALYSIS (the per-step-intermediate fix). Map each produced tensor name to the set
   -- of scan iteration-axis UIDs it (transitively) depends on: seed every scan-state name with its
   -- own iteration axis, then propagate through reads to a fixpoint. A NON-iter stmt whose LHS name
@@ -407,9 +407,9 @@ def finalizeScans (lp : LoweredProgram) : FreshM ScanProgram := do
   -- the original behaviour). Bounded fixpoint: `dep` grows monotonically, capped by #stmts passes.
   let mut dep : HashMap String (List UID) := {}
   for s in nonPre do
-    match s.iterInfo with
-    | some (u, _, _) => dep := dep.insert s.lhsName ((dep.getD s.lhsName [] ++ [u]).eraseDups)
-    | none           => pure ()
+    match s.iterInfo.head? with
+    | some (u, _, _, _) => dep := dep.insert s.lhsName ((dep.getD s.lhsName [] ++ [u]).eraseDups)
+    | none              => pure ()
   for _ in List.range (nonPre.length + 1) do
     let mut changed := false
     for s in nonPre do
@@ -422,18 +422,18 @@ def finalizeScans (lp : LoweredProgram) : FreshM ScanProgram := do
   -- A non-iter intermediate depending on >1 distinct scan axes is an unsupported cross-scan
   -- coupling (no §12.1 example needs it); fail loud rather than silently misroute it.
   for s in nonPre do
-    if s.iterInfo.isNone && (dep.getD s.lhsName []).length > 1 then
+    if s.iterInfo.isEmpty && (dep.getD s.lhsName []).length > 1 then
       throw (CompileError.shapeMismatch
         s!"{s.lhsName}: per-step intermediate depends on multiple scan axes" "a single scan axis")
   let mut nodes : List ScanStmt := []
   for u in uids do
     -- membership predicates, all tested against the ORIGINAL `nonPre` order so the recurrence body
     -- keeps source order (producers before consumers — exactly what `evalScan`'s step loop relies on).
-    let isBase  : Stmt → Bool := fun s => (s.iterInfo.map (fun t => t.1 == u && t.2.2 == false)).getD false
-    let isState : Stmt → Bool := fun s => (s.iterInfo.map (fun t => t.1 == u && t.2.2 == true)).getD false
-    let isInter : Stmt → Bool := fun s => s.iterInfo.isNone && dep.getD s.lhsName [] == [u]
+    let isBase  : Stmt → Bool := fun s => (s.iterInfo.head?.map (fun t => t.1 == u && t.2.2.1 == false)).getD false
+    let isState : Stmt → Bool := fun s => (s.iterInfo.head?.map (fun t => t.1 == u && t.2.2.1 == true)).getD false
+    let isInter : Stmt → Bool := fun s => s.iterInfo.isEmpty && dep.getD s.lhsName [] == [u]
     let axis : AxisSpec := (nonPre.findSome? (fun s =>
-      if (s.iterInfo.map (fun t => t.1 == u)).getD false then s.iterInfo.map (·.2.1) else none)).getD default
+      if (s.iterInfo.head?.map (fun t => t.1 == u)).getD false then s.iterInfo.head?.map (·.2.1) else none)).getD default
     let baseStmts  := nonPre.filter isBase
     let stateRecur := nonPre.filter isState
     -- validation concerns only the genuine state recurrences: per-step intermediates have no base
@@ -448,9 +448,9 @@ def finalizeScans (lp : LoweredProgram) : FreshM ScanProgram := do
     -- ScanAffine (Prop 8.7): affine iff EVERY recurrence stmt (intermediates included) is
     -- identity-nonlin ⇒ associative/parallel-prefix-able. Empty `recur` ⇒ vacuously affine.
     let isAffine : Bool := recurStmts.all (fun s => Stmt.nonlinOf s == Nonlin.identity)
-    nodes := nodes ++ [ ScanStmt.scan repName axis baseStmts recurStmts isAffine ]
+    nodes := nodes ++ [ ScanStmt.scan repName [axis] baseStmts recurStmts isAffine ]
   -- plain = non-iter stmts with NO scan dependency (loop-invariant; evaluated once).
-  let plainStmts := nonPre.filter (fun s => s.iterInfo.isNone && (dep.getD s.lhsName []).isEmpty)
+  let plainStmts := nonPre.filter (fun s => s.iterInfo.isEmpty && (dep.getD s.lhsName []).isEmpty)
   return { decls := lp.decls, stmts := plainStmts.map ScanStmt.plain ++ preNodes ++ nodes,
            env := lp.env, extNames := lp.extNames, ctx := lp.ctx }
 
