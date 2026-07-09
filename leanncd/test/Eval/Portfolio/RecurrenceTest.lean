@@ -45,6 +45,22 @@ run_cmd do
         throwError s!"RC6-compile: expected scan-step degree 2 (r,c), got {deg}"
   | .error e _ => throwError s!"RC6-compile: multi-axis compile failed: {repr e}"
 
+-- RC9  REJECT: a HETEROGENEOUS coupled multi-axis scan. `H` advances only over `{c}` while `G`
+--   advances over `{r,c}`; they share `c`, so component-grouping couples them into ONE scan node
+--   whose axis list would (if taken from the head alone) drop `r` and make `evalScan` silently
+--   mis-address the shorter tensor. The §5 fail-loud guard rejects it with `inconsistentScanAxes`
+--   (design 2026-07-08-multi-axis-scans §5: "exotic couplings fail loud"). Homogeneous couplings
+--   (RC1 both over `l`) and single-tensor multi-axis scans (RC6/RC8) are unaffected.
+run_cmd do
+  match TLProgram.compile (tlprog!{ axis r : ℕ = 2, c : ℕ = 2
+                                    H[j, 0]       := X[j]
+                                    H[j, c +1]    := H[j, c]
+                                    G[r, 0]       := Z[r]
+                                    G[r +1, c +1] := G[r, c] + A[r, c] }) |>.run 0 with
+  | .error (.inconsistentScanAxes _) _ => pure ()
+  | .error e _ => throwError s!"RC9: wrong CompileError: {repr e}"
+  | .ok _ _    => throwError "RC9: expected inconsistentScanAxes (heterogeneous coupling), compile succeeded"
+
 #lspec group "§7 — Recurrence & scans" <|
 -- RC2  simple RNN: single scan, self-recurrence. 1 feature, W = 1, X0 = 1.
 --   S₀ = 1; S₁ = relu(1·1) = 1; S₂ = relu(1·1) = 1  ⇒  S = [1,1,1].
@@ -101,6 +117,20 @@ test "RC8 3d-scan"
             G[a, b, 0]        := S[a, b]
             G[a +1, b +1, d +1] := G[a, b, d] + T[a, b, d] })
       (HashMap.ofList [("S", tl [2,2] [0,0,0,0]), ("T", tl [2,2,2] [1,1,1,1,1,1,1,1])])
-      "G" (tl [2,2,2] [0,0, 0,0, 0,0, 0,1]))
+      "G" (tl [2,2,2] [0,0, 0,0, 0,0, 0,1])) $
+
+-- RC10  MULTI-AXIS scan with a TROPICAL aggregator (maxreduce over a contracted axis `k`) — the
+--   KG-scanagg × KG-2dscan interaction (RC5/RC7 are 1-D tropical; RC6/RC8 are multi-axis sum).
+--   2×2 grid: base `G[r,0]` fills the c=0 column from Z=[2,5]; the step writes only the fully
+--   advanced cell G[1,1] under zero-default boundaries. Only tuple (r,c)=(0,0) is iterated:
+--     G[1,1] = maxₖ(G[0,0] · W[0,0,k]) = max(2·1, 2·3) = max(2,6) = 6   (tropical max, NOT sum=8).
+--   Boundary/base cells: G[0,0]=Z[0]=2, G[1,0]=Z[1]=5, G[0,1]=0 (r=0 boundary, unwritten).
+--   Row-major [r][c] ⇒ [[2,0],[5,6]] = [2,0,5,6]. (W[0,0,:]=[1,3]; other W cells unused.)
+test "RC10 multi-axis maxreduce (KG-scanagg × KG-2dscan)"
+    (evalEqB (tlprog!{ axis r : ℕ = 2, c : ℕ = 2
+            G[r, 0]       := Z[r]
+            G[r +1, c +1] := maxreduce(G[r, c] · W[r, c, k]) })
+      (HashMap.ofList [("Z", tl [2] [2,5]), ("W", tl [2,2,2] [1,3, 0,0, 0,0, 0,0])])
+      "G" (tl [2,2] [2,0, 5,6]))
 
 end LeanNCD.Eval

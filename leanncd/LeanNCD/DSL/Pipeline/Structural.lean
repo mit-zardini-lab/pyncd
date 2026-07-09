@@ -463,6 +463,16 @@ def finalizeScans (lp : LoweredProgram) : FreshM ScanProgram := do
     -- axis list in step slot order, from a representative step (each advancing slot ⇒ one axis).
     let axes : List AxisSpec := (stateRecur.head?.map (fun st =>
       ((st.iterInfo.filter (·.2.2.1)).mergeSort (fun a b => a.2.2.2 ≤ b.2.2.2)).map (·.2.1))).getD []
+    -- FAIL LOUD (design §5): every state recurrence in a component MUST advance over the
+    -- component's FULL axis set. A heterogeneous coupling — e.g. `H` advancing over `{c}` coupled
+    -- (via shared `c`) with `G` advancing over `{r,c}` — would drop the non-head axes when `axes`
+    -- is taken from the head alone, and `evalScan` would silently mis-address the shorter tensor.
+    -- Compare axis-UID SETS (order-independent) against the component's unioned axis set `comp`.
+    for r in stateRecur do
+      let radv := ((r.iterInfo.filter (·.2.2.1)).map (·.1)).eraseDups
+      unless radv.length == comp.length && comp.all (fun u => radv.contains u) do
+        throw (CompileError.inconsistentScanAxes
+          s!"{r.lhsName}: coupled scan statements advance over different axis sets (each must advance over the component's full axis set)")
     -- validation concerns only the genuine state recurrences: per-step intermediates have no base
     -- case and read the state at the current step, so neither check applies to them.
     for r in stateRecur do
