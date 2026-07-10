@@ -142,7 +142,7 @@ with `nm`'s declaration. Two cases:
 - **External tensors** (`nm ∈ extNames`): no declaration exists, so we check internal consistency —
   all reads of the same external name must agree on arity (first read wins as the expected rank).
 
-`recurMorphism` stmts are invisible here (their `readsOf` returns `[]`), consistent with how the
+`recurMorphism` stmts are invisible here (their reads are empty), consistent with how the
 rest of the pipeline treats that escape hatch. -/
 
 private def Decl.axisCount : Decl → Nat

@@ -1,5 +1,9 @@
 # Milestone A — intentional `sorry` inventory
 
+> NOTE (Spike 1g): `St.lean` retains `swap_hexagon_fwd/rev` sorries; `Base/BrNF.lean`
+> carries further open sorries. A complete census is Spike 7's job — this note only
+> corrects the previously-false "St.lean fully sorry-free" statements.
+
 These are SIGNATURE placeholders for data/proof fields the design doc (`papers/leanncd.md` §2.2/§2.3)
 elides with `…`. They are discharged in later milestones (B+), not Milestone A.
 
@@ -18,7 +22,8 @@ elides with `…`. They are discharged in later milestones (B+), not Milestone A
 five of these fields (plus `swap` and `elemental`) sorry-free. `Br`'s laws remain stubbed because
 `Br.tensorHom`/`Br.swap` are themselves still stubbed.
 
-`St.lean` is now **fully sorry-free**: `swap`, `elemental`, `tensorHom_id`, `tensorHom_comp`, and
+`St.lean` is sorry-free **except** `swap_hexagon_fwd`/`swap_hexagon_rev` (§11 hexagon laws,
+deferred — see Spike 7's open-core table): `swap`, `elemental`, `tensorHom_id`, `tensorHom_comp`, and
 `swap_swap` are all proved. The remaining open items are all in `Br`.
 
 | File | Field | Note |
@@ -300,7 +305,8 @@ Fixed in the math tower: `StMat.coeffs`/`bias` now carry the new `Coeff = MvPoly
 re-prove sorry-free over it (their tactics are CommRing-generic). The size type stays `Numeric = ℕ`
 (sizes are non-negative); the fix separates the conflated *size* and *coefficient* roles. The bridge's
 `intToCoeff : Int → Coeff := MvPolynomial.C` is sorry-free, so look-back offsets (`X[i-1]`) realize
-faithfully. (`St.lean` is now fully sorry-free; the remaining B+/G open items are all in `Br`.)
+faithfully. (`St.lean` is sorry-free except `swap_hexagon_fwd`/`swap_hexagon_rev` (§11 hexagon laws,
+deferred — see Spike 7's open-core table); the remaining B+/G open items are all in `Br`.)
 
 **UPDATE (2026-07-01):** `realize` is now **sorry-free** — closed by the multi-output `BrBase`
 generalization (`2026-06-26-multioutput-impl-plan.md` Phases C/E), not by closing `Br.tensorHom`/

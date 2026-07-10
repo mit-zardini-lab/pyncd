@@ -512,7 +512,8 @@ def normAxisUidOf (slots : List LHSSlot) : Option UID :=
   slots.findSome? (fun | .freeNorm a => some a.uid | _ => none)
 
 /-- The output shape: the size of each LHS slot's axis (free/iterAt/iterNext), in slot order.
-    `affine` slots (scatter) are handled in Task 6 — `0` placeholder here. -/
+    `affine` slots (scatter) have no axis size here and yield `0`; their real output extents
+    are computed separately on the scatter path (`scatterOutDim`), not by this function. -/
 def outputShape (sizes : HashMap UID Nat) (slots : List LHSSlot) : List Nat :=
   slots.map (fun sl => match lhsAxisUID? sl with
     | some u => (sizes[u]?).getD 0

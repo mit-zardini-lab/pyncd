@@ -50,7 +50,7 @@ def scan_batches (N : ℕ) (X : C) (P : Dᵒᵖ) :
 /-- Prop 8.7 (Scan-as-catamorphism): the `N`-fold iterate is stable under restriction along the
     reflexive prefix map `[0..N] ↪ [0..N]` (`iotaTo (le_refl N) = 𝟙`); i.e. restricting the iterate
     to its own top prefix is the identity post-composition. A genuine equation over `iterate`
-    and `restrict`. SIGNATURE — body is `sorry`. -/
+    and `restrict`. Proved sorry-free. -/
 theorem scan_catamorphism (N : ℕ) (X : C)
     (step : SmallCategory.hom X X) :
     SmallCategory.comp (TemporalGraded.iterate (D := D) N X step)
