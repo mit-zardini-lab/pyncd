@@ -136,4 +136,17 @@ run_cmd do
       unless bad.isEmpty do
         throwError s!"routing has producer-after-consumer wires: {repr (bad.map (·.1))}"
   | .error e _ => throwError s!"schedule/route errored: {repr e}"
+
+-- Cyclic dataflow must be rejected fail-loud (Spike 1h), not silently source-ordered.
+run_cmd do
+  let ax (nm : String) : AxisSpec := { name := nm, uid := 1, kind := .real none }
+  let rd (nm : String) : RHSExpr :=
+    { body := { terms := [ { factors := [ .read nm [ .axis (ax "i") ] ] } ] }, nonlin := .identity }
+  let aStmt : ScanStmt := .plain (.assign "A" [ .free (ax "i") ] (rd "B"))  -- A := B
+  let bStmt : ScanStmt := .plain (.assign "B" [ .free (ax "i") ] (rd "A"))  -- B := A
+  let lp : LinearProgram := { decls := [], stmts := [aStmt, bStmt], env := {}, extNames := ∅, ctx := { classes := [] } }
+  match schedule lp |>.run 0 with
+  | .ok _ _ => throwError "expected cyclicDataflow, got .ok (schedule silently source-ordered a cycle)"
+  | .error (.cyclicDataflow _) _ => pure ()
+  | .error e _ => throwError s!"expected cyclicDataflow, got: {repr e}"
 end LeanNCD

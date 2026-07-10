@@ -133,8 +133,28 @@ def topoSortFuel : Nat → List ScanStmt → List ScanStmt → List String →
 def topoSort (stmts : List ScanStmt) : List ScanStmt :=
   topoSortFuel stmts.length stmts stmts [] []
 
+/-- Is `ordered` a valid topological order of `all`? Walks `ordered` left to right, replaying
+    the same `eligible`/`emitted` bookkeeping `topoSortFuel` uses: each stmt must be `eligible`
+    given only the names emitted by stmts strictly before it. On a genuine DAG this always
+    holds for `topoSort`'s output; on a cycle, `topoSortFuel`'s fallback (`acc ++ remaining`)
+    appends the un-orderable remainder in source order, so the first such stmt fails
+    `eligible` here (its internal-dependency read was never emitted before it). External reads
+    (not written by any stmt in `all`) are not internal dependencies, so `eligible` already
+    treats them as vacuously satisfied — they never cause a false cycle report. -/
+def isTopoOrdered (all : List ScanStmt) (ordered : List ScanStmt) : Bool :=
+  (ordered.foldl (fun (acc : Bool × List String) sc =>
+      let (ok, emitted) := acc
+      (ok && eligible sc all emitted, emitted ++ sc.writes))
+    (true, ([] : List String))).1
+
 def schedule (lp : LinearProgram) : FreshM ScheduledProgram := do
   let ordered   := topoSort lp.stmts
+  -- Fail loud on cyclic dataflow (Spike 1h): topoSort cannot fully order a cycle, and its
+  -- fallback silently returns source order. routeCore already rejects cycles (cyclicDataflow);
+  -- schedule now does the same on the eval-only path instead of dying later with a generic
+  -- "unknown tensor".
+  if !isTopoOrdered lp.stmts ordered then
+    throw (CompileError.cyclicDataflow "schedule: cyclic dataflow")
   -- collect the sizes pinned by `axis … = n` decls (UIDs are canonical by this phase).
   let explicitSizes : Std.HashMap UID Nat := lp.decls.foldl (fun m d => match d with
     | .axis ax (some n) => m.insert ax.uid n
