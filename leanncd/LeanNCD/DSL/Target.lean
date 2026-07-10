@@ -81,6 +81,10 @@ inductive BrOp
   | scanAffine -- nonlinearity-free scan (Prop 8.7, O(log N) parallel prefix)
   | scanPre    -- scan step from recurMorphism escape hatch
   | minreduce  -- tropical min contraction (×, min, +∞)
+  | sigmoid    -- sigmoid nonlinearity
+  | tanh       -- tanh nonlinearity
+  | gelu       -- gelu nonlinearity (tanh approximation)
+  | leakyrelu  -- leaky-relu nonlinearity (fixed 0.01 negative slope)
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
 
 def BrOp.toString : BrOp → String
@@ -94,6 +98,10 @@ def BrOp.toString : BrOp → String
   | .scan       => "scan"
   | .scanAffine => "scan_affine"
   | .scanPre    => "scan_pre"
+  | .sigmoid    => "sigmoid"
+  | .tanh       => "tanh"
+  | .gelu       => "gelu"
+  | .leakyrelu  => "leakyrelu"
 
 /-- Computable presentation of `BrBase` (§2.3). The math-tower `Fin _ → WeaveShape`
     and `∀ i, StMat …` function fields become `List`s; the dependent

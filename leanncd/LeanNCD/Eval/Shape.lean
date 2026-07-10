@@ -16,7 +16,8 @@ def Stmt.readsOf : Stmt → List (String × List IdxExpr)
   | .assign _ _ r | .scatter _ _ r _ =>
       r.body.terms.flatMap (fun t => t.factors.filterMap (fun
         | .read nm es => some (nm, es)
-        | .iverson _  => none))
+        | .iverson _  => none
+        | .unaryFn _ nm es => some (nm, es)))
   | .recurMorphism _ _ _ => []
 
 -- `idxAffineForm` (the shared affine-lowering primitive) now lives in `DSL/Ast.lean`; the

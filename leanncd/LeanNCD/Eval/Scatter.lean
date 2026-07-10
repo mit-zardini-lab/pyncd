@@ -42,8 +42,8 @@ def evalScatter (env : HashMap String DenseTensor) (sizes : HashMap UID Nat)
       let mut prod := 1.0
       for f in t.factors do
         match gather env coord f with
-        | .ok v    => prod := prod * v
-        | .error _ => prod := prod * 0.0   -- legit out-of-range pad
+        | .ok v   => prod := prod * v
+        | .error e => throw e   -- e.g. a .unaryFn domain violation; out-of-range reads are `.ok 0.0`, not `.error`
       val := val + prod
     -- output coordinate = each slot's affine image at this source coord
     let outCoordZ : List Int := slots.map (fun sl => evalIdx coord (lhsSlotIdx sl))

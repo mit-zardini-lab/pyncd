@@ -121,6 +121,14 @@ syntax:max "(" tl_bool_expr ")"                  : tl_bool_expr
 syntax ident "[" tl_idx_expr,* "]"     : tl_factor
 syntax "[" tl_bool_expr "]"            : tl_factor
 
+-- Unary transcendental functions, restricted to wrapping a bare tensor read (`log(P[i])`),
+-- not composable (`log(sin(X[i]))` is out of scope).
+syntax "log"  "(" ident "[" tl_idx_expr,* "]" ")" : tl_factor
+syntax "exp"  "(" ident "[" tl_idx_expr,* "]" ")" : tl_factor
+syntax "sin"  "(" ident "[" tl_idx_expr,* "]" ")" : tl_factor
+syntax "cos"  "(" ident "[" tl_idx_expr,* "]" ")" : tl_factor
+syntax "sqrt" "(" ident "[" tl_idx_expr,* "]" ")" : tl_factor
+
 -- `·` (product) binds tighter than `+` (sum); both left-associative, n-ary.
 syntax:70 tl_prod_term:70 " · " tl_factor:71 : tl_prod_term
 syntax:71 tl_factor:71                       : tl_prod_term
@@ -132,6 +140,10 @@ syntax:66 tl_prod_term:66                       : tl_sum_expr
 -- unmasked `softmax(sum)` the `( where` lookahead fails and rewinds (it does not commit to
 -- `where`), so the bare `softmax` rule wins and the `(sum)` is consumed at the tl_rhs level.
 syntax "relu"                                           : tl_nonlin
+syntax "sigmoid"                                        : tl_nonlin
+syntax "tanh"                                           : tl_nonlin
+syntax "gelu"                                           : tl_nonlin
+syntax "leakyrelu"                                      : tl_nonlin
 syntax "softmax"                                        : tl_nonlin
 syntax "softmax"   atomic("(" "where") tl_bool_expr ")" : tl_nonlin
 syntax "normalize"                                      : tl_nonlin

@@ -37,7 +37,8 @@ def evalPlain (decls : List Decl) (env : HashMap String DenseTensor) (sizes : Ha
         -- the reduction axis is the slot marked `m.` (norm flag now lives on the output slot).
         let axisUids := slots.filterMap lhsAxisUID?
         let axisPos ← match rhs.nonlin, normAxisUidOf slots with
-          | .relu, _   => pure 0     -- relu is pointwise: the axis is irrelevant
+          | .relu, _ | .sigmoid, _ | .tanh, _ | .gelu, _ | .leakyrelu, _ =>
+              pure 0     -- pointwise: the axis is irrelevant
           | _, some nu => match axisUids.findIdx? (· == nu) with
               | some p => pure p
               | none   => throw s!"evalPlain: marked norm axis of {nm} is not among its output axes"

@@ -66,6 +66,10 @@ inductive BoolExpr
 inductive Nonlin
   | identity  : Nonlin
   | relu      : Nonlin
+  | sigmoid   : Nonlin
+  | tanh      : Nonlin
+  | gelu      : Nonlin
+  | leakyrelu : Nonlin
   | softmax   : Option BoolExpr → Nonlin
   | normalize : Option BoolExpr → Nonlin
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
@@ -74,9 +78,14 @@ inductive Nonlin
 inductive AggOp | sum | max | min
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
 
+-- Unary transcendental functions applicable inline to a single factor's read (`log(P[i])`).
+inductive UnaryOp | log | exp | sin | cos | sqrt
+  deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
+
 inductive Factor
   | read    : String → List IdxExpr → Factor
   | iverson : BoolExpr → Factor
+  | unaryFn : UnaryOp → String → List IdxExpr → Factor
   deriving DecidableEq, Repr, Lean.ToExpr
 
 structure ProdTerm where factors : List Factor

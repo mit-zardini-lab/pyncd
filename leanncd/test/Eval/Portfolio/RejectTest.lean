@@ -46,6 +46,33 @@ run_cmd do
   | .error e _ => throwError s!"SS4: wrong CompileError: {repr e}"
   | .ok _ _    => throwError "SS4: expected causalityViolation, compile succeeded"
 
+-- UF1  unknown tensor referenced ONLY via a `.unaryFn` factor (`log(Missing[i])`) ⇒ the same
+--   up-front "unknown tensor" eval error as a plain `.read` would give — regression test for
+--   `readNames` treating `.unaryFn` exactly like `.read` (§19 test_portfolio discussion).
+run_cmd (assertEvalError "UF1 unaryFn-unknown-tensor"
+  (tlprog!{ L[] := log(Missing[i]) })
+  (HashMap.ofList [("dummy", tl [2] [1,1])])
+  "unknown tensor")
+
+-- UF2  a look-ahead scan read HIDDEN inside `log(...)` must still trip the causality guard —
+--   regression test for `Stmt.rhsReads` treating `.unaryFn` exactly like `.read` (the guard
+--   is computed from index expressions, not raw factor reads, so a careless implementation
+--   could let this slip through).
+run_cmd do
+  match TLProgram.compile (tlprog!{ axis l : ℕ = 3
+                                    S[j, 0]    := X[j, 0]
+                                    S[j, l +1] := S[j, l] + log(X[j, l + 1]) }) |>.run 0 with
+  | .error (.causalityViolation "S") _ => pure ()
+  | .error e _ => throwError s!"UF2: wrong CompileError: {repr e}"
+  | .ok _ _    => throwError "UF2: expected causalityViolation, compile succeeded"
+
+-- UF3  domain violation: log of a non-positive value fails loud (not a silent NaN/-inf), per
+--   this evaluator's fail-loud convention.
+run_cmd (assertEvalError "UF3 log-domain-violation"
+  (tlprog!{ L[] := log(P[i]) })
+  (HashMap.ofList [("P", tl [2] [1, -1])])
+  "log domain error")
+
 /-
 Parse-level rejects (fail during elaboration of `tlprog!`; not automatable — kept as documentation):
 

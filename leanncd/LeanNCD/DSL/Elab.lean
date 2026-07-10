@@ -145,6 +145,10 @@ partial def elabTLBoolExpr : Syntax → MetaM BoolExpr
 
 partial def elabTLNonlin : Syntax → MetaM Nonlin
   | `(tl_nonlin| relu)                          => return .relu
+  | `(tl_nonlin| sigmoid)                       => return .sigmoid
+  | `(tl_nonlin| tanh)                          => return .tanh
+  | `(tl_nonlin| gelu)                          => return .gelu
+  | `(tl_nonlin| leakyrelu)                     => return .leakyrelu
   | `(tl_nonlin| softmax)                       => return .softmax none
   | `(tl_nonlin| softmax( where $b ))           => return .softmax (some (← elabTLBoolExpr b))
   | `(tl_nonlin| normalize)                     => return .normalize none
@@ -155,6 +159,16 @@ partial def elabTLFactor : Syntax → MetaM Factor
   | `(tl_factor| $name:ident [ $idxs,* ]) =>
       return .read (name.getId.eraseMacroScopes.getString!) (← idxs.getElems.toList.mapM elabTLIdxExpr)
   | `(tl_factor| [ $b:tl_bool_expr ]) => return .iverson (← elabTLBoolExpr b)
+  | `(tl_factor| log( $nm:ident [ $idxs,* ] )) =>
+      return .unaryFn .log (nm.getId.eraseMacroScopes.getString!) (← idxs.getElems.toList.mapM elabTLIdxExpr)
+  | `(tl_factor| exp( $nm:ident [ $idxs,* ] )) =>
+      return .unaryFn .exp (nm.getId.eraseMacroScopes.getString!) (← idxs.getElems.toList.mapM elabTLIdxExpr)
+  | `(tl_factor| sin( $nm:ident [ $idxs,* ] )) =>
+      return .unaryFn .sin (nm.getId.eraseMacroScopes.getString!) (← idxs.getElems.toList.mapM elabTLIdxExpr)
+  | `(tl_factor| cos( $nm:ident [ $idxs,* ] )) =>
+      return .unaryFn .cos (nm.getId.eraseMacroScopes.getString!) (← idxs.getElems.toList.mapM elabTLIdxExpr)
+  | `(tl_factor| sqrt( $nm:ident [ $idxs,* ] )) =>
+      return .unaryFn .sqrt (nm.getId.eraseMacroScopes.getString!) (← idxs.getElems.toList.mapM elabTLIdxExpr)
   | _ => throwUnsupportedSyntax
 
 /-- Collect the factor list of a `tl_prod_term`. The `·` rule is left-recursive

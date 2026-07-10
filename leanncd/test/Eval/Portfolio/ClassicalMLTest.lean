@@ -7,10 +7,11 @@ Numeric cross-checks for pairwise distance (CM1), factorization machines (CM2),
 value iteration / Bellman backup (CM3), power iteration / HMM-forward (CM4),
 matrix factorization (CM5) and VAE reparameterization (CM6).
 
-Several are **multi-statement by necessity** (equation-level summation, see the callout
-after §12c): a single RHS sum can't mix terms with different contracted axes, so each
-contraction is materialized into its own intermediate whose index set matches the LHS,
-then the intermediates (all sharing the same free axes) are combined.
+Several decompose a computation into multiple statements (each contraction materialized
+into its own intermediate, then combined) purely for clarity — a single RHS sum can freely
+mix terms with different contracted axes, since each product term is contracted
+independently over the axes it mentions (see the §12c callout in the portfolio doc, and
+EC13/EC15 in `EdgeCaseTest`).
 
 CM7 (argmin / nearest-centroid), CM8 (linear solve / inverse) and CM9 (sigmoid/tanh
 activations) are `[F]` gaps — no argmin, no solve, only relu — so they are comments only.
@@ -32,6 +33,18 @@ test "CM1 pairwise-sqdist"
   })
       (HashMap.ofList [("X", tl [2,2] [0,0, 3,4]), ("one", tl [2] [1,1]), ("m2", tl [] [-2])])
       "D" (tl [2,2] [0,25, 25,0])) $
+
+-- CM1b  true Euclidean distance = sqrt(squared distance) (KG-sqrt), chained on CM1's D.
+--   D=[[0,25],[25,0]] (a 3-4-5 right triangle) ⇒ Dist=[[0,5],[5,0]] exactly.
+test "CM1b euclidean-distance"
+    (evalEqB (tlprog!{
+    sq[i] := X[i, d] · X[i, d]
+    cross[i, j] := X[i, d] · X[j, d]
+    D[i, j] := sq[i] · one[j] + one[i] · sq[j] + m2[] · cross[i, j]
+    Dist[i, j] := sqrt(D[i, j])
+  })
+      (HashMap.ofList [("X", tl [2,2] [0,0, 3,4]), ("one", tl [2] [1,1]), ("m2", tl [] [-2])])
+      "Dist" (tl [2,2] [0,5, 5,0])) $
 
 -- CM2  factorization machine 2nd order = ½((Σ)² − Σ()²).
 --   V=[[1],[2]] (i=2,f=1), x=[1,1], hp=0.5, hm=−0.5.
@@ -86,10 +99,19 @@ test "CM5 matrix-factorization"
 test "CM6 vae-reparam"
     (evalEqB (tlprog!{ z[i] := mu[i] + sigma[i] · eps[i] })
       (HashMap.ofList [("mu", tl [2] [1,2]), ("sigma", tl [2] [0.5,2]), ("eps", tl [2] [2,1])])
-      "z" (tl [2] [2, 4]))
+      "z" (tl [2] [2, 4])) $
+
+-- CM9a  logistic regression `p[i] := sigmoid(W[i,j]·x[j] + b[i])` (`sigmoid` wraps a full sum,
+--   not just one product term — same as `relu` already does). W=[[2]], x=[1], b=[-1]:
+--   pre = 2·1 + (-1) = 1 ⇒ p = sigmoid(1) = 1/(1+e⁻¹) ≈ 0.7310586.
+test "CM9a logistic-regression"
+    (evalEqB (tlprog!{ p[i] := sigmoid(W[i, j] · x[j] + b[i]) })
+      (HashMap.ofList [("W", tl [1,1] [2]), ("x", tl [1] [1]), ("b", tl [1] [-1])])
+      "p" (tl [1] [0.7310585786300049]))
 
 -- CM7  [F] k-means assignment / nearest-centroid — no `argmin` (only max VALUE, not its index). (KG-min)
 -- CM8  [F] closed-form linear regression β=(XᵀX)⁻¹Xᵀy — no linear solve / inverse. (KG-solve)
--- CM9  [F] logistic regression / GRU-LSTM gates — only `relu`; no `σ`/`tanh`. (KG-activation)
+-- CM9b [F] full GRU-LSTM gate composite — `sigmoid`/`tanh` are now available (see CM9a, FF5–FF8),
+--   but the multi-gate cell-state combination isn't authored as a worked example here.
 
 end LeanNCD.Eval

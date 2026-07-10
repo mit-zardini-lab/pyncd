@@ -4,8 +4,8 @@ import LSpec
 # Portfolio §10 — Losses, reductions & statistics
 
 Sum-of-squares, uncentered covariance, mean via rank-0 `1/n`, marginalization, and the
-rank-0 `−1` subtraction trick (ST5). ST6 (cross-entropy) needs a standalone `log` — a known
-gap (KG-log) with no expressible program — so it is documented as a comment only.
+rank-0 `−1` subtraction trick (ST5). ST6 (cross-entropy) uses the inline `log(...)` factor
+(KG-log, closed by the `Factor.unaryFn` mechanism) together with ST5's `−1` trick.
 -/
 namespace LeanNCD.Eval
 open Std LSpec
@@ -43,9 +43,13 @@ test "ST4 marginalize"
 test "ST5 residual-sub"
     (evalEqB (tlprog!{ r[i] := Yhat[i] + m1[] · Y[i] })
       (HashMap.ofList [("Yhat", tl [2] [5,3]), ("Y", tl [2] [2,1]), ("m1", tl [] [-1])])
-      "r" (tl [2] [3,2]))
+      "r" (tl [2] [3,2])) $
 
--- ST6  cross-entropy `L[] := − Y[i] · log(P[i])` — [F] gap KG-log: no standalone `log`.
---       No expressible program; documented, not authored.
+-- ST6  cross-entropy `L[] := m1[]·Y[i]·log(P[i])` (ST5's `−1` trick for the leading minus).
+--   Y=[1,0] (one-hot), P=[0.5,0.5]: L = −(1·ln(0.5) + 0·ln(0.5)) = −ln(0.5) = ln(2) ≈ 0.6931472.
+test "ST6 cross-entropy"
+    (evalEqB (tlprog!{ L[] := m1[] · Y[i] · log(P[i]) })
+      (HashMap.ofList [("Y", tl [2] [1,0]), ("P", tl [2] [0.5,0.5]), ("m1", tl [] [-1])])
+      "L" (tl [] [0.6931471805599453]))
 
 end LeanNCD.Eval

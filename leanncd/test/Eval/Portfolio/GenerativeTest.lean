@@ -42,7 +42,21 @@ test "DF3 denoising-loss"
       (HashMap.ofList [("eps", tl [2] [0.5,0.2]), ("ehat", tl [2] [0.1,0.4]), ("m1", tl [] [-1])])
       "sse" (tl [] [0.20])) $
 
--- DF4  sinusoidal timestep embedding te[t,2i] := sin(t·ω^i) — [F] KG-trig (no sin/cos). Not authored.
+-- DF4  sinusoidal timestep embedding `te[2*i] := sin(Arg[i])` with `Arg[i] := t[]·omega_pow[i]`.
+--   `ω^i` itself is NOT computable inside the DSL (KG-idxvalue: index arithmetic yields
+--   booleans only) — it must be supplied as a precomputed input tensor. Given that, this is an
+--   ordinary materialized product (like DF1) feeding an inline `sin(...)` factor into an
+--   upsample-style affine scatter (EC8-style; odd slots zero-default).
+--   t=1, omega_pow=[ω^0,ω^1]=[1,0.1] ⇒ Arg=[1,0.1] ⇒ te=[sin 1, 0, sin 0.1, 0]
+--   ≈ [0.8414710, 0, 0.0998334, 0].
+test "DF4 sinusoidal-embedding"
+    (evalEqB (tlprog!{
+    axis i : ℕ = 2
+    Arg[i] := t[] · omega_pow[i]
+    te[2*i] := sin(Arg[i])
+  })
+      (HashMap.ofList [("t", tl [] [1]), ("omega_pow", tl [2] [1,0.1])])
+      "te" (tl [4] [0.8414709848078965, 0, 0.09983341664682815, 0])) $
 
 /- ### Mixture of Experts -/
 
@@ -147,9 +161,17 @@ test "CL2 infonce-softmax"
     P[i, j.] := softmax(S[i, j])
   })
       (HashMap.ofList [("Z1", tl [2,2] [1,0,0,1]), ("Z2", tl [2,2] [1,0,0,1])])
-      "P" rowsSumToOne)
+      "P" rowsSumToOne) $
 
 -- CL3  cosine similarity (L2-normalize first) — [F] KG-l2norm (only L1 normalize). Not authored.
--- CL4  InfoNCE loss L := −log P[i,i] — [F] KG-log (no log). Not authored.
+
+-- CL4  InfoNCE loss `L[] := m1[]·log(P[i, i])` (diagonal read, EC5-style, wrapped in `log`;
+--   ST5's `−1` trick for the leading minus). P given directly (not chained through CL1/CL2's
+--   softmax) to keep the hand-computed ground truth simple: P=[[0.5,0.5],[0.25,0.75]], diagonal
+--   = [0.5, 0.75]. L = −(ln 0.5 + ln 0.75) = −(−0.6931472 + −0.2876821) = 0.9808293.
+test "CL4 infonce-loss"
+    (evalEqB (tlprog!{ L[] := m1[] · log(P[i, i]) })
+      (HashMap.ofList [("P", tl [2,2] [0.5,0.5, 0.25,0.75]), ("m1", tl [] [-1])])
+      "L" (tl [] [0.9808292530117262]))
 
 end LeanNCD.Eval

@@ -28,28 +28,48 @@ def boolAxisUIDs : BoolExpr → List UID
 /-- The free axes (LHS) of an assign, as UID list (affine slots contribute none). -/
 def freeAxisUIDs (slots : List LHSSlot) : List UID := slots.filterMap lhsAxisUID?
 
-/-- Every axis-UID appearing in the RHS reads/masks. -/
-def readAxisUIDs (rhs : RHSExpr) : List UID :=
-  rhs.body.terms.flatMap (fun t => t.factors.flatMap (fun
+/-- Every axis-UID appearing in one product term's reads/masks. This is the per-term
+    contraction scope: a `+`-joined RHS sums each term over only the axes *that term*
+    mentions, not the union of axes across the whole equation (see `evalAssignWith`). -/
+def termAxisUIDs (t : ProdTerm) : List UID :=
+  t.factors.flatMap (fun
     | .read _ es => es.flatMap idxAxisUIDs
-    | .iverson b => boolAxisUIDs b))
+    | .iverson b => boolAxisUIDs b
+    | .unaryFn _ _ es => es.flatMap idxAxisUIDs)
+
+/-- Every axis-UID appearing anywhere in the RHS reads/masks (union across all terms).
+    Used for size inference / shape solving, where the full axis set is wanted — NOT for
+    contraction scoping, which must stay per-term (`termAxisUIDs`). -/
+def readAxisUIDs (rhs : RHSExpr) : List UID :=
+  rhs.body.terms.flatMap termAxisUIDs
 
 /-- Every `.read` tensor name appearing in the RHS. -/
 def readNames (rhs : RHSExpr) : List String :=
   rhs.body.terms.flatMap (fun t => t.factors.filterMap (fun
     | .read nm _ => some nm
-    | .iverson _ => none))
+    | .iverson _ => none
+    | .unaryFn _ nm _ => some nm))
 
 /-- The cartesian product of `[0..d-1]` ranges (one per dimension). Reuses `allCoords`. -/
 def cartesian (dims : List Nat) : List (List Nat) := DenseTensor.allCoords dims
 
 /-- Evaluate a `.plain` assign (identity nonlin) to its output tensor.
-    `mul` combines factors within a product term; `combine` folds the per-(term, contracted-coord)
-    contributions onto the accumulator starting from `unit0`. Default is the ℝ contraction `(*, +, 0)`.
+    `mul` combines factors within a product term; `combine` folds contributions onto the
+    accumulator starting from `unit0`. Default is the ℝ contraction `(*, +, 0)`.
 
-    All `.read` tensor names are validated against `env` up front, so the inner accumulation
-    (inside `ofFn`/`Id.run`) is pure: a `gather` error there can only be a legitimate out-of-range
-    pad, which contributes `0.0`. A genuinely-missing input tensor is surfaced as `.error`. -/
+    Each product term is contracted **independently**, over only the axes that term itself
+    mentions (`termAxisUIDs`), then its result is folded into the output accumulator via
+    `combine`. This is standard per-term (Einstein) summation scoping: a `k`-less term like
+    `a[i]` in `Y[i] := a[i] + W[i,k]·v[k]` must never be summed over `k` at all, since it has
+    no `k`-dependence. Scoping contraction at the whole-equation level instead (one shared
+    axis set for every term) would force `a[i]` through a `k`-indexed loop it doesn't need,
+    adding it in `|k|` times instead of once.
+
+    All `.read`/`.unaryFn` tensor names are validated against `env` up front. A `gather` error
+    during accumulation is now genuinely reachable — a `.unaryFn` domain violation (e.g.
+    `log` of a non-positive value) — and propagates as a hard `.error`, per this evaluator's
+    fail-loud convention; it is never treated as an out-of-range pad (out-of-range reads return
+    `.ok 0.0` directly from `gather`, they never reach the `.error` branch at all). -/
 def evalAssignWith (mul : Float → Float → Float) (combine : Float → Float → Float) (unit0 : Float)
     (env : HashMap String DenseTensor) (sizes : HashMap UID Nat)
     (nm : String) (slots : List LHSSlot) (rhs : RHSExpr) : Except EvalError (String × DenseTensor) := do
@@ -62,24 +82,25 @@ def evalAssignWith (mul : Float → Float → Float) (combine : Float → Float 
   for u in frees do
     if (sizes[u]?).isNone then
       throw s!"evalAssign {nm}: output axis (uid {u}) has no inferable size (it appears in no read position)"
-  let contr := (readAxisUIDs rhs).eraseDups.filter (fun u => ! frees.contains u)
   let outShape := outputShape sizes slots
-  let contrSizes := contr.map (fun u => (sizes[u]?).getD 1)
-  let out := DenseTensor.ofFn outShape (fun fcoord =>
-    Id.run do
+  let data ← (DenseTensor.allCoords outShape).mapM (fun fcoord => do
       let baseCoord : HashMap UID Int := (frees.zip fcoord).foldl (fun m (u, v) => m.insert u (Int.ofNat v)) {}
       let mut acc := unit0
       for t in rhs.body.terms do
-        for cc in cartesian contrSizes do
-          let coord := (contr.zip cc).foldl (fun m (u, v) => m.insert u (Int.ofNat v)) baseCoord
+        let termContr := (termAxisUIDs t).eraseDups.filter (fun u => ! frees.contains u)
+        let termSizes := termContr.map (fun u => (sizes[u]?).getD 1)
+        let mut termAcc := unit0
+        for cc in cartesian termSizes do
+          let coord := (termContr.zip cc).foldl (fun m (u, v) => m.insert u (Int.ofNat v)) baseCoord
           let mut prod := 1.0
           for f in t.factors do
             match gather env coord f with
-            | .ok v    => prod := mul prod v
-            | .error _ => prod := mul prod 0.0   -- only reachable as a legit out-of-range pad
-          acc := combine acc prod
+            | .ok v   => prod := mul prod v
+            | .error e => throw e
+          termAcc := combine termAcc prod
+        acc := combine acc termAcc
       pure acc)
-  return (nm, out)
+  return (nm, ⟨outShape, data.toArray⟩)
 
 /-- The default tensor (ℝ) contraction: multiply factors, then sum contributions. -/
 def evalAssign := evalAssignWith (· * ·) (· + ·) 0.0
@@ -148,27 +169,29 @@ def evalAssignSeeded (mul : Float → Float → Float) (combine : Float → Floa
   -- free axes = LHS slot axes minus the seeded UIDs (and minus affine slots, which contribute none)
   let freesAll := freeAxisUIDs slots
   let frees := freesAll.filter (fun u => ! seed.contains u)
-  let contr := (readAxisUIDs rhs).eraseDups.filter (fun u => ! frees.contains u && ! seed.contains u)
   -- output shape: each non-seeded free slot's size, in slot order
   let outShape := slots.filterMap (fun sl => match lhsAxisUID? sl with
     | some u => if seed.contains u then none else some ((sizes[u]?).getD 0)
     | none   => none)
-  let contrSizes := contr.map (fun u => (sizes[u]?).getD 1)
-  let out := DenseTensor.ofFn outShape (fun fcoord =>
-    Id.run do
+  let data ← (DenseTensor.allCoords outShape).mapM (fun fcoord => do
       let baseCoord : HashMap UID Int :=
         (frees.zip fcoord).foldl (fun m (u, v) => m.insert u (Int.ofNat v)) seed
       let mut acc := unit0
       for t in rhs.body.terms do
-        for cc in cartesian contrSizes do
-          let coord := (contr.zip cc).foldl (fun m (u, v) => m.insert u (Int.ofNat v)) baseCoord
+        -- per-term contraction scoping, same rationale as `evalAssignWith`.
+        let termContr := (termAxisUIDs t).eraseDups.filter (fun u => ! frees.contains u && ! seed.contains u)
+        let termSizes := termContr.map (fun u => (sizes[u]?).getD 1)
+        let mut termAcc := unit0
+        for cc in cartesian termSizes do
+          let coord := (termContr.zip cc).foldl (fun m (u, v) => m.insert u (Int.ofNat v)) baseCoord
           let mut prod := 1.0
           for f in t.factors do
             match gather env coord f with
-            | .ok v    => prod := mul prod v
-            | .error _ => prod := mul prod 0.0
-          acc := combine acc prod
+            | .ok v   => prod := mul prod v
+            | .error e => throw e
+          termAcc := combine termAcc prod
+        acc := combine acc termAcc
       pure acc)
-  return (nm, out)
+  return (nm, ⟨outShape, data.toArray⟩)
 
 end LeanNCD.Eval

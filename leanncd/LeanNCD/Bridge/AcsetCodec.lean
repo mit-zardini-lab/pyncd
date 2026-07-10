@@ -62,7 +62,7 @@ def parseWireLabel (s : String) : Option Wire := some (wireOfCode (unaryToNat s)
 @[simp] theorem parseWireLabel_wireLabel (w : Wire) : parseWireLabel (wireLabel w) = some w := by
   simp [parseWireLabel, wireLabel]
 
-/-- The constructor index of a `BrOp` (0..9) — a systematic internal tag, NOT a mapping into
+/-- The constructor index of a `BrOp` (0..13) — a systematic internal tag, NOT a mapping into
     Python's unrelated `Acset.OpTag` (which has different cardinality/semantics; see the Design
     Decision in the plan doc). -/
 def brOpIdx : BrOp → Nat
@@ -76,8 +76,12 @@ def brOpIdx : BrOp → Nat
   | .scanAffine => 7
   | .scanPre    => 8
   | .minreduce  => 9
+  | .sigmoid    => 10
+  | .tanh       => 11
+  | .gelu       => 12
+  | .leakyrelu  => 13
 
-/-- Inverse of `brOpIdx` on `0..9`; defaults to `.contract` outside that range (never hit on data
+/-- Inverse of `brOpIdx` on `0..13`; defaults to `.contract` outside that range (never hit on data
     produced by `brOpIdx`, only relevant for totality on arbitrary/garbage input). -/
 def brOpOfIdx : Nat → BrOp
   | 0 => .contract
@@ -90,6 +94,10 @@ def brOpOfIdx : Nat → BrOp
   | 7 => .scanAffine
   | 8 => .scanPre
   | 9 => .minreduce
+  | 10 => .sigmoid
+  | 11 => .tanh
+  | 12 => .gelu
+  | 13 => .leakyrelu
   | _ => .contract
 
 @[simp] theorem brOpOfIdx_brOpIdx (op : BrOp) : brOpOfIdx (brOpIdx op) = op := by

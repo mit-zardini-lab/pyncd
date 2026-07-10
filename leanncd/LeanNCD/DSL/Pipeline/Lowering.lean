@@ -202,7 +202,8 @@ def Stmt.readFactors : Stmt → List (String × List IdxExpr)
   | .assign _ _ r | .scatter _ _ r _ =>
       r.body.terms.flatMap (fun t => t.factors.filterMap (fun
         | .read nm es => some (nm, es)
-        | .iverson _  => none))
+        | .iverson _  => none
+        | .unaryFn _ nm es => some (nm, es)))
   | .recurMorphism _ _ _ => []
 
 /-- The retained-output `AxisSpec`s of a stmt: those named by `free`/`iterAt`/`iterNext` slots.
@@ -539,6 +540,10 @@ def buildStep (nameToStep : Std.HashMap String (Nat × Nat)) (extIndex : Std.Has
     else if sc.isScan then (if sc.isAffineScan then .scanAffine else .scan)
     else match s.nonlin with
       | .relu        => .relu
+      | .sigmoid     => .sigmoid
+      | .tanh        => .tanh
+      | .gelu        => .gelu
+      | .leakyrelu   => .leakyrelu
       | .softmax _   => .softmax
       | .normalize _ => .normalize
       | .identity    => match s with

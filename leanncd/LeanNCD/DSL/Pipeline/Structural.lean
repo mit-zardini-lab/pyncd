@@ -33,6 +33,7 @@ private def specsNonlin : Nonlin → List AxisSpec
 
 private def specsFactor : Factor → List AxisSpec
   | .read _ es => es.flatMap specsIdx | .iverson b => specsBool b
+  | .unaryFn _ _ es => es.flatMap specsIdx
 
 private def specsRHS (r : RHSExpr) : List AxisSpec :=
   (r.body.terms.flatMap (fun t => t.factors.flatMap specsFactor)) ++ specsNonlin r.nonlin
@@ -108,7 +109,8 @@ def Stmt.readNames : Stmt → List String
   | .assign _ _ r | .scatter _ _ r _ =>
       r.body.terms.flatMap (fun t => t.factors.filterMap (fun
         | .read nm _ => some nm
-        | .iverson _ => none))
+        | .iverson _ => none
+        | .unaryFn _ nm _ => some nm))
   | .recurMorphism _ _ _ => []   -- recurMorphism reads not introspected (E2c)
 
 /-- Build the declaration environment and classify external-input names.
@@ -146,7 +148,8 @@ private def stmtReads (s : Stmt) : List (String × Nat) :=
   | .assign _ _ r | .scatter _ _ r _ =>
       r.body.terms.flatMap (fun t => t.factors.filterMap (fun
         | .read nm es => some (nm, es.length)
-        | .iverson _  => none))
+        | .iverson _  => none
+        | .unaryFn _ nm es => some (nm, es.length)))
   | .recurMorphism _ _ _ => []
 
 /-- Will this LHS be lowered to a `scatter` (publishing its full slot-count rank)? True for an affine
@@ -351,7 +354,8 @@ def Stmt.rhsReads : Stmt → List IdxExpr
   | .assign _ _ r | .scatter _ _ r _ =>
       r.body.terms.flatMap (fun t => t.factors.flatMap (fun
         | .read _ es => es
-        | .iverson _ => []))
+        | .iverson _ => []
+        | .unaryFn _ _ es => es))
   | .recurMorphism _ _ _ => []
 
 /-- Conservative causality check: does any RHS read reference iteration axis `u` with a

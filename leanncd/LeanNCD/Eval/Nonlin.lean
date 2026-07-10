@@ -6,6 +6,24 @@ open Std
 /-- relu: elementwise max(0, x). -/
 def reluT (t : DenseTensor) : DenseTensor := ⟨t.shape, t.data.map (fun x => max 0.0 x)⟩
 
+/-- sigmoid: elementwise 1/(1+e^-x). -/
+def sigmoidT (t : DenseTensor) : DenseTensor :=
+  ⟨t.shape, t.data.map (fun x => 1.0 / (1.0 + Float.exp (-x)))⟩
+
+/-- tanh: elementwise hyperbolic tangent. -/
+def tanhT (t : DenseTensor) : DenseTensor := ⟨t.shape, t.data.map Float.tanh⟩
+
+/-- gelu (tanh approximation): `0.5·x·(1 + tanh(√(2/π)·(x + 0.044715·x³)))`. The exact
+    erf-based form isn't available (no `Float.erf` in this toolchain); this is the standard
+    approximation used by BERT/GPT-2-style implementations. -/
+def geluT (t : DenseTensor) : DenseTensor :=
+  ⟨t.shape, t.data.map (fun x =>
+    0.5 * x * (1.0 + Float.tanh (0.7978845608028654 * (x + 0.044715 * x^3))))⟩
+
+/-- leaky relu: elementwise `x` if `x ≥ 0` else `0.01·x` (fixed negative slope). -/
+def leakyReluT (t : DenseTensor) : DenseTensor :=
+  ⟨t.shape, t.data.map (fun x => if x ≥ 0.0 then x else 0.01 * x)⟩
+
 /-- Build the `coord : HashMap UID Int` for a full multi-index `c`, pairing each axis position's
     UID with its coordinate value (so `evalBool` can see the coordinate for masking). -/
 private def coordMap (axisUids : List UID) (c : List Nat) : HashMap UID Int :=
@@ -64,12 +82,17 @@ def normalizeT (axisPos : Nat) (axisUids : List UID) (mask? : Option BoolExpr)
     entries.map (fun (x, masked) =>
       if masked || s == 0.0 then 0.0 else x / s)) t
 
-/-- Dispatch: apply a Nonlin. `axisPos`/`axisUids` describe the norm axis (ignored by relu/identity). -/
+/-- Dispatch: apply a Nonlin. `axisPos`/`axisUids` describe the norm axis (ignored by the
+    pointwise variants: relu/identity/sigmoid/tanh/gelu/leakyrelu). -/
 def applyNonlin (nl : Nonlin) (axisPos : Nat) (axisUids : List UID)
     (t : DenseTensor) : DenseTensor :=
   match nl with
   | .identity      => t
   | .relu          => reluT t
+  | .sigmoid       => sigmoidT t
+  | .tanh          => tanhT t
+  | .gelu          => geluT t
+  | .leakyrelu     => leakyReluT t
   | .softmax m     => softmaxT axisPos axisUids m t
   | .normalize m   => normalizeT axisPos axisUids m t
 

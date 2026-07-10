@@ -43,7 +43,8 @@ def evalStmtSliceSeeded (env : HashMap String DenseTensor) (sizes : HashMap UID 
       let (_, slice) ← evalAssignSeeded c.mul c.combine c.unit0 env sizes seed nm slots rhs
       let sliceUids := (slots.filterMap lhsAxisUID?).filter (fun u => ! seed.contains u)
       let pos ← match rhs.nonlin with
-        | .identity | .relu => pure 0     -- pointwise: reduction axis irrelevant
+        | .identity | .relu | .sigmoid | .tanh | .gelu | .leakyrelu =>
+            pure 0     -- pointwise: reduction axis irrelevant
         | .softmax _ | .normalize _ => match normAxisUidOf slots with
             | some nu => match sliceUids.findIdx? (· == nu) with
                 | some p => pure p

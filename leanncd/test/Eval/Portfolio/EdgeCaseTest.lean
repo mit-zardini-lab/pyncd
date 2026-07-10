@@ -5,8 +5,8 @@ import LSpec
 
 Legal-but-tricky corners: zero-pad boundary reads (EC1, EC2), size-1 axes (EC3, EC4),
 diagonal read/trace/write (EC5, EC6, EC7), high-rank contraction (EC10, EC14), n-ary
-products (EC11), affine reindex (EC12), precedence (EC13) and the equation-level
-summation gotcha (EC15).
+products (EC11), affine reindex (EC12), precedence (EC13) and per-term contraction
+scoping in a multi-term sum (EC15).
 
 EC8 (`Out[2*i,2*j]:=X[i,j]` upsample) is `[✔]` — already covered by `EvalExamplesTest`.
 EC9 (`Out[i+j]:=X[i,j]`) does NOT parse — LHS slots are single-axis affine only (`i+num`,
@@ -98,16 +98,20 @@ test "EC12 affine-reindex"
       (HashMap.ofList [("X", tl [6] [1,2,3,4,5,6])])
       "Y" (tl [2] [3, 7])) $
 
--- EC13  precedence: `·` binds tighter than `+`; two contractions summed.  (Parens are not
---   surface syntax; the bare form relies on precedence, which is exactly the property tested.)
---   Size-1 contracted axes (k,l) so no equation-level broadcast confounds the precedence test.
---   A=[[1],[2]], B=[[3,4]] ⇒ A·B=[[3,4],[6,8]];  C=[[1],[1]], D=[[1,1]] ⇒ C·D=[[1,1],[1,1]].
---   Y=(A·B)+(C·D)=[[4,5],[7,9]].
+-- EC13  precedence: `·` binds tighter than `+`; two contractions summed, each contracted
+--   independently over its OWN dummy axis.  (Parens are not surface syntax; the bare form
+--   relies on precedence, which is exactly the property tested.)
+--   `k` (size 2) and `l` (size 3) are DIFFERENT sizes, so the test also confirms the two
+--   terms don't share a joint contraction range (per-term contraction scoping; see the
+--   §12c callout in the portfolio doc and EC15).
+--   A=[[1,2],[3,4]] (i,k=2×2), B=I₂ (k,j) ⇒ A·B = A = [[1,2],[3,4]].
+--   C=ones(2,3) (i,l), D=ones(3,2) (l,j) ⇒ C·D[i,j]=Σ_l 1·1=3 (l size 3) ⇒ [[3,3],[3,3]].
+--   Y=(A·B)+(C·D)=[[4,5],[6,7]].
 test "EC13 precedence"
     (evalEqB (tlprog!{ Y[i, j] := A[i, k] · B[k, j] + C[i, l] · D[l, j] })
-      (HashMap.ofList [("A", tl [2,1] [1,2]), ("B", tl [1,2] [3,4]),
-    ("C", tl [2,1] [1,1]), ("D", tl [1,2] [1,1])])
-      "Y" (tl [2,2] [4,5, 7,9])) $
+      (HashMap.ofList [("A", tl [2,2] [1,2, 3,4]), ("B", tl [2,2] [1,0, 0,1]),
+    ("C", tl [2,3] [1,1,1, 1,1,1]), ("D", tl [3,2] [1,1, 1,1, 1,1])])
+      "Y" (tl [2,2] [4,5, 6,7])) $
 
 -- EC14  rank-5 full contraction (many contracted axes at once).
 --   A shape [2,2,1,1,1] data [1,2,3,4] ⇒ s=Σ all = 10.
@@ -116,22 +120,25 @@ test "EC14 rank5-contract"
       (HashMap.ofList [("A", tl [2,2,1,1,1] [1,2,3,4])])
       "s" (tl [] [10])) $
 
--- EC15  equation-level summation gotcha.  Y[i]:=u[]·a[i] + W[i,k]·v[k].
---   k is summed over the WHOLE RHS ⇒ the k-less term u·a[i] is broadcast by |k|=2:
---     Y[i] = |k|·u·a[i] + Σ_k W[i,k]·v[k].
+-- EC15  per-term contraction scoping in a multi-term sum.  Y[i]:=u[]·a[i] + W[i,k]·v[k].
+--   `k` appears only in the second term, so it is contracted WITHIN that term alone; the
+--   k-less first term `u·a[i]` is added in exactly once, unaffected by |k|:
+--     Y[i] = u·a[i] + Σ_k W[i,k]·v[k].
 --   u=10, a=[1,2], W=[[1,1],[1,1]], v=[1,1]:
---     Y[0]=2·10·1 + (1+1)=22;  Y[1]=2·10·2 + (1+1)=42  ⇒  Y=[22,42].
---   (Pins the observed broadcast semantics; flip if a future per-term change lands.)
+--     Y[0]=10·1 + (1+1)=12;  Y[1]=10·2 + (1+1)=22  ⇒  Y=[12,22].
+--   (Regression test: an earlier whole-equation contraction scoping summed every term over the
+--   union of axes across the RHS, which silently broadcast k-less terms by |k|. See
+--   `termAxisUIDs` in `Eval/Contract.lean`.)
 --   NOTE: the doc's canonical form of this example names the second RHS tensor `c[k]`; that
 --   spelling was renamed to `v[k]` here because `c[` is a GLOBALLY reserved token — Mathlib's
 --   `Equiv.Perm` cycle notation (`Mathlib.GroupTheory.Perm.Cycle.Concrete`) declares `c[…]` as
 --   permutation-cycle syntax, and this project transitively imports mathlib, so any tensor
 --   named exactly `c` followed by `[` fails to parse project-wide. Not a DSL bug; `cc`, `c2`,
 --   and uppercase `C` are all unaffected. See the "Naming hazard" note in the portfolio doc.
-test "EC15 equation-level-sum"
+test "EC15 per-term-contraction"
     (evalEqB (tlprog!{ Y[i] := u[] · a[i] + W[i, k] · v[k] })
       (HashMap.ofList [("a", tl [2] [1,2]), ("u", tl [] [10]),
     ("W", tl [2,2] [1,1, 1,1]), ("v", tl [2] [1,1])])
-      "Y" (tl [2] [22, 42]))
+      "Y" (tl [2] [12, 22]))
 
 end LeanNCD.Eval

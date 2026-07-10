@@ -36,12 +36,17 @@ instance : TermTraversable BoolExpr where traverseUID := BoolExpr.mapUID
 def Nonlin.mapUID (f : UData → UData) : Nonlin → Nonlin
   | .identity      => .identity
   | .relu          => .relu
+  | .sigmoid       => .sigmoid
+  | .tanh          => .tanh
+  | .gelu          => .gelu
+  | .leakyrelu     => .leakyrelu
   | .softmax m     => .softmax (m.map (BoolExpr.mapUID f))
   | .normalize m   => .normalize (m.map (BoolExpr.mapUID f))
 
 def Factor.mapUID (f : UData → UData) : Factor → Factor
   | .read nm es => .read nm (es.map (IdxExpr.mapUID f))
   | .iverson b  => .iverson (BoolExpr.mapUID f b)
+  | .unaryFn op nm es => .unaryFn op nm (es.map (IdxExpr.mapUID f))
 
 def ProdTerm.mapUID (f : UData → UData) (p : ProdTerm) : ProdTerm :=
   { factors := p.factors.map (Factor.mapUID f) }
