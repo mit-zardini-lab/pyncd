@@ -1,6 +1,5 @@
 import Mathlib
-import LeanNCD.Mixins.Route
-import LeanNCD.Mixins.Symmetry
+import LeanNCD.Mixins.Stubs
 
 namespace LeanNCD
 open CategoryTheory

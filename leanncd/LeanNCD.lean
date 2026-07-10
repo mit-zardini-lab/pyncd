@@ -103,8 +103,7 @@ import LeanNCD.Seam.Adapter
 import LeanNCD.Core.Graded
 import LeanNCD.Core.Weave
 import LeanNCD.Mixins.Temporal
-import LeanNCD.Mixins.Route
-import LeanNCD.Mixins.Symmetry
+import LeanNCD.Mixins.Stubs
 import LeanNCD.Grothendieck.Split
 import LeanNCD.Algebra.Target
 import LeanNCD.Algebra.Algebra
