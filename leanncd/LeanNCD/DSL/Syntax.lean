@@ -24,7 +24,6 @@ declare_syntax_cat tl_axis_spec
 declare_syntax_cat tl_named_shape
 declare_syntax_cat tl_axis_decl_item
 declare_syntax_cat tl_linear_item
-declare_syntax_cat tl_shape
 declare_syntax_cat tl_decl
 declare_syntax_cat tl_idx_expr
 declare_syntax_cat tl_pred_term
@@ -59,8 +58,6 @@ syntax "ℕ[" tl_size "]"      : tl_axis_kind
 
 -- Axis names in tensor/predicate shapes are bare identifiers.
 syntax ident : tl_axis_spec
--- `tl_shape` is kept for future use; no longer referenced by any `tl_decl` rule.
-syntax "(" tl_axis_spec,* ")" : tl_shape
 -- `T(a, b, c)` — tensor/predicate name followed by its axis list, no colon needed.
 syntax ident "(" tl_axis_spec,* ")" : tl_named_shape
 -- `l : ℕ` or `l : ℕ = 3` — a single axis declaration item (may appear in a comma group).

@@ -8,7 +8,7 @@ Value-returning `Syntax → MetaM <value>` elaborators that construct AST values
 directly (NOT `Expr`-building). This is possible because `SizeExpr` and the AST
 inductives are all computable + `DecidableEq` + `Repr`.
 
-Layers covered: `tl_size`, `tl_axis_kind`, `tl_axis_spec`, `tl_shape`, `tl_decl`,
+Layers covered: `tl_size`, `tl_axis_kind`, `tl_axis_spec`, `tl_decl`,
 `tl_idx_expr` (general integer-affine), `tl_pred_term`.
 -/
 
@@ -37,10 +37,6 @@ partial def elabTLAxisKind : Syntax → MetaM AxisKind
 partial def elabTLAxisSpec : Syntax → MetaM AxisSpec
   | `(tl_axis_spec| $x:ident) =>
       return { name := x.getId.eraseMacroScopes.getString!, uid := 0, kind := .real none }
-  | _ => throwUnsupportedSyntax
-
-partial def elabTLShape : Syntax → MetaM (List AxisSpec)
-  | `(tl_shape| ( $specs,* )) => specs.getElems.toList.mapM elabTLAxisSpec
   | _ => throwUnsupportedSyntax
 
 private def elabTLNamedShape : Syntax → MetaM (String × List AxisSpec)
