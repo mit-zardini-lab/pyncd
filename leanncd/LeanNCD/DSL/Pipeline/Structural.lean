@@ -283,7 +283,8 @@ def unifyAxes (rp : ResolvedProgram) : FreshM CanonicalProgram := do
 E2a SCOPING DECISION (a deliberate divergence from §12.4): affine *reads* (e.g.
 `X[i+p, 2*j+r]`) are LEFT IN PLACE here — the later `route` phase absorbs each read's affine
 `IdxExpr` into the consuming step's `reindexings` field (exactly where stride-maps live in
-`BrBase`, §2.3). So `lowerArith` emits NO separate Slice/Reindex intermediate steps. Its real job is the affine-LHS → `Stmt.scatter` reclassification plus a
+`BrBase`, §2.3). So `lowerArith` emits NO separate Slice/Reindex intermediate steps. Its
+real job is the affine-LHS → `Stmt.scatter` reclassification plus a
 *conservative* `overlappingScatter` injectivity guard (a const LHS coord collapses a dimension
 and so needs `reduce sum`; strided coords like upsample `2*i` are injective). -/
 
