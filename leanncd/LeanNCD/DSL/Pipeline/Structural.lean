@@ -122,9 +122,7 @@ def Stmt.readNames : Stmt → List String
   | .recurMorphism _ _ _ => []   -- recurMorphism reads not introspected (E2c)
 
 /-- Build the declaration environment and classify external-input names.
-    `extNames` = names READ in some stmt but never PRODUCED (never a stmt LHS).
-    `extraStmts := #[]`: bias materialization for `linear … bias := true` is deferred — none of
-    the five §12.1 examples declare a `linear` weight, so it is unexercised here. Never throws. -/
+    `extNames` = names READ in some stmt but never PRODUCED (never a stmt LHS). Never throws. -/
 def resolveDecls (lp : LabeledProgram) : FreshM ResolvedProgram := do
   let env : DeclEnv := lp.decls.foldl (fun m d => match d with
     | .axis _ _ => m                  -- axis decls name an axis, not a tensor: keep them out of the env
@@ -134,7 +132,7 @@ def resolveDecls (lp : LabeledProgram) : FreshM ResolvedProgram := do
   let extNames : Finset String :=
     reads.foldl (fun s n => if produced.contains n then s else insert n s) ∅
   return { decls := lp.decls, stmts := lp.stmts, env,
-           extNames, extraStmts := #[] }
+           extNames }
 
 /-! ## The `checkReadRanks` phase
 
@@ -285,8 +283,7 @@ def unifyAxes (rp : ResolvedProgram) : FreshM CanonicalProgram := do
 E2a SCOPING DECISION (a deliberate divergence from §12.4): affine *reads* (e.g.
 `X[i+p, 2*j+r]`) are LEFT IN PLACE here — the later `route` phase absorbs each read's affine
 `IdxExpr` into the consuming step's `reindexings` field (exactly where stride-maps live in
-`BrBase`, §2.3). So `lowerArith` emits NO separate Slice/Reindex intermediate steps and leaves
-`auxStmts := #[]`. Its real job is the affine-LHS → `Stmt.scatter` reclassification plus a
+`BrBase`, §2.3). So `lowerArith` emits NO separate Slice/Reindex intermediate steps. Its real job is the affine-LHS → `Stmt.scatter` reclassification plus a
 *conservative* `overlappingScatter` injectivity guard (a const LHS coord collapses a dimension
 and so needs `reduce sum`; strided coords like upsample `2*i` are injective). -/
 
@@ -324,7 +321,7 @@ def lowerArith (cp : CanonicalProgram) : FreshM LoweredProgram := do
         else return s
     | .recurMorphism _ _ _ => return s)   -- no affine LHS; passes through unchanged
   return { decls := cp.decls, stmts := stmts', env := cp.env,
-           extNames := cp.extNames, ctx := cp.ctx, auxStmts := #[] }
+           extNames := cp.extNames, ctx := cp.ctx }
 
 /-! ## The `finalizeScans` phase (Phase 5 — recurrence → Scan nodes)
 

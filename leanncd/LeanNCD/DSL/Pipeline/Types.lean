@@ -27,7 +27,6 @@ structure ResolvedProgram where
   stmts      : List Stmt
   env        : DeclEnv
   extNames   : Finset String  -- externally declared (input) tensor names
-  extraStmts : Array Stmt     -- bias-add stmts for `linear … bias`
 
 structure CanonicalProgram where
   decls    : List Decl
@@ -42,7 +41,6 @@ structure LoweredProgram where
   env      : DeclEnv
   extNames : Finset String
   ctx      : Context AxisSpec
-  auxStmts : Array Stmt        -- Slice/Reindex/Scatter intermediates
 
 structure ScanProgram where
   decls    : List Decl

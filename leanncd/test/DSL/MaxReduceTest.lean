@@ -31,7 +31,7 @@ run_cmd do
   let s : Stmt := .assign "P" [.free ax]
     { body := { terms := [] }, nonlin := .identity, agg := .max }
   let env : DeclEnv := ({} : HashMap String Decl).insert "P" (.predicate "P" [ax])
-  let rp : ResolvedProgram := { decls := [], env, extNames := ∅, stmts := [s], extraStmts := #[] }
+  let rp : ResolvedProgram := { decls := [], env, extNames := ∅, stmts := [s] }
   match checkDtypes rp |>.run 0 with
   | .error (.predicateAgg "P") _ => pure ()
   | .error e _                   => throwError s!"wrong error: {repr e}"

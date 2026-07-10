@@ -122,7 +122,7 @@ run_cmd do
   let gRec  : Stmt := .assign "G" [ .free j, .iterNext l ] (rhs "G")
   let hBase : Stmt := .assign "H" [ .free j, .iterAt l 0 ] { body := { terms := [] }, nonlin := .identity }
   let hRec  : Stmt := .assign "H" [ .free j, .iterNext l ] (rhs "H")
-  let lp : LoweredProgram := { decls := [], stmts := [gBase, gRec, hBase, hRec], env := {}, extNames := ∅, ctx := { classes := [] }, auxStmts := #[] }
+  let lp : LoweredProgram := { decls := [], stmts := [gBase, gRec, hBase, hRec], env := {}, extNames := ∅, ctx := { classes := [] } }
   match finalizeScans lp |>.run 0 with
   | .ok sp _ =>
       let scans := sp.stmts.filterMap (fun | .scan _ _ b r _ => some (b, r) | .plain _ => none | .scanPre _ _ _ => none)
@@ -138,7 +138,7 @@ run_cmd do
   let l : AxisSpec := { name := "l", uid := 9, kind := .nat none }
   let orphan : Stmt := .assign "S" [ .iterNext l ]
     { body := { terms := [ { factors := [ .read "S" [ .axis l ] ] } ] }, nonlin := .identity }
-  let lp : LoweredProgram := { decls := [], stmts := [orphan], env := {}, extNames := ∅, ctx := { classes := [] }, auxStmts := #[] }
+  let lp : LoweredProgram := { decls := [], stmts := [orphan], env := {}, extNames := ∅, ctx := { classes := [] } }
   match finalizeScans lp |>.run 0 with
   | .error (.missingBaseCase "S") _ => pure ()
   | .error e _ => throwError s!"wrong error: {repr e}"
@@ -178,8 +178,7 @@ run_cmd do
     .assign nm [] { body := { terms := [{ factors := [readX n] }] }, nonlin := .identity }
   let rp : ResolvedProgram := {
     decls := [], env := {}, extNames := insert "X" ∅,
-    stmts := [mkStmt "A" 2, mkStmt "B" 2],
-    extraStmts := #[] }
+    stmts := [mkStmt "A" 2, mkStmt "B" 2] }
   match checkReadRanks rp |>.run 0 with
   | .ok _ _    => pure ()
   | .error e _ => throwError s!"consistent external reads should not error: {repr e}"
@@ -192,8 +191,7 @@ run_cmd do
     .assign nm [] { body := { terms := [{ factors := [readX n] }] }, nonlin := .identity }
   let rp : ResolvedProgram := {
     decls := [], env := {}, extNames := insert "X" ∅,
-    stmts := [mkStmt "A" 2, mkStmt "B" 1],   -- first read rank 2, second rank 1
-    extraStmts := #[] }
+    stmts := [mkStmt "A" 2, mkStmt "B" 1] }   -- first read rank 2, second rank 1
   match checkReadRanks rp |>.run 0 with
   | .error (.rankMismatch "X" 2 1) _ => pure ()
   | .error e _                       => throwError s!"wrong error: {repr e}"
@@ -210,8 +208,7 @@ run_cmd do
       .assign "T" [.free i]
         { body := { terms := [{ factors := [.read "A" [.axis i]] }] }, nonlin := .identity },
       .assign "Y" [.free i, .free k]
-        { body := { terms := [{ factors := [.read "T" [.axis i, .axis k]] }] }, nonlin := .identity } ],
-    extraStmts := #[] }
+        { body := { terms := [{ factors := [.read "T" [.axis i, .axis k]] }] }, nonlin := .identity } ] }
   match checkReadRanks rp |>.run 0 with
   | .error (.rankMismatch "T" 1 2) _ => pure ()
   | .error e _                       => throwError s!"wrong error: {repr e}"
@@ -226,8 +223,7 @@ run_cmd do
       .assign "T" [.free i]
         { body := { terms := [{ factors := [.read "A" [.axis i]] }] }, nonlin := .identity },
       .assign "Y" [.free i]
-        { body := { terms := [{ factors := [.read "T" [.axis i]] }] }, nonlin := .identity } ],
-    extraStmts := #[] }
+        { body := { terms := [{ factors := [.read "T" [.axis i]] }] }, nonlin := .identity } ] }
   match checkReadRanks rp |>.run 0 with
   | .ok _ _    => pure ()
   | .error e _ => throwError s!"correct-arity intermediate read should pass: {repr e}"
@@ -245,8 +241,7 @@ run_cmd do
       .assign "Out" [.affine (.scale 2 i), .affine (.scale 2 i)]
         { body := { terms := [{ factors := [.read "X" [.axis i]] }] }, nonlin := .identity },
       .assign "Z" [.free a, .free b]
-        { body := { terms := [{ factors := [.read "Out" [.axis a, .axis b]] }] }, nonlin := .identity } ],
-    extraStmts := #[] }
+        { body := { terms := [{ factors := [.read "Out" [.axis a, .axis b]] }] }, nonlin := .identity } ] }
   match checkReadRanks rp |>.run 0 with
   | .ok _ _    => pure ()
   | .error e _ => throwError s!"reading affine-scatter output at slot rank should pass: {repr e}"
@@ -256,7 +251,7 @@ run_cmd do
   let l : AxisSpec := { name := "l", uid := 1, kind := .real none }  -- ← real, not nat
   let s : Stmt := .assign "H" [.iterAt l 0]
     { body := { terms := [] }, nonlin := .identity }
-  let rp : ResolvedProgram := { decls := [], env := {}, extNames := ∅, stmts := [s], extraStmts := #[] }
+  let rp : ResolvedProgram := { decls := [], env := {}, extNames := ∅, stmts := [s] }
   match checkDtypes rp |>.run 0 with
   | .error (.iterAxisNotNat "l") _ => pure ()
   | .error e _                     => throwError s!"wrong error: {repr e}"
@@ -267,7 +262,7 @@ run_cmd do
   let l : AxisSpec := { name := "l", uid := 1, kind := .nat none }
   let s : Stmt := .assign "H" [.iterAt l 0]
     { body := { terms := [] }, nonlin := .identity }
-  let rp : ResolvedProgram := { decls := [], env := {}, extNames := ∅, stmts := [s], extraStmts := #[] }
+  let rp : ResolvedProgram := { decls := [], env := {}, extNames := ∅, stmts := [s] }
   match checkDtypes rp |>.run 0 with
   | .ok _ _    => pure ()
   | .error e _ => throwError s!"nat iterAt should not error: {repr e}"
@@ -277,7 +272,7 @@ run_cmd do
   let m : AxisSpec := { name := "m", uid := 2, kind := .nat none }  -- ← nat, not real
   let s : Stmt := .assign "S" [.freeNorm m]
     { body := { terms := [] }, nonlin := .softmax none }
-  let rp : ResolvedProgram := { decls := [], env := {}, extNames := ∅, stmts := [s], extraStmts := #[] }
+  let rp : ResolvedProgram := { decls := [], env := {}, extNames := ∅, stmts := [s] }
   match checkDtypes rp |>.run 0 with
   | .error (.normAxisNotReal "m") _ => pure ()
   | .error e _                      => throwError s!"wrong error: {repr e}"
@@ -289,7 +284,7 @@ run_cmd do
   let s : Stmt := .assign "P" [.free ax]
     { body := { terms := [] }, nonlin := .relu }  -- ← relu on a predicate
   let env : DeclEnv := ({} : Std.HashMap String Decl).insert "P" (.predicate "P" [ax])
-  let rp : ResolvedProgram := { decls := [], env, extNames := ∅, stmts := [s], extraStmts := #[] }
+  let rp : ResolvedProgram := { decls := [], env, extNames := ∅, stmts := [s] }
   match checkDtypes rp |>.run 0 with
   | .error (.predicateNonlin "P") _ => pure ()
   | .error e _                      => throwError s!"wrong error: {repr e}"
@@ -301,7 +296,7 @@ run_cmd do
   let s : Stmt := .assign "P" [.free ax]
     { body := { terms := [] }, nonlin := .identity }
   let env : DeclEnv := ({} : Std.HashMap String Decl).insert "P" (.predicate "P" [ax])
-  let rp : ResolvedProgram := { decls := [], env, extNames := ∅, stmts := [s], extraStmts := #[] }
+  let rp : ResolvedProgram := { decls := [], env, extNames := ∅, stmts := [s] }
   match checkDtypes rp |>.run 0 with
   | .ok _ _    => pure ()
   | .error e _ => throwError s!"predicate with identity should not error: {repr e}"
