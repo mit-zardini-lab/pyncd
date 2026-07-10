@@ -31,7 +31,7 @@ import Mathlib
   ## Remaining route to `brCancelPoint`
   category/SMC laws (technique demonstrated in `nComp_nId_left`) → `sound : Rel f g → eval f = eval g`
   (induction on `Rel`, each case = one law) → the deep `section_` (Joyal–Street coherence) +
-  `eval_point_injective` → assemble `brCancelPoint` (skeleton in the old `_scratch_nf.lean`). -/
+  `eval_point_injective` → assemble `brCancelPoint` (skeleton in `spikes/_scratch_nf.lean`). -/
 
 namespace LeanNCD
 namespace BrNF
