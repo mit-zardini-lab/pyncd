@@ -354,4 +354,28 @@ run_cmd do
           throwError s!"diagonal read wrong: shape={repr Z.shape} data={repr Z.data}"
     | none => throwError "diagonal read: no Z"
 
+/- KG-multiout regression — two independent, non-chained, mutually-unread statements: `Total`
+   (sum-contraction, not the tail statement, read by nothing) and `Peak` (max-contraction, the
+   tail statement). `schedule` (`Lowering.lean`) used to eliminate any produced-but-unread,
+   non-tail statement as "dead code" — indistinguishable from a genuine second output using only
+   read/unread status — so `Total` would silently vanish from the result. X=[1,5,3]:
+   Total=Σ=9, Peak=max=5. Both must be present. -/
+run_cmd do
+  let env : HashMap String DenseTensor :=
+    ({} : HashMap String DenseTensor).insert "X" (tensorOf [3] [1,5,3])
+  match TLProgram.eval (tlprog!{
+    Total[] := X[i]
+    Peak[] := maxreduce(X[i])
+  }) env with
+  | .error e => throwError s!"multi-output: {e}"
+  | .ok out =>
+      match out["Total"]? with
+      | some t => unless DenseTensor.approxEq t (tensorOf [] [9]) do
+          throwError s!"Total wrong: {repr t.data}"
+      | none => throwError "multi-output: Total silently dropped (KG-multiout regression)"
+      match out["Peak"]? with
+      | some p => unless DenseTensor.approxEq p (tensorOf [] [5]) do
+          throwError s!"Peak wrong: {repr p.data}"
+      | none => throwError "multi-output: Peak missing"
+
 end LeanNCD.Eval

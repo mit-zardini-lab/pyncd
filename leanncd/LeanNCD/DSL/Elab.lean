@@ -153,6 +153,8 @@ partial def elabTLNonlin : Syntax → MetaM Nonlin
   | `(tl_nonlin| softmax( where $b ))           => return .softmax (some (← elabTLBoolExpr b))
   | `(tl_nonlin| normalize)                     => return .normalize none
   | `(tl_nonlin| normalize( where $b ))         => return .normalize (some (← elabTLBoolExpr b))
+  | `(tl_nonlin| l2normalize)                   => return .l2normalize none
+  | `(tl_nonlin| l2normalize( where $b ))       => return .l2normalize (some (← elabTLBoolExpr b))
   | _ => throwUnsupportedSyntax
 
 partial def elabTLFactor : Syntax → MetaM Factor
@@ -175,6 +177,9 @@ partial def elabTLFactor : Syntax → MetaM Factor
     and n-ary (`tl_prod_term · tl_factor`); flatten left-recursively into a list. -/
 partial def prodFactors : Syntax → MetaM (List Factor)
   | `(tl_prod_term| $p:tl_prod_term · $f:tl_factor) => return (← prodFactors p) ++ [(← elabTLFactor f)]
+  | `(tl_prod_term| $p:tl_prod_term / $nm:ident [ $idxs,* ]) =>
+      return (← prodFactors p) ++ [.unaryFn .recip (nm.getId.eraseMacroScopes.getString!)
+        (← idxs.getElems.toList.mapM elabTLIdxExpr)]
   | `(tl_prod_term| $f:tl_factor)                   => return [(← elabTLFactor f)]
   | _ => throwUnsupportedSyntax
 

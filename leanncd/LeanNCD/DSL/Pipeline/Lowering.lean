@@ -144,21 +144,17 @@ partial def liveFix (stmts : List ScanStmt) (live : List String) : List String :
   let live' := liveStep stmts live
   if live'.length == live.length then live else liveFix stmts live'
 
-/-- Phase 7: keep only the stmts (transitively) needed to compute the program's outputs.
-
-    Output detection: the program's result is the LAST stmt's written name(s). We then UNION
-    any other produced names that are read by NO stmt — these are additional results — but
-    ONLY when they are still live, which prevents a genuinely dead unread tensor (computed,
-    never consumed, not the final result) from masquerading as an output. Concretely we seed
-    reachability from the last stmt's writes, take the fixpoint, then fold in unread-produced
-    names that already turned out live. -/
+/-- Phase 7: keep every top-level statement whose result could be observed. Every produced name
+    is treated as a potential output — the scheduler cannot tell "scratch code the user doesn't
+    want" apart from "an intentional secondary output" using only read/unread status, and the
+    safe default is to compute it and let the caller ignore unwanted keys (see KG-multiout: this
+    phase used to eliminate any non-tail, unread statement as "dead", which silently dropped
+    legitimate additional outputs whenever they weren't threaded into a later read — fixed by no
+    longer eliminating produced-but-unread top-level statements). This only affects `.plain`
+    statement pruning; scan-body statements are unaffected. -/
 def schedule (lp : LinearProgram) : FreshM ScheduledProgram := do
   let produced := lp.stmts.flatMap ScanStmt.writes
-  let read     := lp.stmts.flatMap ScanStmt.reads
-  -- Primary output(s): the last stmt's written name(s); fall back to all unread-produced.
-  let lastOut  := (lp.stmts.reverse.head?.map ScanStmt.writes).getD []
-  let outputs  := if lastOut.isEmpty then produced.filter (fun n => ¬ read.contains n) else lastOut
-  let live := liveFix lp.stmts outputs.eraseDups
+  let live := liveFix lp.stmts produced.eraseDups
   let liveStmts := lp.stmts.filter (fun sc => (sc.writes).any (fun w => live.contains w))
   let ordered   := topoSort liveStmts
   -- collect the sizes pinned by `axis … = n` decls (UIDs are canonical by this phase).
@@ -546,6 +542,7 @@ def buildStep (nameToStep : Std.HashMap String (Nat × Nat)) (extIndex : Std.Has
       | .leakyrelu   => .leakyrelu
       | .softmax _   => .softmax
       | .normalize _ => .normalize
+      | .l2normalize _ => .l2normalize
       | .identity    => match s with
           | .scatter .. => .scatter
           | .assign ..  => match s.agg with

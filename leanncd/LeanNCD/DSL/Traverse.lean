@@ -42,6 +42,7 @@ def Nonlin.mapUID (f : UData → UData) : Nonlin → Nonlin
   | .leakyrelu     => .leakyrelu
   | .softmax m     => .softmax (m.map (BoolExpr.mapUID f))
   | .normalize m   => .normalize (m.map (BoolExpr.mapUID f))
+  | .l2normalize m => .l2normalize (m.map (BoolExpr.mapUID f))
 
 def Factor.mapUID (f : UData → UData) : Factor → Factor
   | .read nm es => .read nm (es.map (IdxExpr.mapUID f))

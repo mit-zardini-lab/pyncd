@@ -70,8 +70,9 @@ inductive Nonlin
   | tanh      : Nonlin
   | gelu      : Nonlin
   | leakyrelu : Nonlin
-  | softmax   : Option BoolExpr → Nonlin
-  | normalize : Option BoolExpr → Nonlin
+  | softmax     : Option BoolExpr → Nonlin
+  | normalize   : Option BoolExpr → Nonlin
+  | l2normalize : Option BoolExpr → Nonlin
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
 
 -- Reduction operation for contraction (sum is standard; max/min are tropical).
@@ -79,7 +80,8 @@ inductive AggOp | sum | max | min
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
 
 -- Unary transcendental functions applicable inline to a single factor's read (`log(P[i])`).
-inductive UnaryOp | log | exp | sin | cos | sqrt
+-- `recip` has no keyword form of its own — it's produced only by the infix `/` sugar.
+inductive UnaryOp | log | exp | sin | cos | sqrt | recip
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
 
 inductive Factor

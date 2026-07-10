@@ -11,10 +11,17 @@ open Std
 
 Axis identity in tensor logic is name-based within program scope (§12.1): a name appearing
 in multiple places denotes the same axis. The `specs*` family gathers every source `AxisSpec`
-in program order via exhaustive structural recursion (Lean's totality check forces every
-constructor, so nothing is silently dropped). The three public collectors below are thin
-projections of one traversal: by name (`TLProgram.axisNames`, de-duplicated), by uid
-(`Stmt.uids`), or both (`collectAxisNameUID`). -/
+in program order via structural recursion. Most of these (`specsIdx`, `specsPred`, `specsBool`,
+`specsFactor`, `specsLHS`) are exhaustive matches, so Lean's totality check forces every new
+constructor to be handled — nothing is silently dropped there. `specsNonlin` is the one
+exception: it uses a wildcard fallback (`_ => []`), which is safe ONLY because every current
+non-masked `Nonlin` variant genuinely contributes no axis specs. **Assumption that must hold for
+any future `Nonlin` variant:** if it carries an optional mask (`Option BoolExpr`, like
+`softmax`/`normalize`/`l2normalize`), it needs an explicit `some m => specsBool m` arm here —
+otherwise the wildcard silently swallows that mask's axis specs (this bit `l2normalize` once
+already; see the git history). The three public collectors below are thin projections of one
+traversal: by name (`TLProgram.axisNames`, de-duplicated), by uid (`Stmt.uids`), or both
+(`collectAxisNameUID`). -/
 
 private def specsIdx : IdxExpr → List AxisSpec
   | .axis a => [a] | .const _ => [] | .scale _ a => [a]
@@ -29,7 +36,8 @@ private def specsBool : BoolExpr → List AxisSpec
   | .not a => specsBool a | .ieq a b => specsPred a ++ specsPred b
 
 private def specsNonlin : Nonlin → List AxisSpec
-  | .softmax (some m) => specsBool m | .normalize (some m) => specsBool m | _ => []
+  | .softmax (some m) => specsBool m | .normalize (some m) => specsBool m
+  | .l2normalize (some m) => specsBool m | _ => []
 
 private def specsFactor : Factor → List AxisSpec
   | .read _ es => es.flatMap specsIdx | .iverson b => specsBool b
@@ -438,6 +446,11 @@ def finalizeScans (lp : LoweredProgram) : FreshM ScanProgram := do
   -- share a UID (the §12.1 `G`/`H` coupled scan, and each axis of a genuine multi-axis scan). One
   -- `ScanStmt.scan` per component. Bounded union-find: repeated merge, capped by #stmts passes.
   let axSet : Stmt → List UID := fun s => (s.iterInfo.map (·.1)).eraseDups
+  -- The axis-UID of an LHS slot, if it has one (`.affine` slots contribute none) — used below to
+  -- detect an unsupported in-scan per-step projection (§KG-scanprojection).
+  let slotUID : LHSSlot → Option UID := fun sl => match sl with
+    | .free a | .freeNorm a | .iterAt a _ | .iterNext a => some a.uid
+    | .affine _ => none
   let mut comps : List (List UID) := iterStmts.map axSet
   for _ in List.range (iterStmts.length + 1) do
     comps := comps.foldl (fun acc c =>
@@ -484,6 +497,17 @@ def finalizeScans (lp : LoweredProgram) : FreshM ScanProgram := do
         throw (CompileError.missingBaseCase r.lhsName)
       for u in comp do
         if readsIterAhead r u then throw (CompileError.causalityViolation r.lhsName)
+    -- FAIL LOUD (KG-scanprojection): an `isInter` statement (a per-step intermediate with no
+    -- base case) whose OWN LHS references the component's iteration axis is ambiguous — it
+    -- looks like the user wants a per-step read-out tracked across every `l`, but that's not
+    -- materialized (only same-step scratch intermediates, which never reference `l` on their own
+    -- LHS, are supported here). Reject rather than silently discard; the fully-general workaround
+    -- is to write it as a separate top-level statement after the scan, reading the fully
+    -- materialized state (see SS2 in the portfolio doc).
+    for s in nonPre do
+      if isInter s then
+        if (s.slots.filterMap slotUID).any (fun u => comp.contains u) then
+          throw (CompileError.scanProjectionUnsupported s.lhsName)
     -- recurrence body = per-step intermediates ++ state recurrences, in source order.
     let recurStmts := nonPre.filter (fun s => isInter s || isState s)
     let repName := ((recurStmts.head?.orElse (fun _ => baseStmts.head?)).map Stmt.lhsName).getD ""

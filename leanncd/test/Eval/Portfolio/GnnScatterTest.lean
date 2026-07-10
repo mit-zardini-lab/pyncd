@@ -3,9 +3,9 @@ import LSpec
 /-!
 # Portfolio §8 — Graph / message passing (GNN) + §8b — Consuming scatter outputs
 
-§8 (GN1–GN4): dense/predicate message passing, node degree, max-aggregation.
-  GN5 (degree-normalized D⁻¹AX, KG-div) and GN6 (edge-list scatter-add, KG-gather) are known
-  gaps — left unauthored (see the `--` note at the end).
+§8 (GN1–GN5): dense/predicate message passing, node degree, max-aggregation, and
+  degree-normalized propagation (GN5, via the friendly `/` operator). GN6 (edge-list
+  scatter-add, KG-gather) remains a known gap — left unauthored (see the `--` note at the end).
 
 §8b (SC1–SC8): reading the output of a scatter statement in *later* statements — the
   decoder/GNN readback pattern closed by commits 57d333f / fc10d70 (B3). Doubles as a
@@ -50,6 +50,19 @@ test "GN4 max-aggregation"
             H[i, f] := maxreduce(edge[i, j] · X[j, f]) })
       (HashMap.ofList [("edge", tl [2,2] [1,1, 0,1]), ("X", tl [2,2] [1,2, 3,4])])
       "H" (tl [2,2] [3,4, 3,4])) $
+
+-- GN5  degree-normalized propagation Ĥ = D⁻¹AX, via the friendly `/` operator (KG-div).
+--   A=[[0,1,1],[1,0,0]] (3 nodes), X=[[1,2],[3,4],[5,6]].
+--   H[i,f]=Σⱼ A[i,j]X[j,f]: H[0]=X[1]+X[2]=[8,10]; H[1]=X[0]=[1,2].
+--   deg[i]=Σⱼ A[i,j]: deg=[2,1].  Ĥ[i,f]=H[i,f]/deg[i]: Ĥ[0]=[8,10]/2=[4,5]; Ĥ[1]=[1,2]/1=[1,2].
+test "GN5 degree-normalized"
+    (evalEqB (tlprog!{
+    H[i, f] := A[i, j] · X[j, f]
+    deg[i] := A[i, j]
+    Hhat[i, f] := H[i, f] / deg[i]
+  })
+      (HashMap.ofList [("A", tl [2,3] [0,1,1, 1,0,0]), ("X", tl [3,2] [1,2, 3,4, 5,6])])
+      "Hhat" (tl [2,2] [4,5, 1,2])) $
 
 /- ## §8b Consuming scatter outputs -/
 
@@ -137,10 +150,9 @@ test "SC8 softmax-over-scatter"
       "P" rowsSumToOne)
 
 /-
-GN5 / GN6 — known gaps [F], left unauthored (would be red tests):
-  GN5  degree-normalized  Ĥ = D⁻¹ A X  — needs per-node division  (KG-div).
-  GN6  edge-list scatter-add  Msg[dst[e]] += X[src[e]]  — data-dependent gather/scatter with an
-       index tensor (KG-gather); indices must be affine.
+GN6 — known gap [F], left unauthored (would be a red test):
+  edge-list scatter-add  Msg[dst[e]] += X[src[e]]  — data-dependent gather/scatter with an
+  index tensor (KG-gather); indices must be affine.
 -/
 
 end LeanNCD.Eval

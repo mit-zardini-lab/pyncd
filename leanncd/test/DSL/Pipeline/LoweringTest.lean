@@ -34,21 +34,24 @@ run_cmd do
   | .ok lp _ => unless lp.stmts.length == 1 do throwError "identity assign should not split"
   | .error e _ => throwError s!"errored: {repr e}"
 
--- DCE: `Dead` is computed but never read and is not the output ⇒ dropped. `Y` (output)
--- and its dependency `T` survive.
+-- No DCE for unread top-level statements (KG-multiout fix): `schedule` used to eliminate any
+-- produced-but-unread, non-tail statement as "dead", which is indistinguishable from a
+-- legitimate secondary output using only read/unread status — this silently dropped intended
+-- multi-output programs. `Second` (produced, never read, not the tail statement) now survives
+-- alongside `Y` (the tail output) and `T` (Y's dependency), same as every other statement.
 run_cmd do
   let ax (nm : String) : AxisSpec := { name := nm, uid := 1, kind := .real none }
   let rd (nm : String) : RHSExpr :=
     { body := { terms := [ { factors := [ .read nm [ .axis (ax "i") ] ] } ] }, nonlin := .identity }
-  let tStmt   : ScanStmt := .plain (.assign "T" [ .free (ax "i") ] (rd "X"))      -- T := X
-  let deadS   : ScanStmt := .plain (.assign "Dead" [ .free (ax "i") ] (rd "X"))   -- Dead := X (unused)
-  let yStmt   : ScanStmt := .plain (.assign "Y" [ .free (ax "i") ] (rd "T"))      -- Y := T (output)
-  let lp : LinearProgram := { decls := [], stmts := [tStmt, deadS, yStmt], env := {}, extNames := ∅, ctx := { classes := [] } }
+  let tStmt      : ScanStmt := .plain (.assign "T" [ .free (ax "i") ] (rd "X"))      -- T := X
+  let secondStmt : ScanStmt := .plain (.assign "Second" [ .free (ax "i") ] (rd "X")) -- Second := X (independent output, unread)
+  let yStmt      : ScanStmt := .plain (.assign "Y" [ .free (ax "i") ] (rd "T"))      -- Y := T (tail output)
+  let lp : LinearProgram := { decls := [], stmts := [tStmt, secondStmt, yStmt], env := {}, extNames := ∅, ctx := { classes := [] } }
   match schedule lp |>.run 0 with
   | .ok sp _ =>
       let names := sp.stmts.flatMap ScanStmt.writes
-      unless names.contains "Y" && names.contains "T" do throwError s!"Y,T must survive; got {names}"
-      unless ¬ names.contains "Dead" do throwError s!"Dead must be eliminated; got {names}"
+      unless names.contains "Y" && names.contains "T" && names.contains "Second" do
+        throwError s!"Y, T, and Second must all survive; got {names}"
   | .error e _ => throwError s!"schedule errored: {repr e}"
 
 -- Matmul Y[i,j] := W[i,k]·X[k,j]: W,X external ⇒ nExternal=2; one step; k contracted ⇒

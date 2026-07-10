@@ -85,6 +85,7 @@ inductive BrOp
   | tanh       -- tanh nonlinearity
   | gelu       -- gelu nonlinearity (tanh approximation)
   | leakyrelu  -- leaky-relu nonlinearity (fixed 0.01 negative slope)
+  | l2normalize -- L2-normalize (with optional mask)
   deriving DecidableEq, Repr, Lean.ToExpr, Inhabited
 
 def BrOp.toString : BrOp → String
@@ -102,6 +103,7 @@ def BrOp.toString : BrOp → String
   | .tanh       => "tanh"
   | .gelu       => "gelu"
   | .leakyrelu  => "leakyrelu"
+  | .l2normalize => "l2normalize"
 
 /-- Computable presentation of `BrBase` (§2.3). The math-tower `Fin _ → WeaveShape`
     and `∀ i, StMat …` function fields become `List`s; the dependent

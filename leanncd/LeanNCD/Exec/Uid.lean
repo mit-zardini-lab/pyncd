@@ -30,6 +30,9 @@ inductive CompileError
   | cyclicDataflow       : String → CompileError            -- cyclic dataflow (topoSort cycle fallback)
   | inconsistentScanAxes : String → CompileError            -- coupled scan outputs disagree on shared axis order
   | emptyScanOutputs     : String → CompileError            -- scan step with no true outputs (empty base∩recur)
+  | scanProjectionUnsupported : String → CompileError       -- per-step stmt inside a scan references the
+                                                             -- iteration axis on its own LHS with no base case;
+                                                             -- move it after the scan and read the materialized state
   deriving Repr, DecidableEq
 
 /-- Combined error + UID-counter monad (`EStateM ε σ α = σ → Result ε σ α`, Lean core). Mints fresh

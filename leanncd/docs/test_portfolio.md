@@ -82,12 +82,12 @@ reporting; `RejectTest` and `KnownGapTest` are unchanged; `RecurrenceTest` is hy
 | [`ConvPoolTest.lean`](../test/Eval/Portfolio/ConvPoolTest.lean) | §5 | CV1, CV2, CV4–CV9 | CV3 `[✔]` |
 | [`NormTest.lean`](../test/Eval/Portfolio/NormTest.lean) | §6 | NM1–NM5 | — |
 | [`RecurrenceTest.lean`](../test/Eval/Portfolio/RecurrenceTest.lean) | §7 | RC2–RC10 (RC4/RC9 reject via `run_cmd do`; RC5 asserts correct `maxreduce`-in-scan output; RC6 asserts correct 2-D scan output; RC6-compile checks (via `run_cmd do`) that the 2-D scan lowers to a single well-formed rank-2 Br `.scan` step; RC7 `minreduce`-in-scan; RC8 3-D nested scan; RC9 rejects a heterogeneous coupled multi-axis scan (`inconsistentScanAxes`); RC10 multi-axis `maxreduce`) — **hybrid file** | RC1 `[✔]` |
-| [`GnnScatterTest.lean`](../test/Eval/Portfolio/GnnScatterTest.lean) | §8, §8b | GN1–GN4, SC1–SC8 | GN5/GN6 `[F]` (comment) |
+| [`GnnScatterTest.lean`](../test/Eval/Portfolio/GnnScatterTest.lean) | §8, §8b | GN1–GN5 (GN5: friendly `/` operator), SC1–SC8 | GN6 `[F]` (comment) |
 | [`RelationalTest.lean`](../test/Eval/Portfolio/RelationalTest.lean) | §9 | RL1–RL4, RL6–RL8 | RL5 `[✔]` |
 | [`StatsLossTest.lean`](../test/Eval/Portfolio/StatsLossTest.lean) | §10 | ST1–ST6 (ST6 uses inline `log(...)`) | — |
 | [`TropicalTest.lean`](../test/Eval/Portfolio/TropicalTest.lean) | §11 | TR3, TR6, TR7 (`minreduce` added) | TR1/TR2/TR4 `[✔]`; TR5 `[F]` (min-plus half, comment) |
 | [`TensorNetTest.lean`](../test/Eval/Portfolio/TensorNetTest.lean) | §12 | TN1–TN4 | — |
-| [`GenerativeTest.lean`](../test/Eval/Portfolio/GenerativeTest.lean) | §12b | DF1–DF4, ME1–ME3, SS1–SS3, PE1, CL1–CL2, CL4 (DF4/CL4 use inline `sin(...)`/`log(...)`) | PE2/PE3 `[F]` (comment, see note); ME4 `[F]` gather; CL3 `[F]` l2norm; SS4 → `RejectTest` (comment) |
+| [`GenerativeTest.lean`](../test/Eval/Portfolio/GenerativeTest.lean) | §12b | DF1–DF4, ME1–ME3, SS1–SS3, PE1, CL1–CL4, CL3b (DF4/CL4 use inline `sin(...)`/`log(...)`; CL3/CL3b use `l2normalize`) | PE2/PE3 `[F]` (comment, see note); ME4 `[F]` gather; SS4 → `RejectTest` (comment) |
 | [`ClassicalMLTest.lean`](../test/Eval/Portfolio/ClassicalMLTest.lean) | §12c | CM1–CM6, CM1b (`sqrt(...)`) | CM7–CM9 `[F]` (comment) |
 | [`RejectTest.lean`](../test/Eval/Portfolio/RejectTest.lean) | §13 | RJ3, RJ4, RJ7, SS4/RC4, UF1–UF3 (`.unaryFn` regression: unknown-tensor, causality-violation, domain-violation) — **`run_cmd do` only** (exact `CompileError`/`EvalError` constructor matches) | RJ1/RJ2/RJ5/RJ8/RJ10 (parse-fail or unconstructible — comment); RJ6/RJ9 (don't reject) |
 | [`KnownGapTest.lean`](../test/Eval/Portfolio/KnownGapTest.lean) | §14 | documentation only — cross-references all 19 `KG-*` gaps to their live regression test (if any) | — |
@@ -258,7 +258,7 @@ too) or target one file, e.g. `lake build Eval.Portfolio.AttentionTest`. LSpec g
 | GN2 | `H[i,f] := edge[i,j] · X[j,f]` (`predicate edge`) | edge booleanizes | message passing over a **predicate** adjacency | `[N]` |
 | GN3 | `deg[i] := edge[i,j]` | edge=`[[0,1,1],[1,0,0]]` → `[2,1]` | node degree = contract over neighbors | `[N]` |
 | GN4 | `H[i,f] := maxreduce(edge[i,j] · X[j,f])` | max-aggregation GNN (GraphSAGE-max) | `maxreduce` neighbor aggregation | `[N]` `[E]` |
-| GN5 | degree-normalized `Ĥ = D⁻¹ A X` | needs division by `deg[i]` | **no per-node division** ⇒ expected gap | `[F]` (KG-div) |
+| GN5 | degree-normalized `Ĥ[i,f] := H[i,f] / deg[i]` (chained on `H[i,f] := A[i,j]·X[j,f]`, `deg[i] := A[i,j]`) | A=`[[0,1,1],[1,0,0]]`, X=`[[1,2],[3,4],[5,6]]` → H=`[[8,10],[1,2]]`, deg=`[2,1]` → Ĥ=`[[4,5],[1,2]]` | friendly infix `/` operator (KG-div), per-node division by degree | `[N]` |
 | GN6 | edge-list scatter-add `Msg[dst[e]] += X[src[e]]` | index tensors `src/dst` | data-dependent gather/scatter | `[F]` (KG-gather) |
 
 ## 8b. Consuming scatter outputs (upsampling decoders / GNN readback)
@@ -363,6 +363,14 @@ input tensor, not computed from the loop index `i` inside the DSL.
 | SS2 | output map `y[j,l] := C[j,k]·h[k,l]` (chained on SS1) | — | per-step output projection off the scan state | `[N]` |
 | SS3 | diagonal SSM `h[j,l +1] := a[j]·h[j,l] + B[j]·u[l]` | diagonal `A` (Mamba-ish) | elementwise (diagonal) state transition | `[N]` `[E]` |
 | SS4 | input at advancing index `… + B[j]·u[l + 1]` | — | **rejected** — `causalityViolation` (cf. RC4); convention matters | `[R]` |
+| UF5 | same `y[j,l] := C[j,k]·h[k,l]` written INSIDE the SS1 scan block instead | — | **rejected** — `scanProjectionUnsupported` (§14 KG-scanprojection); write it standalone (SS2) instead | `[R]` |
+
+SS2 must be written standalone, *after* the scan — writing the identical statement inside the
+scan block is a compile-time error (`scanProjectionUnsupported`, `UF5`), not a silent no-op. The
+scan classifies any statement that reads scan state as a per-step intermediate; if that
+statement's own LHS also references the iteration axis, whether the user wants it tracked across
+every step (unsupported — not materialized) or recomputed as same-step scratch is ambiguous, so
+it's rejected rather than guessed at. See §14 KG-scanprojection.
 
 ### Positional encodings
 
@@ -378,7 +386,8 @@ input tensor, not computed from the loop index `i` inside the DSL.
 |----|------|-----------------|--------|-----|
 | CL1 | similarity matrix `S[i,j] := Z1[i,d]·Z2[j,d]` | Z1=Z2=I₂ → `[[1,0],[0,1]]` | pairwise dot-product similarity (matmul) | `[N]` |
 | CL2 | `P[i, j.] := softmax(S[i,j])` (chained) | rows sum to 1 | InfoNCE softmax over the negatives | `[N]` |
-| CL3 | cosine similarity (L2-normalize embeddings first) | — | **only L1 `normalize`, no L2** | `[F]` (KG-l2norm) |
+| CL3 | cosine similarity `Z1n[i,d.] := l2normalize(Z1[i,d])`; `Z2n[j,d.] := l2normalize(Z2[j,d])`; `S[i,j] := Z1n[i,d]·Z2n[j,d]` | Z1=`[[3,4]]` (‖·‖₂=5 → `[0.6,0.8]`), Z2=`[[1,0]]` (unit) → `S=[[0.6]]` | new `l2normalize` `Nonlin` (KG-l2norm), row-wise `x/‖x‖₂` | `[N]` |
+| CL3b | all-zero row `Y[i,d.] := l2normalize(X[i,d])` | X=`[[0,0]]` → `Y=[[0,0]]` | `‖x‖₂=0` normalizes silently to zero, matching `normalize`/`softmax`'s convention (cf. SC8) | `[N]` `[E]` |
 | CL4 | InfoNCE loss `L[] := m1[]·log(P[i, i])` (diagonal read wrapped inline in `log`) | P=`[[0.5,0.5],[0.25,0.75]]` → `−(ln 0.5 + ln 0.75) ≈ 0.9808293` | inline `log(...)` on a diagonal (repeated-axis) read | `[N]` |
 
 ## 12c. Classical ML, probabilistic & RL
@@ -443,18 +452,16 @@ gap is closed — a built-in regression alarm. Cross-referenced above by `KG-*`.
 | ID | Gap | Where it bites | Tag |
 |----|-----|----------------|-----|
 | KG-sub | no `−` operator in the RHS sum — **but** subtraction is achievable via a rank-0 `−1` scalar (`a[i] + neg[]·b[i]` — see ST5). Only a *soft* gap: the ergonomic form is missing, the capability is not | residuals, MSE, centering | `[F]` (soft) |
-| KG-l2norm | only **L1** `normalize` (`x/Σx`); no L2 / `√Σx²` | cosine similarity, RMSNorm, unit-norm embeddings | `[F]` |
 | KG-functor | axes are flat `Fin n` only — no **structured/applicative-functor index spaces** (trees, functions, nested containers) | generalized transformers over non-sequence data (parsing, image→function); see AT8 & `NaperianTypingIntegrationPlan.md` | `[F]` |
 | KG-reshape | LHS index slots are **single-axis affine only** (`2*i`, `i+num`); no multi-axis-into-one-slot (`i+j`, `2*i+k`) — parse-fail | reshape/flatten, Kronecker product, im2col, overlapping-accumulate scatter (also unreachable via surface syntax) | `[F]` |
 | KG-datamask | `where` masks are **index predicates only** — cannot read a data tensor (`where edge[i,j] > 0`) — parse-fail | GAT / any graph-structured masked softmax over a runtime adjacency | `[F]` |
 | KG-solve | no linear **solve / inverse / eigendecomp / determinant** (only contraction) | closed-form regression, PCA, spectral GCN, normalizing-flow log-det | `[F]` |
 | KG-idxvalue | index arithmetic yields **booleans only** (via Iverson) — never a numeric tensor value; blocks computing `ω^i`/index-derived biases inside the DSL (they must be supplied as precomputed input tensors, e.g. DF4) | ALiBi, relative-position numeric bias, distance-decay weights | `[F]` |
 | KG-min | min aggregation (`minreduce`, tropical min-times `(×, min, +∞)` — see TR6/TR7, RC7) is supported. Still open: **additive within-term combine** (min-*plus* semiring, `+` instead of `×`) and **argmin** (index output, cf. KG-idxvalue) | shortest path, Viterbi, DTW (need min-plus); k-means (needs argmin) | `[F]` (partial) |
-| KG-div | division by a tensor / per-element reciprocal (only whole-axis `normalize`) | D⁻¹AX GNN norm, layernorm variance, softmax-free attention | `[F]` |
 | KG-gather | data-dependent gather/scatter with an **index tensor** (indices must be affine) — see [§19.1](#191-kg-gather--data-dependent-gatherscatter) for a fix design & proof-burden analysis | embedding lookup by ids, edge-list scatter-add, top-k | `[F]` |
 | KG-scale | free scalar literal on the RHS (e.g. `· 0.5`) | 1/√d attention scaling (workaround: rank-0 tensor, see AT6) | `[F]`? |
-| KG-multiout | multiple outputs **not** at the tail statement | multi-head split, aux losses | `[F]` |
 | KG-recur | `recurMorphism` / `scanPre` escape hatch (AST-only) | programmatic recurrences | `[F]` |
+| KG-scanprojection | a per-step scan read-out (e.g. `y[j,l] := C[j,k]·h[k,l]`) written **inside** the same scan block as its state `h` — rejected at compile time (`scanProjectionUnsupported`), not silently dropped. Not a missing capability: the identical statement written standalone *after* the scan (reading the materialized state) already works — see SS2 (§12b) | any attempt to read out per-step scan state inline instead of as a separate post-scan statement | `[R]` |
 
 > **Design direction — general semiring notation (planned, not yet implemented).** The remaining
 > tropical/semiring gaps (KG-min's min-*plus* half, and future max-plus / log-sum-exp) should be
@@ -516,10 +523,14 @@ gap is closed — a built-in regression alarm. Cross-referenced above by `KG-*`.
 | Per-term contraction scoping | — | EC13 (independent per-term dummy axes of different sizes), EC15 (`k`-less term unaffected by `\|k\|`) |
 | Inline unary transcendental functions (`log`/`exp`/`sin`/`cos`/`sqrt`) | — | ST6 (`log`), CL4 (`log` on a diagonal read), DF4 (`sin`), CM1b (`sqrt`) — `Factor.unaryFn`, fails loud on domain violation |
 | Pointwise activations (`sigmoid`/`tanh`/`gelu`/`leakyrelu`) | relu | FF5–FF8, CM9a (`sigmoid` on a full sum, logistic regression) — new `Nonlin` variants |
+| Friendly division (`/`) | — | GN5 (degree-normalized GNN) — desugars to `Factor.unaryFn .recip`, fails loud on divide-by-zero |
+| L2-normalize (`l2normalize`) | normalize (L1) | CL3 (cosine similarity), CL3b (all-zero row → silent zero) — new `Nonlin` variant, same `perRow` mechanism as `normalize`/`softmax` |
 | Diffusion / MoE / SSM / PE / contrastive | — | §12b (DF*, ME*, SS*, PE*, CL*) |
 | Classical ML / probabilistic / RL | — | §12c (CM1–CM9b, CM1b) |
-| **Reject** paths | (a few) | RJ1–RJ10, SS4, UF1–UF3 |
-| **Known gaps** | — | KG-* (§14): sub(soft), l2norm, min, div, gather, multiout, recur, functor, reshape, datamask, solve, idxvalue |
+| **Reject** paths | (a few) | RJ1–RJ10, SS4, UF1–UF5 |
+| **Known gaps** | — | KG-* (§14): sub(soft), min, gather, recur, functor, reshape, datamask, solve, idxvalue |
+| Multi-output programs (schedule bug fix) | — | `EvalExamplesTest` (Total/Peak, KG-multiout) — `schedule` no longer eliminates produced-but-unread top-level statements |
+| In-scan per-step projection (KG-scanprojection) | — | UF5 — rejected at compile time (`scanProjectionUnsupported`); not a missing primitive, see SS2 for the standalone workaround |
 
 ## 17. Follow-ups
 
@@ -560,15 +571,12 @@ them (there is no expressible program to test). Priority order for practical ML 
 | Priority | Gap | Blocks |
 |----------|-----|--------|
 | High | **KG-gather** — no data-dependent gather/scatter | Embedding lookup, edge-list scatter-add, top-k routing |
-| High | **KG-div** — no per-element division | Degree-normalized GNN (D⁻¹AX), LayerNorm variance |
-| Medium | **KG-l2norm** — only L1 `normalize` | Cosine similarity, RMSNorm, unit-norm embeddings |
 | Medium | **KG-min** (partial) — `min` aggregation (`minreduce`) is supported; still missing additive within-term combine (min-plus) and argmin | Shortest path, Viterbi, DTW (min-plus); k-means argmin |
 | Lower | **KG-solve** — no linear solve/inverse | Closed-form regression, PCA, normalizing-flow log-det |
 | Lower | **KG-idxvalue** — index arithmetic yields booleans only | ALiBi, relative-position numeric bias |
 | Lower | **KG-datamask** — `where` clauses are index predicates only | GAT data-driven masked softmax |
 | Lower | **KG-reshape** — no multi-axis-into-one-slot LHS | Reshape/flatten, Kronecker, im2col |
 | Lower | **KG-functor** — axes are flat `Fin n` only | Generalized transformers over non-sequence data |
-| Lower | **KG-multiout** — outputs must be at the tail statement | Multi-head split, auxiliary losses |
 | Lower | **KG-recur** — `recurMorphism`/`scanPre` AST-only | Programmatic recurrences |
 
 ### D. How to track progress

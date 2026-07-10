@@ -163,7 +163,24 @@ test "CL2 infonce-softmax"
       (HashMap.ofList [("Z1", tl [2,2] [1,0,0,1]), ("Z2", tl [2,2] [1,0,0,1])])
       "P" rowsSumToOne) $
 
--- CL3  cosine similarity (L2-normalize first) — [F] KG-l2norm (only L1 normalize). Not authored.
+-- CL3  cosine similarity via L2-normalize-then-dot-product (KG-l2norm).
+--   Z1=[[3,4]] (‖·‖₂=5) → normalized [0.6,0.8]; Z2=[[1,0]] (already unit) → unchanged.
+--   S[i,j] = Z1n·Z2n = 0.6·1+0.8·0 = 0.6.
+test "CL3 cosine-similarity"
+    (evalEqB (tlprog!{
+    Z1n[i, d.] := l2normalize(Z1[i, d])
+    Z2n[j, d.] := l2normalize(Z2[j, d])
+    S[i, j] := Z1n[i, d] · Z2n[j, d]
+  })
+      (HashMap.ofList [("Z1", tl [1,2] [3,4]), ("Z2", tl [1,2] [1,0])])
+      "S" (tl [1,1] [0.6])) $
+
+-- CL3b  all-zero row L2-normalizes silently to zero (‖x‖₂=0), matching `normalize`/`softmax`'s
+--   existing convention (SC8's precedent) — not a domain error, unlike `log`/`sqrt`/`recip`.
+test "CL3b l2normalize-zero-row"
+    (evalEqB (tlprog!{ Y[i, d.] := l2normalize(X[i, d]) })
+      (HashMap.ofList [("X", tl [1,2] [0,0])])
+      "Y" (tl [1,2] [0,0])) $
 
 -- CL4  InfoNCE loss `L[] := m1[]·log(P[i, i])` (diagonal read, EC5-style, wrapped in `log`;
 --   ST5's `−1` trick for the leading minus). P given directly (not chained through CL1/CL2's

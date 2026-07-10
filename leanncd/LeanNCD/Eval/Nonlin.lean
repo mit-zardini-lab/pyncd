@@ -82,6 +82,16 @@ def normalizeT (axisPos : Nat) (axisUids : List UID) (mask? : Option BoolExpr)
     entries.map (fun (x, masked) =>
       if masked || s == 0.0 then 0.0 else x / s)) t
 
+/-- L2-normalize along `axisPos` (+ optional mask): y = x / ‖x‖₂ = x / √(Σ x²) over unmasked
+    entries in the row. An all-zero row (‖x‖₂ = 0) normalizes to zero, matching `normalizeT`'s
+    convention (not a domain error — see SC8's precedent for softmax). -/
+def l2normalizeT (axisPos : Nat) (axisUids : List UID) (mask? : Option BoolExpr)
+    (t : DenseTensor) : DenseTensor :=
+  perRow axisPos axisUids mask? (fun entries =>
+    let s := Float.sqrt (entries.foldl (fun a (x, masked) => if masked then a else a + x*x) 0.0)
+    entries.map (fun (x, masked) =>
+      if masked || s == 0.0 then 0.0 else x / s)) t
+
 /-- Dispatch: apply a Nonlin. `axisPos`/`axisUids` describe the norm axis (ignored by the
     pointwise variants: relu/identity/sigmoid/tanh/gelu/leakyrelu). -/
 def applyNonlin (nl : Nonlin) (axisPos : Nat) (axisUids : List UID)
@@ -95,5 +105,6 @@ def applyNonlin (nl : Nonlin) (axisPos : Nat) (axisUids : List UID)
   | .leakyrelu     => leakyReluT t
   | .softmax m     => softmaxT axisPos axisUids m t
   | .normalize m   => normalizeT axisPos axisUids m t
+  | .l2normalize m => l2normalizeT axisPos axisUids m t
 
 end LeanNCD.Eval

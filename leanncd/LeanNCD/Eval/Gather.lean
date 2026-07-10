@@ -51,10 +51,11 @@ def gatherRead (env : HashMap String DenseTensor) (coord : HashMap UID Int)
       else
         .ok (t.get! (srcZ.map Int.toNat))
 
-/-- Apply a unary transcendental function to a gathered value. `log`/`sqrt` fail loud on a
-    non-positive/negative input (consistent with this evaluator's fail-loud conventions
-    elsewhere — unsized axes, unknown tensors, causality violations); `exp`/`sin`/`cos` are
-    total, no domain check needed. -/
+/-- Apply a unary transcendental function to a gathered value. `log`/`sqrt`/`recip` fail loud on
+    a domain violation (consistent with this evaluator's fail-loud conventions elsewhere —
+    unsized axes, unknown tensors, causality violations); `exp`/`sin`/`cos` are total, no domain
+    check needed. `recip` (the friendly `/` operator's desugared form) fails on exactly zero
+    rather than propagating `inf`. -/
 def applyUnaryFn : UnaryOp → Float → Except EvalError Float
   | .log,  v => if v ≤ 0.0 then .error s!"log domain error: log({v}) undefined for non-positive input"
                 else .ok (Float.log v)
@@ -63,6 +64,8 @@ def applyUnaryFn : UnaryOp → Float → Except EvalError Float
   | .exp,  v => .ok (Float.exp v)
   | .sin,  v => .ok (Float.sin v)
   | .cos,  v => .ok (Float.cos v)
+  | .recip, v => if v == 0.0 then .error s!"div domain error: 1/{v} undefined for zero input"
+                 else .ok (1.0 / v)
 
 /-- Gather one factor's value at a coordinate, from the input tensors.
     `.read nm es`: map each `eᵢ` to its source coord via `evalIdx`; out-of-range (any coord < 0

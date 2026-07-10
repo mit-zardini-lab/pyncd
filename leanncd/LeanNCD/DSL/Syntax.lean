@@ -133,6 +133,10 @@ syntax "sqrt" "(" ident "[" tl_idx_expr,* "]" ")" : tl_factor
 syntax:70 tl_prod_term:70 " · " tl_factor:71 : tl_prod_term
 syntax:71 tl_factor:71                       : tl_prod_term
 
+-- Friendly division: same precedence as `·`, RHS restricted to a bare read (mirrors the
+-- log/exp/sin/cos/sqrt restriction) — `H[i,f] / deg[i]`, not composable with another function.
+syntax:70 tl_prod_term:70 " / " ident "[" tl_idx_expr,* "]" : tl_prod_term
+
 syntax:65 tl_sum_expr:65 " + " tl_prod_term:66 : tl_sum_expr
 syntax:66 tl_prod_term:66                       : tl_sum_expr
 
@@ -148,6 +152,8 @@ syntax "softmax"                                        : tl_nonlin
 syntax "softmax"   atomic("(" "where") tl_bool_expr ")" : tl_nonlin
 syntax "normalize"                                      : tl_nonlin
 syntax "normalize" atomic("(" "where") tl_bool_expr ")" : tl_nonlin
+syntax "l2normalize"                                      : tl_nonlin
+syntax "l2normalize" atomic("(" "where") tl_bool_expr ")" : tl_nonlin
 
 -- Aggregation operations: change the contraction from sum to another reduction.
 syntax "maxreduce" : tl_agg

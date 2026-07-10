@@ -73,14 +73,40 @@ run_cmd (assertEvalError "UF3 log-domain-violation"
   (HashMap.ofList [("P", tl [2] [1, -1])])
   "log domain error")
 
+-- UF4  division by zero (the friendly `/` operator, KG-div) fails loud rather than propagating
+--   `inf`. `/` desugars to `Factor.unaryFn .recip`, so this exercises the same domain-check
+--   convention as UF3.
+run_cmd (assertEvalError "UF4 div-domain-violation"
+  (tlprog!{ Y[i] := X[i] / Z[i] })
+  (HashMap.ofList [("X", tl [2] [1,2]), ("Z", tl [2] [1,0])])
+  "div domain error")
+
+-- UF5  a per-step scan read-out written INSIDE the scan block ⇒ scanProjectionUnsupported.
+--   `y[j,l] := C[j,k]·h[k,l]` has no base case and its own LHS references the scan axis `l` —
+--   ambiguous between "track this across every step" (not materialized here) and "same-step
+--   scratch" (never references `l` on its own LHS). Rejected rather than silently dropped; the
+--   fully general workaround is SS2 (`GenerativeTest.lean`) — write it standalone, after the
+--   scan, reading the materialized state.
+run_cmd do
+  match TLProgram.compile (tlprog!{ axis l : ℕ = 3
+                                    h[j, 0]    := h0[j]
+                                    h[j, l +1] := A[j, k] · h[k, l] + B[j] · u[l]
+                                    y[j, l]    := C[j, k] · h[k, l] }) |>.run 0 with
+  | .error (.scanProjectionUnsupported "y") _ => pure ()
+  | .error e _ => throwError s!"UF5: wrong CompileError: {repr e}"
+  | .ok _ _    => throwError "UF5: expected scanProjectionUnsupported, compile succeeded"
+
 /-
 Parse-level rejects (fail during elaboration of `tlprog!`; not automatable — kept as documentation):
 
   RJ1  symbolic-coefficient stride:   Y[i] := W[p] · X[s * j]
        → `unexpected token '*'; expected ']'`  (IdxExpr has no symbolic-coeff strides)
 
-  RJ2  floor-division by a variable:   Y[i] := X[i / j]
-       → `unexpected token '/'; expected ']'`  (`/` requires a literal divisor)
+  RJ2  floor-division by a variable inside an INDEX expression:   Y[i] := X[i / j]
+       → `unexpected token '/'; expected ']'`  (`/` is not wired into `tl_idx_expr` grammar at
+       all — this is unrelated to the friendly `/` DIVISION operator added for KG-div, UF4,
+       which lives in `tl_prod_term` — a different syntax category — and only divides one
+       tensor's value by another's, never an index)
 
   RJ5  over-indexed read of an undeclared intermediate — rejected by Task-A guard.
 
