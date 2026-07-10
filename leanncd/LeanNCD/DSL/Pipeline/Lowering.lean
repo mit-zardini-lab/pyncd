@@ -266,20 +266,6 @@ def readPosAxis : IdxExpr → AxisP
                     | none        => AxisP.mk none (SizeExpr.var "_")
   | .const _     => AxisP.mk none (SizeExpr.var "_")
 
-/-- The contracted (summed-over) axes of a stmt: read axes whose uid is not a retained (LHS) axis. -/
-def stepContracted (s : Stmt) : List AxisSpec :=
-  (s.readFactors.flatMap (fun rf => rf.2.flatMap idxAxes)).filter
-    (fun a => !(s.lhsAxes.map (·.uid)).contains a.uid)
-
-/-- A step's full index space: retained (LHS) axes then contracted axes, deduplicated by uid. -/
-def stepDegAxes (s : Stmt) : List AxisSpec := dedupByUid (s.lhsAxes ++ stepContracted s)
-
-/-- A step's (output) weave over its degree: contracted axes tiled, retained axes fixed. -/
-def stepMkWeave (s : Stmt) : WeaveShapeP :=
-  (stepDegAxes s).map (fun a =>
-    if ((stepContracted s).map (·.uid)).contains a.uid then WeaveSlotP.tiled
-    else WeaveSlotP.fixed (AxisP.mk (some a.name) (SizeExpr.var a.name)))
-
 /-- Express a read coordinate `IdxExpr` as an integer-affine combination of the degree axes
     identified by uids `us` (column order = `us`): returns `(coeff-row, bias)`. The dense view of the
     shared `idxAffineForm` primitive (M2 dedup, §6.2) — `coeffs = densify (affine coeffs) over us`,
@@ -375,7 +361,7 @@ def ScanStmt.stepRetainedAxes (sc : ScanStmt) : List AxisSpec :=
 
 /-- A step's combined index space across all `stepStmts`: retained (LHS) axes of every contributing
     stmt, then the contracted (read-but-not-retained) axes, deduplicated by uid. Generalizes
-    `stepDegAxes` from one stmt to the `.scan` group. -/
+    the per-stmt degree computation to the `.scan` group. -/
 def ScanStmt.stepDegAxesMulti (sc : ScanStmt) : List AxisSpec :=
   let ss := sc.stepStmts
   let retained := sc.stepRetainedAxes
