@@ -100,6 +100,15 @@ superficially like duplication. Any implementation plan should treat them as fix
 
 ### Spike 1: dead code, stale docs, housekeeping
 
+> **✅ DONE — merged to `main` 2026-07-10** (commits `1cf92d3..3bb7e13`; full `lake build` green,
+> 8,604 jobs; whole-branch review clean). All eight sub-items **1a–1h** landed, including the
+> optional behavior-changing **1h** (fail-loud `cyclicDataflow` reject, added test-first).
+> Reference drift found and corrected during execution: the `_scratch_nf` doc citation was at
+> `BrNF.lean:34` (not `Br.lean:288`); the `Shape.lean` "Task 6" placeholder was at `:515`; and
+> `St.lean` was indeed **not** sorry-free (`swap_hexagon_fwd/rev`, `St.lean:267-268`), so the
+> `SORRY_INVENTORY.md` claim was corrected — the full sorry recount stays deferred to Spike 7.
+> The bullets below are retained as the record of what was changed.
+
 All verified dead by grep and/or reasoning from the current code; each bullet is
 independently landable.
 
@@ -540,7 +549,7 @@ tests (`ColoredPROP.lean`) and could merge into it. Only worth doing opportunist
 ## Suggested spike ordering and dependencies
 
 ```text
-Wave 1   Spike 1  (dead code, stale docs, housekeeping)          — anytime, zero deps
+Wave 1   Spike 1  ✅ DONE 2026-07-10 (dead code/docs/housekeeping) — merged 1cf92d3..3bb7e13
 Wave 3a  Spike 7a/7b/7c (sorry pruning)                          — anytime, zero deps
          Spike 8  (proof-adjacent type cleanups: 8a/8c independent, 8b/8d opportunistic)
 Wave 2   Spike 2  (AST accessors/traversals)                     — first structural spike
