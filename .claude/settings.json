@@ -86,7 +86,10 @@
       "mcp__lean-lsp__lean_build",
       "Bash(rtk tree *)",
       "mcp__lean-lsp__lean_local_search",
-      "mcp__lean-lsp__lean_verify"
+      "mcp__lean-lsp__lean_verify",
+      "Bash(echo \"exit: $?\")",
+      "Bash(echo \"grep exit: $?\")",
+      "Bash(rtk grep *)"
     ],
     "additionalDirectories": [
       "/tmp"
