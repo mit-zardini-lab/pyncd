@@ -63,10 +63,10 @@ def splitNonlins (sp : ScanProgram) : FreshM LinearProgram := do
 
 /-! ## Phase 7 — `schedule`
 
-Dead-code elimination by backward reachability from the program's outputs. A statement is
-kept iff it writes a tensor name that is (transitively) needed to compute an output.
-After DCE, the surviving statements are topologically sorted so producers always precede
-their consumers. -/
+Ordering only; no statement pruning (KG-multiout: every produced name may be an intended
+output, so the scheduler keeps all top-level statements and lets the caller ignore unwanted
+keys). Statements are topologically sorted so producers precede their consumers.
+Never-read *external* input names are still dropped (`liveExtNames`). -/
 
 /-- Tensor names a ScanStmt writes (its LHS name(s)). -/
 def ScanStmt.writes : ScanStmt → List String
@@ -133,30 +133,8 @@ def topoSortFuel : Nat → List ScanStmt → List ScanStmt → List String →
 def topoSort (stmts : List ScanStmt) : List ScanStmt :=
   topoSortFuel stmts.length stmts stmts [] []
 
-/-- One backward-reachability pass: add names read by any stmt that writes a live name. -/
-def liveStep (stmts : List ScanStmt) (live : List String) : List String :=
-  (live ++ stmts.flatMap (fun sc =>
-    if (sc.writes).any (fun w => live.contains w) then sc.reads else [])).eraseDups
-
-/-- Iterate `liveStep` to a fixpoint. Terminates because `live` grows monotonically and is
-    bounded by the finite tensor-name set; `partial` sidesteps the termination proof. -/
-partial def liveFix (stmts : List ScanStmt) (live : List String) : List String :=
-  let live' := liveStep stmts live
-  if live'.length == live.length then live else liveFix stmts live'
-
-/-- Phase 7: keep every top-level statement whose result could be observed. Every produced name
-    is treated as a potential output — the scheduler cannot tell "scratch code the user doesn't
-    want" apart from "an intentional secondary output" using only read/unread status, and the
-    safe default is to compute it and let the caller ignore unwanted keys (see KG-multiout: this
-    phase used to eliminate any non-tail, unread statement as "dead", which silently dropped
-    legitimate additional outputs whenever they weren't threaded into a later read — fixed by no
-    longer eliminating produced-but-unread top-level statements). This only affects `.plain`
-    statement pruning; scan-body statements are unaffected. -/
 def schedule (lp : LinearProgram) : FreshM ScheduledProgram := do
-  let produced := lp.stmts.flatMap ScanStmt.writes
-  let live := liveFix lp.stmts produced.eraseDups
-  let liveStmts := lp.stmts.filter (fun sc => (sc.writes).any (fun w => live.contains w))
-  let ordered   := topoSort liveStmts
+  let ordered   := topoSort lp.stmts
   -- collect the sizes pinned by `axis … = n` decls (UIDs are canonical by this phase).
   let explicitSizes : Std.HashMap UID Nat := lp.decls.foldl (fun m d => match d with
     | .axis ax (some n) => m.insert ax.uid n
