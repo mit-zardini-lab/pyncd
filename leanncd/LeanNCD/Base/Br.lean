@@ -294,7 +294,14 @@ def brPoint (X : BrObj) : BrBase [] X where
                      it is well-defined and injective (this is where the empty domain earns its keep).
     In `N`, `interchange`/`∘`-assoc/unit are structural and ALL braid laws (involution, naturality,
     hexagon) become `Equiv` facts on the wiring. A several-hundred-line development (defining `N` is
-    the gating bulk), deferred as its own milestone. -/
+    the gating bulk), deferred as its own milestone.
+
+    MODEL-ADEQUACY FINDING (2026-07): the bijective-wiring NbE model above (implemented in the
+    now-parked `spikes/BrNF.lean`) provably CANNOT interpret the CD generators `copyW`/`delW`
+    (one-in-two-out) the current `Hom` carries — a bijection `OutPort ≃ InPort` has no room for
+    them. Completing `brCancelPoint` needs a non-bijective (gs-monoidal / cospan) model, a larger
+    development than `BrNF`'s header estimated. `BrNF` is parked (off the default build) for its
+    reusable sorry-free wiring combinators and `@[simp]`-projection technique. -/
 theorem brCancelPoint {X Y : BrObj} {f g : Hom X Y}
     (h : Rel (.comp (.gen (brPoint X)) f) (.comp (.gen (brPoint X)) g)) : Rel f g := by
   sorry

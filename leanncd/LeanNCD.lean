@@ -19,7 +19,6 @@ reindex coefficients), `Fin n →` function fields, and dependent typing — so 
                                    symmetric monoidal category on `BrBase` generators (raw
                                    `Hom` syntax quotiented by `Rel`). St lives INSIDE Br via
                                    each `BrBase`'s dependent `reindexings` field
-  Base/BrNF                        WIP NbE model targeting `brCancelPoint` (off critical path)
   Seam/Adapter                     strictifies `ColoredPROP` onto Mathlib's
                                    `MonoidalCategory` / `SymmetricCategory`
   Core/Graded, Core/Weave          `DGradedColoredPROP` (the D-graded class: `sh`, `act`, δ, …)
@@ -98,7 +97,6 @@ import LeanNCD.Base.Numeric
 import LeanNCD.Base.ColoredPROP
 import LeanNCD.Base.St
 import LeanNCD.Base.Br
-import LeanNCD.Base.BrNF   -- WIP: NbE model for `brCancelPoint` (off critical path; carries deferred sorries)
 import LeanNCD.Seam.Adapter
 import LeanNCD.Core.Graded
 import LeanNCD.Core.Weave
