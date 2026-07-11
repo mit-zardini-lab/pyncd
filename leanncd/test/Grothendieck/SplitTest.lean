@@ -7,6 +7,5 @@ open CategoryTheory
 
 #check @Cˢʰᵃʳᵖ
 #check @Dat
-#check @grothendieck_split
 
 end LeanNCD

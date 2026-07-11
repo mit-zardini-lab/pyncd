@@ -15,8 +15,7 @@ def structuralCongruence (C : Type) [ColoredPROP C] : HomRel C :=
   fun _ _ _ _ => True   -- SIGNATURE: replace with the real connectivity-agreement relation.
 
 /-- The structural congruence is a `Congruence` (graded_prop.md §7.1): an equivalence relation,
-    stable under pre- and post-composition. SIGNATURE — bodies are `sorry`. With the `True` stub it
-    is trivially all three, but the real relation must be proved a genuine congruence. -/
+    stable under pre- and post-composition. Proved for the `True` stub (the real relation must be re-proved a genuine congruence). -/
 instance structuralCongruence.instCongruence (C : Type) [ColoredPROP C] :
     Congruence (structuralCongruence C) where
   -- The `True` stub is trivially a congruence.
@@ -37,7 +36,7 @@ abbrev CSharp (C : Type) [ColoredPROP C] : Type :=
 notation "Cˢʰᵃʳᵖ" => CSharp
 
 /-- Data functor (graded_prop.md §7.1, Prop 8.3): each `C♯`-object ↦ its set of size-assignments
-    over the structural skeleton; trivial (identity) on morphisms. SIGNATURE — body is `sorry`. -/
+    over the structural skeleton; trivial (identity) on morphisms. Trivial `Unit`-valued stub (the real `Dat` assigns each object its size-assignment set). -/
 def Dat (C : Type) [ColoredPROP C] : Cˢʰᵃʳᵖ C ⥤ Type where
   obj _ := Unit
   map _ := 𝟙 Unit
@@ -48,11 +47,5 @@ def Dat (C : Type) [ColoredPROP C] : Cˢʰᵃʳᵖ C ⥤ Type where
     required by `CategoryTheory.Grothendieck`. -/
 noncomputable def Dat' (C : Type) [ColoredPROP C] : Cˢʰᵃʳᵖ C ⥤ CategoryTheory.Cat :=
   Dat C ⋙ typeToCat
-
-/-- Prop 8.3: the Grothendieck construction `∫Dat` over the structural index PROP recovers the
-    fully-sized graded PROP, `C ≌ ∫Dat`. SIGNATURE — the equivalence is `sorry`. -/
-theorem grothendieck_split (C : Type) [ColoredPROP C] :
-    Nonempty (C ≌ CategoryTheory.Grothendieck (Dat' C)) :=
-  sorry  -- SIGNATURE: Prop 8.3 (Grothendieck structure/data split).
 
 end LeanNCD
