@@ -11,7 +11,7 @@ ring values (`Numeric = MvPolynomial String ℕ` for sizes, `Coeff = MvPolynomia
 reindex coefficients), `Fin n →` function fields, and dependent typing — so they are
 `noncomputable` and exist only to be reasoned about.
 
-  Base/Category, Base/ColoredPROP  the `ColoredPROP` class (a colored PROP) + `Elemental`
+  Base/ColoredPROP                 the `ColoredPROP` class (a colored PROP) + `Elemental`
   Base/Numeric                     `Numeric` (sizes) and `Coeff` (signed reindex coefficients)
   Base/St                          `St`, the INDEX prop: objects = axis lists; morphisms =
                                    `StMat`, integer-affine coordinate maps (coeffs + bias)
@@ -92,7 +92,6 @@ the §2–§10 coherences, the `brCancelPoint` free-strict-SMC normal-form miles
 of a runnable artifact is therefore the principal open seam. `SORRY_INVENTORY.md` is the
 authoritative, milestone-by-milestone record of exactly what is proved.
 -/
-import LeanNCD.Base.Category
 import LeanNCD.Base.Numeric
 import LeanNCD.Base.ColoredPROP
 import LeanNCD.Base.St
