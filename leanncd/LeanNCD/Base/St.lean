@@ -19,8 +19,9 @@ abbrev StObj := List Axis
     (signed), NOT `Numeric` (the ℕ size type): reindexing offsets can be negative (look-back).
 
     The indices `Fin cod.length` / `Fin dom.length` count **axes**, not elements within an axis.
-    `Axis.size` is symbolic metadata (a computable `SizeExpr`, was `Numeric`); the type of `StMat` does not enforce that
-    coordinate values stay within `[0, n)` for an axis of size `n`. That bound only becomes
+    `Axis.size` is symbolic metadata (a computable `SizeExpr`, was `Numeric`); the type of
+    `StMat` does not enforce that coordinate values stay within `[0, n)` for an axis of size `n`.
+    That bound only becomes
     operative at evaluation time (Milestone I / `DenseTensor`), where symbolic sizes are
     instantiated to concrete `Nat`s. -/
 @[ext]       -- generate the extensionality lemma StMat.ext for St

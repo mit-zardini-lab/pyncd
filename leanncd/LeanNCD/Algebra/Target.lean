@@ -70,7 +70,7 @@ abbrev Mat (R : Type) [CommRing R] := FGModuleCat R
 -- RECORDED OBSTRUCTION (SORRY_INVENTORY Milestone H): NO `TargetActegory StObj (Mat ℝ) ℝ` instance
 -- is provided (was: 8 `sorry` fields) —
 -- a faithful dimension-adding `actV` is mathematically impossible over `FGModuleCat ℝ`. Two walls:
--- (1) axis sizes are symbolic (`Numeric = MvPolynomial String ℕ`), so there is no finite-dim module
+-- (1) axis sizes are symbolic (`SizeExpr`), so there is no finite-dim module
 --     of dimension `|P|`; (2) `δ_V` forces `dim∘actV` multiplicative in the V-variable, i.e.
 --     `f(P) = f(P)² ⟹ f(P) = 1`, so any `δ_V`-respecting lift PRESERVES dimension. And `actV = id`
 --     is inconsistent with the intended evaluator `F` (equivariance `F(X⊛P) ≅ actV(F X, P)` would

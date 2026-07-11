@@ -6,7 +6,7 @@ namespace LeanNCD
 open CategoryTheory
 
 /-- Structural congruence on `C`-morphisms (graded_prop.md §7.1): two morphisms are related iff
-    they agree on connectivity (weave shapes, op names, routing) and differ only on `Numeric`
+    they agree on connectivity (weave shapes, op names, routing) and differ only on `SizeExpr`
     sizes. STUB body — the real relation compares the structural skeletons.
 
     `HomRel C` unfolds to `∀ {X Y : C}, (X ⟶ Y) → (X ⟶ Y) → Prop`; the seam
@@ -23,7 +23,7 @@ instance structuralCongruence.instCongruence (C : Type) [ColoredPROP C] :
   comp_right := fun {_} {_} {_} {_} {_} _g h => h
   equivalence := ⟨fun _ => trivial, fun h => h, fun _ _ => trivial⟩
 
-/-- `C♯` — the structural index PROP: `C` with `Numeric` sizes erased, realised as the categorical
+/-- `C♯` — the structural index PROP: `C` with `SizeExpr` sizes erased, realised as the categorical
     quotient of `C` by `structuralCongruence`. `CategoryTheory.Quotient` takes the `HomRel`
     directly (the `Congruence` instance above witnesses that it is a quotient of categories).
 

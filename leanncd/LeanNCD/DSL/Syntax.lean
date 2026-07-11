@@ -39,7 +39,7 @@ declare_syntax_cat tl_lhs_slot
 declare_syntax_cat tl_stmt
 declare_syntax_cat tl_program
 
--- Layer 1: sizes (bracket holds a tl_size term elaborating to Numeric, §2.1)
+-- Layer 1: sizes (bracket holds a tl_size term elaborating to SizeExpr, §2.1)
 -- `*`/`/` (prec 70) bind tighter than `+`/`-` (prec 65); all left-associative.
 -- `/` requires a literal `num` divisor (floor-div by a variable is not polynomial).
 syntax:max num                       : tl_size
