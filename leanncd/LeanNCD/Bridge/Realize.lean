@@ -2,7 +2,7 @@
 import LeanNCD.Base.Br          -- Axis, StObj, StMat, ArrayType, DType, Br
 import LeanNCD.Base.BrWiring    -- BrMorph.wiring (copy/permute/discard plumbing)
 import LeanNCD.DSL.Target       -- AxisP, StMatP, StObjP
-import LeanNCD.DSL.SizeExpr     -- SizeExpr.toNumeric
+import LeanNCD.Base.SizeExpr     -- SizeExpr.toNumeric
 
 namespace LeanNCD
 

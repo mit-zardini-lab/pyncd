@@ -1,4 +1,4 @@
-import LeanNCD.DSL.SizeExpr     -- SizeExpr (axis sizes)
+import LeanNCD.Base.SizeExpr     -- SizeExpr (axis sizes)
 
 namespace LeanNCD.Acset
 

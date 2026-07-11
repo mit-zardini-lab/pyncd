@@ -1,4 +1,4 @@
-import LeanNCD.DSL.SizeExpr
+import LeanNCD.Base.SizeExpr
 import LeanNCD.DSL.Elab
 import LeanNCD.DSL.Syntax
 

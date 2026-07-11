@@ -1,5 +1,5 @@
 -- LeanNCD/DSL/Target.lean
-import LeanNCD.DSL.SizeExpr   -- SizeExpr
+import LeanNCD.Base.SizeExpr   -- SizeExpr
 import LeanNCD.Exec.Uid       -- CompileError (for StMatP.validate)
 import Lean                    -- Lean.ToExpr
 

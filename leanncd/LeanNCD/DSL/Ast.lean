@@ -1,4 +1,4 @@
-import LeanNCD.DSL.SizeExpr
+import LeanNCD.Base.SizeExpr
 import LeanNCD.Exec.Uid   -- reuse the canonical `UID := Nat`; do NOT redefine it (duplicate-def error)
 import LeanNCD.DSL.Target
 

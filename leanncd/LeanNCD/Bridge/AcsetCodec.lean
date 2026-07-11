@@ -2,7 +2,7 @@
 import Mathlib.Data.Nat.Pairing   -- Nat.pair/unpair
 import LeanNCD.Acset.SBrInstance  -- Acset.SBrInstance and its row types
 import LeanNCD.DSL.Target         -- ThreadedComposed, BrBaseP, Wire, BrOp
-import LeanNCD.DSL.SizeExpr       -- SizeExpr
+import LeanNCD.Base.SizeExpr       -- SizeExpr
 import LeanNCD.Bridge.Realize     -- ThreadedComposed.WellFormed (round-trip theorem, Task C)
 
 /-! ### §8.2 acset codec — `ThreadedComposed ↔ Acset.SBrInstance`
