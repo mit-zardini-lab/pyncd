@@ -424,12 +424,12 @@ instance Br : ColoredPROP BrObj where
   tensorHom_unit_r := fun f => BrMorph.tensor_unitr_heq f         -- cast-Rel, by Quot.sound + HEq
 
 /-- Br elementality — the **(Elem)** mixin. Demoted from a `ColoredPROP` field (2026-06-22) so that
-    `instance Br : ColoredPROP` above is sorry-free; this opt-in instance carries the deferred proof.
+    `instance Br : ColoredPROP` above is sorry-free; this opt-in `def` (`brElemental`) carries the deferred proof.
     The reduction to raw-syntax point-cancellation is sorry-free — ALL the hard content is isolated
     in `brCancelPoint` (the free-strict-SMC normal-form milestone, whose only consumer is
     `weave_unique`/Prop 8.2). Machinery (`brPoint`, `brCancelPoint`, this reduction) is fully kept so
     the proof is resumable; see the `brCancelPoint` doc-comment for the route and resume pointer. -/
-instance : Elemental BrObj where
+def brElemental : Elemental BrObj where
   elemental := by
     -- Points separate quotient morphisms. The reduction to raw-syntax point-cancellation is
     -- sorry-free; ALL the hard content is isolated in `brCancelPoint` (the normal-form milestone).
