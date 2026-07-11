@@ -512,6 +512,18 @@ real relation exists.
 
 ### Spike 8: proof-adjacent type cleanups (the noncomputable/computable seam)
 
+> **✅ DONE — merged to `main` 2026-07-11** (commits `2db951c..7831816`; full `lake build` green,
+> 8,602 jobs — down from 8,604 as `Base/Category` and `DSL/SizeExpr` fold/relocate away;
+> whole-branch review clean, opus-verified). **8a** deleted the nearly-dead `StMatP'` (chosen over
+> wire-through, which would touch the proved `RouteSpec` surface). **8d** merged `Base/Category`
+> into `ColoredPROP.lean`. **8c** swapped `Axis.size`/`DType.nat` from the noncomputable `Numeric`
+> to the computable `SizeExpr` (relocating `SizeExpr` `DSL/`→`Base/` first to avoid a Base→DSL
+> layering inversion), deleting the lossy `toNumeric` bridge and the `Numeric` abbrev (`Coeff`
+> kept — it backs the `StMat` laws) and making `realizeAxis` identity-on-size; the `StMat` category
+> laws were verified **byte-identical** (signature-only swap, no proof-meaning change, no sorry
+> touched). **8b** intentionally skipped (churn without payoff). A trailing `docs:` commit swept the
+> stale `Numeric` references the swap exposed. The writeup below is retained as the record.
+
 A fourth, separate proof-track spike — findings that are neither sorry-count reductions
 (Spike 7) nor proof-script consolidation (Spike 6), but simplifications of the *types* the
 proofs are stated over. Grouped here because they're small, mostly independent of each other
@@ -561,7 +573,7 @@ tests (`ColoredPROP.lean`) and could merge into it. Only worth doing opportunist
 ```text
 Wave 1   Spike 1  ✅ DONE 2026-07-10 (dead code/docs/housekeeping) — merged 1cf92d3..3bb7e13
 Wave 3a  Spike 7a/7b/7c ✅ DONE 2026-07-10 (sorry pruning)        — merged eb09a6d..c707fce
-         Spike 8  (proof-adjacent type cleanups: 8a/8c independent, 8b/8d opportunistic)
+         Spike 8  ✅ DONE 2026-07-11 (proof-adjacent type cleanups)   — merged 2db951c..7831816
 Wave 2   Spike 2  (AST accessors/traversals)                     — first structural spike
          Spike 6a (toBrBaseP)                                    — before/with Spike 3
          Spike 3  (Nonlin + Elab tables; then optional 3c)       — after 2 (and ideally 6a)
