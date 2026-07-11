@@ -32,25 +32,6 @@ def StMatP.validate (m : StMatP) : Except CompileError StMatP :=
     s!"coeffs {m.codLen}×{m.domLen}, bias {m.codLen}"
     s!"coeffs {m.coeffs.length} rows, bias {m.bias.length}")
 
-/-- M4b — the typed core form of a reindexing (§3.5): a `codLen × domLen` integer-affine map with the
-    shape carried by `Fin`-indexed functions. Alongside the executable `StMatP`; because the rank is
-    in the type, well-formedness is *structural* — `toStMatP` is always `wellFormed`. -/
-structure StMatP' (domLen codLen : Nat) where
-  coeffs : Fin codLen → Fin domLen → Int
-  bias   : Fin codLen → Int
-
-/-- Materialize a typed reindexing to the executable list `StMatP` (row-major). -/
-def StMatP'.toStMatP {d c : Nat} (m : StMatP' d c) : StMatP where
-  domLen := d
-  codLen := c
-  coeffs := (List.finRange c).map (fun i => (List.finRange d).map (fun j => m.coeffs i j))
-  bias   := (List.finRange c).map m.bias
-
-/-- The bridge payoff: a typed reindexing always materializes to a `wellFormed` executable one, so
-    typed-origin matrices need no `validate` — the shape invariant is discharged by the type. -/
-theorem StMatP'.toStMatP_wellFormed {d c : Nat} (m : StMatP' d c) : m.toStMatP.wellFormed := by
-  simp [StMatP.wellFormed, StMatP'.toStMatP, List.length_map, List.length_finRange]
-
 /-- Computable presentation of `Axis` (§2.2): name + a `SizeExpr` (not `Numeric`). -/
 structure AxisP where
   name : Option String
