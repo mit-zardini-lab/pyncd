@@ -67,7 +67,8 @@ class TargetActegory (D : Type) (V : Type*) [ColoredPROP D] [Category V] [Monoid
 /-- The default target actegory: finitely-generated (finite-dimensional) `R`-modules (Mathlib). -/
 abbrev Mat (R : Type) [CommRing R] := FGModuleCat R
 
--- RECORDED OBSTRUCTION (SORRY_INVENTORY Milestone H): these `sorry`s are NOT a proof effort —
+-- RECORDED OBSTRUCTION (SORRY_INVENTORY Milestone H): NO `TargetActegory StObj (Mat ℝ) ℝ` instance
+-- is provided (was: 8 `sorry` fields) —
 -- a faithful dimension-adding `actV` is mathematically impossible over `FGModuleCat ℝ`. Two walls:
 -- (1) axis sizes are symbolic (`Numeric = MvPolynomial String ℕ`), so there is no finite-dim module
 --     of dimension `|P|`; (2) `δ_V` forces `dim∘actV` multiplicative in the V-variable, i.e.
@@ -75,15 +76,6 @@ abbrev Mat (R : Type) [CommRing R] := FGModuleCat R
 --     is inconsistent with the intended evaluator `F` (equivariance `F(X⊛P) ≅ actV(F X, P)` would
 --     need `dim F(X⊛P) = dim F(X)`, false). A faithful ℝ-valued actegory needs CONCRETE (Nat) sizes
 --     (the Milestone I `DenseTensor` regime), not the symbolic math tower. Deferred by design.
-noncomputable instance : TargetActegory StObj (Mat ℝ) ℝ where
-  actV := sorry  -- SIGNATURE: appends ℝ-typed dimensions; composition = matrix multiply over ℝ
-  δ_V := sorry
-  δ0_V := sorry
-  υ_V := sorry
-  α_V := sorry
-  act_unit_assoc_V := sorry
-  υ_nat_V := sorry
-  dist_coh_V := sorry
 
 /-! ## §7.5 — The `R = Bool` predicate target (deferred formalization obligation)
 
