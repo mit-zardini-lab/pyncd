@@ -454,6 +454,16 @@ proof schemas that account for ~700 lines collapse:
 
 ### Spike 7: prune the sorry surface to the honest open core (38 → ~14)
 
+> **✅ DONE — merged to `main` 2026-07-10** (commits `eb09a6d..c707fce`; full `lake build` green,
+> 8,603 jobs — down from 8,604 as `BrNF` left the build; whole-branch review clean). All of
+> **7a/7b/7c** landed: 7a deleted the impossible `TargetActegory StObj (Mat ℝ) ℝ` instance +
+> `instAlgebraBrMatR` + `construct_correspondence` (**−17** sorries); 7b parked `BrNF` (R100 rename
+> to `spikes/BrNF.lean`, **−≈6**) and **demoted** `instance : Elemental BrObj` → `def brElemental`;
+> 7c **deleted** `grothendieck_split` (**−1**, chosen over restating). Confirmed **pure subtraction —
+> no new proofs, no sorry re-introduced**; `St.swap_hexagon_fwd/rev`, `instDGradedStBr`, and
+> `brCancelPoint`'s proof were left untouched (out of scope). A trailing `docs:` commit swept the
+> stale references the deletions exposed. The census/table below is retained as the record.
+
 Full census performed (verified by grep + reading each site). The Bridge track
 (Realize/Agreement/AcsetCodec/SBr/RouteSpec) and the whole executable track are **zero-sorry**
 today; all 38 are math-tower. Three actions:
@@ -550,7 +560,7 @@ tests (`ColoredPROP.lean`) and could merge into it. Only worth doing opportunist
 
 ```text
 Wave 1   Spike 1  ✅ DONE 2026-07-10 (dead code/docs/housekeeping) — merged 1cf92d3..3bb7e13
-Wave 3a  Spike 7a/7b/7c (sorry pruning)                          — anytime, zero deps
+Wave 3a  Spike 7a/7b/7c ✅ DONE 2026-07-10 (sorry pruning)        — merged eb09a6d..c707fce
          Spike 8  (proof-adjacent type cleanups: 8a/8c independent, 8b/8d opportunistic)
 Wave 2   Spike 2  (AST accessors/traversals)                     — first structural spike
          Spike 6a (toBrBaseP)                                    — before/with Spike 3
