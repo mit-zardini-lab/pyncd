@@ -712,7 +712,7 @@ between factors, but `agg` reinterprets what "combine" and "reduce" mean arithme
 #### Proof-burden verdict
 
 **Confirmed proof-free on both tracks** — a sharp contrast with KG-gather (§19.1). Grepping
-`Base/Br*.lean` (the category-theory proof track — `Br.lean`, `BrNF.lean`, `BrWiring.lean`)
+`Base/Br*.lean` (the category-theory proof track — `Br.lean`, `BrWiring.lean`) and `spikes/BrNF.lean` (parked out of default build)
 shows **zero references to `BrOp` at all**: that track proves things about categorical
 wiring/composition structure, and never inspects which reduction or combine a step performs.
 Within `DSL/Target.lean`/`DSL/Pipeline/Lowering.lean` themselves, the only theorem

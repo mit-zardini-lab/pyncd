@@ -63,7 +63,7 @@ theorem scan_catamorphism (N : ℕ) (X : C)
 
 end Temporal
 
--- §8.3: grothendieck_split — already stated in `LeanNCD/Grothendieck/Split.lean`; not restated here.
+-- §8.3: the Grothendieck structure/data split is not currently formalized (the previous `grothendieck_split` theorem was removed pending a genuine structural congruence).
 -- §8.4: equivariance — `SymmetryGraded` is a stub class extending `DGradedColoredPROP` with no
 --        genuine equivariance field/equation yet (EM-machinery gated). OMITTED — nothing faithful
 --        to state over the class fields without faking a `True`.

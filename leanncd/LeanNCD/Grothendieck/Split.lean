@@ -35,16 +35,17 @@ abbrev CSharp (C : Type) [ColoredPROP C] : Type :=
 /-- `C♯`, the structural index PROP (see `CSharp`). -/
 notation "Cˢʰᵃʳᵖ" => CSharp
 
-/-- Data functor (graded_prop.md §7.1, Prop 8.3): each `C♯`-object ↦ its set of size-assignments
-    over the structural skeleton; trivial (identity) on morphisms. Trivial `Unit`-valued stub (the real `Dat` assigns each object its size-assignment set). -/
+/-- Data functor (graded_prop.md §7.1, Prop 8.3): each `C♯`-object maps to its set of
+    size-assignments over the structural skeleton; trivial (identity) on morphisms. Trivial
+    `Unit`-valued stub (the real `Dat` assigns each object its size-assignment set). -/
 def Dat (C : Type) [ColoredPROP C] : Cˢʰᵃʳᵖ C ⥤ Type where
   obj _ := Unit
   map _ := 𝟙 Unit
   map_id _ := rfl
   map_comp _ _ := (Category.comp_id _).symm
 
-/-- `Dat` valued in `Cat` via the discrete category on each fiber (`typeToCat : Type ⥤ Cat`), as
-    required by `CategoryTheory.Grothendieck`. -/
+/-- `Dat` valued in `Cat` via the discrete category on each fiber (`typeToCat : Type ⥤ Cat`),
+    as required by `CategoryTheory.Grothendieck`. -/
 noncomputable def Dat' (C : Type) [ColoredPROP C] : Cˢʰᵃʳᵖ C ⥤ CategoryTheory.Cat :=
   Dat C ⋙ typeToCat
 

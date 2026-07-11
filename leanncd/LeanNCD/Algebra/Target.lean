@@ -83,7 +83,7 @@ The `TargetActegory` class above is parameterised by the value semiring `R : Com
 (line 15), and §7.5 turns precisely on that parameter:
 
   • `R = ℝ`   ⇒ contraction is (`×`, then `Σ`) — the *tensor* / linear-algebra reading,
-                 realised by the `matTargetActegory` instance over `Mat ℝ = FGModuleCat ℝ`.
+                 the intended realization over `Mat ℝ = FGModuleCat ℝ` (see RECORDED OBSTRUCTION notes below for why no faithful instance is provided).
   • `R = Bool` ⇒ contraction is (`∧`, then `∃`) — the *predicate* / relational reading.
 
 The "∃/∧-vs-Σ/× split is exactly the choice of `R`" (the proposition Task 6 will state as

@@ -1,6 +1,6 @@
 # Milestone A — intentional `sorry` inventory
 
-> NOTE (Spike 1g): `St.lean` retains `swap_hexagon_fwd/rev` sorries; `Base/BrNF.lean`
+> NOTE (Spike 1g): `St.lean` retains `swap_hexagon_fwd/rev` sorries; `spikes/BrNF.lean` (parked out of the default build)
 > carries further open sorries. A complete census is Spike 7's job — this note only
 > corrects the previously-false "St.lean fully sorry-free" statements.
 

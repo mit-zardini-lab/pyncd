@@ -62,7 +62,7 @@ class ColoredPROP (ob : Type) extends SmallCategory ob where
     proof that no proved/executable result needs. The executable target's tensor-slice extraction
     uses **`St`** elementality (proved, `St.elemental`), not `Br`'s — a `Br` slice is a reindexing
     built from `St` elements (shape coordinates). See leanncd.md §2 / graded_prop.md §3.2. As a mixin,
-    `Br : ColoredPROP` is sorry-free while `instance : Elemental BrObj` keeps the deferred proof. -/
+    `Br : ColoredPROP` is sorry-free while `def brElemental : Elemental BrObj` keeps the deferred proof. -/
 class Elemental (ob : Type) [ColoredPROP ob] where
   elemental : ∀ {X Y : ob} (f g : SmallCategory.hom X Y),
                 (∀ x : SmallCategory.hom (ColoredPROP.unit : ob) X,
