@@ -5,7 +5,7 @@ namespace LeanNCD
 
 inductive DType
   | reals
-  | nat : Numeric → DType
+  | nat : SizeExpr → DType
 
 structure ArrayType where
   dtype : DType

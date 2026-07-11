@@ -3,7 +3,7 @@ import LeanNCD.Base.Br
 
 namespace LeanNCD
 
-noncomputable def ax_i : Axis := ⟨some "i", MvPolynomial.X "n"⟩
+def ax_i : Axis := ⟨some "i", SizeExpr.var "n"⟩
 
 -- TEST: targetAxes keeps the .fixed axes in order and drops the .tiled slots.
 example :

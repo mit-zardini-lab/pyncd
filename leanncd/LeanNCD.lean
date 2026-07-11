@@ -12,9 +12,9 @@ reindex coefficients), `Fin n →` function fields, and dependent typing — so 
 `noncomputable` and exist only to be reasoned about.
 
   Base/ColoredPROP                 the `ColoredPROP` class (a colored PROP) + `Elemental`
-  Base/Numeric                     `Numeric` (sizes) and `Coeff` (signed reindex coefficients)
-  Base/SizeExpr                    computable `SizeExpr` mirror of `Numeric`, with a `toNumeric`
-                                   bridge (moved from DSL/ so `Base/St` can depend on it)
+  Base/Numeric                     `Coeff` (signed reindex coefficients)
+  Base/SizeExpr                    `SizeExpr`, a standalone computable axis-size type
+                                   (moved from DSL/ so `Base/St` can depend on it)
   Base/St                          `St`, the INDEX prop: objects = axis lists; morphisms =
                                    `StMat`, integer-affine coordinate maps (coeffs + bias)
   Base/Br                          `Br`, the OPERATION prop: `BrMorph` = the free strict
@@ -63,7 +63,7 @@ The same conceptual object has three representations, one per concern. They shar
 
   concept           math tower (Base/)          presentation (DSL/Target)   acset (Acset/)
   ───────────────   ─────────────────────────   ─────────────────────────   ──────────────────
-  axis              `Axis`   (Numeric size)      `AxisP`  (SizeExpr)         `AxisUID`+`axisSizes`
+  axis              `Axis`   (SizeExpr size)     `AxisP`  (SizeExpr)         `AxisUID`+`axisSizes`
   reindex map       `StMat`  (Coeff, dependent)  `StMatP` (Int lists)        `SampleRow`s
   one Br morphism   `BrMorph` (Hom/Rel quotient) `ThreadedComposed` (DAG)    `SBrInstance` (tables)
 

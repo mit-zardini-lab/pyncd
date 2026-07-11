@@ -1,13 +1,14 @@
 import Mathlib
 import LeanNCD.Base.ColoredPROP
 import LeanNCD.Base.Numeric
+import LeanNCD.Base.SizeExpr
 
 namespace LeanNCD
 
 /-- An axis: an optional name and a symbolic size. -/
 structure Axis where
   name : Option String
-  size : Numeric
+  size : SizeExpr
 
 /-- A shape = an ordered list of axes. The objects of St. -/
 abbrev StObj := List Axis
@@ -18,7 +19,7 @@ abbrev StObj := List Axis
     (signed), NOT `Numeric` (the ℕ size type): reindexing offsets can be negative (look-back).
 
     The indices `Fin cod.length` / `Fin dom.length` count **axes**, not elements within an axis.
-    `Axis.size` is symbolic metadata (`Numeric`); the type of `StMat` does not enforce that
+    `Axis.size` is symbolic metadata (a computable `SizeExpr`, was `Numeric`); the type of `StMat` does not enforce that
     coordinate values stay within `[0, n)` for an axis of size `n`. That bound only becomes
     operative at evaluation time (Milestone I / `DenseTensor`), where symbolic sizes are
     instantiated to concrete `Nat`s. -/

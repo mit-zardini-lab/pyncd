@@ -4,7 +4,7 @@ import LeanNCD.Base.St
 namespace LeanNCD
 
 -- A one-axis shape and its identity stride morphism.
-noncomputable def a0 : Axis := ⟨some "i", MvPolynomial.X "n"⟩
+def a0 : Axis := ⟨some "i", SizeExpr.var "n"⟩
 
 -- TEST: the identity stride matrix has the unit coefficient matrix and zero bias (definitional).
 -- Coefficients are `Coeff = MvPolynomial String ℤ` (signed), not the ℕ size type `Numeric`.

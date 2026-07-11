@@ -2,13 +2,13 @@
 import LeanNCD.Base.Br          -- Axis, StObj, StMat, ArrayType, DType, Br
 import LeanNCD.Base.BrWiring    -- BrMorph.wiring (copy/permute/discard plumbing)
 import LeanNCD.DSL.Target       -- AxisP, StMatP, StObjP
-import LeanNCD.Base.SizeExpr     -- SizeExpr.toNumeric
+import LeanNCD.Base.SizeExpr     -- SizeExpr
 
 namespace LeanNCD
 
-/-- Realize a presentation axis. Size via the §12.2 bridge `SizeExpr.toNumeric`. SORRY-FREE. -/
+/-- Realize a presentation axis. Identity-on-size (`Axis.size` is now `SizeExpr`, same as `AxisP.size`). SORRY-FREE. -/
 noncomputable def realizeAxis (a : AxisP) : Axis :=
-  { name := a.name, size := a.size.toNumeric }
+  { name := a.name, size := a.size }
 
 /-- SORRY-FREE. -/
 noncomputable def realizeStObj (s : StObjP) : StObj := s.map realizeAxis
