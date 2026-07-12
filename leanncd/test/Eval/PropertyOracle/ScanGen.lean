@@ -89,8 +89,75 @@ def partialScanCases : List ScanCase :=
   ([2, 3].flatMap (fun L => [true, false].map (fun neg => template2 L neg))) ++
   ([2, 3].map template3)
 
+-- ===== Template 4: state + external read  S[l+1] := S[l] + X[l] =====
+private def l4 (L : Nat) : AxisSpec := ⟨"l", 232, .nat (some (.lit L))⟩
+
+private def template4 (L : Nat) : ScanCase :=
+  let l := l4 L
+  let base : Stmt := .assign "S" [.iterAt l 0]
+    { body := { terms := [{ factors := [.read "C0" []] }] }, nonlin := .identity }
+  let recur : Stmt := .assign "S" [.iterNext l]
+    { body := { terms := [{ factors := [.read "S" [.axis l]] }, { factors := [.read "X" [.axis l]] }] },
+      nonlin := .identity }
+  let xData : Array Float := ((List.range L).map (fun i => Float.ofNat i + 1.0)).toArray
+  let inputs : Std.HashMap String DenseTensor :=
+    (({} : Std.HashMap String DenseTensor).insert "C0" ⟨[], #[1.0]⟩).insert "X" ⟨[L], xData⟩
+  { prog := { decls := [.axis l (some L), .tensor "C0" [], .tensor "X" [l]],
+              stmts := [base, recur] },
+    inputs := inputs, axes := [l], Ls := [L], base := [base], recur := [recur] }
+
+-- ===== Template 5: tropical aggregator  M[j,l+1] := maxreduce/minreduce(M[j,l]·W[j,k]) =====
+private def j5 : AxisSpec := ⟨"j", 241, .real (some (.lit 1))⟩
+private def k5 : AxisSpec := ⟨"k", 242, .real (some (.lit 2))⟩
+private def l5 (L : Nat) : AxisSpec := ⟨"l", 243, .nat (some (.lit L))⟩
+
+private def template5 (L : Nat) (useMax : Bool) : ScanCase :=
+  let l := l5 L
+  let base : Stmt := .assign "M" [.free j5, .iterAt l 0]
+    { body := { terms := [{ factors := [.read "X0" [.axis j5]] }] }, nonlin := .identity }
+  let recur : Stmt := .assign "M" [.free j5, .iterNext l]
+    { body := { terms := [{ factors := [.read "M" [.axis j5, .axis l], .read "W" [.axis j5, .axis k5]] }] },
+      nonlin := .identity, agg := if useMax then .max else .min }
+  let inputs : Std.HashMap String DenseTensor :=
+    (({} : Std.HashMap String DenseTensor).insert "X0" ⟨[1], #[2.0]⟩).insert "W" ⟨[1,2], #[1.0, 3.0]⟩
+  { prog := { decls := [.axis j5 (some 1), .axis k5 (some 2), .axis l (some L),
+                        .tensor "X0" [j5], .tensor "W" [j5, k5]],
+              stmts := [base, recur] },
+    inputs := inputs, axes := [l], Ls := [L], base := [base], recur := [recur] }
+
+-- ===== Template 6: 2-D grid-DP  G[r,0]:=Z[r]; G[r+1,c+1]:=G[r,c]+A[r,c] =====
+private def r6 : AxisSpec := ⟨"r", 251, .nat (some (.lit 2))⟩
+private def c6 : AxisSpec := ⟨"c", 252, .nat (some (.lit 2))⟩
+
+private def template6 : ScanCase :=
+  let base : Stmt := .assign "G" [.free r6, .iterAt c6 0]
+    { body := { terms := [{ factors := [.read "Z" [.axis r6]] }] }, nonlin := .identity }
+  let recur : Stmt := .assign "G" [.iterNext r6, .iterNext c6]
+    { body := { terms := [{ factors := [.read "G" [.axis r6, .axis c6], .read "A" [.axis r6, .axis c6]] }] },
+      nonlin := .identity }
+  let inputs : Std.HashMap String DenseTensor :=
+    (({} : Std.HashMap String DenseTensor).insert "Z" ⟨[2], #[0.0, 0.0]⟩).insert "A" ⟨[2,2], #[1.0,1.0,1.0,1.0]⟩
+  { prog := { decls := [.axis r6 (some 2), .axis c6 (some 2), .tensor "Z" [r6], .tensor "A" [r6, c6]],
+              stmts := [base, recur] },
+    inputs := inputs, axes := [r6, c6], Ls := [2, 2], base := [base], recur := [recur] }
+
+/-- The full curated six-template scan generator. -/
+def enumScanCases : List ScanCase :=
+  partialScanCases ++
+  ([2, 3].map template4) ++
+  ([2, 3].flatMap (fun L => [true, false].map (fun m => template5 L m))) ++
+  [template6]
+
 -- CONTRACT TESTS (fire on build):
-#guard partialScanCases.length == 10   -- 4 (template1) + 4 (template2) + 2 (template3)
-#guard partialScanCases.all (fun c => (TLProgram.eval c.prog c.inputs).toOption.isSome)
+#guard enumScanCases.length == 17   -- 10 (templates 1-3) + 2 (t4) + 4 (t5) + 1 (t6)
+#guard enumScanCases.all (fun c => (TLProgram.eval c.prog c.inputs).toOption.isSome)
+-- coverage: the 2-D template is present
+#guard enumScanCases.any (fun c => c.axes.length == 2)
+-- coverage: the coupled 2-state template is present (more than one base stmt)
+#guard enumScanCases.any (fun c => c.base.length > 1)
+-- coverage: the tropical-aggregator template is present
+#guard enumScanCases.any (fun c => c.recur.any (fun s => match s with
+  | .assign _ _ rhs => rhs.agg == .max || rhs.agg == .min
+  | _ => false))
 
 end LeanNCD.PropertyOracle
