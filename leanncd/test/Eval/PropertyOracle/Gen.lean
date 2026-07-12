@@ -115,10 +115,33 @@ private def contractPrograms : List TLProgram :=
          ({ body := ⟨[pTerm e]⟩, nonlin := .identity, agg := .sum } : RHSExpr)] } :
       TLProgram))
 
+/-! ## A multi-term contraction program (Task 5b — materialization must bite on a CONTRACTING
+statement)
+
+`contractPrograms` above are all SINGLE-term (`C[i] := P[i,j]`), so `materializeSplit`
+(`terms.length ≥ 2` is its split trigger, `Transforms.lean`) never touches them — materialization
+was never exercised on a contracting statement. `contractMultiTermPrograms` fixes this:
+`C[i] := P[i,j] + A[i]` has TWO terms — `P[i,j]` contracts `j` (read but absent from the LHS
+`[i]`), `A[i]` is a plain read — so `materializeSplit` splits it into `T0[i] := P[i,j]` (itself a
+contracting statement) and `T1[i] := A[i]`, summed. -/
+
+/-- A product term reading `A` at `e` (shares `e` with `pTerm` so both terms of a program use the
+    same output index). -/
+private def aTerm (e : IdxExpr) : ProdTerm := ⟨[Factor.read "A" [e]]⟩
+
+/-- 3 multi-term contraction programs (one per `idxChoices i` variant), each 2-term: the
+    contracting `P[e,j]` plus the plain `A[e]`. -/
+private def contractMultiTermPrograms : List TLProgram :=
+  (idxChoices i).map (fun e =>
+    ({ decls := axDecls ++ inputDecls ++ [pDecl],
+       stmts := [Stmt.assign "C" [.free i]
+         ({ body := ⟨[pTerm e, aTerm e]⟩, nonlin := .identity, agg := .sum } : RHSExpr)] } :
+      TLProgram))
+
 /-- Bounded enumeration: 1-statement programs over every RHS choice (`Y := f(A,B)`), 2-statement
     INDEPENDENT programs (`Y := f(A,B); Z := g(A,B)`) over a capped subset of RHS choices per
-    statement, Y-DEPENDENT 2-statement programs (`yDepPrograms`), and genuine-contraction
-    programs (`contractPrograms`). -/
+    statement, Y-DEPENDENT 2-statement programs (`yDepPrograms`), genuine-contraction programs
+    (`contractPrograms`), and multi-term contraction programs (`contractMultiTermPrograms`). -/
 def enumPrograms : List (TLProgram × Std.HashMap String DenseTensor) :=
   let decls := axDecls ++ inputDecls
   let one := (stmtChoices "Y").map (fun s => ({ decls, stmts := [s] } : TLProgram))
@@ -130,7 +153,8 @@ def enumPrograms : List (TLProgram × Std.HashMap String DenseTensor) :=
     else (stmtChoices "Y")).flatMap (fun s1 =>
       (if cappedTwoStmt then (stmtChoices "Z").take twoStmtCap else stmtChoices "Z").map
         (fun s2 => ({ decls, stmts := [s1, s2] } : TLProgram)))
-  (one ++ two ++ yDepPrograms ++ contractPrograms).map (fun p => (p, inputEnv))
+  (one ++ two ++ yDepPrograms ++ contractPrograms ++ contractMultiTermPrograms).map
+    (fun p => (p, inputEnv))
 
 -- CONTRACT TESTS (fire on build):
 -- (1) non-empty and bounded:
@@ -157,6 +181,18 @@ def enumPrograms : List (TLProgram × Std.HashMap String DenseTensor) :=
   p.stmts.any (fun s =>
     let lhsUids := (Stmt.lhsAxes s).map AxisSpec.uid
     (Stmt.readFactors s).any (fun (_, idxs) =>
+      idxs.any (fun e => (idxAffineForm e).2.any (fun (_, u) => !lhsUids.contains u)))))
+-- (3d) materialization-bites-on-contraction coverage (Task 5b): some program has a statement
+-- that is BOTH multi-term (`terms.length ≥ 2`, so `materializeSplit` will split it) AND has a
+-- term reading an axis absent from the statement's own LHS (a genuinely contracted axis) — i.e.
+-- a statement whose split intermediate is itself a contracting statement.
+#guard enumPrograms.any (fun (p, _) =>
+  p.stmts.any (fun s =>
+    let lhsUids := (Stmt.lhsAxes s).map AxisSpec.uid
+    let isMultiTerm : Bool := match s with
+      | .assign _ _ r | .scatter _ _ r _ => r.body.terms.length ≥ 2
+      | _ => false
+    isMultiTerm && (Stmt.readFactors s).any (fun (_, idxs) =>
       idxs.any (fun e => (idxAffineForm e).2.any (fun (_, u) => !lhsUids.contains u)))))
 
 end LeanNCD.PropertyOracle
