@@ -32,7 +32,9 @@ structure ScanCase where
 private def j1 : AxisSpec := ⟨"j", 201, .real (some (.lit 2))⟩
 private def l1 (L : Nat) : AxisSpec := ⟨"l", 202, .nat (some (.lit L))⟩
 
-private def template1 (L : Nat) (Aneg : Bool) : ScanCase :=
+/-- Public (unlike the other templates) because `ScanUnroll`'s Task 4 point-check needs a
+    concrete, named case to test `unrollScan1D` against directly. -/
+def template1 (L : Nat) (Aneg : Bool) : ScanCase :=
   let l := l1 L
   let base : Stmt := .assign "S" [.free j1, .iterAt l 0]
     { body := { terms := [{ factors := [.read "X0" [.axis j1]] }] }, nonlin := .identity }
