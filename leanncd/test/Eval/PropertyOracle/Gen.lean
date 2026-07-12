@@ -25,9 +25,11 @@ private def axDecls : List Decl := [.axis i (some 2), .axis j (some 2)]
     included purely for the affine-read coverage guard (3). -/
 private def idxChoices (a : AxisSpec) : List IdxExpr := [.axis a, .shift a 1, .scale 2 a]
 
-/-- Input tensors: A, B, both 1-D over axis `i` (kept small; `j` is declared but
-    unused by any tensor/read in this bound — reserved for a future widening). -/
+/-- Input tensors: A, B, both 1-D over axis `i` (kept small). `P` is a 2-D tensor over
+    `[i, j]`, used only by the contraction programs below — it is what finally puts the
+    `j` axis to work. -/
 private def inputDecls : List Decl := [.tensor "A" [i], .tensor "B" [i]]
+private def pDecl : Decl := .tensor "P" [i, j]
 
 /-- Read-factor choices for a 1-D output over axis i: A or B, each with each idx choice. -/
 private def readChoices : List Factor :=
@@ -48,9 +50,10 @@ private def rhsChoices : List RHSExpr :=
 private def stmtChoices (nm : String) : List Stmt :=
   rhsChoices.map (fun r => Stmt.assign nm [.free i] r)
 
-/-- Deterministic input env: A,B are 1-D size-2 tensors with data [1,2]/[3,4]. -/
+/-- Deterministic input env: A,B are 1-D size-2 tensors with data [1,2]/[3,4]; P is a
+    2-D size-(2×2) tensor with data [1,2,3,4] (used only by the contraction programs). -/
 private def inputEnv : Std.HashMap String DenseTensor :=
-  (({} : Std.HashMap String DenseTensor).insert "A" ⟨[2], #[1.0, 2.0]⟩).insert "B" ⟨[2], #[3.0, 4.0]⟩
+  (((({} : Std.HashMap String DenseTensor).insert "A" ⟨[2], #[1.0, 2.0]⟩).insert "B" ⟨[2], #[3.0, 4.0]⟩).insert "P" ⟨[2, 2], #[1.0, 2.0, 3.0, 4.0]⟩)
 
 /-- Cap on how many of `stmtChoices` per name are crossed to build 2-statement
     programs (`termChoices`/`rhsChoices` are already large — 42/1806 — and their
@@ -60,9 +63,62 @@ private def twoStmtCap : Nat := 40
 
 private def cappedTwoStmt : Bool := (stmtChoices "Y").length > twoStmtCap
 
-/-- Bounded enumeration: 1-statement programs over every RHS choice (`Y := f(A,B)`),
-    plus 2-statement programs (`Y := f(A,B); Z := g(A,B)`, independent — extend to
-    Y-dependent later) over a capped subset of RHS choices per statement. -/
+/-! ## Y-dependent 2-statement programs (Task 5, E6 review — the key reordering fix)
+
+The `two` programs above are INDEPENDENT (`Y := f(A,B); Z := g(A,B)`): permuting them to
+`[Z; Y]` still evaluates identically, so `checkLaws`'s reordering law never exercises real
+reordering. `yDepPrograms` instead builds `Y := f(A,B); Z := g(...Y...)` where `Z`'s RHS READS
+the tensor `Y` produced by the first statement — a genuine producer→consumer dependency.
+Permuting the statement list to `[Z; Y]` now forces `schedule`/`topoSort`
+(`LeanNCD/DSL/Pipeline/Lowering.lean`) to reorder producer-before-consumer to get the same
+answer, so the reordering law does real work on these programs. -/
+
+/-- Cap on how many `stmtChoices "Y"` (producer statements) are crossed with `zRhsChoices`
+    below, kept small since this is purely additive to the existing bound. -/
+private def yDepCap : Nat := 20
+
+/-- A product term reading the produced intermediate `Y` at index `e`. -/
+private def yReadTerm (e : IdxExpr) : ProdTerm := ⟨[Factor.read "Y" [e]]⟩
+
+/-- RHS choices for `Z`: each reads `Y` alone, or `Y` summed with one A/B read term
+    (3 idx choices × (1 self + 6 partner reads) = 21 — small and bounded). -/
+private def zRhsChoices : List RHSExpr :=
+  (idxChoices i).flatMap (fun e =>
+    ({ body := ⟨[yReadTerm e]⟩, nonlin := .identity, agg := .sum } : RHSExpr) ::
+    readChoices.map (fun f =>
+      { body := ⟨[yReadTerm e, ⟨[f]⟩]⟩, nonlin := .identity, agg := .sum }))
+
+/-- Y-dependent programs: `yDepCap` (20) first-statement (`Y`) choices × `zRhsChoices`
+    (21) = 420 programs, each `[Y := f(A,B); Z := g(...Y...)]`. -/
+private def yDepPrograms : List TLProgram :=
+  ((stmtChoices "Y").take yDepCap).flatMap (fun s1 =>
+    zRhsChoices.map (fun r2 =>
+      ({ decls := axDecls ++ inputDecls, stmts := [s1, Stmt.assign "Z" [.free i] r2] } :
+        TLProgram)))
+
+/-! ## A genuine-contraction program (Task 5 — exercises materialization beyond the linear/sum
+fragment, and puts the previously-unused `j` axis to work)
+
+`C[i] := P[i,j]` (`agg := .sum`) reads the 2-D input `P` over both `i` and `j`, but its LHS
+only retains `i` — `j` is CONTRACTED (summed away), matching the Route phase's own definition
+(`Lowering.lean`: "Contracted axes = read axes whose uid is NOT among the LHS axis uids"). -/
+
+/-- A product term reading `P` at `(e, j)` — `j` fixed at a plain read (the contracted axis),
+    `e` ranging over `idxChoices i` (the retained axis's read expression). -/
+private def pTerm (e : IdxExpr) : ProdTerm := ⟨[Factor.read "P" [e, .axis j]]⟩
+
+/-- 3 contraction programs (one per `idxChoices i` variant on the retained axis). -/
+private def contractPrograms : List TLProgram :=
+  (idxChoices i).map (fun e =>
+    ({ decls := axDecls ++ inputDecls ++ [pDecl],
+       stmts := [Stmt.assign "C" [.free i]
+         ({ body := ⟨[pTerm e]⟩, nonlin := .identity, agg := .sum } : RHSExpr)] } :
+      TLProgram))
+
+/-- Bounded enumeration: 1-statement programs over every RHS choice (`Y := f(A,B)`), 2-statement
+    INDEPENDENT programs (`Y := f(A,B); Z := g(A,B)`) over a capped subset of RHS choices per
+    statement, Y-DEPENDENT 2-statement programs (`yDepPrograms`), and genuine-contraction
+    programs (`contractPrograms`). -/
 def enumPrograms : List (TLProgram × Std.HashMap String DenseTensor) :=
   let decls := axDecls ++ inputDecls
   let one := (stmtChoices "Y").map (fun s => ({ decls, stmts := [s] } : TLProgram))
@@ -74,7 +130,7 @@ def enumPrograms : List (TLProgram × Std.HashMap String DenseTensor) :=
     else (stmtChoices "Y")).flatMap (fun s1 =>
       (if cappedTwoStmt then (stmtChoices "Z").take twoStmtCap else stmtChoices "Z").map
         (fun s2 => ({ decls, stmts := [s1, s2] } : TLProgram)))
-  (one ++ two).map (fun p => (p, inputEnv))
+  (one ++ two ++ yDepPrograms ++ contractPrograms).map (fun p => (p, inputEnv))
 
 -- CONTRACT TESTS (fire on build):
 -- (1) non-empty and bounded:
@@ -88,5 +144,20 @@ def enumPrograms : List (TLProgram × Std.HashMap String DenseTensor) :=
 #guard enumPrograms.any (fun (p, _) =>
   p.stmts.any (fun | .assign _ _ r => r.body.terms.any (fun t => t.factors.any (fun
       | .read _ idxs => idxs.any (fun | .axis _ => false | _ => true) | _ => false)) | _ => false))
+-- (3b) Y-dependent coverage: some program has a statement that reads a name produced by an
+-- earlier statement (the reordering law is no longer vacuous):
+#guard enumPrograms.any (fun (p, _) =>
+  (p.stmts.foldl (fun (acc : Bool × List String) s =>
+      let (found, produced) := acc
+      (found || s.readNames.any produced.contains, produced ++ [s.lhsName]))
+    (false, [])).1)
+-- (3c) contraction coverage: some program has a statement that reads an axis absent from its
+-- own LHS (a genuinely contracted axis, per the Route phase's definition):
+#guard enumPrograms.any (fun (p, _) =>
+  p.stmts.any (fun s =>
+    let lhsUids := (Stmt.lhsAxes s).map AxisSpec.uid
+    (Stmt.readFactors s).any (fun (_, idxs) =>
+      idxs.any (fun e => (idxAffineForm e).2.any (fun (_, u) => !lhsUids.contains u)))))
 
 end LeanNCD.PropertyOracle
+

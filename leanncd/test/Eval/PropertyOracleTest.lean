@@ -26,4 +26,24 @@ private def bogusSplit : TLProgram :=
 #guard ! evalAgreesOn (producedNames goodProg)
           (TLProgram.eval goodProg goodEnv) (TLProgram.eval bogusSplit goodEnv)
 
+-- TEST-THE-TESTER (c) (Task 5 — reordering teeth, non-vacuous positive): a Y-DEPENDENT
+-- 2-statement program `Y := A + B; Z := Y` passes both laws — in particular, the reordering
+-- law's permutation `[Z; Y]` forces `schedule`/`topoSort` to reorder producer-before-consumer
+-- to reproduce the baseline, which `checkLaws` verifies via `programPermutations`.
+private def yStmt : Stmt :=
+  .assign "Y" [.free i0] ⟨⟨[⟨[.read "A" [.axis i0]]⟩, ⟨[.read "B" [.axis i0]]⟩]⟩, .identity, .sum⟩
+private def yDepGoodProg : TLProgram :=
+  { decls := [.axis i0 (some 2), .tensor "A" [i0], .tensor "B" [i0]],
+    stmts := [yStmt, .assign "Z" [.free i0] ⟨⟨[⟨[.read "Y" [.axis i0]]⟩]⟩, .identity, .sum⟩] }
+#guard (checkLaws yDepGoodProg goodEnv).isNone
+
+-- TEST-THE-TESTER (d): a genuinely-DIFFERENT program (not a permutation of `yDepGoodProg`'s
+-- statements — `Z` here reads `A` directly instead of the produced `Y`) must NOT agree with it;
+-- `evalAgreesOn` catches the semantic difference on the produced names.
+private def yDepDifferentProg : TLProgram :=
+  { yDepGoodProg with
+    stmts := [yStmt, .assign "Z" [.free i0] ⟨⟨[⟨[.read "A" [.axis i0]]⟩]⟩, .identity, .sum⟩] }
+#guard ! evalAgreesOn (producedNames yDepGoodProg)
+          (TLProgram.eval yDepGoodProg goodEnv) (TLProgram.eval yDepDifferentProg goodEnv)
+
 end LeanNCD.PropertyOracle
