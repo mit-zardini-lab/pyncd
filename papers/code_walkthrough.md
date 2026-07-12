@@ -65,6 +65,14 @@ flowchart TD
   G --> I
 ```
 
+How to interpret the non-pipeline boxes:
+
+- `Core` (`Graded`, `Weave`, `Mixins`) is the abstraction layer on top of categorical foundations (`Base`).
+- `Props.Generic` proves reusable theorems parameterized by those `Core` abstractions.
+- `Instances.StBr` supplies the concrete flagship instance (`D = St`, `C = Br`) so those generic theorems can specialize to this project.
+
+So these three boxes are primarily a **theory stack** (`Base -> Core -> Props/Instances`), while the `DSL -> ThreadedComposed -> Bridge.Realize` path is the **executable compiler path**.
+
 ### 2.2 What each main directory does
 
 | Directory | Role | Key files to start with |
