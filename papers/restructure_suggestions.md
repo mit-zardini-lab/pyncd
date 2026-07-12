@@ -44,6 +44,8 @@ carries `file:line` references against HEAD as of 2026-07-09.
   - [E10. Stage the interpreter into a code generator](#e10-stage-the-interpreter-into-a-code-generator)
   - [E11. Investigation: do UIDs earn their keep?](#e11-investigation-do-uids-earn-their-keep)
   - [E12. Named simp sets for the proof domains (tiny)](#e12-named-simp-sets-for-the-proof-domains-tiny)
+  - [E13. Generators for `Br` — closing `BrOp`, and promoting E6's laws to theorems](#e13-generators-for-br--closing-brop-and-promoting-e6s-laws-to-theorems)
+  - [E14. A simplifier: local algebraic rewrite rules over the DSL AST](#e14-a-simplifier-local-algebraic-rewrite-rules-over-the-dsl-ast)
   - [How the exploratory ideas compose](#how-the-exploratory-ideas-compose)
 
 ---
@@ -85,7 +87,9 @@ superficially like duplication. Any implementation plan should treat them as fix
    (acset labels via `natToUnary`). Deriving it from constructor order (`BrOp.toCtorIdx`)
    would make a constructor reorder silently change the wire format. Keep the table;
    optionally add a `#guard` totality check (`(List.range 15).map (brOpIdx ∘ brOpOfIdx) ==
-   List.range 15`).
+   List.range 15`). (A different question about the same type, left to **E13**: this constraint
+   is about `BrOp`'s wire-format *stability*, not about whether its constructors are a *complete*
+   generating set for `Br` — the two are independent concerns about one inductive.)
 5. **Two guards that share an error constructor are different checks.** `finalizeScans`'
    `inconsistentScanAxes` (`Structural.lean:489-492`, axis *sets*) and `buildStep`'s
    `outputAxesConsistent` (`Lowering.lean:476-486`, axis *order*) must not be merged; give
@@ -278,7 +282,10 @@ the 8-line hazard warning in the module docstring; `buildStep`'s op mapping
 `Eval/Nonlin.lean:97-108` 9→3; the `evalPlain`/`evalStmtSliceSeeded` axis-resolution matches
 become exhaustive 3-arm matches with no wildcard, deleting the second hazard comment).
 Equality-only sites (`== .identity` at `Structural.lean:247,516`, `Lowering.lean:34`) are
-unchanged. `BrOp` stays flat (Python bridge); only the mapping changes. Surface syntax
+unchanged. `BrOp` stays flat (Python bridge); only the mapping changes. (This spike already does,
+for `Nonlin`, exactly the move **E13** asks whether `Br`'s own generators need: closing off a
+flat, wildcard-hazard-prone sum type into a structurally exhaustive split. `BrOp` itself is the
+next candidate for the same question.) Surface syntax
 unchanged. **Budget RouteSpec repair** for the one `buildStep` arm this touches (limited
 exposure; see Constraint 3 — cheaper if Spike 6a has landed first). Pinned by NonlinTest,
 FF5–FF8 (unmarked activations), LoweringTest's masked-softmax split, EvalExamplesTest's
@@ -375,7 +382,9 @@ pass unchanged), migrate assertions to field matches second. ~20 throw sites acr
 
 **4i. Small decoupling wins:** `Eval/Eval.lean` imports all of `DSL.Compile` solely for the
 `TLProgram.eval` wrapper (:78-83) — move the wrapper out (e.g. `Eval/Entry.lean`) so the
-interpreter depends only on `DSL.Ast` + `Pipeline.Types`. And `evalScheduled` drops solver
+interpreter depends only on `DSL.Ast` + `Pipeline.Types`. (Already, in miniature, the
+worker/wrapper split **E4**'s exploration names explicitly: `compileToScheduled`+`evalScheduled`
+is the worker, `TLProgram.eval` the thin boundary around it.) And `evalScheduled` drops solver
 warnings into `dbg_trace` (`Eval/Eval.lean:64`) — return them instead
 (`AffineShapeSolverTest:412` already asserts on a returned list elsewhere).
 
@@ -478,7 +487,8 @@ the *classes* (`TargetActegory`, `Algebra`, `ParaAlgebra` — all sorry-free) an
 remain instantiable at Milestone I with concrete `Nat` sizes — which is the actual plan of
 record anyway.
 
-**7b. Park `BrNF` outside the default build (−6 sorries, −247 built lines).** Verified:
+**7b. Park `BrNF` outside the default build (−6 sorries, −247 built lines).**
+[†](#e13-generators-for-br--closing-brop-and-promoting-e6s-laws-to-theorems) Verified:
 imported by nothing except the root `LeanNCD.lean:101`. More importantly, a **model-adequacy
 finding supersedes its plan**: `Hom` gained CD generators `copyW`/`delW` (`Br.lean:61-62`)
 with comonoid laws in `Rel` (:125-134), and `brCancelPoint` quantifies over *all* raw terms —
@@ -486,7 +496,10 @@ but `BrNF`'s `NData` wiring is a *bijection* (`OutPort ≃ InPort`), which prova
 interpret one-in-two-out `copyW` (`BrNF.lean:243-244` admits exactly this). **BrNF as
 designed can never complete `brCancelPoint`.** The honest route is a gs-monoidal/cospan
 (non-bijective) model — a larger development than BrNF's header estimates, which predate the
-CD extension. Actions: drop the import, move the file to `spikes/`, and record the
+CD extension. (Part II's **E13** frames this precisely: `Br`'s generating set — `BrOp` plus the
+CD structural generators — isn't closed under its own wiring model yet, the same kind of gap
+that forced GHC's Core to grow explicit `Coercion` terms for GADTs; the cospan model is that
+growth, not a proof patch.) Actions: drop the import, move the file to `spikes/`, and record the
 cospan-model requirement in `Br.lean:298`'s doc (the sorry-free wiring combinators and the
 `@[simp]`-projection technique in BrNF survive in the file for eventual reuse). Optionally
 demote `instance : Elemental BrObj` (`Br.lean:425`) to a scoped instance/def so no default
@@ -506,7 +519,7 @@ real relation exists.
 | Item | Status |
 |------|--------|
 | `St.swap_hexagon_fwd/rev` (`St.lean:267-268`) | **The one recommended proof spike.** Provable as stated, same genre as the proved `tensorHom_assoc`. Known friction (recorded from a prior attempt): the associator casts are defeq-not-syntactic — needs the `rw`/`erw` cast-bridge idiom (cf. `Br_swap_hexagon_fwd`'s `cast_quot_id`), *not* simp; budget a focused Br-hexagon-sized effort, not a quick win. Closing them makes `St` fully sorry-free; the Adapter consumers already exist. |
-| `brCancelPoint` (`Br.lean:300`) | True; parked pending the cospan model (7b). Not load-bearing. |
+| `brCancelPoint` (`Br.lean:300`) | True; parked pending the cospan model (7b). Not load-bearing. **Not yet a scheduled spike** — 7b names the requirement but doesn't scope it; see **E13**, which also depends on this model existing. |
 | `weave_unique` (`Core/Weave.lean:32`) | Double-gated (`broadcast_gen`, `brCancelPoint`); park. |
 | `instDGradedStBr` 10 fields (`Instances/StBr.lean:15-24`) | The genuine long pole: `act` is de-risked (spike S0, ~400–650 lines), `sh_act` redesigned to `≅`, `broadcast_gen` deep. Staged work, unaffected by this doc. |
 
@@ -577,10 +590,14 @@ Wave 3a  Spike 7a/7b/7c ✅ DONE 2026-07-10 (sorry pruning)        — merged eb
 Wave 2   Spike 2  (AST accessors/traversals)                     — first structural spike
          Spike 6a (toBrBaseP)                                    — before/with Spike 3
          Spike 3  (Nonlin + Elab tables; then optional 3c)       — after 2 (and ideally 6a)
+                  [3a doubles as a worked dry-run for E13's "close BrOp" question]
          Spike 4  (Eval unification; 4a→4b→4c→4d, then 4e–4i)    — after 2; 4d cheaper after 3
+                  [do 4i early: a cheap worker/wrapper trial before the E4 decision point]
          Spike 5  (finalizeScans decomposition)                  — after 2
 Wave 3b  Spike 6b/6c/6d (RouteSpec/AcsetCodec consolidation)     — independent of Wave 2
          St hexagons proof spike                                 — independent, budget separately
+         Cospan model spike (scope Br's non-bijective wiring —  — independent, budget separately;
+           Spike 7b's named-but-unscheduled prerequisite)           unlocks E13 once scoped
 ```
 
 Every spike is verified by `lake build` (full suite, currently 8,602 jobs) — the test
@@ -611,13 +628,15 @@ below consolidates it into one map so the interaction is decidable at planning t
 | E3 | Evaluate over an arbitrary semiring | algebra-parameterized interpreters | spike-worthy |
 | E4 | EvalPlan: run the route's own affine maps | stride-based einsum; "one artifact, two consumers" | prototype-first |
 | E5 | Executable denotation of the routed artifact | denotational semantics as executable spec | spike-worthy |
-| E6 | Property-based oracles for the pipeline | QuickCheck / metamorphic testing | spike-worthy |
+| E6 | Property-based oracles for the pipeline | QuickCheck / metamorphic testing | ✅ DONE 2026-07-12 |
 | E7 | Accumulate compile diagnostics | the Validation applicative | spike-worthy |
 | E8 | Open registration of unary functions | environment extensions, command macros | recorded-only |
 | E9 | Datatype-generic acset codecs | custom `deriving` handlers | recorded-only |
 | E10 | Stage the interpreter into a code generator | Futamura projections | recorded-only |
 | E11 | Do UIDs earn their keep? | locally-nameless discipline | investigation |
 | E12 | Named simp sets for the proof domains | mathlib attribute hygiene | spike-worthy (tiny) |
+| E13 | Generators for `Br` — closing `BrOp`, promoting E6's laws to theorems | GHC's Core as a small closed generating set; System FC | investigation → spike-worthy |
+| E14 | A simplifier: local algebraic rewrite rules over the DSL AST | GHC's Simplifier + `RULES` pragma; worker/wrapper; specialization; CSE | spike-worthy (after E2) |
 
 ### How the explorations relate to the Part I spikes
 
@@ -632,7 +651,7 @@ spikes they protect or reshape, and the rest are genuinely independent — pull 
 | **E12** (named simp sets) | **Folds into** Spike 6 | *During Spike 6* — register the lemmas as you consolidate them, not as a separate pass. |
 | **E3** (semiring) | **Depends on** Spike 4a/4b — it is their payoff (`unit1` threaded, one evaluator body) | *After Spike 4.* Not a competitor to Spike 4; do not attempt before it. |
 | **E10** (codegen) | **Depends on** E4 (its `EvalPlan` is ~80% of the specialization) | *After E4*, and only once the Python-target work is actually scheduled. |
-| **E6** (property oracles) | **Precedes** — the regression net that makes behavior-dense refactors low-anxiety | *Before Spikes 4 and 5, and before E4.* Highest value landed early; the scan-unrolling oracle is precisely what de-risks Spike 5's `finalizeScans` rewrite and E4's plan compiler. |
+| **E6** (property oracles) | ✅ **DONE 2026-07-12** — the regression net Spikes 4/5 and E4 can now build against | Landed early as intended; the scan-unrolling oracle is precisely what de-risks Spike 5's `finalizeScans` rewrite and E4's plan compiler, whenever those are picked up. |
 | **E11** (UID investigation) | **Precedes/reshapes** Spike 2 — a "yes, delete UIDs" outcome changes what 2b/2c relocate | *Before committing Spike 2* — one focused day. If UIDs survive, Spike 2 proceeds unchanged; if not, 2b/2c shrink or move. |
 | **E4** (EvalPlan) | **Overlaps** Spike 4 — rewrites the same `Contract`/`Gather`/`Scatter` internals Spike 4 unifies | *Decide at Spike 4.* If E4 is on the roadmap, weigh how much of Spike 4's internal unification (4c/4d/4f) it would supersede before investing there; keep 4a/4b regardless (E4 builds on them, as E3 does). |
 | **E2 light** (typed core IR) | **Overlaps** the Wave-2 executable spikes (3–5) — `CoreStmt` makes unwritable the invariants 3/4/5 only document | *After Spikes 3–5*, as their typed successor — or fold the `Recurrence` structure into Spike 5 if attempted concurrently. |
@@ -640,12 +659,18 @@ spikes they protect or reshape, and the rest are genuinely independent — pull 
 | **E7** (Validation applicative) | **Independent** — a *Compile*-layer change (`resolveDecls`/`checkReadRanks`/`checkDtypes`), distinct from Spike 4h's *Eval*-layer `EvalError` | Anytime; self-contained. |
 | **E8** (open unary registration) | **Independent, recorded-only** — Spike 3b already shrinks the syntax/elab share | Deferred; revisit only if the function inventory starts growing monotonically. |
 | **E9** (generic codecs) | **Independent, recorded-only** — Spike 6d's combinators already capture most of the line savings | Deferred; revisit only if the acset table inventory grows. |
+| **E13** (`Br` generators) | **Depends on** a cospan wiring model that Spike 7b *names* but does not schedule — this is not yet a task anywhere in this doc; **informed by** Spike 3a (the same closed-generating-set move, already worked for `Nonlin`); **feeds** E5/E6 | *Budget the cospan model itself first* (Wave 3b, alongside the St-hexagons proof spike) — E13's closure question is only answerable once it exists. Do Spike 3a before attempting E13's own investigation; it's a worked precedent for the same move. |
+| **E14** (simplifier) | **Depends on** E2 (a stable `CoreStmt` to rewrite over); **absorbs** the CSE/scan-specialization follow-ons E4 opens up; **precedes** E10 if both are pursued (E10's Futamura-style specialization is more effective over E14's already-simplified/unrolled programs than over the raw interpreter) | *After E2*, opportunistically once E4 lands (its plan fragments make CSE/specialization cheap to implement); before E10, if E10 is ever scheduled. |
 
 **So: should the explorations come first?** Mostly no — do the Part I spikes on their own
-schedule and pull each exploration in at the point above. The two exceptions are **E6** and
-**E11**: E6 is the safety net worth having in place before the behavior-dense spikes (4, 5) and
-E4 touch anything, and E11 is a one-day question worth answering before Spike 2 invests in
-relocating UID-keyed accessors. The remaining sequencing among the explorations themselves
+schedule and pull each exploration in at the point above. The two exceptions were **E6** and
+**E11**: E6 was the safety net worth having in place before the behavior-dense spikes (4, 5) and
+E4 touch anything (✅ done 2026-07-12 — see E6 above), and E11 is a one-day question worth
+answering before Spike 2 invests in relocating UID-keyed accessors. **E13** is a third kind of
+exception, in the opposite direction:
+it cannot come first even if resourced, because its prerequisite — a scoped cospan wiring model
+— doesn't exist as a task anywhere yet; scoping that model (Wave 3b) is the first available step,
+not E13's own investigation. The remaining sequencing among the explorations themselves
 (E6 → E3 → E4 → E5) is covered in [How the exploratory ideas compose](#how-the-exploratory-ideas-compose).
 
 Concretely, here is one sequencing that satisfies every dependency above — it extends the
@@ -658,7 +683,8 @@ Phase 0  — zero-dep, start now, run in parallel
   Spike 1        dead code / stale docs / housekeeping
   Spike 7a/7b/7c sorry-surface pruning (38 → ~14)
   Spike 8a/8c    proof-adjacent type cleanups
-  E6             property-based oracles      ← regression net; MUST land before Spikes 4/5 + E4
+  E6             property-based oracles      ✅ DONE 2026-07-12 (all 3 laws — reordering,
+                 materialization, scan-unrolling); regression net now in place for Spikes 4/5 + E4
   E11            UID investigation (~1 day)  ← MUST resolve before the Spike 2 commit
 
 Phase 1  — foundational structural spike (executable track)
@@ -679,6 +705,8 @@ Phase 3  — proof consolidation (independent of Waves above; run in parallel)
   Spike 6b/6c/6d RouteSpec + AcsetCodec consolidation
   E12            named simp sets            ← folded into Spike 6
   St hexagons    swap_hexagon_fwd/rev proof spike (budget separately)
+  Cospan model   scope Br's non-bijective wiring model (Spike 7b's named-but-unscheduled
+                 prerequisite) — budget separately; unlocks E13 once scoped
 
 Phase 4  — typed successor + executable denotation (after Spikes 3–5)
   E2 (light)     CoreStmt boundary type (subsumes invariants Spikes 3–5 only document)
@@ -688,14 +716,21 @@ Opportunistic / deferred (pull in on demand, no phase)
   E7             accumulate compile diagnostics (Validation) — anytime, self-contained
   Spike 8b/8d    lowest-priority type cleanups
   E8, E9         open unary registry / generic codecs — recorded-only; revisit if inventories grow
-  E10            interpreter → codegen — after E4, and only when the Python target is scheduled
+  E10            interpreter → codegen — after E4, and after E14 if both are pursued (see E14),
+                 and only when the Python target is scheduled
+  E13            Br generators / BrOp-closure question — after Phase 3's cospan model is scoped;
+                 do Spike 3a first (a worked precedent for the same move)
+  E14            simplifier (rewrite rules over CoreStmt) — after E2; absorbs CSE/scan-
+                 specialization; do before E10 if both are pursued
 ```
 
 The critical path runs Phase 0's E6/E11 enablers → Spike 2 → Spike 4 → E4/E3 → E5; everything
 in Phase 3 and the "deferred" block is off that path and can be scheduled to fill gaps. If only
 one exploration thread is resourced, run **E6 → E3 → E4 → E5** (the highest-value path from
 [How the exploratory ideas compose](#how-the-exploratory-ideas-compose)) and leave the spikes
-otherwise untouched.
+otherwise untouched. One Phase-3 item is worth not indefinitely deferring despite being "off
+path": scoping the cospan wiring model is Spike 7b's own flagged gap (`brCancelPoint` is parked
+on it, not just E13) — it earns its keep independent of whether E13 is ever pursued.
 
 ### E1. One traversal to rule the collectors (van Laarhoven)
 
@@ -745,6 +780,13 @@ can carry. Two escalation levels:
   embedding) does not play well with indexed families, and every test constructing record
   literals pays churn. The light form captures most of the value; escalate only if a third
   phase-invariant bug appears.
+- **A third option, worth recording between the two:** rather than narrowing *types* per
+  phase, `CoreStmt` could instead carry small explicit *witness* terms for the invariants a
+  phase currently relies on in a comment — closer to how System FC gave GADT refinement an
+  explicit `Coercion`/`Cast` term instead of a smarter type index (see **E13**'s use of the
+  same move for `Br`). Cheaper than the Heavy tier (no indexed family, no `deriving` fight),
+  but only checkable, not enforced by the type — a middle ground, not yet worth choosing
+  between with the others.
 
 *References:* Najd & Peyton Jones, [Trees that Grow](https://simon.peytonjones.org/trees-that-grow/) (JUCS 2017; [arXiv](https://arxiv.org/abs/1610.04799)) — the type-family-per-phase idiom from GHC's own AST; Strom & Yemini, [Typestate: A Programming Language Concept for Enhancing Software Reliability](https://www.cs.cmu.edu/~aldrich/papers/classic/tse12-typestate.pdf) (IEEE TSE 1986) — invariants a type carries across phases.
 
@@ -801,7 +843,18 @@ rewrite of `Contract`/`Gather`/`Scatter` internals (~300 lines) with numeric-equ
 — prototype on the scan-free fragment and diff against the current evaluator over the whole
 portfolio before committing.
 
-*Reference:* the [`numpy.einsum`](https://numpy.org/doc/stable/reference/generated/numpy.einsum.html) Einstein-summation convention — the stride/coefficient-row contraction spec this plan representation mirrors.
+Named explicitly, this split *is* GHC's worker/wrapper transformation: a lean "worker" over the
+dense affine-map/integer-coordinate representation, wrapped by a thin boundary that does the
+`HashMap`/`Except` boxing today's `Contract`/`Gather` conflate into one function. The framing
+generalizes past this one boundary — `evalScan`'s four numbered phases (Spike 4f) are a second
+candidate worker/wrapper split once `EvalPlan` exists. Two further payoffs the plan
+representation unlocks, folded into **E14** rather than duplicated here: once affine-map
+fragments are directly comparable (not `HashMap`-driven dictionaries), **CSE** across statements
+and **compile-time unrolling of small, statically-known scan lengths** (the same transform E6's
+scan-unroll oracle already builds, reused as a real optimization rather than a test) both become
+straightforward passes over the plan.
+
+*References:* the [`numpy.einsum`](https://numpy.org/doc/stable/reference/generated/numpy.einsum.html) Einstein-summation convention — the stride/coefficient-row contraction spec this plan representation mirrors; Gill & Hutton, [The Worker/Wrapper Transformation](https://people.cs.nott.ac.uk/pszgmh/wrapper.pdf) (JFP 2009) — the general pattern this split instantiates.
 
 ### E5. An executable denotation for the routed artifact
 
@@ -822,11 +875,26 @@ covers most of the portfolio.) This catches a whole class of bug RouteSpec canno
 proves weave *shapes* are right, not that the wiring *means* the right contraction. It also
 gives the eventual `realize`-agreement proof its computational skeleton — the denotation is
 the function the proof will characterize. Cheap to start (`evalBrBaseP` for `contract`/
-`relu`-class ops is a small wrapper over existing Eval pieces), incremental thereafter.
+`relu`-class ops is a small wrapper over existing Eval pieces), incremental thereafter. This
+denotation is also the natural home for **E13**'s question: once `evalBrBaseP` runs over `Br`'s
+actual generators, whether those generators are closed stops being abstract — a gap in the
+denotation *is* a gap in the generating set.
 
 *Reference:* [Denotational semantics](https://en.wikipedia.org/wiki/Denotational_semantics) — giving a program a meaning as a mathematical (here, *executable*) function; the agreement test characterizes `route` against that denotation before the eventual `realize` proof does.
 
 ### E6. Property-based oracles (the tests the portfolio can't express)
+
+> **✅ DONE — merged to `main` 2026-07-12** (commits `faedda0..456294a`; full `lake build` green,
+> 8,611 jobs). All three laws landed: reordering + materialization (`Compare`/`Transforms`/
+> `Gen`/`Oracle.lean`, 2026-07-11) and the scan-unrolling oracle (`ScanGen`/`ScanUnroll`/
+> `ScanOracle.lean` + entry, 2026-07-12) — a curated six-template scan generator, a mechanical
+> 1-D/2-D unroll transform (independent traversal order from `evalScan`'s own), and a new
+> slice-extraction comparator (`sliceTensorAtMulti`, the inverse of `writeSliceAtMulti`). One
+> real bug caught along the way, exactly the kind this spike exists to catch: template 6's
+> `G[r,c]+A[r,c]` was silently computing multiplication instead of addition (all-zeros output),
+> found only because the scan-unroll law checks the actual *value*, not just well-formedness —
+> the well-formedness-only contract tests from the generator task had missed it entirely. The
+> bullets below are retained as the record of the original design.
 
 The portfolio pins ~130 hand-computed examples — excellent, but every one is a point. The
 pipeline has *laws*, and Lean has a QuickCheck (`Plausible` — confirmed present in this
@@ -849,6 +917,11 @@ The generator is the real work (small well-formed `TLProgram`s: 1–3 axes of si
 statements), and it need not round-trip through surface syntax — generate `Stmt` values
 directly. Spike-worthy independent of everything else; highest value if landed *before*
 Spikes 4/5/E4.
+
+One further implication, expanded in **E13**: these three laws are exactly the shape of
+equation GHC's `RULES` pragma promotes from "tested behavior" to "a trusted rewrite" — landing
+E6 is a down-payment on eventually restating reordering/materialization/scan-unrolling as
+theorems about `Br` itself, not just facts about `Eval`.
 
 *References:* Claessen & Hughes, [QuickCheck: A Lightweight Tool for Random Testing of Haskell Programs](https://www.cs.tufts.edu/~nr/cs257/archive/john-hughes/quick.pdf) (ICFP 2000) — the property/generator model (`Plausible` is its Lean port); Chen et al., [Metamorphic Testing: A Review of Challenges and Opportunities](https://dl.acm.org/doi/10.1145/3143561) (ACM Computing Surveys 2018; [tech report](https://www.cs.hku.hk/data/techreps/document/TR-2017-04.pdf)) — the invariance-relation oracles (reordering, materialization, scan-unrolling) above.
 
@@ -906,7 +979,11 @@ without metaprogram maintenance. The pattern earns its keep only if the table in
 
 `papers/pytorch_compilation.md` already contemplates compiling tensor-logic to Python. The
 pearl framing: the evaluator is an interpreter `eval : Program → Env → Tensors`; its first
-Futamura projection — specialize it to a fixed program — is a code generator. E4's `EvalPlan`
+Futamura projection — specialize it to a fixed program — is a code generator. (A different sense
+of "specialize" than **E14**'s GHC-style per-instantiation specialization — this one is
+partial evaluation of the *interpreter itself*, Futamura's move, not a rewrite pass over
+programs it runs; the two compose rather than compete, since E14's unrolled scan is itself a
+more-specialized program for E10 to then specialize the interpreter against.) E4's `EvalPlan`
 is 80% of that specialization already (per-statement dense affine maps + a semiring tag is
 essentially an einsum call spec): `EvalPlan → String` emitting `torch.einsum`/`scatter_add`
 calls is a small pretty-printer, and the Lean evaluator becomes the differential-testing
@@ -914,7 +991,16 @@ oracle for the emitted code. Recorded-only until the Python-target work is actua
 scheduled, but it strengthens the case for E4: the plan representation serves eval,
 route-agreement, *and* codegen.
 
-*Reference:* Futamura, "Partial Evaluation of Computation Process — An Approach to a Compiler-Compiler" (Systems, Computers, Controls 1971; reprinted in *Higher-Order and Symbolic Computation* 12(4):381–391, 1999); overview: [Partial evaluation — Futamura projections](https://en.wikipedia.org/wiki/Partial_evaluation#Futamura_projections) — specializing an interpreter to a fixed program *is* a compiler.
+Worth noting for when this is scheduled: unlike GHC (lazy, heap-allocated), Lean 4's own
+compiler is the closer architectural cousin here — it compiles a strict functional language via
+reference counting with **reuse analysis** (Perceus): a dying, same-shaped allocation's memory
+is reused in place for a fresh one, rather than freed and reallocated. `EvalPlan → String`
+emitting real tensor-allocating calls is exactly where a reuse-style analysis pays off — a
+source tensor that's dead after a statement and shape-matches that statement's output is a
+candidate for an in-place write instead of a fresh allocation, a performance angle GHC's own
+lineage wouldn't suggest looking for.
+
+*References:* Futamura, "Partial Evaluation of Computation Process — An Approach to a Compiler-Compiler" (Systems, Computers, Controls 1971; reprinted in *Higher-Order and Symbolic Computation* 12(4):381–391, 1999); overview: [Partial evaluation — Futamura projections](https://en.wikipedia.org/wiki/Partial_evaluation#Futamura_projections) — specializing an interpreter to a fixed program *is* a compiler; Reinking, Xie, de Moura & Leijen, [Perceus: Garbage Free Reference Counting with Reuse](https://xnning.github.io/papers/perceus.pdf) (PLDI 2021) — the reuse-analysis technique above, from Lean 4's own compiler.
 
 ### E11. Investigation: do UIDs earn their keep?
 
@@ -944,6 +1030,90 @@ Spike 6 if adopted.
 
 *Reference:* Lean reference manual, [Simp sets](https://lean-lang.org/doc/reference/latest/The-Simplifier/Simp-sets/) — `register_simp_attr` for named, non-default simp sets (`@[acset_simp]`, `@[route_simp]`).
 
+### E13. Generators for `Br` — closing `BrOp`, and promoting E6's laws to theorems
+
+GHC's Core is a deliberately small, *closed* set of primitive term formers (`Var`, `Lit`, `App`,
+`Lam`, `Let`, `Case`, `Cast`, `Tick`, `Type`, `Coercion` — [Peyton Jones, *The Glasgow Haskell
+Compiler*](https://simon.peytonjones.org/assets/pdfs/glasgow-haskell-compiler.pdf), §3) that
+every surface feature desugars into — every optimization pass is `Core → Core`, so one
+simplifier serves every language feature at once. `Br` already has this shape: `BrOp` is the
+flat content-generator inductive, and `copyW`/`delW`/`swap` are the CD/comonoid structural
+generators, wired via `NData`. The question this doc doesn't currently ask: **is that generating
+set actually closed?**
+
+Spike 7b already answers "not yet," concretely: `NData`'s wiring is a bijection
+(`OutPort ≃ InPort`), which is *provably* unable to interpret `copyW` (one-in-two-out) —
+`BrNF.lean:243-244` admits exactly this, which is why `brCancelPoint` is parked pending a
+cospan (non-bijective) wiring model. This is structurally the same failure GHC hit with GADTs:
+the original Core had no term former that could carry the type-equality evidence a GADT match
+refines, so System FC extended Core with explicit `Coercion`/`Cast` formers — a new *generator*,
+not a bigger proof. Reframed this way, **the cospan model isn't a patch to `BrNF`, it's `Br`'s
+System-FC moment**: the generating set needs a new construct (non-bijective wiring), the same
+way Core's did. Worth stating in Spike 7b's writeup, since it changes the *size* of the
+undertaking from "fix a proof" to "extend the presentation" — smaller in code, but a genuine
+design decision about what `Br`'s generators are allowed to express.
+
+The second half: if `BrOp` (plus the corrected wiring model) is ever confirmed to be a closed
+generating set — closed specifically under the DSL's own semantics-preserving transforms — then
+**E6's three laws stop being test oracles and become candidate categorical theorems.**
+Reordering, materialization, and scan-unrolling are exactly the shape of equation GHC's `RULES`
+pragma promotes from "observed to hold" to "a rewrite the compiler is licensed to perform": E6,
+which tests these laws at the `Eval` level today, is a down-payment on eventually restating them
+as equations between `Br`-terms built from the same generators E5's
+`evalBrBaseP`/`evalThreaded` already consume. This doesn't change E6's plan — it changes what
+E6's *result* is worth: a passing property oracle is now legible as evidence for a specific
+future theorem statement, not just regression coverage.
+
+**Verdict:** investigation first (analogous to E11 — "is `BrOp` closed?" is a bounded question,
+not a redesign) — but note the investigation can't fully close until the cospan wiring model
+Spike 7b names actually exists (currently unscheduled; budget it as its own spike, Wave 3b), and
+Spike 3a's Nonlin closure is a worked precedent worth doing first regardless. Spike-worthy once
+answered; the payoff compounds with E5/E6 rather than competing with them.
+
+*References:* Peyton Jones et al., [The Glasgow Haskell Compiler](https://simon.peytonjones.org/assets/pdfs/glasgow-haskell-compiler.pdf) — Core as a small closed IR, §3; Sulzmann, Chakravarty, Peyton Jones & Donnelly, [System F with Type Equality Coercions](https://www.microsoft.com/en-us/research/wp-content/uploads/2007/01/tldi22-sulzmann-with-appendix.pdf) (TLDI 2007) — the `Coercion`/`Cast` extension to Core that GADTs forced; Peyton Jones, Tolmach & Hoare, [Playing by the Rules: Rewriting as a practical optimisation technique in GHC](https://www.microsoft.com/en-us/research/publication/playing-by-the-rules-rewriting-as-a-practical-optimisation-technique-in-ghc/) (Haskell Workshop 2001) — `RULES` as user-trusted equations over Core terms, the model for promoting E6's laws.
+
+### E14. A simplifier: local algebraic rewrite rules over the DSL AST
+
+Nothing in Spikes 1–8 or E1–E13 does peephole simplification on `TLProgram` itself — the closest
+things are *test*-side transforms (E6's `materializeSplit`/reordering) and *representation*
+changes (E2's `CoreStmt`, E4's `EvalPlan`). GHC's actual optimization workhorse is neither: it's
+the Simplifier, a small set of local, confluence-checked rewrites applied to a stable Core IR,
+plus a user-extensible layer (`RULES`) for library-specific equations the compiler can't derive
+on its own. The direct analogue here, once E2's `CoreStmt` exists as a stable rewrite target:
+
+```lean
+def simplifyStmt : CoreStmt → CoreStmt   -- one local rewrite step
+def simplify     : List CoreStmt → List CoreStmt   -- fixpoint of simplifyStmt, bounded
+```
+
+A first useful rule set, all sound by construction against the exact-comparison discipline E6
+already established (any candidate rule gets the SAME treatment as a metamorphic law — generate,
+compare, and if it ever fails on a well-formed program that's a finding, not a bug in the rule):
+additive identity (`X + 0 ⇒ X`, a zero-term dropped from a sum), redundant materialization
+(the literal inverse of E6's `materializeSplit` — collapsing a chain of single-use intermediates
+back into one statement when nothing else reads them), and — the two payoffs worth calling out on
+their own —
+
+- **Common subexpression elimination.** Once E4's `EvalPlan` exists, two statements' affine-map
+  fragments are directly, structurally comparable (not `HashMap`-driven dictionaries reconciled
+  at runtime), so detecting and sharing an identical sub-computation across statements (e.g. two
+  attention heads both reading the same `Q·Kᵀ` slice) becomes a straightforward fixpoint pass
+  rather than a semantic proof exercise.
+- **Compile-time unrolling of small, statically-known scan lengths.** Every scan axis size is a
+  compile-time literal (`Decl.axis l (some L)`) — this is GHC's specialization pass in miniature
+  (turning a parameterized computation into a monomorphic, straight-line one per concrete size).
+  The transform is *the same code* as E6's scan-unroll oracle, reused as a real optimization
+  rather than a test: what's being built right now to check `evalScan` against its unrolled form
+  is, with no new logic, a compiler pass that replaces a small scan with its unrolled form.
+
+**Verdict:** spike-worthy, but sequenced *after* E2 (needs a stable IR to rewrite over) and best
+started once E4 exists (CSE and scan-specialization are its cheapest, highest-value first rules).
+Not a competitor to E6 — the two share machinery (the unroll transform) and a verification
+discipline (generate-and-compare), they just answer different questions ("does this hold" vs.
+"can we always rewrite to this").
+
+*References:* Peyton Jones, Tolmach & Hoare, [Playing by the Rules: Rewriting as a practical optimisation technique in GHC](https://www.microsoft.com/en-us/research/publication/playing-by-the-rules-rewriting-as-a-practical-optimisation-technique-in-ghc/) (Haskell Workshop 2001) — the `RULES` mechanism this pass generalizes; Peyton Jones, [The Glasgow Haskell Compiler](https://simon.peytonjones.org/assets/pdfs/glasgow-haskell-compiler.pdf) — the Simplifier's role as GHC's central, repeatedly-applied optimization pass.
+
 ### How the exploratory ideas compose
 
 E3 + E4 + E5 are one program viewed from three sides: a single **plan representation**
@@ -955,3 +1125,11 @@ where today there are two disconnected coordinate systems and no executable brid
 safety net that makes the migration testable; E1/E2 are the AST-side analogues of the same
 "one definition, many instantiations" move. If only one exploratory thread gets pursued,
 E6 → E3 → E4 → E5 in that order is the highest-value path.
+
+E13 and E14 are a second such pair, one level up. E13 asks whether `Br`'s generators are closed
+— the categorical precondition for E6's laws to become theorems and for E5's denotation to be
+complete. E14 asks what a closed, stable `CoreStmt` (E2) buys once you're willing to rewrite it —
+the GHC-Simplifier analogue, absorbing CSE and scan-specialization as its first two payoffs.
+Neither is on the critical path above, but both are the natural *next* question once E2/E5/E6
+land: E13 is "did E5/E6 characterize everything," E14 is "now that there's a stable IR, what do
+we do with it besides interpret it."
