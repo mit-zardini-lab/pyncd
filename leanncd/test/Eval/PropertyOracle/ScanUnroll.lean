@@ -105,4 +105,67 @@ run_cmd do
           unless denseEq s2 ⟨[2], #[4.0, 18.0]⟩ do throwError s!"Su_S_2 wrong: {repr s2.data}"
       | _, _, _ => throwError "missing Su_S_k"
 
+/-! ## `unrollScan2D` (Task 5): the one 2-D template in scope -/
+
+/-- Unroll the one 2-D template in scope: base `G[r,0] := …` (varies freely over `r`, pins `c`
+    at 0) and recur `G[r+1,c+1] := G[r,c] + …[r,c]` (advances both `r` and `c` together). NOT a
+    general N-axis walker — specialized to this exact shape, matching the design's explicit
+    scope restriction to one curated 2-D template.
+
+    Emits: ONE vector-shaped statement for the `c = 0` column (matching the base's own free-axis
+    shape, rather than `Lr` separate scalar leaves), plus one scalar leaf per OTHER grid cell —
+    a fully-advanced cell `(ri,ci)` with `ri ≥ 1` reads the diagonal predecessor `(ri-1,ci-1)`
+    (from the column vector if `ci-1 = 0`, else from a prior leaf); an unreached boundary cell
+    `(0,ci)` with `ci ≥ 1` is the aggregator's zero identity, matching `evalScan`'s zero-default. -/
+def unrollScan2D (c : ScanCase) : TLProgram :=
+  match c.axes, c.Ls, c.base, c.recur with
+  | [r, cc], [Lr, Lc], [.assign stateName _ baseRhs], [.assign _ _ recurRhs] =>
+      let col0Name := s!"Su_{stateName}_col0"
+      let leaf (ri ci : Nat) : String := s!"Su_{stateName}_{ri}_{ci}"
+      let col0 : Stmt := .assign col0Name [.free r] baseRhs
+      let substCell (pri pci : Nat) (f : Factor) : Factor :=
+        match f with
+        | .read nm idxs =>
+            if nm == stateName then
+              if pci == 0 then .read col0Name [.const (Int.ofNat pri)]
+              else .read (leaf pri pci) []
+            else
+              .read nm (idxs.map (fun e => match e with
+                | .axis a =>
+                    if a.uid == r.uid then .const (Int.ofNat pri)
+                    else if a.uid == cc.uid then .const (Int.ofNat pci)
+                    else e
+                | other => other))
+        | other => other
+      let cells : List Stmt := (List.range Lr).flatMap (fun ri =>
+        ((List.range (Lc - 1)).map (· + 1)).map (fun ci =>
+          if ri == 0 then
+            .assign (leaf 0 ci) [] { body := { terms := [] }, nonlin := .identity }
+          else
+            let rhs' := { recurRhs with body := ⟨recurRhs.body.terms.map (fun t =>
+              ⟨t.factors.map (substCell (ri - 1) (ci - 1))⟩)⟩ }
+            .assign (leaf ri ci) [] rhs'))
+      { decls := c.prog.decls, stmts := [col0] ++ cells }
+  | _, _, _, _ =>
+      -- unreachable for any case the generator actually produces (template 6 is the only
+      -- 2-axis case, and always has exactly this shape); a total (non-panicking) fallback
+      -- keeps this function total rather than partial.
+      { decls := c.prog.decls, stmts := [] }
+
+-- TEST-THE-TESTER: template 6 (2-D grid-DP), hand-verified against RC6
+-- (RecurrenceTest.lean) — G[1,1] = G[0,0]+A[0,0] = 1; all other non-column-0 cells stay 0.
+private def t6case : ScanCase := template6
+private def t6unrolled := unrollScan2D t6case
+#guard (TLProgram.eval t6unrolled t6case.inputs).toOption.isSome
+run_cmd do
+  match TLProgram.eval t6unrolled t6case.inputs with
+  | .error e => throwError e
+  | .ok env =>
+      match env["Su_G_col0"]?, env["Su_G_1_1"]?, env["Su_G_0_1"]? with
+      | some col0, some g11, some g01 =>
+          unless denseEq col0 ⟨[2], #[0.0, 0.0]⟩ do throwError s!"Su_G_col0 wrong: {repr col0.data}"
+          unless denseEq g11 ⟨[], #[1.0]⟩ do throwError s!"Su_G_1_1 wrong: {repr g11.data}"
+          unless denseEq g01 ⟨[], #[0.0]⟩ do throwError s!"Su_G_0_1 wrong: {repr g01.data}"
+      | _, _, _ => throwError "missing Su_G_* leaves"
+
 end LeanNCD.PropertyOracle
