@@ -1,5 +1,6 @@
 import LeanNCD.DSL.Ast
 import LeanNCD.Eval.Eval
+import Eval.PropertyOracle.Compare
 
 /-!
 # Curated scan-template generator (E6 scan-unrolling oracle, Task 1/2)
@@ -131,17 +132,33 @@ private def template5 (L : Nat) (useMax : Bool) : ScanCase :=
 private def r6 : AxisSpec := ⟨"r", 251, .nat (some (.lit 2))⟩
 private def c6 : AxisSpec := ⟨"c", 252, .nat (some (.lit 2))⟩
 
-private def template6 : ScanCase :=
+/-- Public (unlike templates 2-5) because `ScanUnroll`'s Task 5 point-check needs a concrete,
+    named case to test `unrollScan2D` against directly. -/
+def template6 : ScanCase :=
   let base : Stmt := .assign "G" [.free r6, .iterAt c6 0]
     { body := { terms := [{ factors := [.read "Z" [.axis r6]] }] }, nonlin := .identity }
   let recur : Stmt := .assign "G" [.iterNext r6, .iterNext c6]
-    { body := { terms := [{ factors := [.read "G" [.axis r6, .axis c6], .read "A" [.axis r6, .axis c6]] }] },
+    { body := { terms := [{ factors := [.read "G" [.axis r6, .axis c6]] },
+                           { factors := [.read "A" [.axis r6, .axis c6]] }] },
       nonlin := .identity }
   let inputs : Std.HashMap String DenseTensor :=
     (({} : Std.HashMap String DenseTensor).insert "Z" ⟨[2], #[0.0, 0.0]⟩).insert "A" ⟨[2,2], #[1.0,1.0,1.0,1.0]⟩
   { prog := { decls := [.axis r6 (some 2), .axis c6 (some 2), .tensor "Z" [r6], .tensor "A" [r6, c6]],
               stmts := [base, recur] },
     inputs := inputs, axes := [r6, c6], Ls := [2, 2], base := [base], recur := [recur] }
+
+-- REGRESSION GUARD (found while deriving Task 5's unrollScan2D by hand): template6 must match
+-- RC6's own hand-verified result (RecurrenceTest.lean) — an earlier draft had `G[r,c]` and
+-- `A[r,c]` crammed into one product term (multiplication) instead of two summed terms
+-- (addition), and Task 2's contract tests only checked well-formedness (`.isSome`), never the
+-- actual value, so it slipped through. Row-major [r][c]: G = [[0,0],[0,1]].
+run_cmd do
+  match TLProgram.eval template6.prog template6.inputs with
+  | .error e => throwError e
+  | .ok env => match env["G"]? with
+    | some g => unless denseEq g ⟨[2, 2], #[0.0, 0.0, 0.0, 1.0]⟩ do
+        throwError s!"template6 wrong: {repr g.data}"
+    | none => throwError "template6: no G in output"
 
 /-- The full curated six-template scan generator. -/
 def enumScanCases : List ScanCase :=
