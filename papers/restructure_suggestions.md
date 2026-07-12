@@ -1,5 +1,25 @@
 # leanncd restructuring suggestions
 
+> **Resume here (checkpoint 2026-07-12).** E6 (property-based oracles) is now fully DONE — all
+> three laws (reordering, materialization, scan-unrolling) landed and pushed to `main`; see its
+> ✅ marker in [E6](#e6-property-based-oracles-the-tests-the-portfolio-cant-express) below for
+> the commit range and the one real bug it caught (template 6's `G[r,c]+A[r,c]` was silently
+> computing multiplication). Per this doc's own critical path (see
+> [How the explorations relate to the Part I spikes](#how-the-explorations-relate-to-the-part-i-spikes)),
+> the next open item is **[E11](#e11-investigation-do-uids-earn-their-keep)** — "do UIDs earn
+> their keep?", a ~1 day investigation that gates Spike 2's accessor relocation — or,
+> independently, the **cospan-model spike** (Wave 3b, unlocks
+> **[E13](#e13-generators-for-br--closing-brop-and-promoting-e6s-laws-to-theorems)**) if that
+> thread is preferred instead. Neither has been started.
+>
+> Quick resume checklist:
+>
+> 1. `cd leanncd && lake build` — confirm still green (8,611 jobs, 36 sorries / 14 in the
+>    default build, as of this checkpoint).
+> 2. Read whichever of E11 / the cospan model you're picking up (E11 is a bounded
+>    investigation, not a redesign — see its writeup for the specific unknowns to resolve).
+> 3. Use `superpowers:brainstorming` to scope it before touching code, same as E6.
+
 A global review of `leanncd/` (~9,200 lines of Lean across 49 modules) after the recent wave of
 feature fixes (`Factor.unaryFn` inline transcendentals, new `Nonlin` activations, `l2normalize`,
 the friendly `/` operator, multi-axis scans, scan aggregators, the multi-output `schedule` fix,
