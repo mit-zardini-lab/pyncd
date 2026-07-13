@@ -667,6 +667,66 @@ Code anchors:
 - [`routeCore`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean#L573-L579)
 - [`route`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean#L583-L588)
 
+At the end of this stage, the compiler has produced concrete [`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118) values. Below are the exact `repr` outputs from Lean for the running examples.
+
+**Example A (matmul) — exact `ThreadedComposed`**
+
+```lean
+{ steps := [{ op := LeanNCD.BrOp.contract,
+              degree := [{ name := some "i", size := LeanNCD.SizeExpr.var "i" },
+                         { name := some "j", size := LeanNCD.SizeExpr.var "j" },
+                         { name := some "k", size := LeanNCD.SizeExpr.var "k" }],
+              inputWeaves := [[LeanNCD.WeaveSlotP.fixed { name := some "W_0", size := LeanNCD.SizeExpr.var "W_0" },
+                               LeanNCD.WeaveSlotP.fixed { name := some "W_1", size := LeanNCD.SizeExpr.var "W_1" }],
+                              [LeanNCD.WeaveSlotP.fixed { name := some "X_0", size := LeanNCD.SizeExpr.var "X_0" },
+                               LeanNCD.WeaveSlotP.fixed { name := some "X_1", size := LeanNCD.SizeExpr.var "X_1" }]],
+              outputWeaves := [[LeanNCD.WeaveSlotP.fixed { name := some "i", size := LeanNCD.SizeExpr.var "i" },
+                                LeanNCD.WeaveSlotP.fixed { name := some "j", size := LeanNCD.SizeExpr.var "j" },
+                                LeanNCD.WeaveSlotP.tiled]],
+              reindexings := [{ domLen := 3, codLen := 2, coeffs := [[1, 0, 0], [0, 0, 1]], bias := [0, 0] },
+                              { domLen := 3, codLen := 2, coeffs := [[0, 0, 1], [0, 1, 0]], bias := [0, 0] }] }],
+  routing := [[LeanNCD.Wire.external 0, LeanNCD.Wire.external 1]],
+  nExternal := 2 }
+```
+
+**Example B (affine scan) — exact `ThreadedComposed`**
+
+```lean
+{ steps := [{ op := LeanNCD.BrOp.scanAffine,
+              degree := [{ name := some "j", size := LeanNCD.SizeExpr.var "j" },
+                         { name := some "l", size := LeanNCD.SizeExpr.var "l" },
+                         { name := some "k", size := LeanNCD.SizeExpr.var "k" }],
+              inputWeaves := [[LeanNCD.WeaveSlotP.fixed { name := some "X_0", size := LeanNCD.SizeExpr.var "X_0" }],
+                              [LeanNCD.WeaveSlotP.fixed { name := some "A_0", size := LeanNCD.SizeExpr.var "A_0" },
+                               LeanNCD.WeaveSlotP.fixed { name := some "A_1", size := LeanNCD.SizeExpr.var "A_1" }]],
+              outputWeaves := [[LeanNCD.WeaveSlotP.fixed { name := some "j", size := LeanNCD.SizeExpr.var "j" },
+                                LeanNCD.WeaveSlotP.fixed { name := some "l", size := LeanNCD.SizeExpr.var "l" },
+                                LeanNCD.WeaveSlotP.tiled]],
+              reindexings := [{ domLen := 3, codLen := 1, coeffs := [[1, 0, 0]], bias := [0] },
+                              { domLen := 3, codLen := 2, coeffs := [[1, 0, 0], [0, 0, 1]], bias := [0, 0] }] }],
+  routing := [[LeanNCD.Wire.external 0, LeanNCD.Wire.external 1]],
+  nExternal := 2 }
+```
+
+**Example B (nonlinear scan with `relu`) — exact `ThreadedComposed`**
+
+```lean
+{ steps := [{ op := LeanNCD.BrOp.scan,
+              degree := [{ name := some "j", size := LeanNCD.SizeExpr.var "j" },
+                         { name := some "l", size := LeanNCD.SizeExpr.var "l" },
+                         { name := some "k", size := LeanNCD.SizeExpr.var "k" }],
+              inputWeaves := [[LeanNCD.WeaveSlotP.fixed { name := some "X_0", size := LeanNCD.SizeExpr.var "X_0" }],
+                              [LeanNCD.WeaveSlotP.fixed { name := some "A_0", size := LeanNCD.SizeExpr.var "A_0" },
+                               LeanNCD.WeaveSlotP.fixed { name := some "A_1", size := LeanNCD.SizeExpr.var "A_1" }]],
+              outputWeaves := [[LeanNCD.WeaveSlotP.fixed { name := some "j", size := LeanNCD.SizeExpr.var "j" },
+                                LeanNCD.WeaveSlotP.fixed { name := some "l", size := LeanNCD.SizeExpr.var "l" },
+                                LeanNCD.WeaveSlotP.tiled]],
+              reindexings := [{ domLen := 3, codLen := 1, coeffs := [[1, 0, 0]], bias := [0] },
+                              { domLen := 3, codLen := 2, coeffs := [[1, 0, 0], [0, 0, 1]], bias := [0, 0] }] }],
+  routing := [[LeanNCD.Wire.external 0, LeanNCD.Wire.external 1]],
+  nExternal := 2 }
+```
+
 ### 4.7 Stage 6: routed artifact ([`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118))
 
 **Input:** the output of Stage 5 — this section describes the data type that [`route`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean#L583-L588) produces and that the bridge (Stage 7) consumes.
