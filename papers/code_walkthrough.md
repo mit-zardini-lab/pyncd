@@ -163,6 +163,12 @@ flowchart TD
 
 ### 4.2 Stage 0-1: grammar and elaboration
 
+**Input:** raw Lean source text containing a `tl!{ ... }` expression.
+
+**What happens:** Lean's parser recognises the `tl_*` syntax categories (defined in [`DSL/Syntax.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Syntax.lean#L21-L40)) and builds an untyped `Syntax` tree. The registered elaborator ([`elabTLProgram`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Elab.lean#L259-L284)) then recursively walks that tree, calling helpers for each grammar non-terminal, to produce a typed Lean value.
+
+**Output:** a [`TLProgram`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean#L123-L126) — a list of declarations and a list of statements with all axis UIDs set to 0 (unresolved) and no ordering or routing applied.
+
 - Syntax categories are declared in
   [`DSL/Syntax.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Syntax.lean#L21-L40).
 - Parsing/elaboration functions in
@@ -211,7 +217,9 @@ The elaborators need `partial def` for two reasons. First, they recurse over unt
 
 ### 4.3 Stage 2: AST model
 
-[`DSL/Ast.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean#L12-L127) defines the compiler's intermediate representation (IR) — the typed data structures that the elaborator produces and that all subsequent pipeline phases consume. At the top level, the AST has two layers:
+**Input:** not a transformation stage — this section describes the data model that the elaborator (Stage 0-1) produces and that every pipeline phase below consumes and transforms.
+
+**What the types represent:** [`DSL/Ast.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean#L12-L127) defines the compiler's intermediate representation (IR) — the typed data structures that the elaborator produces and that all subsequent pipeline phases consume. At the top level, the AST has two layers:
 
 - **Declarations** describe the *shape* of the program: what tensors exist, what axes they range over, and what their kinds (real, nat) and sizes are.
 - **Statements** describe the *computation*: assignments from a right-hand side expression to a named output tensor.
@@ -348,6 +356,12 @@ Pipeline chain (exact order):
 
 ### 4.5 Stage 4: structural normalization/checking
 
+**Input:** a raw [`TLProgram`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean#L123-L126) with uid = 0 on every axis, no declaration environment, and no axis-consistency guarantees.
+
+**What happens:** seven passes run in sequence, each strengthening what the program is allowed to assume. The first two build context (assign UIDs, resolve declarations); the next three validate correctness (rank/arity checks, dtype constraints, axis unification); the last two prepare data for lowering (arithmetic normalization, scan grouping). Any violation immediately returns a [`CompileError`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L18-L31).
+
+**Output:** a [`TLProgram`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean#L123-L126) with all axes carrying unique non-zero UIDs, a resolved [`DeclEnv`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L10-L10), all same-name axes coequalized, index arithmetic in canonical affine form, and scan recurrences grouped into [`ScanStmt`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L17-L18) pairs.
+
 In [`DSL/Pipeline/Structural.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Structural.lean#L87-L409):
 
 - [`assignUIDs`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Structural.lean#L87-L98): canonical per-name axis identities
@@ -392,6 +406,12 @@ What the code actually does:
   - coequalizes same-name axes to canonical UID and substitutes across program.
 
 ### 4.6 Stage 5: lowering, scans, scheduling, routing
+
+**Input:** the normalized [`TLProgram`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean#L123-L126) from Stage 4 — axes resolved, arith in canonical form, scans grouped — but still an unordered flat list of statements with no execution order and no wire assignments.
+
+**What happens:** nonlinear statements are split into two (linear pre-activation + nonlinearity-only step), statements are topologically sorted into a valid execution order, and then each statement is lowered into a [`BrBaseP`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L93-L99) node with explicit [`Wire`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L106-L109) references pointing to either external inputs or the outputs of earlier steps.
+
+**Output:** a [`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118) — an ordered list of primitive operation steps together with a routing table (one `List Wire` per step) and the count of external inputs.
 
 In [`DSL/Pipeline/Lowering.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean#L59-L588):
 
@@ -442,6 +462,12 @@ Code anchors:
 
 ### 4.7 Stage 6: routed artifact ([`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118))
 
+**Input:** the output of Stage 5 — this section describes the data type that [`route`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean#L583-L588) produces and that the bridge (Stage 7) consumes.
+
+**What it is:** [`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118) is the computable, runtime-serialisable representation of the full program graph. It is not yet a formal categorical morphism — it is the *presentation* from which one is constructed.
+
+**Output / successor:** [`realize`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L250-L253) in Stage 7 consumes a `ThreadedComposed` together with a [`WellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L139-L147) proof and produces a formal [`BrMorph`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L141-L141).
+
 In [`DSL/Target.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L12-L158):
 
 - [`BrBaseP`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L93-L99), [`StMatP`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L12-L17), [`AxisP`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L9-L9) are computable presentation types.
@@ -471,6 +497,12 @@ Code anchors:
   [`ThreadedComposed.WellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L139-L147)
 
 ### 4.8 Stage 7: from routed presentation to formal Br morphism
+
+**Input:** a [`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118) from Stage 6 together with a [`ThreadedComposed.WellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L139-L147) proof. The proof is supplied by [`compile_wellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L379-L383), which establishes that any output of [`TLProgram.compile`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Compile.lean#L19-L29) already satisfies all required invariants.
+
+**What happens:** each presentation-level object and primitive is *realized* into its dependent math-tower counterpart — affine maps become [`StMat`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/St.lean#L28-L30) values, each step becomes a typed [`BrBase`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L44-L51), and the routing wires are used to compose steps using the categorical tensor and composition structure of [`BrMorph`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L141-L141).
+
+**Output:** a formal [`BrMorph`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L141-L141) — a quotient-level morphism in the free strict symmetric monoidal category over broadcast generators. This is the end of the compilation pipeline.
 
 In [`Bridge/Realize.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L50-L253):
 
