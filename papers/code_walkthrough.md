@@ -246,6 +246,16 @@ What the code actually does:
 **Lean concept:** inductive and structure as ADT/record backbone  
 **Docs:** [Inductive Types](https://leanprover.github.io/theorem_proving_in_lean4/Inductive-Types/), [Pattern Matching](https://lean-lang.org/doc/reference/latest/Terms/Pattern-Matching/)
 
+**How to read the AST notation.** Lean 4 has two kinds of type-level building blocks you will see throughout the AST.
+
+An `inductive` type is a tagged union (like a Haskell ADT or a Rust `enum`). Each variant is a *constructor* accessed via dot notation, e.g. `LHSSlot.free`, `Stmt.assign`, `Factor.read`. You pick one constructor and supply its arguments positionally. Pattern matching on an `inductive` must cover every constructor.
+
+A `structure` type is a named record with labelled fields. You construct one using **anonymous constructor syntax** `{ field := value, ... }` — the curly braces mean "build a value of whichever structure type is expected here, filling in its fields". For example, `RHSExpr` is a structure with fields `body`, `nonlin`, and `agg`, so `{ body := ..., nonlin := .identity, agg := .sum }` constructs an `RHSExpr`. Lean infers which structure type is required from the surrounding context (the expected type), so you don't have to write the type name again.
+
+You will also see **angle-bracket syntax** `⟨..., ..., ...⟩`. This is the anonymous constructor for any type with a single constructor — most commonly `structure` types. `⟨"i", 0, .real none⟩` constructs an `AxisSpec` value by position: name = `"i"`, uid = `0`, kind = `.real none`. It is exactly equivalent to `AxisSpec.mk "i" 0 (.real none)` or `{ name := "i", uid := 0, kind := .real none }`.
+
+Finally, **leading-dot constructors** like `.identity`, `.sum`, `.real none` are shorthand for `Nonlin.identity`, `AggOp.sum`, `AxisKind.real none` etc. — Lean infers the namespace from the expected type.
+
 **Example A — matmul AST** (`Y[i,j] := W[i,k] · X[k,j]`)
 
 The elaborator produces this `TLProgram` (UIDs are all 0 before `assignUIDs` runs; the pipeline will replace them with distinct non-zero values):
