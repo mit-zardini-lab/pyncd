@@ -254,6 +254,14 @@ What the code actually does:
 **Lean concept:** inductive and structure as ADT/record backbone  
 **Docs:** [Inductive Types](https://leanprover.github.io/theorem_proving_in_lean4/Inductive-Types/), [Pattern Matching](https://lean-lang.org/doc/reference/latest/Terms/Pattern-Matching/)
 
+**`deriving` clauses.** Many AST types end with `deriving Repr, DecidableEq, Inhabited` (or a subset). This instructs Lean to *automatically generate* typeclass instances rather than write them by hand:
+
+- [`Repr`](https://leanprover-community.github.io/mathlib4_docs/Init/Repr.html) — generates a `repr` function that pretty-prints the value. Used by `#eval` and by `throwError s!"{repr e}"` in the `tl!` macro.
+- [`DecidableEq`](https://leanprover-community.github.io/mathlib4_docs/Init/Prelude.html#DecidableEq) — generates a decision procedure for `a == b`. Pipeline passes use `==` to compare axis UIDs, tensor names, and error values; without `DecidableEq` those comparisons would not typecheck.
+- [`Inhabited`](https://leanprover-community.github.io/mathlib4_docs/Init/Prelude.html#Inhabited) — provides a default value for the type (via `default`). Required by certain array and list operations that need a fallback element.
+
+`deriving` is Lean's equivalent of Haskell's `deriving (Show, Eq)` — it runs a compile-time macro that inspects the type definition and synthesises the instance automatically.
+
 **How to read the AST notation.** Lean 4 has two kinds of type-level building blocks you will see throughout the AST.
 
 An `inductive` type is a tagged union (like a Haskell ADT or a Rust `enum`). Each variant is a *constructor* accessed via dot notation, e.g. `LHSSlot.free`, `Stmt.assign`, `Factor.read`. You pick one constructor and supply its arguments positionally. Pattern matching on an `inductive` must cover every constructor.
@@ -380,6 +388,8 @@ Pipeline chain (exact order):
 ```lean
 abbrev FreshM := EStateM CompileError Nat
 ```
+
+**`abbrev` vs `def`.** You will see both in this codebase. A plain `def` introduces a name that is *opaque* during type unification — Lean treats it as a black box unless you explicitly unfold it. An [`abbrev`](https://lean-lang.org/doc/reference/latest/Declarations/abbrev/) is a *transparent* alias: Lean automatically unfolds it whenever it needs to check whether two types match. `FreshM` is an `abbrev` so that any function returning `EStateM CompileError Nat` is also accepted where `FreshM` is expected, and vice versa, without any explicit coercion. Use `abbrev` for thin type aliases you never want the typechecker to treat as opaque; use `def` for named concepts you want to reason about abstractly.
 
 [`EStateM ε σ α`](https://leanprover-community.github.io/mathlib4_docs/Init/Control/EStateM.html) is Lean's built-in *combined error-and-state* monad. At runtime it is essentially a function `σ → Result ε σ α`: it takes an initial state, and returns either `ok (value, newState)` or `error e`. The two type parameters fill specific roles here:
 
@@ -510,6 +520,8 @@ What the code actually does:
   - stable Kahn-style topological sort ([`topoSortFuel`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean#L119-L129)),
   - explicit cyclic-dataflow failure ([`CompileError.cyclicDataflow`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L31-L31)),
   - computes [`explicitSizes`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L65-L66) from `axis ... = n` declarations.
+
+  **The fuel pattern.** You will notice [`topoSortFuel`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean#L119-L129) takes an extra `Nat` argument called "fuel". This is a standard Lean idiom for writing recursive functions whose termination cannot be proved structurally. Instead of using `partial def` (which abandons termination checking entirely), the function takes a decreasing counter: each recursive call passes `fuel - 1`, and when `fuel` reaches 0 the function returns a failure case. Lean's termination checker accepts this because the `Nat` argument is structurally decreasing. The caller supplies a fuel value large enough that it is never reached in practice (typically the list length, which bounds the number of steps in Kahn's algorithm). This keeps the function in the kernel's trusted fragment — unlike `partial def`, a fuelled function *can* be used in proofs — while avoiding the need for a full termination proof. See [well-founded recursion](https://lean-lang.org/doc/reference/latest/Definitions/Well-Founded-Recursion/) in the Lean reference.
 - [`buildExtIndex`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean#L340-L362)
   - indexes external read names in first-seen read order.
 - [`buildNameToStep`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean#L474-L480)
@@ -517,8 +529,10 @@ What the code actually does:
 - [`buildStep`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean#L482-L553)
   - computes [`degree`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L96-L96), weaves, reindexings, and routing wires for one scheduled statement.
 - [`routeCore`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean#L573-L579)
-  - mapM over scheduled statements with [`buildStep`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean#L482-L553),
+  - `mapM` over scheduled statements with [`buildStep`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean#L482-L553),
   - returns aligned `(steps, routing)` lists.
+
+  **`mapM` and monadic list traversal.** [`List.mapM`](https://leanprover-community.github.io/mathlib4_docs/Init/Data/List/Lemmas.html) is the monadic version of `map`: it applies a function `a → M b` to every element of a list, threading the monad `M` through each call in sequence and collecting results into `M (List b)`. Here `M = FreshM`, so `mapM buildStep stmts` runs `buildStep` on each statement in order, threading the UID counter (and propagating any `CompileError` immediately if `buildStep` throws). This is the idiomatic Lean/Haskell way to "loop with effects" — no explicit recursion or mutable state needed at the call site.
 - [`route`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean#L583-L588)
   - packages [`routeCore`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean#L573-L579) output into [`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118),
   - checks [`wellFormedDom`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L142-L153),
@@ -558,6 +572,10 @@ What the code actually does:
 - [`ThreadedComposed.externalPort`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L128-L134) finds first consuming port for external slot `k`.
 - [`ThreadedComposed.wellFormedDom`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L142-L153) enforces external-slot referencedness and rank consistency across all consumers.
 - [`ThreadedComposed.WellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L139-L147) strengthens this with producer/consumer type match, output-arity, and topological membership.
+
+**`Prop` vs `Type` — why `WellFormed` costs nothing at runtime.** In Lean 4 every term has a type, and types themselves live in a *universe*. Ordinary data (integers, lists, `ThreadedComposed`) lives in `Type`. *Propositions* — logical statements that are either true or false — live in `Prop`. A value of type `Prop` is a *proof*, and Lean's kernel erases all `Prop`-valued terms before generating native code: proofs have zero runtime cost.
+
+`ThreadedComposed.WellFormed tc` is a `Prop`. It is a bundle of logical predicates about the routing/type/topology invariants of `tc`. Passing it to `realize` does not allocate anything at runtime — it is erased entirely. What it *does* do is give the type system a guarantee: `realize` can safely assume all invariants hold without re-checking them at runtime. This is the deep reason the codebase separates the *computable* pipeline (which builds `ThreadedComposed`) from the *proof* layer (`compile_wellFormed`, `WellFormed`) — the proof layer exists entirely at the type-checking level and costs nothing when the compiled binary runs. See [propositions as types](https://leanprover.github.io/theorem_proving_in_lean4/propositions_and_proofs.html) in *Theorem Proving in Lean 4*.
 
 Code anchors:
 
@@ -701,10 +719,28 @@ There are three intentionally distinct worlds:
 
 [`LeanNCD.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/LeanNCD.lean) explains this split directly.
 
+**`noncomputable` — why the math tower can't be evaluated.** The `Base/` and `Core/` layers contain many definitions marked [`noncomputable`](https://lean-lang.org/doc/reference/latest/Declarations/noncomputable/). In Lean 4 a definition is *computable* if the kernel can reduce it to a concrete value (i.e. it ultimately bottoms out in constructors and primitive operations). A definition is `noncomputable` when it uses:
+
+- **Classical axioms** (e.g. `Classical.choice`, `Classical.em`) — these assert the existence of values without specifying how to construct them.
+- **`Quotient.lift`** applied to a non-computable function — the quotient type itself is computable, but extracting a canonical representative may require choice.
+- Any definition that transitively depends on either of the above.
+
+The categorical morphism type [`BrMorph`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L141-L141) is a `Quotient` — it identifies morphisms up to the equational theory of a symmetric monoidal category. `Quotient.lift` lets you define functions *out of* the quotient (e.g. semantic interpretations), but it requires a proof that the function respects the equivalence relation; this typically uses classical reasoning. The result is `noncomputable`. This is why `realize` produces a `BrMorph` that can be *reasoned about* in proofs but is never *evaluated* at runtime — evaluation happens through the separate `Eval/` path on the computable `ScheduledProgram` instead.
+
 ### 6.3 Important conceptual nuance
 
 The routed DAG ([`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118)) is not yet the final quotient-level morphism.
 It becomes a formal [`BrMorph`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L141-L141) only after [`realize`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L250-L253).
+
+**Lean quotients — how `BrMorph` is defined.** A [quotient type](https://lean-lang.org/doc/reference/latest/The-Type-System/Quotients/) `Quotient s` (where `s : Setoid α`) takes an existing type `α` and a *setoid* — a type together with an equivalence relation `≈` — and collapses equal elements. Two values `a b : α` with `a ≈ b` become *definitionally equal* after quotienting: `Quot.mk a = Quot.mk b`.
+
+In [`Base/Br.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean):
+
+- [`Hom`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L53-L63) is the *raw syntax* type — an inductive tree of generators (broadcast, contract, identity, compose, tensor-product…). It contains all possible syntactic expressions.
+- [`Rel`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L64-L135) is the equivalence relation on `Hom` encoding the SMC laws (associativity, unit, naturality of symmetry, etc.). Two `Hom` trees are `Rel`-related if one can be rewritten to the other using the category axioms.
+- [`BrMorph`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L141-L141) is `Quotient (Setoid.mk Rel ...)` — the quotient of `Hom` by `Rel`. An element of `BrMorph` is an equivalence class of syntactic morphisms; two programs that are equal up to the SMC laws are the *same* `BrMorph`.
+
+To define a function *out of* a quotient you use [`Quotient.lift`](https://leanprover-community.github.io/mathlib4_docs/Init/Core.html#Quotient.lift): you supply a function `f : Hom → T` and a proof that `a ≈ b → f a = f b` (the function respects the equivalence), and Lean lifts it to `BrMorph → T`. This is how semantic interpretations (algebras) are defined: they respect the category equations by construction. See [Quotients](https://lean-lang.org/doc/reference/latest/The-Type-System/Quotients/) in the Lean reference.
 
 ---
 
