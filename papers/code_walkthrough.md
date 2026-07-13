@@ -608,7 +608,12 @@ This example shows the main structural effect of [`finalizeScans`](https://githu
 
 If we changed the recurrence to `relu(S[j,l] · A[j,k])`, the structure would be the same except the recurrence stmt would still carry `nonlin := .relu` here, and the final Boolean would be `false`. The actual split into a linear pre-activation step plus a separate `relu` step happens in Stage 5, not Stage 4.
 
-### 4.6 Stage 5: lowering, scans, scheduling, routing
+### 4.6 Stage 5: lowering, scans, scheduling, routing to `ThreadedComposed` (construction + inspection)
+
+This fused section has two aspects:
+
+- **Aspect A (transformation):** how Stage 5 computes the routed artifact (`splitNonlins`, `schedule`, `route`).
+- **Aspect B (artifact inspection):** what that routed artifact (`ThreadedComposed`) contains and which invariants the bridge requires.
 
 **Input:** the [`ScanProgram`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L45-L50) from Stage 4 — axes resolved, arithmetic normalized, and any recurrences already grouped into [`ScanStmt`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L15-L18) nodes — but still with no execution order and no wire assignments.
 
@@ -727,7 +732,7 @@ At the end of this stage, the compiler has produced concrete [`ThreadedComposed`
   nExternal := 2 }
 ```
 
-### 4.7 Stage 6: routed artifact inspection ([`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118))
+#### Aspect B: routed artifact inspection ([`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118))
 
 **Input:** the output of Stage 5 (`route`) — a fully built `ThreadedComposed`.
 
@@ -737,7 +742,7 @@ At the end of this stage, the compiler has produced concrete [`ThreadedComposed`
 
 **Output (this stage):** a [`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118) value (steps + routing + `nExternal`).
 
-**Successor (next stage, §4.8 / Stage 7):** [`realize`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L250-L253) consumes that `ThreadedComposed` together with a [`WellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L139-L147) proof and produces a formal [`BrMorph`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L141-L141).
+**Successor (next section, §4.7 / Stage 7):** [`realize`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L250-L253) consumes that `ThreadedComposed` together with a [`WellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L139-L147) proof and produces a formal [`BrMorph`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L141-L141).
 
 In [`DSL/Target.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L12-L158):
 
@@ -771,7 +776,7 @@ Code anchors:
 - [`WellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L139-L147) strengthening:
   [`ThreadedComposed.WellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L139-L147)
 
-### 4.8 Stage 7: from routed presentation to formal Br morphism
+### 4.7 Stage 7: from routed presentation to formal Br morphism
 
 **Input:** a [`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118) from Stage 6 together with a [`ThreadedComposed.WellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L139-L147) proof. The proof is supplied by [`compile_wellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L379-L383), which establishes that any output of [`TLProgram.compile`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Compile.lean#L19-L29) already satisfies all required invariants.
 
