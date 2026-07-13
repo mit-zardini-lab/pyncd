@@ -246,6 +246,54 @@ What the code actually does:
 **Lean concept:** inductive and structure as ADT/record backbone  
 **Docs:** [Inductive Types](https://leanprover.github.io/theorem_proving_in_lean4/Inductive-Types/), [Pattern Matching](https://lean-lang.org/doc/reference/latest/Terms/Pattern-Matching/)
 
+**Example A — matmul AST** (`Y[i,j] := W[i,k] · X[k,j]`)
+
+The elaborator produces this `TLProgram` (UIDs are all 0 before `assignUIDs` runs; the pipeline will replace them with distinct non-zero values):
+
+```lean
+TLProgram {
+  decls := [],
+  stmts := [
+    Stmt.assign "Y"
+      [ LHSSlot.free ⟨"i", 0, .real none⟩,   -- free output axis i
+        LHSSlot.free ⟨"j", 0, .real none⟩ ]  -- free output axis j
+      { body   := { terms := [{ factors := [
+                      Factor.read "W" [.axis ⟨"i", 0, .real none⟩,
+                                       .axis ⟨"k", 0, .real none⟩],
+                      Factor.read "X" [.axis ⟨"k", 0, .real none⟩,
+                                       .axis ⟨"j", 0, .real none⟩]
+                    ]}]},
+        nonlin := .identity,
+        agg    := .sum }   -- k is contracted by summation
+  ]
+}
+```
+
+Points to note: `k` appears in the RHS reads but not in the LHS slots, so it is a *contracted* (summation) axis. After `assignUIDs`, `i`, `j`, and `k` each get a distinct non-zero UID so later passes can distinguish them even when axis names are reused across statements.
+
+**Example B — nonlinear scan AST** (`S[j, l+1] := relu(S[j, l] · A[j, k])`)
+
+```lean
+TLProgram {
+  decls := [],
+  stmts := [
+    Stmt.assign "S"
+      [ LHSSlot.free     ⟨"j", 0, .real none⟩,   -- free output axis j
+        LHSSlot.iterNext ⟨"l", 0, .nat  none⟩ ]  -- l+1: this is the recurrence step output
+      { body   := { terms := [{ factors := [
+                      Factor.read "S" [.axis ⟨"j", 0, .real none⟩,
+                                       .axis ⟨"l", 0, .nat  none⟩],  -- reads S at current step l
+                      Factor.read "A" [.axis ⟨"j", 0, .real none⟩,
+                                       .axis ⟨"k", 0, .real none⟩]
+                    ]}]},
+        nonlin := .relu,
+        agg    := .sum }   -- k contracted; relu applied after contraction
+  ]
+}
+```
+
+The `LHSSlot.iterNext` slot on `l` is what tells the pipeline this is a recurrence — the output is the value of `S` at step `l+1`. The read of `S[j, l]` in the RHS refers to the value at the *current* step. `finalizeScans` later pairs these into a [`ScanStmt.scan`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L17-L18) structure, and `splitNonlins` separates the linear contraction from the `relu` into two scheduled steps.
+
 ### 4.4 Stage 3: compile entrypoint and macro
 
 [`DSL/Compile.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Compile.lean#L19-L43):
