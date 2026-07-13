@@ -935,6 +935,16 @@ Expected routed wiring from the test:
  [Wire.internal 1 0]]
 ```
 
+This value is the full [`routing : List (List Wire)`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L116-L116) field of `ThreadedComposed`.
+
+- Outer list index `i` = **which step** is being wired (`routing[i]` feeds `steps[i]`).
+- Inner list index `j` = **which input port** of that step (`routing[i][j]` is wire for input port `j`).
+- Each inner element is either:
+  - [`Wire.external k`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L107-L107): read external input slot `k`, or
+  - [`Wire.internal s o`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L108-L108): read output slot `o` from earlier step `s`.
+
+So `routing.length == steps.length`, and each `routing[i].length` equals the arity (number of input weaves) of `steps[i]`.
+
 How to read this:
 
 1. **Step 0** computes H from externals W1 and X.
