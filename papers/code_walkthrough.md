@@ -877,6 +877,17 @@ Code anchors:
 
 ## 5) Running examples through the pipeline
 
+Before reading the example assertions, it helps to decode the key output fields once:
+
+- [`ThreadedComposed.steps`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L115-L115): ordered list of routed primitive steps (each step is a [`BrBaseP`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L93-L99)).
+- [`steps.length`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L115-L115): number of routed primitive operations in the compiled program graph.
+- [`ThreadedComposed.nExternal`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L117-L117): number of external input tensors (names read but never produced internally). External slots are indexed `0 .. nExternal-1`.
+- [`ThreadedComposed.routing`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L116-L116): per-step input wiring. `routing[i]` is the list of wires feeding step `i`.
+- [`Wire.external k`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L107-L109): this step input comes from external input slot `k`.
+- [`Wire.internal j s`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L108-L109): this step input comes from output slot `s` of earlier step `j`.
+- [`BrBaseP.op`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L94-L94): operation tag (`contract`, `scanAffine`, `scan`, `relu`, etc.).
+- [`BrBaseP.outputWeaves`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L97-L97): output axis pattern; [`WeaveSlotP.tiled`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L44-L47) marks a contracted/broadcast axis, while `fixed` marks an output-retained axis.
+
 ### 5.1 Example A: matmul
 
 Source:
