@@ -789,6 +789,42 @@ So the endpoint is:
 
 [`TLProgram.compile`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Compile.lean#L19-L29) -> [`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118) -> [`compile_wellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L379-L383) -> [`realize`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L250-L253) -> formal [`BrMorph`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L141-L141).
 
+At this point, the running examples have corresponding formal-output terms of type `Σ (dom cod : BrObj), BrMorph dom cod`:
+
+```lean
+import LeanNCD.DSL.Compile
+import LeanNCD.Bridge.Realize
+import LeanNCD.Bridge.Agreement
+
+open LeanNCD
+
+noncomputable def realizeFromProgram (p : TLProgram) :
+    Except CompileError (Σ (dom cod : BrObj), BrMorph dom cod) :=
+  match h : (TLProgram.compile p).run 0 with
+  | .ok tc s'    => .ok (realize tc (compile_wellFormed p 0 tc s' h))
+  | .error e _   => .error e
+
+noncomputable def exampleA_brMorph :
+    Except CompileError (Σ (dom cod : BrObj), BrMorph dom cod) :=
+  realizeFromProgram (tlprog!{ Y[i,j] := W[i,k] · X[k,j] })
+
+noncomputable def exampleB_affine_brMorph :
+    Except CompileError (Σ (dom cod : BrObj), BrMorph dom cod) :=
+  realizeFromProgram (tlprog!{
+    S[j, 0]    := X[j]
+    S[j, l +1] := S[j, l] · A[j, k]
+  })
+
+noncomputable def exampleB_relu_brMorph :
+    Except CompileError (Σ (dom cod : BrObj), BrMorph dom cod) :=
+  realizeFromProgram (tlprog!{
+    S[j, 0]    := X[j]
+    S[j, l +1] := relu(S[j, l] · A[j, k])
+  })
+```
+
+Unlike `ThreadedComposed`, these cannot be shown as a stable `repr` dump: [`BrMorph`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L141-L141) is a quotient (`Quotient (setoidHom ...)`) and the bridge is intentionally `noncomputable`, so Lean does not expose a canonical printable normal form for the resulting morphism.
+
 What the code actually does:
 
 - [`realizeAxis`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L10-L11), [`realizeStObj`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L14-L14), [`realizeStMat`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L25-L29) map presentation-level objects/matrices into dependent math-tower forms.
