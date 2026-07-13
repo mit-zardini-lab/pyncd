@@ -381,15 +381,52 @@ Pipeline chain (exact order):
 abbrev FreshM := EStateM CompileError Nat
 ```
 
-[`EStateM ε σ α`](https://leanprover-community.github.io/mathlib4_docs/Lean/Elab/InfoTree/Main.html) is Lean's built-in *combined error-and-state* monad — essentially `σ → Result ε σ α`, where the function takes an initial state and returns either a successful value paired with the new state, or an error. Here:
+[`EStateM ε σ α`](https://leanprover-community.github.io/mathlib4_docs/Init/Control/EStateM.html) is Lean's built-in *combined error-and-state* monad. At runtime it is essentially a function `σ → Result ε σ α`: it takes an initial state, and returns either `ok (value, newState)` or `error e`. The two type parameters fill specific roles here:
 
-- **`σ = Nat`** — the mutable state is a simple counter. [`freshUData`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L42-L46) reads the counter, increments it, and returns a fresh [`UData`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L11-L15) wrapping the old value as a UID. UIDs are deterministic (reproducible, testable) — they are sequential integers, not random.
-- **`ε = CompileError`** — any of the [15 error variants](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L17-L36) defined in the same file (e.g. `shapeMismatch`, `rankMismatch`, `causalityViolation`, `cyclicDataflow`). When any pipeline phase calls `throw e`, Lean's monad machinery short-circuits the rest of the `do` chain and returns that error — there is no need for explicit `if-then-else` error propagation.
+- **`σ = Nat`** — the mutable state is a single counter. [`freshUData`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L42-L46) reads the counter, increments it by one, and returns a [`UData`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L11-L15) whose `uid` field holds the *old* value. UIDs are therefore sequential integers — deterministic and reproducible, not random — so compiled programs produce the same graph for the same source every time.
 
-The `Nat` counter starts at 1 (or whatever the caller provides) and is threaded implicitly through the entire `do` chain in `TLProgram.compile`. Because Lean's `do` notation desugars to `bind`, each pipeline phase receives the counter state left by the previous phase and passes its updated state to the next — exactly like `State`/`Except` monad stacks in Haskell, but as a single efficient type in Lean's core.
+- **`ε = CompileError`** — the [15-variant sum type](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L17-L36) of everything that can go wrong (e.g. `rankMismatch`, `causalityViolation`, `cyclicDataflow`). Any pipeline phase can call `throw e`; Lean's monad machinery immediately short-circuits the rest of the chain and propagates the error upward — no manual `if`/`match`-on-error threading needed.
 
-**Lean concept:** monadic sequencing (do, bind, Kleisli composition)  
-**Docs:** [Elaboration and Compilation](https://lean-lang.org/doc/reference/latest/Elaboration-and-Compilation/), [Monads in Lean](https://leanprover.github.io/functional_programming_in_lean/), [`EStateM` reference](https://leanprover-community.github.io/mathlib4_docs/Init/Control/EStateM.html)
+**How `TLProgram.compile` uses it.** The entire ten-phase pipeline is written as one `do` block:
+
+```lean
+def TLProgram.compile (p : TLProgram) : FreshM ThreadedComposed := do
+  let a ← assignUIDs p
+  let b ← resolveDecls a
+  let b ← checkReadRanks b
+  let b ← checkDtypes b
+  let c ← unifyAxes b
+  let d ← lowerArith c
+  let e ← finalizeScans d
+  let f ← splitNonlins e
+  let g ← schedule f
+  route g
+```
+
+Each `let x ← phase y` desugars to `(phase y).bind (fun x => ...)`. `bind` for `EStateM` threads the counter state from one phase to the next and propagates any error immediately. The counter is never visible in the source — it is entirely implicit in the monadic plumbing.
+
+`TLProgram.compileToScheduled` makes the same pipeline explicit using the **Kleisli fish operator** `>=>`:
+
+```lean
+def TLProgram.compileToScheduled : TLProgram → FreshM ScheduledProgram :=
+  assignUIDs >=> resolveDecls >=> checkReadRanks >=> checkDtypes
+             >=> unifyAxes >=> lowerArith >=> finalizeScans
+             >=> splitNonlins >=> schedule
+```
+
+`f >=> g` means "run `f`, then feed its output to `g`, threading the monad state". It is exactly function composition lifted into the monad — mathematically it is the composition law of the Kleisli category of `FreshM`. The two styles (`do`-notation and `>=>`) are equivalent; the `do` form in `compile` names intermediate values (useful for readability), while `>=>` in `compileToScheduled` is more concise for a pure pipeline.
+
+**Running the monad.** In the `tl!{...}` macro, the pipeline is kicked off by:
+
+```lean
+match TLProgram.compile prog |>.run 0 with
+| .ok tc _   => return Lean.toExpr tc
+| .error e _ => throwError s!"tl! compile error: {repr e}"
+```
+
+`.run 0` supplies the initial counter value (0) and executes the whole chain, returning either the finished [`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118) or the first [`CompileError`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L17-L36) encountered. The `_` in each branch discards the final counter state — once compilation is done, the exact counter value is irrelevant.
+
+**Lean concept:** [`EStateM`](https://leanprover-community.github.io/mathlib4_docs/Init/Control/EStateM.html), [do-notation and bind](https://leanprover.github.io/functional_programming_in_lean/), [Kleisli composition `>=>`](https://leanprover-community.github.io/mathlib4_docs/Mathlib/Control/Basic.html)
 
 ### 4.5 Stage 4: structural normalization/checking
 
