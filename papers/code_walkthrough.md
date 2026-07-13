@@ -9,6 +9,28 @@ The central story is:
 3. produce a routed presentation ([`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118)),
 4. realize it as a formal [`BrMorph`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L141-L141) in the categorical model.
 
+## Table of contents
+
+- [1) How to read this guide](#1-how-to-read-this-guide)
+- [2) Codebase structure (where things live)](#2-codebase-structure-where-things-live)
+- [3) Lean concepts you will see immediately](#3-lean-concepts-you-will-see-immediately)
+- [4) Compilation pipeline walkthrough (stagewise)](#4-compilation-pipeline-walkthrough-stagewise)
+  - [4.1 Big-picture flow](#41-big-picture-flow)
+  - [4.2 Stage 0-1: grammar and elaboration](#42-stage-0-1-grammar-and-elaboration)
+  - [4.3 Stage 2: AST model](#43-stage-2-ast-model)
+  - [4.4 Stage 3: compile entrypoint and macro](#44-stage-3-compile-entrypoint-and-macro)
+  - [4.5 Stage 4: structural normalization/checking](#45-stage-4-structural-normalizationchecking)
+  - [4.6 Stage 5: lowering, scans, scheduling, routing to `ThreadedComposed` (construction + inspection)](#46-stage-5-lowering-scans-scheduling-routing-to-threadedcomposed-construction--inspection)
+  - [4.7 Stage 7: from routed presentation to formal Br morphism](#47-stage-7-from-routed-presentation-to-formal-br-morphism)
+- [5) Running examples through the pipeline](#5-running-examples-through-the-pipeline)
+- [6) Category-theory mapping to implementation](#6-category-theory-mapping-to-implementation)
+- [7) Proof roadmap (what is proved, what drives compiler trust)](#7-proof-roadmap-what-is-proved-what-drives-compiler-trust)
+- [8) Lean concept callouts at encounter points](#8-lean-concept-callouts-at-encounter-points)
+- [9) Suggested reading itinerary (fast to deep)](#9-suggested-reading-itinerary-fast-to-deep)
+- [10) Practical checkpoints while reading](#10-practical-checkpoints-while-reading)
+- [11) Figure summary](#11-figure-summary)
+- [12) Closing note](#12-closing-note)
+
 ---
 
 ## 1) How to read this guide
