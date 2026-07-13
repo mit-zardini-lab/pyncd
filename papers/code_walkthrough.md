@@ -287,17 +287,34 @@ TLProgram {
 }
 ```
 
-Points to note: `k` appears in the RHS reads but not in the LHS slots, so it is a *contracted* (summation) axis. After `assignUIDs`, `i`, `j`, and `k` each get a distinct non-zero UID so later passes can distinguish them even when axis names are reused across statements.
+Points to note: `k` appears in the RHS reads but not in the LHS slots, so it is a *contracted* (summation) axis. `decls` is empty here because no explicit declarations were written — axes are inferred entirely from usage. After `assignUIDs`, `i`, `j`, and `k` each get a distinct non-zero UID so later passes can distinguish them even when axis names are reused across statements.
 
-**Example B — nonlinear scan AST** (`S[j, l+1] := relu(S[j, l] · A[j, k])`)
+**Example B — nonlinear scan AST with declarations** (`axis l : ℕ = 4 ; linear A ; S[j, l+1] := relu(S[j, l] · A[j, k])`)
+
+This variant adds explicit declarations to show non-empty `decls`. The source program would be:
+
+```lean
+tl!{
+  axis l : ℕ = 4       -- l is a nat axis pinned to size 4
+  linear A              -- A is declared as a linear (weight) tensor
+  S[j, l+1] := relu(S[j, l] · A[j, k])
+}
+```
+
+The elaborated `TLProgram`:
 
 ```lean
 TLProgram {
-  decls := [],
+  decls := [
+    Decl.axis ⟨"l", 0, .nat (some (SizeExpr.lit 4))⟩ (some 4),
+      -- axis l : ℕ = 4 → kind = nat, pinned size = 4
+    Decl.linear "A" [⟨"j", 0, .real none⟩, ⟨"k", 0, .real none⟩] false
+      -- linear A[j,k], no bias
+  ],
   stmts := [
     Stmt.assign "S"
       [ LHSSlot.free     ⟨"j", 0, .real none⟩,   -- free output axis j
-        LHSSlot.iterNext ⟨"l", 0, .nat  none⟩ ]  -- l+1: this is the recurrence step output
+        LHSSlot.iterNext ⟨"l", 0, .nat  none⟩ ]  -- l+1: recurrence step output
       { body   := { terms := [{ factors := [
                       Factor.read "S" [.axis ⟨"j", 0, .real none⟩,
                                        .axis ⟨"l", 0, .nat  none⟩],  -- reads S at current step l
@@ -309,6 +326,11 @@ TLProgram {
   ]
 }
 ```
+
+What the declarations contribute:
+
+- `Decl.axis` pins the size of `l` to 4. The pipeline stores this in [`explicitSizes`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L65-L66) so the evaluator and bridge can use concrete dimensions without further inference.
+- `Decl.linear` marks `A` as a *linear* (weight/parameter) tensor rather than a plain data tensor. This affects how `resolveDecls` classifies inputs: `A` will appear in the [`DeclEnv`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L10-L10) with its declared rank, so `checkReadRanks` can validate that every read of `A` uses exactly 2 indices.
 
 The `LHSSlot.iterNext` slot on `l` is what tells the pipeline this is a recurrence — the output is the value of `S` at step `l+1`. The read of `S[j, l]` in the RHS refers to the value at the *current* step. `finalizeScans` later pairs these into a [`ScanStmt.scan`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L17-L18) structure, and `splitNonlins` separates the linear contraction from the `relu` into two scheduled steps.
 
