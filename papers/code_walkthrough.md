@@ -395,6 +395,16 @@ abbrev FreshM := EStateM CompileError Nat
 
 - **`σ = Nat`** — the mutable state is a single counter. [`freshUData`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L42-L46) reads the counter, increments it by one, and returns a [`UData`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L11-L15) whose `uid` field holds the *old* value. UIDs are therefore sequential integers — deterministic and reproducible, not random — so compiled programs produce the same graph for the same source every time.
 
+  **What is `UData`?** [`UData`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L11-L15) is a small structure pairing a unique integer identity with an optional human-readable display name:
+
+  ```lean
+  structure UData where
+    uid  : UID                     -- UID = Nat; the unique integer identity
+    name : Option DynamicName := none  -- DynamicName = String; display-only, may be absent
+  ```
+
+  The `uid` field is the identity that matters for all pipeline logic — two axes are the *same* axis if and only if their UIDs are equal. The `name` field is purely cosmetic: it is used for pretty-printing and error messages but never for equality or lookup. After `assignUIDs`, every `AxisSpec` in the program holds a `UData`-derived `uid` that is distinct from every other axis's `uid`, regardless of what the axis was named in the source.
+
 - **`ε = CompileError`** — the [15-variant sum type](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L17-L36) of everything that can go wrong (e.g. `rankMismatch`, `causalityViolation`, `cyclicDataflow`). Any pipeline phase can call `throw e`; Lean's monad machinery immediately short-circuits the rest of the chain and propagates the error upward — no manual `if`/`match`-on-error threading needed.
 
 **How `TLProgram.compile` uses it.** The entire ten-phase pipeline is written as one `do` block:
