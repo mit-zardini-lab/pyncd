@@ -943,6 +943,8 @@ The corresponding `steps` list (same example, same ordering) is:
  [BrOp.contract, BrOp.contract, BrOp.relu]
  ```
 
+ This value is the full [`steps : List BrBaseP`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L115-L115) field of `ThreadedComposed`.
+
  So indices align as:
 
  - `steps[0] = contract`, `routing[0] = [external 0, external 1]`
