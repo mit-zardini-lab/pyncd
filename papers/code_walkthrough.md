@@ -935,7 +935,9 @@ Expected routed wiring from the test:
  [Wire.internal 1 0]]
 ```
 
- The corresponding `steps` list (same example, same ordering) is:
+This value is the full [`routing : List (List Wire)`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L116-L116) field of `ThreadedComposed`.
+
+The corresponding `steps` list (same example, same ordering) is:
 
  ```lean
  [BrOp.contract, BrOp.contract, BrOp.relu]
@@ -946,8 +948,6 @@ Expected routed wiring from the test:
  - `steps[0] = contract`, `routing[0] = [external 0, external 1]`
  - `steps[1] = contract`, `routing[1] = [external 2, internal 0 0]`
  - `steps[2] = relu`,     `routing[2] = [internal 1 0]`
-
- This value is the full [`routing : List (List Wire)`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L116-L116) field of `ThreadedComposed`.
 
 - Outer list index `i` = **which step** is being wired (`routing[i]` feeds `steps[i]`).
 - Inner list index `j` = **which input port** of that step (`routing[i][j]` is wire for input port `j`).
