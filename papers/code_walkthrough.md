@@ -168,6 +168,24 @@ flowchart TD
 - Parsing/elaboration functions in
   [`DSL/Elab.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Elab.lean#L110-L284) build [`TLProgram`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean#L123-L126) values from syntax.
 
+#### What is an elaborator?
+
+In Lean 4, *parsing* and *elaboration* are two distinct phases. The **parser** turns raw text into an untyped `Syntax` tree — a lightweight, generic tree of tokens and node kinds. An **elaborator** is then a function that walks that `Syntax` tree and produces a typed Lean value (or expression). Elaborators run inside the `MetaM` / `TermElabM` monad, which gives them access to the type environment, unification, and fresh-name generation.
+
+For this DSL the flow is:
+
+```
+text: "Y[i,j] := W[i,k] · X[k,j]"
+  → parser (via syntax rules in Syntax.lean)
+  → Syntax tree (untyped)
+  → elaborator (functions in Elab.lean)
+  → TLProgram value (typed Lean data)
+```
+
+The `elab` keyword registers a function as the elaborator for a particular syntax category. So when Lean encounters `tl!{ ... }`, it dispatches to the registered elaborator, which recursively calls helpers like [`elabTLStmt`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Elab.lean#L246-L250) and [`elabTLIdxExpr`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Elab.lean#L110-L118) to convert each sub-tree fragment into the corresponding [`Stmt`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean#L116-L121) or [`IdxExpr`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean#L25-L31) constructor. This is why the functions are named `elab*`: they are the elaboration handlers for each grammar non-terminal.
+
+**Reference:** [Elaboration and Compilation](https://lean-lang.org/doc/reference/latest/Elaboration-and-Compilation/)
+
 Code anchors:
 
 - Grammar entrypoint for programs:
