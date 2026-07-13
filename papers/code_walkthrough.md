@@ -458,6 +458,22 @@ means exactly:
 
 The pipe is just a readability device: it lets you read the expression left-to-right as "compile `prog`, then run the resulting `FreshM` computation with initial state 0". See [functions and evaluation](https://leanprover.github.io/functional_programming_in_lean/getting-to-know/evaluating.html).
 
+**What is `TLProgram.compile`?** In Lean, a definition of the form
+
+```lean
+def TLProgram.compile (p : TLProgram) : FreshM ThreadedComposed := ...
+```
+
+is an ordinary function whose name is placed in the `TLProgram` namespace. It is not a special method mechanism built into the language — it is just a namespaced function taking a [`TLProgram`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean#L123-L126) as input and returning a `FreshM` computation that, when run, produces a [`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118) or a [`CompileError`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L17-L36).
+
+So:
+
+```lean
+TLProgram.compile prog
+```
+
+means "apply the compiler pipeline to the AST value `prog`". Because the result lives in `FreshM`, this expression does **not** execute the pipeline yet; it merely constructs the monadic computation describing the ten compilation phases. The later `.run 0` is what actually executes that computation with initial UID counter `0`.
+
 `.run 0` supplies the initial counter value (0) and executes the whole chain, returning either the finished [`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118) or the first [`CompileError`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L17-L36) encountered. The `_` in each branch discards the final counter state — once compilation is done, the exact counter value is irrelevant.
 
 **Lean concept:** [`EStateM`](https://leanprover-community.github.io/mathlib4_docs/Init/Control/EStateM.html), [do-notation and bind](https://leanprover.github.io/functional_programming_in_lean/), [Kleisli composition `>=>`](https://leanprover-community.github.io/mathlib4_docs/Mathlib/Control/Basic.html)
