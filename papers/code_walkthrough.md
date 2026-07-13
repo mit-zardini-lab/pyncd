@@ -484,7 +484,7 @@ means "apply the compiler pipeline to the AST value `prog`". Because the result 
 
 **What happens:** seven passes run in sequence, each strengthening what the program is allowed to assume. The first two build context (assign UIDs, resolve declarations); the next three validate correctness (rank/arity checks, dtype constraints, axis unification); the last two prepare data for lowering (arithmetic normalization, scan grouping). Any violation immediately returns a [`CompileError`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L18-L31).
 
-**Output:** a [`TLProgram`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean#L123-L126) with all axes carrying unique non-zero UIDs, a resolved [`DeclEnv`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L10-L10), all same-name axes coequalized, index arithmetic in canonical affine form, and scan recurrences grouped into [`ScanStmt`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L17-L18) pairs.
+**Output:** strictly speaking, the end-of-stage artifact is no longer a raw [`TLProgram`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean#L123-L126). The seven passes step through [`LabeledProgram`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L21-L24), [`ResolvedProgram`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L25-L30), [`CanonicalProgram`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L31-L37), and [`LoweredProgram`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L38-L44), and [`finalizeScans`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Structural.lean#L404-L519) finally returns a [`ScanProgram`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L45-L50): axes now have unique non-zero UIDs, declarations have been resolved into a [`DeclEnv`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L10-L10), same-name axes have been coequalized, affine/scatter structure has been normalized, and any recurrence has been grouped into a [`ScanStmt.scan`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L17-L18) node.
 
 In [`DSL/Pipeline/Structural.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Structural.lean#L87-L409):
 
@@ -529,9 +529,84 @@ What the code actually does:
   - computes `(axis name, uid)` pairs ([`collectAxisNameUID`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Structural.lean#L260-L264)),
   - coequalizes same-name axes to canonical UID and substitutes across program.
 
+At the end of this stage, the running examples look like this.
+
+**Example A after Stage 4** (matmul; no scan structure, so it stays a plain statement inside a `ScanProgram`)
+
+```lean
+ScanProgram {
+  decls := [],
+  stmts := [
+    ScanStmt.plain <|
+      Stmt.assign "Y"
+        [ LHSSlot.free ⟨"i", 1, .real none⟩,
+          LHSSlot.free ⟨"j", 2, .real none⟩ ]
+        { body := { terms := [{ factors := [
+                      Factor.read "W" [.axis ⟨"i", 1, .real none⟩,
+                                       .axis ⟨"k", 3, .real none⟩],
+                      Factor.read "X" [.axis ⟨"k", 3, .real none⟩,
+                                       .axis ⟨"j", 2, .real none⟩]
+                    ]}]},
+          nonlin := .identity,
+          agg := .sum }
+  ],
+  extNames := {"W", "X"},
+  ...
+}
+```
+
+The only visible change from the raw AST is the UID assignment: `i`, `j`, and `k` are now distinct non-zero identifiers (`1`, `2`, `3`). Because there are no recurrence slots and no affine LHS coordinates, `lowerArith` and `finalizeScans` leave the statement structurally unchanged apart from wrapping it as [`ScanStmt.plain`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L16-L16).
+
+**Example B after Stage 4** (affine scan with declarations: `axis l : ℕ = 4 ; linear A ; S[j,0] := X[j] ; S[j,l+1] := S[j,l] · A[j,k]`)
+
+```lean
+ScanProgram {
+  decls := [
+    Decl.axis ⟨"l", 1, .nat (some (SizeExpr.lit 4))⟩ (some 4),
+    Decl.linear "A" [⟨"j", 2, .real none⟩, ⟨"k", 3, .real none⟩] false
+  ],
+  stmts := [
+    ScanStmt.scan "S"
+      [⟨"l", 1, .nat none⟩]
+      [ Stmt.assign "S"
+          [ LHSSlot.free ⟨"j", 2, .real none⟩,
+            LHSSlot.iterAt ⟨"l", 1, .nat none⟩ 0 ]
+          { body := { terms := [{ factors := [
+                        Factor.read "X" [.axis ⟨"j", 2, .real none⟩]
+                      ]}]},
+            nonlin := .identity,
+            agg := .sum } ]
+      [ Stmt.assign "S"
+          [ LHSSlot.free ⟨"j", 2, .real none⟩,
+            LHSSlot.iterNext ⟨"l", 1, .nat none⟩ ]
+          { body := { terms := [{ factors := [
+                        Factor.read "S" [.axis ⟨"j", 2, .real none⟩,
+                                         .axis ⟨"l", 1, .nat none⟩],
+                        Factor.read "A" [.axis ⟨"j", 2, .real none⟩,
+                                         .axis ⟨"k", 3, .real none⟩]
+                      ]}]},
+            nonlin := .identity,
+            agg := .sum } ]
+      true
+  ],
+  extNames := {"X"},
+  ...
+}
+```
+
+This example shows the main structural effect of [`finalizeScans`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Structural.lean#L404-L519): the base case (`iterAt l 0`) and recurrence step (`iterNext l`) are no longer separate top-level statements. They have been grouped into a single [`ScanStmt.scan`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L17-L18) node carrying:
+
+- the scan state name (`"S"`),
+- the advancing scan axis list (`[l]`),
+- the base statements,
+- the recurrence-body statements,
+- and the final `Bool` flag `true`, meaning this is a [`scanAffine`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L62-L62)-eligible scan (one advancing axis, identity nonlinearity throughout).
+
+If we changed the recurrence to `relu(S[j,l] · A[j,k])`, the structure would be the same except the recurrence stmt would still carry `nonlin := .relu` here, and the final Boolean would be `false`. The actual split into a linear pre-activation step plus a separate `relu` step happens in Stage 5, not Stage 4.
+
 ### 4.6 Stage 5: lowering, scans, scheduling, routing
 
-**Input:** the normalized [`TLProgram`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean#L123-L126) from Stage 4 — axes resolved, arith in canonical form, scans grouped — but still an unordered flat list of statements with no execution order and no wire assignments.
+**Input:** the [`ScanProgram`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L45-L50) from Stage 4 — axes resolved, arithmetic normalized, and any recurrences already grouped into [`ScanStmt`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Types.lean#L15-L18) nodes — but still with no execution order and no wire assignments.
 
 **What happens:** nonlinear statements are split into two (linear pre-activation + nonlinearity-only step), statements are topologically sorted into a valid execution order, and then each statement is lowered into a [`BrBaseP`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L93-L99) node with explicit [`Wire`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L106-L109) references pointing to either external inputs or the outputs of earlier steps.
 
