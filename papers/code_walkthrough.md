@@ -306,6 +306,12 @@ The `LHSSlot.iterNext` slot on `l` is what tells the pipeline this is a recurren
 
 ### 4.4 Stage 3: compile entrypoint and macro
 
+**Input:** a [`TLProgram`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean#L123-L126) value produced by the elaborator — a flat list of declarations and statements with no UIDs assigned, no axis unification, and no scheduling order.
+
+**What happens:** [`TLProgram.compile`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Compile.lean#L19-L29) sequences all ten pipeline phases (stages 4–10 below) in a single monadic `do` chain running inside [`FreshM`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L34-L34) — a state monad that carries a counter for minting fresh unique IDs and accumulates any [`CompileError`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L18-L31)s. The `tl!{ ... }` macro runs this entire chain at Lean elaboration time (i.e. at compile time of the Lean source file), so the result is a fully-compiled value embedded directly in the compiled binary.
+
+**Output:** a [`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118) — the routed, scheduled program graph ready for realization or evaluation. If any phase detects a malformed program it returns a [`CompileError`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L18-L31) instead and the chain short-circuits.
+
 [`DSL/Compile.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Compile.lean#L19-L43):
 
 - [`TLProgram.compile`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Compile.lean#L19-L29) chains phases in [`FreshM`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L34-L34)
