@@ -211,7 +211,16 @@ The elaborators need `partial def` for two reasons. First, they recurse over unt
 
 ### 4.3 Stage 2: AST model
 
-[`DSL/Ast.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean#L12-L127) defines the compiler IR:
+[`DSL/Ast.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean#L12-L127) defines the compiler's intermediate representation (IR) — the typed data structures that the elaborator produces and that all subsequent pipeline phases consume. At the top level, the AST has two layers:
+
+- **Declarations** describe the *shape* of the program: what tensors exist, what axes they range over, and what their kinds (real, nat) and sizes are.
+- **Statements** describe the *computation*: assignments from a right-hand side expression to a named output tensor.
+
+Every statement's right-hand side decomposes as a sum of products of tensor reads (`SumExpr`), an optional nonlinearity applied to the result (`Nonlin`), and a reduction/contraction operation (`AggOp`). The left-hand side decomposes into a list of `LHSSlot`s — one per output axis — which distinguish free output axes, recurrence iteration axes (scan step / next), and affine scatter destinations.
+
+Axes are tracked uniformly as [`AxisSpec`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean#L12-L16) values (name + unique ID + kind) throughout the AST. The pipeline assigns these UIDs in the first phase ([`assignUIDs`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Structural.lean#L87-L98)) so that later passes can identify the same axis by UID regardless of how it was spelled in the source.
+
+The types in the AST are:
 
 - [`TLProgram`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean#L123-L126) (decls + stmts),
 - [`Stmt`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean#L116-L121) (assign, scatter, recurMorphism),
