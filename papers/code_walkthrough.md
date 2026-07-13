@@ -373,8 +373,23 @@ Pipeline chain (exact order):
 9. [`schedule`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean#L150-L166)
 10. [`route`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean#L583-L588)
 
+**What is `FreshM`?**
+
+[`FreshM`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L38-L40) is defined as a one-line alias:
+
+```lean
+abbrev FreshM := EStateM CompileError Nat
+```
+
+[`EStateM ε σ α`](https://leanprover-community.github.io/mathlib4_docs/Lean/Elab/InfoTree/Main.html) is Lean's built-in *combined error-and-state* monad — essentially `σ → Result ε σ α`, where the function takes an initial state and returns either a successful value paired with the new state, or an error. Here:
+
+- **`σ = Nat`** — the mutable state is a simple counter. [`freshUData`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L42-L46) reads the counter, increments it, and returns a fresh [`UData`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L11-L15) wrapping the old value as a UID. UIDs are deterministic (reproducible, testable) — they are sequential integers, not random.
+- **`ε = CompileError`** — any of the [15 error variants](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L17-L36) defined in the same file (e.g. `shapeMismatch`, `rankMismatch`, `causalityViolation`, `cyclicDataflow`). When any pipeline phase calls `throw e`, Lean's monad machinery short-circuits the rest of the `do` chain and returns that error — there is no need for explicit `if-then-else` error propagation.
+
+The `Nat` counter starts at 1 (or whatever the caller provides) and is threaded implicitly through the entire `do` chain in `TLProgram.compile`. Because Lean's `do` notation desugars to `bind`, each pipeline phase receives the counter state left by the previous phase and passes its updated state to the next — exactly like `State`/`Except` monad stacks in Haskell, but as a single efficient type in Lean's core.
+
 **Lean concept:** monadic sequencing (do, bind, Kleisli composition)  
-**Docs:** [Elaboration and Compilation](https://lean-lang.org/doc/reference/latest/Elaboration-and-Compilation/), [Monads in Lean](https://leanprover.github.io/functional_programming_in_lean/)
+**Docs:** [Elaboration and Compilation](https://lean-lang.org/doc/reference/latest/Elaboration-and-Compilation/), [Monads in Lean](https://leanprover.github.io/functional_programming_in_lean/), [`EStateM` reference](https://leanprover-community.github.io/mathlib4_docs/Init/Control/EStateM.html)
 
 ### 4.5 Stage 4: structural normalization/checking
 
