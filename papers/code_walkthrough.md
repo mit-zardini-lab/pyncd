@@ -736,7 +736,7 @@ At the end of this stage, the compiler has produced concrete [`ThreadedComposed`
 
 **Input:** the output of Stage 5 (`route`) — a fully built `ThreadedComposed`.
 
-**What happens in this section:** no new compiler pass runs here. Stage 6 is an **artifact boundary/inspection step**: we examine the structure and invariants of the routed value produced in Stage 5 so the Stage 7 bridge can consume it safely.
+**What happens in this aspect:** no new compiler pass runs here. This is an **artifact boundary/inspection step**: we examine the structure and invariants of the routed value produced in Stage 5 so the Stage 7 bridge can consume it safely.
 
 **What it is:** [`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118) is the computable, runtime-serialisable representation of the full program graph. It is not yet a formal categorical morphism — it is the *presentation* from which one is constructed.
 
