@@ -444,6 +444,20 @@ match TLProgram.compile prog |>.run 0 with
 | .error e _ => throwError s!"tl! compile error: {repr e}"
 ```
 
+Here `|>` is Lean's **forward pipe** operator. `x |> f` means `f x`: it takes the expression on the left and passes it as the argument to the function on the right. So:
+
+```lean
+TLProgram.compile prog |>.run 0
+```
+
+means exactly:
+
+```lean
+(TLProgram.compile prog).run 0
+```
+
+The pipe is just a readability device: it lets you read the expression left-to-right as "compile `prog`, then run the resulting `FreshM` computation with initial state 0". See [functions and evaluation](https://leanprover.github.io/functional_programming_in_lean/getting-to-know/evaluating.html).
+
 `.run 0` supplies the initial counter value (0) and executes the whole chain, returning either the finished [`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118) or the first [`CompileError`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Exec/Uid.lean#L17-L36) encountered. The `_` in each branch discards the final counter state — once compilation is done, the exact counter value is irrelevant.
 
 **Lean concept:** [`EStateM`](https://leanprover-community.github.io/mathlib4_docs/Init/Control/EStateM.html), [do-notation and bind](https://leanprover.github.io/functional_programming_in_lean/), [Kleisli composition `>=>`](https://leanprover-community.github.io/mathlib4_docs/Mathlib/Control/Basic.html)
