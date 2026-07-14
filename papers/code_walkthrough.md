@@ -37,10 +37,17 @@ The central story is:
   - [7.1 Compiler-to-bridge trust chain](#71-compiler-to-bridge-trust-chain)
   - [7.2 Key theorem clusters](#72-key-theorem-clusters)
   - [7.3 Open/deferred proof areas (important for readers)](#73-opendeferred-proof-areas-important-for-readers)
-- [8) Lean concept callouts at encounter points](#8-lean-concept-callouts-at-encounter-points)
-- [9) Suggested reading itinerary (fast to deep)](#9-suggested-reading-itinerary-fast-to-deep)
-- [10) Practical checkpoints while reading](#10-practical-checkpoints-while-reading)
-- [11) Closing note](#11-closing-note)
+- [8) ACSet interoperability (code + proof tutorial)](#8-acset-interoperability-code--proof-tutorial)
+  - [8.1 What interoperates (and what does not)](#81-what-interoperates-and-what-does-not)
+  - [8.2 Python ACSet path (external/export representation)](#82-python-acset-path-externalexport-representation)
+  - [8.3 Lean ACSet path (bridge representation + proofs)](#83-lean-acset-path-bridge-representation--proofs)
+  - [8.4 Walkthrough: DSL compile -> ACSet tables -> realized `BrMorph`](#84-walkthrough-dsl-compile---acset-tables---realized-brmorph)
+  - [8.5 Proof coverage, caveats, and trust boundary](#85-proof-coverage-caveats-and-trust-boundary)
+  - [8.6 Interop verification checklist](#86-interop-verification-checklist)
+- [9) Lean concept callouts at encounter points](#9-lean-concept-callouts-at-encounter-points)
+- [10) Suggested reading itinerary (fast to deep)](#10-suggested-reading-itinerary-fast-to-deep)
+- [11) Practical checkpoints while reading](#11-practical-checkpoints-while-reading)
+- [12) Closing note](#12-closing-note)
 
 ---
 
@@ -49,7 +56,7 @@ The central story is:
 Use this in two passes:
 
 - **Pass A (systems view):** read Sections 2–5 quickly to understand the architecture and dataflow.
-- **Pass B (proof/category view):** read Sections 6–8 and follow the file pointers.
+- **Pass B (proof/category view):** read Sections 6–9 and follow the file pointers.
 
 Two running examples are threaded throughout:
 
@@ -1114,7 +1121,148 @@ This means:
 
 ---
 
-## 8) Lean concept callouts at encounter points
+## 8) ACSet interoperability (code + proof tutorial)
+
+Terminology note first: the repository uses **ACSet/acset** (attributed C-set).  
+The request says "acets"; below we interpret that as ACSet interoperability.
+
+### 8.1 What interoperates (and what does not)
+
+There are two related ACSet paths:
+
+1. **Python tensor program -> ACSet CSV tables** (for interchange/export).
+2. **Lean [`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118) -> Lean [`Acset.SBrInstance`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/SBrInstance.lean#L64-L70) -> [`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118)** (for bridge agreement proofs).
+
+Both use the same table-shaped concept ([`SBrInstance`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/SBrInstance.lean#L64-L70)), but they serve different goals:
+
+- the Python path preserves user-facing tensor/operator metadata;
+- the Lean path uses a synthetic but invertible encoding tuned for the bridge theorem.
+
+So the strongest proved statement is about Lean encode/decode and bridge agreement, **not** "Python conversion equals compiler output" in full semantic detail.
+
+### 8.2 Python ACSet path (external/export representation)
+
+Start with these files:
+
+- [`acset/instances.py`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/instances.py)
+- [`acset/convert.py`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/convert.py)
+- [`acset/csv_io.py`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/csv_io.py)
+
+Core schema/dataclasses (`acset/instances.py`):
+
+- [`SStInstance`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/instances.py#L40-L45), [`EntryRow`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/instances.py#L32-L37) (stride-morphism tables),
+- [`SBrInstance`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/instances.py#L92-L97), [`EquationRow`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/instances.py#L47-L51), [`ArrayRow`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/instances.py#L54-L68), [`ArrayAxisRow`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/instances.py#L71-L78), [`SampleRow`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/instances.py#L81-L89),
+- [`OpTag`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/instances.py#L10-L21), [`DataTag`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/instances.py#L24-L29).
+
+Core conversion entrypoints (`acset/convert.py`):
+
+- [`from_stride_morphism`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/convert.py#L86-L102)
+- [`from_tensor_equation`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/convert.py#L183-L206)
+- [`from_tensor_program`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/convert.py#L209-L223)
+
+Core CSV entrypoints (`acset/csv_io.py`):
+
+- [`write_sst`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/csv_io.py#L126-L138), [`read_sst`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/csv_io.py#L217-L228)
+- [`write_sbr`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/csv_io.py#L141-L214), [`read_sbr`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/csv_io.py#L231-L289)
+
+What to notice while reading:
+
+- [`from_tensor_program`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/convert.py#L209-L223) merges a whole tensor program into one [`SBrInstance`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/instances.py#L92-L97).
+- operation tags are Python-side [`OpTag`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/instances.py#L10-L21) values (e.g., linear/softmax/masked forms).
+- CSV I/O is table-first and deterministic by explicit column order.
+
+### 8.3 Lean ACSet path (bridge representation + proofs)
+
+Start with these files:
+
+- [`leanncd/LeanNCD/Acset/SBrInstance.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/SBrInstance.lean)
+- [`leanncd/LeanNCD/Acset/Csv.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/Csv.lean)
+- [`leanncd/LeanNCD/Acset/Io.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/Io.lean)
+- [`leanncd/LeanNCD/Bridge/AcsetCodec.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/AcsetCodec.lean)
+- [`leanncd/LeanNCD/Bridge/SBr.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/SBr.lean)
+- [`leanncd/LeanNCD/Bridge/Agreement.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean)
+
+Lean ACSet schema:
+
+- [`Acset.SBrInstance`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/SBrInstance.lean#L64-L70) and row structs in [`Acset/SBrInstance.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/SBrInstance.lean) (notably [`AxisType`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/SBrInstance.lean#L6-L6), [`AxisUID`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/SBrInstance.lean#L10-L13), [`OpTag`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/SBrInstance.lean#L16-L20), [`DataTag`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/SBrInstance.lean#L22-L22), [`EquationRow`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/SBrInstance.lean#L25-L27), [`ArrayRow`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/SBrInstance.lean#L30-L43), [`ArrayAxisRow`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/SBrInstance.lean#L45-L51), [`SampleRow`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/SBrInstance.lean#L53-L62)).
+
+Lean CSV codec:
+
+- [`renderTable`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/Csv.lean#L23-L25) / [`parseTable`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/Csv.lean#L28-L30) in [`Acset/Csv.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/Csv.lean),
+- [`writeSBr`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/Io.lean#L41-L53) / [`readSBr`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/Io.lean#L116-L129) in [`Acset/Io.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/Io.lean).
+
+Lean bridge codec (`Bridge/AcsetCodec.lean`):
+
+- [`fromThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/AcsetCodec.lean#L223-L229) (encode),
+- [`toThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/AcsetCodec.lean#L314-L323) (decode),
+- theorem [`toThreadedComposed_fromThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/AcsetCodec.lean#L1569-L1592).
+
+Bridge realization + agreement:
+
+- [`realizeSBr`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/SBr.lean#L17-L29) in [`Bridge/SBr.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/SBr.lean) (decode then realize),
+- [`realize_fromThreadedComposed_agree`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L407-L413), [`agree_dom`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L417-L419), [`agree_cod`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L422-L424) in [`Bridge/Agreement.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean).
+
+### 8.4 Walkthrough: DSL compile -> ACSet tables -> realized `BrMorph`
+
+Use this flow as your mental model:
+
+```text
+TL source
+  -> TLProgram.compile
+  -> ThreadedComposed
+  -> AcsetCodec.fromThreadedComposed
+  -> Acset.SBrInstance tables
+  -> AcsetCodec.toThreadedComposed
+  -> realize / realizeSBr
+  -> Σ (dom cod : BrObj), BrMorph dom cod
+```
+
+Linked nodes in that flow:
+
+- [`TLProgram.compile`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Compile.lean#L19-L29)
+- [`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118)
+- [`AcsetCodec.fromThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/AcsetCodec.lean#L223-L229)
+- [`Acset.SBrInstance`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/SBrInstance.lean#L64-L70)
+- [`AcsetCodec.toThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/AcsetCodec.lean#L314-L323)
+- [`realize`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L250-L253) / [`realizeSBr`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/SBr.lean#L17-L29)
+- Σ (dom cod : [`BrObj`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L14-L14)), [`BrMorph`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L141-L141) dom cod
+
+Key trust steps:
+
+1. [`compile_wellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L379-L383) proves successful compile output is [`WellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L139-L147).
+2. [`toThreadedComposed_fromThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/AcsetCodec.lean#L1569-L1592) proves ACSet encode/decode round-trip (under [`WellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L139-L147) + [`WellShaped`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/AcsetCodec.lean#L524-L524) assumptions).
+3. [`realize_fromThreadedComposed_agree`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L407-L413) proves the ACSet path and direct route-to-[`BrMorph`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L141-L141) path agree.
+
+### 8.5 Proof coverage, caveats, and trust boundary
+
+Covered now:
+
+- compilation -> bridge preconditions ([`compile_wellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L379-L383)),
+- ACSet codec round-trip on the Lean bridge representation ([`toThreadedComposed_fromThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/AcsetCodec.lean#L1569-L1592)),
+- realization agreement ([`realize_fromThreadedComposed_agree`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L407-L413), plus [`agree_dom`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L417-L419)/[`agree_cod`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L422-L424) projections).
+
+Important caveats:
+
+- [`realizeSBr`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/SBr.lean#L17-L29) is total and falls back for malformed ACSet data; agreement theorems target well-formed compiler-derived artifacts.
+- the Lean ACSet encoding is intentionally synthetic for invertibility (e.g., internal wire/op coding), not a theorem that Python [`from_tensor_program`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/convert.py#L209-L223) is identical in semantics.
+- this repository currently has Lean ACSet coverage for [`SBrInstance`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Acset/SBrInstance.lean#L64-L70); Python also has [`SStInstance`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/acset/instances.py#L40-L45) CSV flow.
+
+### 8.6 Interop verification checklist
+
+For ACSet interoperability changes, run both Python and Lean checks:
+
+1. Python ACSet tests:
+   - `pytest tests/test_acset_instances.py tests/test_acset_convert.py tests/test_acset_csv.py tests/test_cset_roundtrip.py` for [`tests/test_acset_instances.py`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/tests/test_acset_instances.py), [`tests/test_acset_convert.py`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/tests/test_acset_convert.py), [`tests/test_acset_csv.py`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/tests/test_acset_csv.py), [`tests/test_cset_roundtrip.py`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/tests/test_cset_roundtrip.py)
+2. Lean ACSet + bridge tests/build:
+   - `cd leanncd && lake build`
+   - focus on [`test/Acset/CsvTest.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/test/Acset/CsvTest.lean), [`test/Acset/IoTest.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/test/Acset/IoTest.lean), [`test/Acset/FixtureTest.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/test/Acset/FixtureTest.lean), [`test/Bridge/AcsetCodecTest.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/test/Bridge/AcsetCodecTest.lean), and [`test/Bridge/AgreementTest.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/test/Bridge/AgreementTest.lean).
+3. If you touch codecs:
+   - re-check [`toThreadedComposed_fromThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/AcsetCodec.lean#L1569-L1592),
+   - re-check [`realize_fromThreadedComposed_agree`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L407-L413) (and [`agree_dom`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L417-L419) / [`agree_cod`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L422-L424)).
+
+---
+
+## 9) Lean concept callouts at encounter points
 
 Use this as a “jump table” while reading code.
 
@@ -1130,7 +1278,7 @@ Use this as a “jump table” while reading code.
 
 ---
 
-## 9) Suggested reading itinerary (fast to deep)
+## 10) Suggested reading itinerary (fast to deep)
 
 1. [`LeanNCD.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/LeanNCD.lean) (top comment)
 2. [`DSL/Syntax.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Syntax.lean) -> [`DSL/Elab.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Elab.lean) -> [`DSL/Ast.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Ast.lean)
@@ -1145,7 +1293,7 @@ Use this as a “jump table” while reading code.
 
 ---
 
-## 10) Practical checkpoints while reading
+## 11) Practical checkpoints while reading
 
 After Section 4:
 
@@ -1162,7 +1310,7 @@ After Section 7:
 
 ---
 
-## 11) Closing note
+## 12) Closing note
 
 If you keep one mental model, use this:
 
