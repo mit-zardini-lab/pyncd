@@ -1123,9 +1123,6 @@ This means:
 
 ## 8) ACSet interoperability (code + proof tutorial)
 
-Terminology note first: the repository uses **ACSet/acset** (attributed C-set).  
-The request says "acets"; below we interpret that as ACSet interoperability.
-
 ### 8.1 What interoperates (and what does not)
 
 There are two related ACSet paths:
