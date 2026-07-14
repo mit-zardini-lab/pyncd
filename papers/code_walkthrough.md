@@ -13,6 +13,9 @@ The central story is:
 
 - [1) How to read this guide](#1-how-to-read-this-guide)
 - [2) Codebase structure (where things live)](#2-codebase-structure-where-things-live)
+  - [2.1 Directory map](#21-directory-map)
+  - [2.2 What each main directory does](#22-what-each-main-directory-does)
+  - [2.3 High-value files and their primary jobs](#23-high-value-files-and-their-primary-jobs)
 - [3) Lean concepts you will see immediately](#3-lean-concepts-you-will-see-immediately)
 - [4) Compilation pipeline walkthrough (stagewise)](#4-compilation-pipeline-walkthrough-stagewise)
   - [4.1 Big-picture flow](#41-big-picture-flow)
@@ -23,13 +26,21 @@ The central story is:
   - [4.6 Stage 5: lowering, scans, scheduling, routing to `ThreadedComposed` (construction + inspection)](#46-stage-5-lowering-scans-scheduling-routing-to-threadedcomposed-construction--inspection)
   - [4.7 Stage 7: from routed presentation to formal Br morphism](#47-stage-7-from-routed-presentation-to-formal-br-morphism)
 - [5) Running examples through the pipeline](#5-running-examples-through-the-pipeline)
+  - [5.1 Example A: matmul](#51-example-a-matmul)
+  - [5.2 Example B: scan vs scanAffine](#52-example-b-scan-vs-scanaffine)
+  - [5.3 Routing sanity example](#53-routing-sanity-example)
 - [6) Category-theory mapping to implementation](#6-category-theory-mapping-to-implementation)
+  - [6.1 Mapping table](#61-mapping-table)
+  - [6.2 Why there are multiple representations](#62-why-there-are-multiple-representations)
+  - [6.3 Important conceptual nuance](#63-important-conceptual-nuance)
 - [7) Proof roadmap (what is proved, what drives compiler trust)](#7-proof-roadmap-what-is-proved-what-drives-compiler-trust)
+  - [7.1 Compiler-to-bridge trust chain](#71-compiler-to-bridge-trust-chain)
+  - [7.2 Key theorem clusters](#72-key-theorem-clusters)
+  - [7.3 Open/deferred proof areas (important for readers)](#73-opendeferred-proof-areas-important-for-readers)
 - [8) Lean concept callouts at encounter points](#8-lean-concept-callouts-at-encounter-points)
 - [9) Suggested reading itinerary (fast to deep)](#9-suggested-reading-itinerary-fast-to-deep)
 - [10) Practical checkpoints while reading](#10-practical-checkpoints-while-reading)
-- [11) Figure summary](#11-figure-summary)
-- [12) Closing note](#12-closing-note)
+- [11) Closing note](#11-closing-note)
 
 ---
 
@@ -965,18 +976,13 @@ Why this is a good walkthrough:
 | [`ColoredPROP`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/ColoredPROP.lean#L10-L67) | strict symmetric monoidal category interface over colored objects | [`Base/ColoredPROP.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/ColoredPROP.lean) |
 | [`StObj`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/St.lean#L9-L9), [`StMat`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/St.lean#L28-L30) | index/shape PROP with affine maps | [`Base/St.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/St.lean) |
 | [`BrBase`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L44-L51), [`BrMorph`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L141-L141) | free strict SMC on broadcast generators (quotiented syntax) | [`Base/Br.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean) |
-| [`Hom`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L53-L63) + [`Rel`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L64-L135) + quotient | raw syntax + equations -> semantic morphisms | [`Base/Br.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean) |
+| [`Hom`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L53-L63) + [`Rel`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L64-L135) + quotient | `Hom`: raw syntax trees of composed/tensored generators; `Rel`: equations identifying trees with the same categorical meaning; quotient turns syntax modulo laws into semantic morphisms | [`Base/Br.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean) |
 | [`DGradedColoredPROP`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Core/Graded.lean#L12-L23) | graded PROP with action/coherence data | [`Core/Graded.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Core/Graded.lean) |
 | [`Weave`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Core/Weave.lean#L10-L17) | factorization witness g = lam ; [f,P] ; rho | [`Core/Weave.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Core/Weave.lean) |
 | [`TemporalGraded`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Mixins/Temporal.lean#L10-L16) | scan/temporal mixin over graded structure | [`Mixins/Temporal.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Mixins/Temporal.lean) |
 | [`Algebra`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Algebra/Algebra.lean#L15-L26) | strong symmetric monoidal, equivariant semantics functor | [`Algebra/Algebra.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Algebra/Algebra.lean) |
 | [`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118) | computable routed presentation of a Br program | [`DSL/Target.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean) |
 | [`realize`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L250-L253) | presentation -> formal [`BrMorph`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L141-L141) | [`Bridge/Realize.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean) |
-
-Quick intuition for the core pair in [`Base/Br.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean):
-
-- [`Hom`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L53-L63) = raw syntax trees for composing/tensoring primitive generators.
-- [`Rel`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L64-L135) = equations saying when two such trees represent the same categorical morphism.
 
 ### 6.2 Why there are multiple representations
 
@@ -1017,6 +1023,10 @@ To define a function *out of* a quotient you use [`Quotient.lift`](https://leanp
 
 ### 7.1 Compiler-to-bridge trust chain
 
+The ultimate bridge result is [`realizeCompiled`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L384-L387): from a successful run of [`TLProgram.compile`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Compile.lean#L19-L29), it constructs a dependent pair `Σ (dom cod : BrObj), BrMorph dom cod`. This means the result is a package containing (1) a domain object `dom : BrObj`, (2) a codomain object `cod : BrObj`, and (3) a morphism `f : BrMorph dom cod`; the crucial point is that the morphism's type depends on the chosen domain and codomain. In plain English: **if compilation succeeds, the program really does determine a valid morphism in `Br`**.
+
+To understand the proof approach, work backward from that goal. [`realize`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L250-L253) is the bridge function that maps a computable [`ThreadedComposed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L114-L118) into a quotient-level [`BrMorph`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L141-L141) by composing realized primitives according to routing, but it only applies to `ThreadedComposed` values that satisfy `WellFormed`. So the proof burden is shifted to showing that **the compiler itself always produces `WellFormed` routed graphs**. Section 7.1 is the dependency chain for that argument: start from the end goal “produce a `BrMorph`,” reduce it to the precondition for `realize`, and then discharge that precondition from increasingly local routing/scheduling invariants proved inside the pipeline.
+
 ```mermaid
 flowchart TD
   A[routeCore and buildStep invariants]
@@ -1038,6 +1048,33 @@ flowchart TD
   D --> G
   G --> H
 ```
+
+Box-by-box explanation:
+
+- **A — `routeCore` and `buildStep` invariants.**  
+  Local facts established while constructing routed steps (shape compatibility, wire/source discipline, and per-step well-formed structure) in [`DSL/Pipeline/Lowering.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean).
+- **B — `wf_typeMatch`.**  
+  Proves each routed input wire matches the producer output type expected by the consumer step; no ill-typed edge is introduced.
+- **C — `wf_singleOutput`.**  
+  Proves each routed step exposes exactly the output shape/arity expected by downstream wiring.
+- **D — `wf_topo`.**  
+  Proves topological validity: internal wires only reference earlier steps (acyclic, forward-only dependency flow).
+- **E — `wellFormedDom` checks.**  
+  Presentation-level domain sanity checks from [`ThreadedComposed.wellFormedDom`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Target.lean#L142-L153): external ports are valid and consistently referenced.
+- **F — `compile_eq_route`.**  
+  Connects top-level compilation to routed-core facts, exposing the exact route/schedule result used by the bridge proof.
+- **G — `compile_wellFormed`.**  
+  Main bridge theorem in [`Bridge/Agreement.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L379-L383): combines B/C/D plus compile-route equalities to show compiled outputs satisfy [`ThreadedComposed.WellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L139-L147).
+- **H — `realize` is applicable.**  
+  Since `WellFormed` is available, [`realize`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L250-L253) can be called to produce a formal [`BrMorph`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L141-L141).
+
+Read the diagram backward as a proof plan:
+
+1. **Goal:** obtain a formal `BrMorph` from compiled output (captured concretely by [`realizeCompiled`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L384-L387)).
+2. To call [`realize`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L250-L253), it suffices to prove [`ThreadedComposed.WellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Realize.lean#L139-L147).
+3. [`compile_wellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L379-L383) is exactly that theorem: successful compilation implies `WellFormed`.
+4. Proving `compile_wellFormed` reduces to showing the routed artifact returned by the compiler is the same one analyzed by the routing lemmas ([`compile_eq_route`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L19-L43)), and that this routed artifact satisfies the three key invariants (`wf_typeMatch`, `wf_singleOutput`, `wf_topo`) plus domain sanity (`wellFormedDom`).
+5. Those bridge-level invariants are themselves proved from still more local facts about [`routeCore`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean#L573-L579) and [`buildStep`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/DSL/Pipeline/Lowering.lean#L482-L553): how wires are created, how outputs are indexed, and why consumers only read from available earlier producers.
 
 ### 7.2 Key theorem clusters
 
@@ -1063,12 +1100,12 @@ flowchart TD
 
 ### 7.3 Open/deferred proof areas (important for readers)
 
-Current intentional gaps include (see [`leanncd/SORRY_INVENTORY.md`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/SORRY_INVENTORY.md)):
+Current gaps include (see [`leanncd/SORRY_INVENTORY.md`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/SORRY_INVENTORY.md)):
 
-- [`Core/Weave.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Core/Weave.lean): [`weave_unique`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Core/Weave.lean#L29-L32)
-- [`Instances/StBr.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Instances/StBr.lean): many signature fields ([`act`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Instances/StBr.lean#L15-L15), delta/alpha fields, etc.)
-- [`Base/St.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/St.lean): some hexagon fields
-- [`Base/Br.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean): [`brCancelPoint`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L307-L307) obligation
+- [`Core/Weave.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Core/Weave.lean): [`weave_unique`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Core/Weave.lean#L29-L32). Completing this would show that a weave factorization is unique as Lean data once it exists, strengthening the “canonical factorization” story used by the abstract graded/weave layer. This matters mainly for the categorical theory stack rather than the executable compiler.
+- [`Instances/StBr.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Instances/StBr.lean): many signature fields remain open. Completing [`act`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Instances/StBr.lean#L15-L15) would provide the concrete St-indexed action of shapes on Br morphisms; completing the delta/alpha/unit/coherence fields would prove that this action interacts correctly with tensor, unit, and nested lifting; completing `broadcast_gen` would show that Br morphisms admit the required broadcast-style factorization. Together these gaps block full completion of the flagship `StBr` instance and the strongest specialized batching/equivariance theorems, but they do not change the current executable compile pipeline.
+- [`Base/St.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/St.lean): some hexagon fields. Completing these would finish the proof that the affine-index category `St` satisfies the symmetric-monoidal coherence laws expected by its `ColoredPROP` structure. This mainly strengthens the mathematical foundations used by later theory, rather than changing routing or compilation behavior directly.
+- [`Base/Br.lean`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean): [`brCancelPoint`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Base/Br.lean#L307-L307) obligation. Completing this would establish the point-separation/cancellation property needed to make `Br` elemental, which in turn supports Br-specific weave uniqueness and related categorical uniqueness arguments. Its impact is again primarily on the abstract proof layer, not on day-to-day compilation.
 
 This means:
 
@@ -1125,19 +1162,7 @@ After Section 7:
 
 ---
 
-## 11) Figure summary
-
-This walkthrough used three diagrams:
-
-1. **Architecture map** (Section 2)
-2. **Stagewise compile flow** (Section 4)
-3. **Proof dependency chain to [`compile_wellFormed`](https://github.com/william-macready/pyncd/blob/agents/tutorial-lean4-compilation-guide/leanncd/LeanNCD/Bridge/Agreement.lean#L379-L383)** (Section 7)
-
-You can render these Mermaid blocks directly in Markdown-capable viewers.
-
----
-
-## 12) Closing note
+## 11) Closing note
 
 If you keep one mental model, use this:
 
