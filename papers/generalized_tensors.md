@@ -532,16 +532,18 @@ Notation legend for this section:
 Canonical 1D/2D forms:
 
 ```tl
+-- stand-alone context: container O = List[No], K = List[Ks], In = List[Ni], Cin = List[Cin], Cout = List[Cout], Kh = List[Kx], Kw = List[Ky]; tensor X(In), X2(In, In, Cin), W(K), Wk(Cout, Cin, Kh, Kw), Y(O), Y2(O, O, Cout)
 Y[o] := W[p] · X[o + p]                                   -- 1D convolution
-Y[oh, ow, co] := Wk[co, ci, kh, kw] · X[oh + kh, ow + kw, ci]  -- 2D convolution
+Y2[oh, ow, co] := Wk[co, ci, kh, kw] · X2[oh + kh, ow + kw, ci]  -- 2D convolution
 ```
 
 Equivalent explicit-reduce form:
 
 ```tl
+-- stand-alone context: container O = List[No], K = List[Ks], In = List[Ni], Cin = List[Cin], Cout = List[Cout], Kh = List[Kx], Kw = List[Ky]; tensor X(In), X2(In, In, Cin), W(K), Wk(Cout, Cin, Kh, Kw), Y(O), Y2(O, O, Cout)
 Y[o] := reduce(sum, p in K) (W[p] · X[o + p])                                      -- 1D convolution
-Y[oh, ow, co] := reduce(sum, ci in Cin, kh in Kh, kw in Kw)                        -- 2D convolution
-  (Wk[co, ci, kh, kw] · X[oh + kh, ow + kw, ci])
+Y2[oh, ow, co] := reduce(sum, ci in Cin, kh in Kh, kw in Kw)                        -- 2D convolution
+  (Wk[co, ci, kh, kw] · X2[oh + kh, ow + kw, ci])
 ```
 
 Interpretation:
@@ -567,12 +569,14 @@ container In  = List[Ni]      -- input positions
 Canonical (implicit contraction over `p`):
 
 ```tl
+-- stand-alone context: container O = List[No], K = List[Ks], In = List[Ni]; tensor W(K), X(In), Y(O)
 Y[o] := W[p] · X[stride*o + p]
 ```
 
 Explicit reduce:
 
 ```tl
+-- stand-alone context: container O = List[No], K = List[Ks], In = List[Ni]; tensor W(K), X(In), Y(O)
 Y[o] := reduce(sum, p in K) (W[p] · X[stride*o + p])
 ```
 
@@ -591,12 +595,14 @@ container In  = List[Ni]
 Canonical (implicit contraction over `p`):
 
 ```tl
+-- stand-alone context: container O = List[No], K = List[Ks], In = List[Ni]; tensor W(K), X(In), Y(O)
 Y[o] := W[p] · X[o + dilation*p]
 ```
 
 Explicit reduce:
 
 ```tl
+-- stand-alone context: container O = List[No], K = List[Ks], In = List[Ni]; tensor W(K), X(In), Y(O)
 Y[o] := reduce(sum, p in K) (W[p] · X[o + dilation*p])
 ```
 
@@ -615,12 +621,14 @@ container C   = List[Cin]
 Canonical (implicit contraction over `p`):
 
 ```tl
+-- stand-alone context: container O = List[No], K = List[Ks], C = List[Cin]; tensor X(O, C), Wd(C, K), Y(O, C)
 Y[o, c] := Wd[c, p] · X[o + p, c]
 ```
 
 Explicit reduce:
 
 ```tl
+-- stand-alone context: container O = List[No], K = List[Ks], C = List[Cin]; tensor X(O, C), Wd(C, K), Y(O, C)
 Y[o, c] := reduce(sum, p in K) (Wd[c, p] · X[o + p, c])
 ```
 
@@ -639,12 +647,14 @@ container Cout = List[Cout]
 Canonical (implicit contraction over `c`):
 
 ```tl
+-- stand-alone context: container O = List[No], Cin = List[Cin], Cout = List[Cout]; tensor Y(O, Cin), Wp(Cout, Cin), Z(O, Cout)
 Z[o, co] := Wp[co, c] · Y[o, c]
 ```
 
 Explicit reduce:
 
 ```tl
+-- stand-alone context: container O = List[No], Cin = List[Cin], Cout = List[Cout]; tensor Y(O, Cin), Wp(Cout, Cin), Z(O, Cout)
 Z[o, co] := reduce(sum, c in Cin) (Wp[co, c] · Y[o, c])
 ```
 
@@ -653,6 +663,7 @@ Key point: stride/dilation/depthwise/pointwise are all parameter changes to inde
 ### 6.3 Irregular neighborhoods (graph/message passing)
 
 ```tl
+-- stand-alone context: container V = List[num_nodes], Nbr = Neighborhood[V], Cin = List[Cin], Cout = List[Cout]; tensor X(V, Cin), W(Cout, Cin, Nbr), Y(V, Cout)
 Y[v, co] := W[co, ci, p] · X[nbr(v, p), ci]
 ```
 
@@ -664,6 +675,7 @@ where:
 Equivalent explicit reduction:
 
 ```tl
+-- stand-alone context: container V = List[num_nodes], Nbr = Neighborhood[V], Cin = List[Cin], Cout = List[Cout]; tensor X(V, Cin), W(Cout, Cin, Nbr), Y(V, Cout)
 Y[v, co] := reduce(sum, p in Nbr(v), ci in Cin) (W[co, ci, p] · X[nbr(v,p), ci])
 ```
 
@@ -674,12 +686,14 @@ This is graph convolution/message passing in the same reindex+fold form as grid 
 Most convolution equations are written as **gather**:
 
 ```tl
+-- stand-alone context: container O = List[No], P = List[Ks], XAxis = List[Ni]; tensor X(XAxis), Y(O), W(P)
 Y[o] := ... X[idx(o,p)] ...
 ```
 
 Some operators (transpose/deconv-style or routing-style updates) are naturally **scatter**:
 
 ```tl
+-- stand-alone context: container O = List[No], P = List[Ks], YAxis = List[Ny]; tensor X(O), Y(YAxis), W(P)
 Y[tgt(o,p)] := W[p] · X[o]
 ```
 
@@ -719,6 +733,7 @@ container Nbr   = Neighborhood[V]
 Tensor declarations over named containers:
 
 ```tl
+-- stand-alone context: container Tok = List[n], Time = List[T], Mask = Maybe[has_mask], Mod = Sum{text,image}, V = List[num_nodes], Nbr = Neighborhood[V], d = List[dim]; tensor X(Time, Tok, d), M(Time, Tok, Mask), F(Mod, Tok, d)
 tensor X(Time, Tok, d)
 tensor M(Time, Tok, Mask)
 tensor F(Mod, Tok, d)
@@ -741,6 +756,9 @@ where:
 GNN-specialized `Neighborhood` example (predicate-backed):
 
 ```tl
+container V = List[n]
+container P = List[pmax]
+
 axis v : ℕ = n
 axis p : ℕ = pmax
 axis u : ℕ = n
@@ -802,6 +820,7 @@ F[image, i, d]
 ## 7.4 Optional explicit reduce binder
 
 ```tl
+-- stand-alone context: container Time = List[T], Tok = List[n], d = List[d]; tensor A(Time, Tok), B(Tok, d), Y(Time, d)
 Y[t, d] := reduce(sum, i in Tok) (A[t, i] · B[i, d])
 ```
 
@@ -816,6 +835,7 @@ Clarification versus current Lean DSL:
 
 ### Gather (pullback)
 ```tl
+-- stand-alone context: container Out = List[No], P = List[Ks], XAxis = List[Ni], Cin = List[Cin], Cout = List[Cout]; tensor X(XAxis, Cin), W(Cout, Cin, P), Y(Out, Cout)
 Y[out...] := W[..., p] · X[idx(out..., p), ...]
 ```
 
@@ -826,12 +846,14 @@ Definitions:
 
 Examples:
 ```tl
+-- stand-alone context: container V = List[num_nodes], K = List[k], Cin = List[Cin], Cout = List[Cout]; tensor X(V, Cin), W(Cout, Cin, K), Y(V, Cout)
 Y[v, co] := W[co, ci, p] · X[v + p, ci]
 Y[v, co] := W[co, ci, p] · X[nbr(v, p), ci]
 ```
 
 ### Scatter (pushforward), existing mapped-LHS form
 ```tl
+-- stand-alone context: container Out = List[No], P = List[Ks], YAxis = List[Ny], Cin = List[Cin], Cout = List[Cout]
 Y[tgt(out..., p), ...] := RHS
 ```
 
@@ -842,6 +864,7 @@ Definitions:
 
 Example:
 ```tl
+-- stand-alone context: container V = List[num_nodes], P = List[k], YAxis = List[Ny], Cin = List[Cin], Cout = List[Cout]; tensor X(V, Cin), W(Cout, Cin, P), Y(YAxis, Cout)
 Y[tgt(v, p), co] := W[co, ci, p] · X[v, ci]
 ```
 
@@ -893,6 +916,7 @@ Connection to current Lean `St` behavior:
 
 For
 ```tl
+-- stand-alone context: container O = List[No], P = List[Ks], XAxis = List[Ni], YAxis = List[No]
 Y[o] := ... X[idx(o,p)] ...
 ```
 `idx` must type-check as:
@@ -910,6 +934,7 @@ Definitions:
 
 For
 ```tl
+-- stand-alone context: container O = List[No], P = List[Ks], YAxis = List[Ny]
 Y[tgt(o,p)] := RHS(o,p)
 ```
 `tgt` must type-check as:
@@ -973,6 +998,11 @@ M[t, i, none]   := ...
 Example (Iverson value gating):
 
 ```tl
+container Time = List[T]
+container Tok  = List[n]
+tensor X(Time, Tok)
+tensor Y(Time, Tok)
+
 Y[t, i] := [i <= t] · X[t, i]
 ```
 
@@ -1109,6 +1139,7 @@ act_t(pos) = pos + t
 Convolution form:
 
 ```tl
+-- stand-alone context: container O = List[No], K = List[Ks], In = List[Ni]; tensor X(In), W(K), Y(O)
 Y[o] := W[p] · X[o + p]
 ```
 
@@ -1134,6 +1165,7 @@ for a corresponding slot relabeling `p -> p'`.
 Message-passing form:
 
 ```tl
+-- stand-alone context: container V = List[num_nodes], Nbr = Neighborhood[V], Cin = List[Cin], Cout = List[Cout]; tensor X(V, Cin), W(Cout, Cin, Nbr), Y(V, Cout)
 Y[v, co] := W[co, ci, p] · X[nbr(v,p), ci]
 ```
 
@@ -1341,6 +1373,13 @@ Practical DSL patterns:
 1. **Locality/stencil legality (CNNs)**
 
 ```tl
+axis ox : ℕ = nox
+axis oy : ℕ = noy
+axis px : ℕ = kx
+axis py : ℕ = ky
+axis ix : ℕ = nix
+axis iy : ℕ = niy
+
 predicate stencil2d_src(ox, oy, px, py, ix, iy)
 stencil2d_src[ox,oy,px,py,ix,iy] :=
   [ix = ox + px] ·
@@ -1357,6 +1396,13 @@ Corresponding `Shape/Pos`:
 2. **Neighborhood selection (GNNs)**
 
 ```tl
+container V = List[n]
+container P = List[pmax]
+
+axis v : ℕ = n
+axis p : ℕ = pmax
+axis u : ℕ = n
+
 predicate adj_slot(v, p, u)      -- slot p of v selects neighbor u
 ```
 
@@ -1369,6 +1415,12 @@ Corresponding `Shape/Pos`:
 3. **Ragged/variable-length validity**
 
 ```tl
+container B = List[batch]
+container T = List[tmax]
+
+axis b : ℕ = batch
+axis t : ℕ = tmax
+
 predicate token_valid(b, t)
 token_valid[b,t] := [t < len[b]]
 ```
@@ -1381,6 +1433,10 @@ Corresponding `Shape/Pos`:
 4. **Branch/activity guards for multimodal `Sum`/`Maybe`**
 
 ```tl
+container I = List[num_items]
+
+axis i : ℕ = num_items
+
 predicate active_text(i)
 predicate active_image(i)
 ```
@@ -1393,6 +1449,14 @@ Corresponding `Shape/Pos` (one simple formulation):
 5. **Scatter write legality as a predicate**
 
 ```tl
+container O = List[num_outputs]
+container P = List[pmax]
+container Y = List[num_targets]
+
+axis o : ℕ = num_outputs
+axis p : ℕ = pmax
+axis y : ℕ = num_targets
+
 predicate write_target(o, p, y)
 ```
 
