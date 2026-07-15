@@ -37,7 +37,7 @@ The tensor-logic DSL (§12) and everything that executes. Types here are first-o
 `SizeExpr`/`Int`-valued, and `deriving DecidableEq Repr ToExpr`, so the elaborator can build,
 compare, and embed them at elaboration time.
 
-  Exec/*                           UID minting, term traversal, the §7.4 `Context` coequalizer
+  Exec/*                           UID minting, term traversal
   DSL/Ast,                         the front end: computable sizes, the typed AST, the surface
   DSL/Syntax, DSL/Elab             grammar, and value-returning elaborators (`tlprog!{…}`)
   DSL/Target                       the `*P` PRESENTATION types (`AxisP`/`StMatP`/`BrBaseP`/
@@ -111,7 +111,6 @@ import LeanNCD.Props.Generic
 import LeanNCD.Instances.StBr
 import LeanNCD.Exec.Uid
 import LeanNCD.Exec.Traversable
-import LeanNCD.Exec.Context
 import LeanNCD.Base.SizeExpr
 import LeanNCD.DSL.Ast
 import LeanNCD.DSL.Syntax

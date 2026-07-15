@@ -43,29 +43,6 @@ run_cmd do
   | .ok rp _ => unless rp.env.contains "A" do throwError "env missing declared A"
   | .error e _ => throwError s!"errored: {repr e}"
 
--- Two `k` axes with DIFFERENT uids (7 and 3) must unify to the canonical (max = 7);
--- i,j keep their own uids. (Feeds resolveDecls directly with distinct uids — skips
--- assignUIDs, which would otherwise pre-bind the two k's.)
-run_cmd do
-  let i : AxisSpec := { name := "i", uid := 5, kind := .real none }
-  let j : AxisSpec := { name := "j", uid := 4, kind := .real none }
-  let k1 : AxisSpec := { name := "k", uid := 7, kind := .real none }
-  let k2 : AxisSpec := { name := "k", uid := 3, kind := .real none }
-  let lp : LabeledProgram := { decls := [], stmts := [
-    .assign "Y" [ .free i, .free j ]
-      { body := { terms := [ { factors := [
-            .read "W" [ .axis i, .axis k1 ],
-            .read "X" [ .axis k2, .axis j ] ] } ] },
-        nonlin := .identity } ] }
-  match (resolveDecls lp >>= unifyAxes) |>.run 0 with
-  | .ok cp _ =>
-      let prog : TLProgram := { decls := cp.decls, stmts := cp.stmts }
-      let kUIDs := ((collectAxisNameUID prog).filter (·.1 == "k")).map (·.2) |>.eraseDups
-      unless kUIDs == [7] do throwError s!"k should unify to [7], got {kUIDs}"
-      let iUIDs := ((collectAxisNameUID prog).filter (·.1 == "i")).map (·.2) |>.eraseDups
-      unless iUIDs == [5] do throwError s!"i should stay [5], got {iUIDs}"
-  | .error e _ => throwError s!"errored: {repr e}"
-
 -- lowerArith
 -- Upsample: Out[2*i, 2*j] := X[i,j] — affine LHS ⇒ reclassified to Stmt.scatter, injective (no error).
 run_cmd do
@@ -74,9 +51,9 @@ run_cmd do
     [ .affine (.scale 2 (ax "i")), .affine (.scale 2 (ax "j")) ]
     { body := { terms := [ { factors := [ .read "X" [ .axis (ax "i"), .axis (ax "j") ] ] } ] },
       nonlin := .identity }
-  let cp : CanonicalProgram :=
-    { decls := [], stmts := [upsample], env := {}, extNames := ∅, ctx := { classes := [] } }
-  match lowerArith cp |>.run 0 with
+  let rp : ResolvedProgram :=
+    { decls := [], stmts := [upsample], env := {}, extNames := ∅ }
+  match lowerArith rp |>.run 0 with
   | .ok lp _ =>
       match lp.stmts with
       | [ .scatter "Out" _ _ _ ] => pure ()
@@ -92,9 +69,9 @@ run_cmd do
     { body := { terms := [ { factors := [ .read "W" [.axis (ax "i"), .axis (ax "k")],
                                             .read "X" [.axis (ax "k"), .axis (ax "j")] ] } ] },
       nonlin := .identity }
-  let cp : CanonicalProgram :=
-    { decls := [], stmts := [mm], env := {}, extNames := ∅, ctx := { classes := [] } }
-  match lowerArith cp |>.run 0 with
+  let rp : ResolvedProgram :=
+    { decls := [], stmts := [mm], env := {}, extNames := ∅ }
+  match lowerArith rp |>.run 0 with
   | .ok lp _ => match lp.stmts with
                 | [ .assign "Y" _ _ ] => pure ()
                 | _ => throwError "matmul assign should remain Stmt.assign"
@@ -104,9 +81,9 @@ run_cmd do
 run_cmd do
   let collapse : Stmt := .assign "Z" [ .affine (.const 0) ]
     { body := { terms := [ { factors := [ .read "X" [ .const 0 ] ] } ] }, nonlin := .identity }
-  let cp : CanonicalProgram :=
-    { decls := [], stmts := [collapse], env := {}, extNames := ∅, ctx := { classes := [] } }
-  match lowerArith cp |>.run 0 with
+  let rp : ResolvedProgram :=
+    { decls := [], stmts := [collapse], env := {}, extNames := ∅ }
+  match lowerArith rp |>.run 0 with
   | .error (.overlappingScatter "Z") _ => pure ()
   | .error e _ => throwError s!"wrong error: {repr e}"
   | .ok _ _ => throwError "expected overlappingScatter for collapsing const LHS"
@@ -122,7 +99,7 @@ run_cmd do
   let gRec  : Stmt := .assign "G" [ .free j, .iterNext l ] (rhs "G")
   let hBase : Stmt := .assign "H" [ .free j, .iterAt l 0 ] { body := { terms := [] }, nonlin := .identity }
   let hRec  : Stmt := .assign "H" [ .free j, .iterNext l ] (rhs "H")
-  let lp : LoweredProgram := { decls := [], stmts := [gBase, gRec, hBase, hRec], env := {}, extNames := ∅, ctx := { classes := [] } }
+  let lp : LoweredProgram := { decls := [], stmts := [gBase, gRec, hBase, hRec], env := {}, extNames := ∅ }
   match finalizeScans lp |>.run 0 with
   | .ok sp _ =>
       let scans := sp.stmts.filterMap (fun | .scan _ _ b r _ => some (b, r) | .plain _ => none | .scanPre _ _ _ => none)
@@ -138,7 +115,7 @@ run_cmd do
   let l : AxisSpec := { name := "l", uid := 9, kind := .nat none }
   let orphan : Stmt := .assign "S" [ .iterNext l ]
     { body := { terms := [ { factors := [ .read "S" [ .axis l ] ] } ] }, nonlin := .identity }
-  let lp : LoweredProgram := { decls := [], stmts := [orphan], env := {}, extNames := ∅, ctx := { classes := [] } }
+  let lp : LoweredProgram := { decls := [], stmts := [orphan], env := {}, extNames := ∅ }
   match finalizeScans lp |>.run 0 with
   | .error (.missingBaseCase "S") _ => pure ()
   | .error e _ => throwError s!"wrong error: {repr e}"

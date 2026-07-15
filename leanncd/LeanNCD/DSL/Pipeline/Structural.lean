@@ -19,9 +19,8 @@ non-masked `Nonlin` variant genuinely contributes no axis specs. **Assumption th
 any future `Nonlin` variant:** if it carries an optional mask (`Option BoolExpr`, like
 `softmax`/`normalize`/`l2normalize`), it needs an explicit `some m => specsBool m` arm here —
 otherwise the wildcard silently swallows that mask's axis specs (this bit `l2normalize` once
-already; see the git history). The three public collectors below are thin projections of one
-traversal: by name (`TLProgram.axisNames`, de-duplicated), by uid (`Stmt.uids`), or both
-(`collectAxisNameUID`). -/
+already; see the git history). The two public collectors below are thin projections of one
+traversal: by name (`TLProgram.axisNames`, de-duplicated) or by uid (`Stmt.uids`). -/
 
 private def specsIdx : IdxExpr → List AxisSpec
   | .axis a => [a] | .const _ => [] | .scale _ a => [a]
@@ -247,37 +246,6 @@ def checkDtypes (rp : ResolvedProgram) : FreshM ResolvedProgram := do
     | .recurMorphism _ _ _ => pure ()
   return rp
 
-/-! ## The `unifyAxes` phase (§7.4 UID coequalizer)
-
-Groups every axis occurrence sharing a NAME within program scope, picks the largest UID as the
-canonical representative (the §7.3 cocone vertex), and substitutes it throughout the program. In
-the full pipeline `assignUIDs` already binds each name to one UID, so this is effectively identity
-there; the standalone test feeds DISTINCT UIDs for one name to genuinely exercise the merge. -/
-
-/-- Every (axis-name, axis-uid) pair occurring anywhere in the program, in program order.
-    Mirrors `TLProgram.axisNames` exactly but keeps the uid alongside the name; the test reads
-    it back to assert post-unification UIDs. -/
-def collectAxisNameUID (p : TLProgram) : List (String × UID) :=
-  p.axisSpecs.map (fun a => (a.name, a.uid))
-
-/-- Realize the §7.4 UID coequalizer: group UIDs by axis name, canonical = largest UID per name,
-    substitute throughout. Pure inside; lifted via `return`. Identity when each name has one UID. -/
-def unifyAxes (rp : ResolvedProgram) : FreshM CanonicalProgram := do
-  let prog : TLProgram := { decls := rp.decls, stmts := rp.stmts }
-  -- group UIDs by axis name
-  let byName : HashMap String (Finset UID) :=
-    (collectAxisNameUID prog).foldl
-      (fun m (nm, u) => m.insert nm (insert u (m.getD nm ∅))) {}
-  -- one EqClass per name; canonical = largest UID
-  let ctx : Context AxisSpec :=
-    byName.fold (fun c _ uids =>
-      match uids.max with
-      | some top => Context.merge c { bucket := uids, canonical := { data := default, uid := top } }
-      | none     => c) { classes := [] }
-  let prog' := Context.apply ctx prog        -- TermTraversable TLProgram
-  return { decls := prog'.decls, stmts := prog'.stmts,
-           env := rp.env, extNames := rp.extNames, ctx }
-
 /-! ## The `lowerArith` phase (Phase 4 — affine index arithmetic)
 
 E2a SCOPING DECISION (a deliberate divergence from §12.4): affine *reads* (e.g.
@@ -304,8 +272,8 @@ def LHSSlot.collapses : LHSSlot → Bool
   | .affine (.const _) => true
   | _                  => false
 
-def lowerArith (cp : CanonicalProgram) : FreshM LoweredProgram := do
-  let stmts' ← cp.stmts.mapM (fun s => do
+def lowerArith (rp : ResolvedProgram) : FreshM LoweredProgram := do
+  let stmts' ← rp.stmts.mapM (fun s => do
     match s with
     | .assign nm slots rhs =>
         -- Reclassify affine (Out[2*i,2*j]) OR diagonal (Y[i,i], a repeated free axis) LHS to a
@@ -321,8 +289,8 @@ def lowerArith (cp : CanonicalProgram) : FreshM LoweredProgram := do
           throw (CompileError.overlappingScatter nm)
         else return s
     | .recurMorphism _ _ _ => return s)   -- no affine LHS; passes through unchanged
-  return { decls := cp.decls, stmts := stmts', env := cp.env,
-           extNames := cp.extNames, ctx := cp.ctx }
+  return { decls := rp.decls, stmts := stmts', env := rp.env,
+           extNames := rp.extNames }
 
 /-! ## The `finalizeScans` phase (Phase 5 — recurrence → Scan nodes)
 
@@ -516,6 +484,6 @@ def finalizeScans (lp : LoweredProgram) : FreshM ScanProgram := do
   -- plain = non-iter stmts with NO scan dependency (loop-invariant; evaluated once).
   let plainStmts := nonPre.filter (fun s => s.iterInfo.isEmpty && (dep.getD s.lhsName []).isEmpty)
   return { decls := lp.decls, stmts := plainStmts.map ScanStmt.plain ++ preNodes ++ nodes,
-           env := lp.env, extNames := lp.extNames, ctx := lp.ctx }
+           env := lp.env, extNames := lp.extNames }
 
 end LeanNCD

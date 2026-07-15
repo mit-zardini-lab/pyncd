@@ -11,7 +11,7 @@ run_cmd do
                                             .read "K" [.axis (ax "s"), .axis (ax "d")] ] } ] },
       nonlin := .softmax (some mask) }
   let sp : ScanProgram :=
-    { decls := [], stmts := [ .plain attn ], env := {}, extNames := ∅, ctx := { classes := [] } }
+    { decls := [], stmts := [ .plain attn ], env := {}, extNames := ∅ }
   match splitNonlins sp |>.run 0 with
   | .ok lp _ =>
       let stmts := lp.stmts.filterMap (fun | .plain s => some s | .scan .. => none | .scanPre .. => none)
@@ -29,7 +29,7 @@ run_cmd do
   let mm : Stmt := .assign "Y" [ .free (ax "i") ]
     { body := { terms := [ { factors := [ .read "X" [.axis (ax "i")] ] } ] }, nonlin := .identity }
   let sp : ScanProgram :=
-    { decls := [], stmts := [ .plain mm ], env := {}, extNames := ∅, ctx := { classes := [] } }
+    { decls := [], stmts := [ .plain mm ], env := {}, extNames := ∅ }
   match splitNonlins sp |>.run 0 with
   | .ok lp _ => unless lp.stmts.length == 1 do throwError "identity assign should not split"
   | .error e _ => throwError s!"errored: {repr e}"
@@ -46,7 +46,7 @@ run_cmd do
   let tStmt      : ScanStmt := .plain (.assign "T" [ .free (ax "i") ] (rd "X"))      -- T := X
   let secondStmt : ScanStmt := .plain (.assign "Second" [ .free (ax "i") ] (rd "X")) -- Second := X (independent output, unread)
   let yStmt      : ScanStmt := .plain (.assign "Y" [ .free (ax "i") ] (rd "T"))      -- Y := T (tail output)
-  let lp : LinearProgram := { decls := [], stmts := [tStmt, secondStmt, yStmt], env := {}, extNames := ∅, ctx := { classes := [] } }
+  let lp : LinearProgram := { decls := [], stmts := [tStmt, secondStmt, yStmt], env := {}, extNames := ∅ }
   match schedule lp |>.run 0 with
   | .ok sp _ =>
       let names := sp.stmts.flatMap ScanStmt.writes
@@ -62,7 +62,7 @@ run_cmd do
   let mm : Stmt := .assign "Y" [ .free i, .free j ]
     { body := { terms := [ { factors := [ .read "W" [.axis i, .axis k], .read "X" [.axis k, .axis j] ] } ] },
       nonlin := .identity }
-  let sp : ScheduledProgram := { decls := [], stmts := [ .plain mm ], env := {}, extNames := (insert "W" (insert "X" (∅ : Finset String))), ctx := { classes := [] }, explicitSizes := {} }
+  let sp : ScheduledProgram := { decls := [], stmts := [ .plain mm ], env := {}, extNames := (insert "W" (insert "X" (∅ : Finset String))), explicitSizes := {} }
   match route sp |>.run 0 with
   | .ok tc _ =>
       unless tc.nExternal == 2 do throwError s!"nExternal should be 2, got {tc.nExternal}"
@@ -82,7 +82,7 @@ run_cmd do
   let i := ax "i" 1
   let conv : Stmt := .assign "Y" [ .free i ]
     { body := { terms := [ { factors := [ .read "X" [ .scale 2 i ] ] } ] }, nonlin := .identity }
-  let sp : ScheduledProgram := { decls := [], stmts := [ .plain conv ], env := {}, extNames := (insert "X" (∅ : Finset String)), ctx := { classes := [] }, explicitSizes := {} }
+  let sp : ScheduledProgram := { decls := [], stmts := [ .plain conv ], env := {}, extNames := (insert "X" (∅ : Finset String)), explicitSizes := {} }
   match route sp |>.run 0 with
   | .ok tc _ =>
       let sm := tc.steps.head!.reindexings.head!
@@ -97,7 +97,7 @@ run_cmd do
   let i := ax "i" 1
   let s : Stmt := .assign "Y" [ .free i ]
     { body := { terms := [ { factors := [ .read "Ghost" [ .axis i ] ] } ] }, nonlin := .identity }
-  let sp : ScheduledProgram := { decls := [], stmts := [ .plain s ], env := {}, extNames := (∅ : Finset String), ctx := { classes := [] }, explicitSizes := {} }
+  let sp : ScheduledProgram := { decls := [], stmts := [ .plain s ], env := {}, extNames := (∅ : Finset String), explicitSizes := {} }
   match route sp |>.run 0 with
   | .ok tc _ => throwError s!"expected route to reject unresolved read, got {tc.steps.length} step(s)"
   | .error (.undeclaredName nm) _ => unless nm == "Ghost" do throwError s!"wrong undeclared name: {nm}"
@@ -127,7 +127,7 @@ run_cmd do
   let sinkStmt : ScanStmt := .plain (.assign "Sink" [.free i, .free j] (mkRd "Y" [.axis i, .axis j]))
   -- Source order: [yStmt, hStmt, sinkStmt] -- NOT topological (Y before H)
   let exts : Finset String := insert "W2" (insert "W1" (insert "X" ∅))
-  let lp : LinearProgram := { decls := [], stmts := [yStmt, hStmt, sinkStmt], env := {}, extNames := exts, ctx := { classes := [] } }
+  let lp : LinearProgram := { decls := [], stmts := [yStmt, hStmt, sinkStmt], env := {}, extNames := exts }
   match (do let sp ← schedule lp; route sp) |>.run 0 with
   | .ok tc _ =>
       -- After topoSort, every internal wire internal j _ at step i must have j < i.
@@ -144,7 +144,7 @@ run_cmd do
     { body := { terms := [ { factors := [ .read nm [ .axis (ax "i") ] ] } ] }, nonlin := .identity }
   let aStmt : ScanStmt := .plain (.assign "A" [ .free (ax "i") ] (rd "B"))  -- A := B
   let bStmt : ScanStmt := .plain (.assign "B" [ .free (ax "i") ] (rd "A"))  -- B := A
-  let lp : LinearProgram := { decls := [], stmts := [aStmt, bStmt], env := {}, extNames := ∅, ctx := { classes := [] } }
+  let lp : LinearProgram := { decls := [], stmts := [aStmt, bStmt], env := {}, extNames := ∅ }
   match schedule lp |>.run 0 with
   | .ok _ _ => throwError "expected cyclicDataflow, got .ok (schedule silently source-ordered a cycle)"
   | .error (.cyclicDataflow _) _ => pure ()

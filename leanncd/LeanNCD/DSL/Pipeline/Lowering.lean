@@ -59,7 +59,7 @@ def splitScan (sc : ScanStmt) : FreshM (List ScanStmt) := do
 def splitNonlins (sp : ScanProgram) : FreshM LinearProgram := do
   let stmts' ← sp.stmts.flatMapM splitScan
   return { decls := sp.decls, stmts := stmts', env := sp.env,
-           extNames := sp.extNames, ctx := sp.ctx }
+           extNames := sp.extNames }
 
 /-! ## Phase 7 — `schedule`
 
@@ -162,7 +162,7 @@ def schedule (lp : LinearProgram) : FreshM ScheduledProgram := do
   let orderedReads := ordered.flatMap ScanStmt.reads
   let liveExtNames := lp.extNames.filter (fun nm => orderedReads.contains nm)
   return { decls := lp.decls, stmts := ordered, env := lp.env, extNames := liveExtNames,
-           ctx := lp.ctx, explicitSizes }
+           explicitSizes }
 
 /-! ## Phase 8 — `route`
 
