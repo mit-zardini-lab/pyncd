@@ -1,24 +1,26 @@
 # leanncd restructuring suggestions
 
-> **Resume here (checkpoint 2026-07-12).** E6 (property-based oracles) is now fully DONE — all
-> three laws (reordering, materialization, scan-unrolling) landed and pushed to `main`; see its
-> ✅ marker in [E6](#e6-property-based-oracles-the-tests-the-portfolio-cant-express) below for
-> the commit range and the one real bug it caught (template 6's `G[r,c]+A[r,c]` was silently
-> computing multiplication). Per this doc's own critical path (see
+> **Resume here (checkpoint 2026-07-15).** E6 (property-based oracles) and **E11** (do UIDs
+> earn their keep?) are both now fully DONE — see their ✅ markers in
+> [E6](#e6-property-based-oracles-the-tests-the-portfolio-cant-express) and
+> [E11](#e11-investigation-do-uids-earn-their-keep) below. E11's outcome: `unifyAxes` +
+> `Exec/Context.lean` deleted as proven-dead machinery, `CanonicalProgram` merged into
+> `ResolvedProgram`. Per this doc's own critical path (see
 > [How the explorations relate to the Part I spikes](#how-the-explorations-relate-to-the-part-i-spikes)),
-> the next open item is **[E11](#e11-investigation-do-uids-earn-their-keep)** — "do UIDs earn
-> their keep?", a ~1 day investigation that gates Spike 2's accessor relocation — or,
-> independently, the **cospan-model spike** (Wave 3b, unlocks
+> the next open item is **Spike 2** (one home for AST accessors and read/axis traversals) — now
+> unblocked, since E11 settled that axis identity is purely name-based and UIDs carry no extra
+> distinguishing information for 2b/2c to worry about — or, independently, the **cospan-model
+> spike** (Wave 3b, unlocks
 > **[E13](#e13-generators-for-br--closing-brop-and-promoting-e6s-laws-to-theorems)**) if that
-> thread is preferred instead. Neither has been started.
+> thread is preferred instead.
 >
 > Quick resume checklist:
 >
-> 1. `cd leanncd && lake build` — confirm still green (8,611 jobs, 36 sorries / 14 in the
->    default build, as of this checkpoint).
-> 2. Read whichever of E11 / the cospan model you're picking up (E11 is a bounded
->    investigation, not a redesign — see its writeup for the specific unknowns to resolve).
-> 3. Use `superpowers:brainstorming` to scope it before touching code, same as E6.
+> 1. `cd leanncd && lake build` — confirm still green (sorry count in the default build
+>    unchanged from the last checkpoint — E11 touched no proof).
+> 2. Read Spike 2's writeup (or the cospan model's, if that thread is preferred) before
+>    touching code.
+> 3. Use `superpowers:brainstorming` to scope it before touching code, same as E6/E11.
 
 A global review of `leanncd/` (~9,200 lines of Lean across 49 modules) after the recent wave of
 feature fixes (`Factor.unaryFn` inline transcendentals, new `Nonlin` activations, `l2normalize`,
@@ -1023,6 +1025,22 @@ lineage wouldn't suggest looking for.
 *References:* Futamura, "Partial Evaluation of Computation Process — An Approach to a Compiler-Compiler" (Systems, Computers, Controls 1971; reprinted in *Higher-Order and Symbolic Computation* 12(4):381–391, 1999); overview: [Partial evaluation — Futamura projections](https://en.wikipedia.org/wiki/Partial_evaluation#Futamura_projections) — specializing an interpreter to a fixed program *is* a compiler; Reinking, Xie, de Moura & Leijen, [Perceus: Garbage Free Reference Counting with Reuse](https://xnning.github.io/papers/perceus.pdf) (PLDI 2021) — the reuse-analysis technique above, from Lean 4's own compiler.
 
 ### E11. Investigation: do UIDs earn their keep?
+
+> **✅ DONE — merged to `main` 2026-07-15.** All three honest unknowns resolved: no phase
+> distinguishes same-named occurrences after unification (marks live on the LHS slot, never on
+> `AxisSpec` identity); `unifyAxes`'s own doc comment already admitted it's identity given
+> `assignUIDs`'s one-uid-per-name invariant, confirmed by tracing every bucket it could ever
+> group; and the bridge/acset layer's `axisUidFor3` is an unrelated, independently-synthesized
+> id — `AxisP` carries no pipeline uid at all. Outcome: **major simplification**, matching Spike
+> 1a's shape. Deleted `unifyAxes`, `collectAxisNameUID`, and `Exec/Context.lean`'s generic
+> coequalizer (`EqClass`/`Context`/`Context.merge`/`Context.apply`); merged the now-redundant
+> `CanonicalProgram` into `ResolvedProgram` (identical once `ctx` is gone); dropped the
+> write-only `ctx` field from `LoweredProgram`/`ScanProgram`/`LinearProgram`/`ScheduledProgram`.
+> `Compile.lean`'s pipeline: 9 phases → 8. Explicitly **descoped**: full elimination of `Nat` UID
+> as axis identity (rekeying `Eval`'s `HashMap UID _` by `String` name) — that reaches
+> `dedupByUid`, which `RouteSpec.lean` unfolds definitionally (`dedupByUid_eq_foldl := rfl`),
+> Constraint 3's proof-repair territory, deferred pending Spike 6. See
+> `docs/superpowers/specs/2026-07-15-e11-uid-investigation-design.md` for the full evidence trail.
 
 Axis identity is *defined* to be name-based within program scope (§12.1, quoted at
 `Structural.lean:12`), yet the pipeline mints `Nat` UIDs (`FreshM`), then runs a coequalizer
