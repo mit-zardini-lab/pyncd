@@ -42,7 +42,7 @@ compare, and embed them at elaboration time.
   DSL/Syntax, DSL/Elab             grammar, and value-returning elaborators (`tlprog!{…}`)
   DSL/Target                       the `*P` PRESENTATION types (`AxisP`/`StMatP`/`BrBaseP`/
                                    `ThreadedComposed`) — computable mirrors of the math tower
-  DSL/Pipeline/*, DSL/Compile      `TLProgram.compile`: eight transformation phases (+ two
+  DSL/Pipeline/*, DSL/Compile      `TLProgram.compile`: seven transformation phases (+ two
                                    validation passes, `checkReadRanks`/`checkDtypes`) threaded
                                    in `FreshM`, taking source → `ThreadedComposed`
   Eval/*                           a `Float` reference interpreter (`TLProgram.eval`)
