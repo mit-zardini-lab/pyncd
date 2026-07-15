@@ -257,6 +257,8 @@ Therefore, this note **does not** claim:
 - that every container supports contraction by default,
 - that every container supports every optimization pass,
 - or that representation alone implies full tensor algebra.
+For a concrete minimal extension set aimed at practical tensor-network factorizations
+(including MERA), see [Appendix B](#appendix-b-minimal-extensions-for-practical-tensor-network-factorizations-including-mera).
 
 It **does** claim:
 - classical tensors are the all-`ListDesc` special case (surface: all `List[n]` axes),
@@ -1410,3 +1412,187 @@ Benefits of generalized predicates:
 - **Dependent routing:** branch activation for `Sum`/`Maybe` can be typed as predicate-governed position availability.
 - **Certified optimization paths:** proven predicate properties justify sparse/local kernels instead of dense fallback.
 - **Better diagnostics:** failures point to the exact predicate, axis, and violated law.
+
+---
+
+## Appendix B. Minimal extensions for practical tensor-network factorizations (including MERA)
+
+This appendix makes explicit what must be added to move from "MERA can be written as
+explicit contractions" to "MERA is practical and checkable as a first-class program."
+
+### B.1 Scope of this extension set
+
+Goals:
+1. represent network topology explicitly (nodes, ports, bonds, open legs),
+2. type-check bond/port compatibility statically,
+3. state and check tensor laws (isometry/unitarity),
+4. support causal-cone and contraction planning metadata.
+
+Non-goal:
+- this appendix still does not define a full optimizer/training algorithm; it defines
+  the minimum typed IR and legality hooks such an optimizer requires.
+
+### B.2 New containers (explicit `Shape/Pos` definitions)
+
+#### 1) `MeraLayerDesc` (finite scale levels)
+
+```text
+Shape(MeraLayerDesc) = Fin L
+Pos(MeraLayerDesc, l) = Unit
+```
+
+Interpretation:
+- `l` is a scale/layer index (`0 .. L-1`).
+- This is a bookkeeping axis used to index layer-local objects.
+
+#### 2) `MeraNodeDesc` (nodes at each layer)
+
+```text
+Shape(MeraNodeDesc) = Fin L
+Pos(MeraNodeDesc, l) = NodesAt(l)
+```
+
+where `NodesAt(l)` is the finite set of node ids at layer `l`.
+
+Interpretation:
+- captures the nonuniform "how many tensors exist at each scale" structure.
+
+#### 3) `MeraPortDesc` (ports/legs on each node)
+
+```text
+Shape(MeraPortDesc) = (l, n) with l : Fin L and n : NodesAt(l)
+Pos(MeraPortDesc, (l,n)) = PortsOf(l,n)
+```
+
+where `PortsOf(l,n)` is the finite set of local leg labels (for example
+`in0`, `in1`, `out`, `up`, `downL`, `downR` depending on node type).
+
+Interpretation:
+- makes tensor arity and leg identity explicit at the index level.
+
+#### 4) `MeraBondDesc` (internal contracted edges)
+
+```text
+Shape(MeraBondDesc) = Bonds
+Pos(MeraBondDesc, b) = Endpoints(b)
+```
+
+with:
+
+```text
+Endpoints(b) = {left, right}
+```
+
+and endpoint metadata:
+
+```text
+endpoint_node : (b, side) -> (l, n)
+endpoint_port : (b, side) -> p where p : PortsOf(endpoint_node(b,side))
+```
+
+Interpretation:
+- each internal bond connects exactly two concrete node ports.
+
+#### 5) `MeraOpenLegDesc` (physical/input-output open legs)
+
+```text
+Shape(MeraOpenLegDesc) = OpenLegs
+Pos(MeraOpenLegDesc, q) = Unit
+```
+
+with attachment metadata:
+
+```text
+openleg_node : q -> (l, n)
+openleg_port : q -> p where p : PortsOf(openleg_node(q))
+```
+
+Interpretation:
+- separates contracted internal bonds from externally visible legs.
+
+#### 6) `CausalConeDesc` (optional but practical)
+
+```text
+Shape(CausalConeDesc) = (target_open_leg, cutoff_layer)
+Pos(CausalConeDesc, (q, lc)) = ConeNodes(q, lc)
+```
+
+where `ConeNodes(q,lc)` is the finite set of nodes in the causal cone of `q`
+up to layer `lc`.
+
+Interpretation:
+- allows typed restriction to cone-local contractions.
+
+### B.3 Required legality predicates/laws
+
+The following predicates are the minimal static obligations:
+
+1. **Endpoint existence and uniqueness**
+   - every `(b, side)` maps to exactly one `(node, port)`,
+   - each internal port endpoint participates in exactly one bond or one open leg attachment as declared.
+
+2. **Port closure**
+   - mapped ports are in-domain:
+     `endpoint_port(b,side) : PortsOf(endpoint_node(b,side))`.
+
+3. **Dimension compatibility**
+   - if bond `b` connects `(nodeA, portA)` and `(nodeB, portB)`, then:
+     `Dim(nodeA, portA) = Dim(nodeB, portB)`.
+
+4. **Node-type arity law**
+   - each node kind (disentangler/isometry/top tensor) has a declared required port pattern,
+     and `PortsOf(l,n)` must satisfy that pattern.
+
+5. **Acyclic layer flow law (for standard MERA variants)**
+   - directed coarse-graining edges respect layer order (no illegal backward edges unless explicitly allowed by variant).
+
+6. **Finite foldability**
+   - all contraction domains induced by `Bonds`/`ConeNodes` are finite and have lawful fold instances for declared reducers.
+
+### B.4 Tensor law declarations (isometry/unitarity)
+
+Practical MERA requires constraints beyond shape legality. Add law declarations:
+
+```tl
+law unitary(U, node):
+  contract(conj(U[node]), U[node], over = in_ports(node)) = I(out_ports(node))
+
+law isometric(W, node):
+  contract(conj(W[node]), W[node], over = fine_ports(node)) = I(coarse_ports(node))
+```
+
+Compiler obligations:
+- type-check contracted vs free ports in each law,
+- verify identity target space matches free-port dimensions,
+- reject laws referencing non-foldable/ill-typed contraction domains.
+
+### B.5 Minimal DSL sketch with these containers
+
+```tl
+container Layer = MeraLayer[L]
+container Node  = MeraNode[Layer]
+container Port  = MeraPort[Node]
+container Bond  = MeraBond
+container Open  = MeraOpenLeg
+container Cone  = CausalCone[Open, Layer]
+
+tensor T(Node, Port)          -- local tensor entries by node and port tuple
+predicate endpoint(Bond, side, Node, Port)
+predicate open_attach(Open, Node, Port)
+predicate dim_eq(Node, Port, Node, Port)
+```
+
+This is schematic: concrete programs usually tabulate each node tensor as a
+rank-k `ListDesc`-specialized payload indexed by that node's ordered port basis.
+
+### B.6 What this extension enables immediately
+
+- First-class typed network topology (instead of ad-hoc flattened indices),
+- static checks for bond/port consistency and dimension matching,
+- explicit location to attach isometry/unitarity obligations,
+- typed causal-cone restricted contractions.
+
+What still remains out-of-scope without further work:
+- contraction-order optimization/search policies,
+- numerical optimization/training procedures,
+- gauge/canonicalization algorithms.
