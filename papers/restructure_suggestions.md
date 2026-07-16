@@ -766,6 +766,25 @@ on it, not just E13) — it earns its keep independent of whether E13 is ever pu
 > cluster or the rest of the AST — see `docs/superpowers/specs/2026-07-15-e1-traverseaxes-prototype-design.md`
 > for the full go/no-go criteria and what remains before committing to E1 broadly or falling back to Spike 2a/2b.
 
+> **Prototype result (PredArith slice, 2026-07-15):** extended
+> `test/DSL/TraverseAxesSpike.lean` to `PredArith.traverseAxes`, testing genuine self-recursion
+> (`.mul`/`.iabs`) and composition with the already-proven `IdxExpr.traverseAxes` (via
+> `.embed`) — both risks the IdxExpr-only slice couldn't test. 2 of 3 theorems closed, both
+> independently verified sound: `traverseAxes_const_eq_specsPred` (collect AxisSpecs) and
+> `traverseAxes_const_eq_predAxisUIDs` (collect UIDs). Both use real induction with genuine,
+> correctly-used inductive hypotheses for the `.mul` and `.iabs` self-recursive cases, and
+> delegate cleanly to the already-proven `IdxExpr` slice's lemmas for the `.embed` case. The
+> third theorem (`traverseAxes_id_eq_predMapUID`, the remap) did not close — not due to
+> proof-search failure, but because `PredArith.mapUID` is declared `partial def` with genuine
+> self-recursive cases (`.mul`/`.iabs` call it recursively), which causes Lean to generate zero
+> equation lemmas for the entire definition, even for the non-recursive `.embed` case. This is
+> an unrelated production-code-style limitation, not a flaw in the `traverseAxes` technique
+> itself. `PredArith.traverseAxes` required no `partial` annotation — it compiled as ordinary
+> structural recursion. This still does **not** decide E1 for `BoolExpr` (same shape of
+> self-recursion, untested) or the rest of the AST — see
+> `docs/superpowers/specs/2026-07-15-e1-traverseaxes-predarith-design.md` for the full go/no-go
+> criteria and what remains.
+
 Spike 2 deduplicates the collectors by sharing functions. The pearl-level fix is stronger:
 almost every function in `Traverse.lean`, the `specs*` family, and the `*AxisUIDs` family is
 the *same* traversal instantiated at a different applicative functor:
