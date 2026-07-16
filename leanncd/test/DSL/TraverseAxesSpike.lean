@@ -1,8 +1,12 @@
 -- test/DSL/TraverseAxesSpike.lean
 --
--- E1 prototype (IdxExpr slice only): does one `traverseAxes` subsume `IdxExpr.mapUID`
--- (remap), `specsIdx` (collect AxisSpecs), and `idxAxisUIDs` (collect UIDs)?
--- See docs/superpowers/specs/2026-07-15-e1-traverseaxes-prototype-design.md.
+-- E1 prototype: does one `traverseAxes` subsume the hand-written `mapUID`/`specs*`/`*AxisUIDs`
+-- families? IdxExpr slice (leaf, no self-recursion): subsumes `IdxExpr.mapUID` (remap),
+-- `specsIdx` (collect AxisSpecs), `idxAxisUIDs` (collect UIDs) — see
+-- docs/superpowers/specs/2026-07-15-e1-traverseaxes-prototype-design.md.
+-- PredArith slice (self-recursion + composition): subsumes `specsPred`/`predAxisUIDs`; the
+-- remap direction is blocked by an unrelated production-code limitation (see the theorem's
+-- own comment below) — see docs/superpowers/specs/2026-07-15-e1-traverseaxes-predarith-design.md.
 import LeanNCD.DSL.Traverse
 import LeanNCD.Eval.Contract
 import Mathlib.Control.Traversable.Instances

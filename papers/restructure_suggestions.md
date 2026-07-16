@@ -762,9 +762,13 @@ on it, not just E13) — it earns its keep independent of whether E13 is ever pu
 > cleanly with sound, hand-written proofs — no universe issues, no typeclass diamonds. Two
 > are fully computational with zero axioms; the third uses only the standard axioms `propext`
 > and `Quot.sound` from a Mathlib lemma. No `sorry`, `admit`, or custom axioms were needed.
-> This does **not** yet decide E1 for the harder mutually-recursive `BoolExpr`/`PredArith`
-> cluster or the rest of the AST — see `docs/superpowers/specs/2026-07-15-e1-traverseaxes-prototype-design.md`
-> for the full go/no-go criteria and what remains before committing to E1 broadly or falling back to Spike 2a/2b.
+> This does **not** yet decide E1 for `BoolExpr`/`PredArith` or the rest of the AST — see
+> `docs/superpowers/specs/2026-07-15-e1-traverseaxes-prototype-design.md` for the full go/no-go
+> criteria and what remains before committing to E1 broadly or falling back to Spike 2a/2b.
+> (**Correction, since attempted:** the phrase "mutually-recursive `BoolExpr`/`PredArith` cluster"
+> above was inaccurate — `PredArith` recurses only into itself and `IdxExpr`; `BoolExpr` recurses
+> into itself and `PredArith`, one direction only, so there's no cycle. PredArith has since been
+> attempted — see the next blockquote below.)
 
 > **Prototype result (PredArith slice, 2026-07-15):** extended
 > `test/DSL/TraverseAxesSpike.lean` to `PredArith.traverseAxes`, testing genuine self-recursion
