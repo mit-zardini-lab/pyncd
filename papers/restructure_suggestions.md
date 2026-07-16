@@ -756,6 +756,16 @@ on it, not just E13) — it earns its keep independent of whether E13 is ever pu
 
 ### E1. One traversal to rule the collectors (van Laarhoven)
 
+> **Prototype result (IdxExpr slice only, 2026-07-15):** `test/DSL/TraverseAxesSpike.lean`
+> tested whether one `traverseAxes` definition subsumes `IdxExpr.mapUID`/`specsIdx`/
+> `idxAxisUIDs` for the non-recursive `IdxExpr` node. All three equivalence theorems closed
+> cleanly with sound, hand-written proofs — no universe issues, no typeclass diamonds. Two
+> are fully computational with zero axioms; the third uses only the standard axioms `propext`
+> and `Quot.sound` from a Mathlib lemma. No `sorry`, `admit`, or custom axioms were needed.
+> This does **not** yet decide E1 for the harder mutually-recursive `BoolExpr`/`PredArith`
+> cluster or the rest of the AST — see `docs/superpowers/specs/2026-07-15-e1-traverseaxes-prototype-design.md`
+> for the full go/no-go criteria and what remains before committing to E1 broadly or falling back to Spike 2a/2b.
+
 Spike 2 deduplicates the collectors by sharing functions. The pearl-level fix is stronger:
 almost every function in `Traverse.lean`, the `specs*` family, and the `*AxisUIDs` family is
 the *same* traversal instantiated at a different applicative functor:
