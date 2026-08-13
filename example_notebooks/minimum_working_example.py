@@ -1,3 +1,15 @@
+import os
+import sys
+
+# Puts the repository root on sys.path and makes it the working directory, so the
+# imports and relative paths below resolve. See fix_notebook_dir.py.
+import fix_notebook_dir
+
+# The rendered diagrams use box-drawing characters, which the default Windows
+# console code page cannot encode.
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
 import construction_helpers as ch # Needed for @ auto-alignment
 import data_structure.Category as cat
 import data_structure.Numeric as nm
@@ -127,7 +139,10 @@ async def render_ffn_layer():
 def transformer_core():
     _attention_layer = attention_layer()
     _ffn_layer = ffn_layer()
-    res_attention = res(_attention_layer)
+    # The layer below is repeated, so it has to map its domain back to itself.
+    # Attention takes three inputs - the query, key and value sources - so the
+    # single incoming wire is fanned out to all three first.
+    res_attention = res((0, 0, 0) @ _attention_layer)
     res_ffn = res(_ffn_layer)
     _transformer = cat.Block.template(
         res_attention @ res_ffn,
@@ -173,14 +188,16 @@ async def ask_input() -> None | Literal['Quit']:
         if choice.lower() == 'q':
             return 'Quit'
         try:
-            choice = int(choice)
-            command_name = list(commands.keys())[choice]
-            await commands[command_name]()
+            command_name = list(commands.keys())[int(choice)]
         except (ValueError, IndexError):
             print('Invalid choice. Please enter a valid command number, or q to quit.')
+            continue
+        await commands[command_name]()
 
 if __name__ == '__main__':
-    server = subprocess.Popen(['python', 'run_server.py'])
+    server = subprocess.Popen(
+        [sys.executable,
+         os.path.join(fix_notebook_dir.REPO_ROOT, 'run_server.py')])
     print('Server started.')
     while True:
         command = asyncio.run(ask_input())

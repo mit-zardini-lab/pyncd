@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Callable, Iterable, Iterator, overload
 import data_structure.Term as fd
 import data_structure.Category as cat
+import data_structure.Numeric as nm
 
 '''
 Multiplication looks like:
@@ -42,7 +43,7 @@ def target_expand[L,M:cat.Morphism,T=L](
                 segment 
                 for member in target 
                 for segment in target_expand(member, conversion)) # type: ignore
-        case cat.Rearrangement(mapping=()):
+        case cat.Rearrangement(mapping=(), _dom=()):
             return ()
         case cat.Morphism():
             return (target,) # type: ignore
@@ -92,8 +93,16 @@ def datatype_converter[B: cat.Datatype, A: cat.Axis](target: B | cat.Array[B, A]
         target = cat.Array[B, A](datatype=target)
     return target
 
-def axis_converter[A:cat.Axis](target: A | str | fd.DynamicName) -> A | cat.RawAxis:
-    return cat.RawAxis.named(target) if isinstance(target, (str, fd.DynamicName)) else target
+def axis_converter[A:cat.Axis](target: A | str | fd.DynamicName | nm.Numeric) -> A | cat.RawAxis:
+    match target:
+        case str() | fd.DynamicName():
+            return cat.RawAxis.named(target)
+        case nm.Numeric():
+            sized = cat.RawAxis(_size=target)
+            return fd.DynamicName.from_str(target.to_latex()).capture(sized)
+        case _:
+            return target
+    #return cat.RawAxis.named(target) if isinstance(target, (str, fd.DynamicName)) else target
 
 def full_converter(target):
     if isinstance(target, cat.Datatype):

@@ -31,8 +31,34 @@ def align_axes(
     if len(left_axes) != len(right_axes):
         raise ValueError("Cannot align axes of different lengths")
     for left_axis, right_axis in zip(left_axes, right_axes):
-        ctx.append_iter((left_axis, right_axis))
+        #ctx.append_iter((left_axis, right_axis))
+        axis_merge, size_merge = align_axis(left_axis, right_axis)
+        ctx.append_bucket(axis_merge)
+        ctx.append_bucket(size_merge)
     return ctx
+
+def align_axis(
+    left: cat.Axis,
+    right: cat.Axis,
+) -> list[fd.EqualityClass]:
+    # RawAxes take the lowest priority
+    # We align both the size and other aspects of the axis
+    left_priority = 1 - isinstance(left, cat.RawAxis)
+    right_priority = 1 - isinstance(right, cat.RawAxis)
+    axis_size_equality_classes_left = [
+        fd.EqualityClass.template(left, priority=left_priority),
+        fd.EqualityClass.template(left.local_size(), priority=left_priority)
+    ]
+    axis_size_equality_classes_right = [
+        fd.EqualityClass.template(right, priority=right_priority),
+        fd.EqualityClass.template(right.local_size(), priority=right_priority)
+    ]
+    return [
+        left_class.merge(right_class)
+        for left_class, right_class in 
+        zip(axis_size_equality_classes_left,
+            axis_size_equality_classes_right)
+    ]
 
 def align_composed(
     *targets: cat.BroadcastedCategory | cat.StrideCategory,

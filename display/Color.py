@@ -26,7 +26,10 @@ def colored_output(target: str, fg: Color | None = None, bg: Color | None = None
             return f"\033[38;2;{';'.join(map(str, fg_rgb))}m{target}\033[0m"
         case _, _:
             return f"\033[38;2;{';'.join(map(str, fg_rgb))}m\033[48;2;{';'.join(map(str, bg_rgb))}m{target}\033[0m"
-        
+
+def clip(x: float, _min: float = 0, _max: float = 1) -> float:
+    return max(_min, min(_max, x))
+
 @dataclass(frozen=True)
 class Color(ABC):
     def red(self) -> float: ...
@@ -50,14 +53,16 @@ class Color(ABC):
     @classmethod
     def from_rgb(cls, r01: float, g01: float, b01: float) -> Self: ...
     @classmethod
-    def from_hue(cls, hue360: float) -> Self:
+    def from_hue(cls, hue360: float, saturation01: float = 1, value01: float = 1) -> Self:
         sextant = (hue360 % 360) / 60
-        def clip(x: float) -> float:
-            return max(0, min(1, x))
+        saturation01 = clip(saturation01)
+        value01 = clip(value01)
+        chroma = saturation01 * value01
+        minimum = value01 - chroma
         return cls.from_rgb(
-            clip(abs(sextant-3)-1),
-            clip(2-abs(sextant-4)),
-            clip(2-abs(sextant-2))
+            clip(abs(sextant-3)-1) * chroma + minimum,
+            clip(2-abs(sextant-2)) * chroma + minimum,
+            clip(2-abs(sextant-4)) * chroma + minimum
         )
 
     def contrast(self) -> Self:
@@ -100,5 +105,41 @@ class HexadecimalColor(Color):
     @classmethod
     def from_int(cls, value: int) -> Self:
         return cls(f'#{value:06x}'[:7])
+
+@dataclass(frozen=True)
+class HSVColor(Color):
+    hue: float
+    saturation: float
+    value: float
+
+    @classmethod
+    def from_rgb(cls, r01: float, g01: float, b01: float) -> Self:
+        rgb = (r01, g01, b01)
+        value = max(rgb)
+        chroma = value - min(rgb)
+        saturation = 0 if value == 0 else chroma / value
+
+        max_index = max(enumerate(rgb), key=lambda x: x[1])[0]
+        plus_index = (max_index + 1) % 3
+        minus_index = (max_index - 1) % 3
+
+        hue = (60 * (2 * max_index + (rgb[plus_index] - rgb[minus_index]) / chroma) if chroma != 0 else 0) % 360
+        return cls(hue, saturation, value)
+    
+    def _rgb(self) -> tuple[float, float, float]:
+        chroma = self.saturation * self.value
+        sextant = (self.hue % 360) / 60
+        minimum = self.value - chroma
+        return (
+            clip(abs(sextant-3)-1) * chroma + minimum,
+            clip(2-abs(sextant-4)) * chroma + minimum,
+            clip(2-abs(sextant-2)) * chroma + minimum
+        )
+    
+    def red(self) -> float: return self._rgb()[0]
+    def green(self) -> float: return self._rgb()[1]
+    def blue(self) -> float: return self._rgb()[2]
+        
+
     
 

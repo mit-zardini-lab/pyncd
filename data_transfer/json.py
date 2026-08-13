@@ -77,7 +77,7 @@ class TermJSONConverter:
                 raise ValueError(f"Invalid JSON data for reconstruction: {data}")
             
     @classmethod
-    def export(cls, data: fd.GeneralTerm, target_file: str):
+    def export(cls, data: fd.GeneralTerm, target_file: str, indent: None | int = 4) -> None:
         converter = cls()
         json_data = converter.to_json(data)
         json_export: JSONDataStructure = {
@@ -85,7 +85,7 @@ class TermJSONConverter:
             'data': json_data
         }
         with open(target_file, 'w') as json_file:
-            json.dump(json_export, json_file, indent=4)
+            json.dump(json_export, json_file, indent=indent)
 
     @classmethod
     def export_to_json(cls, data: fd.GeneralTerm, indent: None | int = None) -> str:

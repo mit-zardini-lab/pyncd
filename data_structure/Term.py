@@ -20,6 +20,7 @@ from enum import Enum
 import functools
 
 import utilities.utilities as util
+from functools import cached_property
 
 T = TypeVar('T', covariant=True)
 
@@ -34,17 +35,51 @@ def register_enum(cls: Type[Enum]) -> Type[Enum]:
     EnumDirectory[cls.__qualname__] = cls
     return cls
 
+def _structural_hash(self) -> int:
+    '''
+    The hash ``@dataclass(frozen=True)`` would generate, computed once.
+
+    Terms form a DAG with heavy sharing, but a structural hash walks it as a
+    tree: a subterm reachable by n paths is hashed n times, so the cost is the
+    number of PATHS rather than of nodes. Fusing attention made 8.3M hash
+    calls - 114k of them primitive - over a result holding 35.6k distinct
+    objects.
+
+    Caching is sound because terms are frozen; nothing in the package mutates
+    one after construction. The cache lives in the instance ``__dict__``,
+    outside ``__dataclass_fields__``, so it takes no part in ``__eq__`` and
+    does not change what a term is.
+    '''
+    cached = self.__dict__.get('_hash')
+    if cached is None:
+        cached = hash(tuple(
+            getattr(self, name) for name in self.__dataclass_fields__))
+        object.__setattr__(self, '_hash', cached)
+    return cached
+
 @dataclass(frozen=True)
-class Term(ABC):
+class Term:
     '''
     A term is an element in our formal representational language. It provides a container for data
     structures that appear in expressions. Abstractly, a term is a construction rule;
       $\\gamma_k: \\Pi_ki x_i \\rightarrow T_k $
     So that, within our grammar, all properties of $T_k$ can be derived from $\\Pi_ki x_i$.
     '''
+    # Subclasses opt out by setting this False in their own body - see Numeric,
+    # whose equality goes through its own numeric_hash() instead. Deliberately
+    # unannotated: an annotated ClassVar still lands in __dataclass_fields__,
+    # which keys()/dict()/reconstruct() iterate.
+    _memoize_hash = True
+
     def __init_subclass__(cls) -> None:
         assert cls.__qualname__ not in TermDirectory, f"Term class {cls.__qualname__} already registered."
         TermDirectory[cls.__qualname__] = cls
+        # Installed HERE, before @dataclass runs on the subclass: the decorator
+        # leaves __hash__ alone when the class already has an explicit one, so
+        # every Term picks this up automatically - including those declared
+        # later, and without touching any of the ~50 declaration sites.
+        if cls._memoize_hash:
+            cls.__hash__ = _structural_hash
         return super().__init_subclass__()
     def keys(self) -> Iterable[str]:
         return (f.name for f in self.__dataclass_fields__.values())
@@ -57,6 +92,8 @@ IDMAX = 2**31-1
 type IDType = int
 def fresh_id() -> IDType:
     return random.randint(1, IDMAX)
+def hash_id(obj) -> IDType:
+    return hash(obj) % IDMAX
 
 ''' UID Handler '''
 @dataclass(frozen=True)
@@ -125,6 +162,35 @@ class DynamicName(Term):
         if self.settings is not None and self.settings.absolute:
             latex = f'|{latex}|' 
         return latex
+    
+    def subscript_target(self, target: DynamicName) -> DynamicName:
+        ''' {A}_{B} subscript_target {C}_{D} = {C}_{D}{A}{B}'''
+        return DynamicName(
+            body=target.body,
+            subscript=(
+                self 
+                if target.subscript is None 
+                else self.subscript_target(target.subscript)
+                ),
+            settings=target.settings
+        )
+    def subscript_capture[S:UTerm](self, target: S) -> S:
+        if (old_name := target.uid._name) is None:
+            return target
+        new_name = self.subscript_target(old_name)
+        return new_name.capture(target)
+    
+    def add_subscript(self, other: DynamicName | str | None) -> DynamicName:
+        if not other:
+            return self
+        other = other if isinstance(other, DynamicName) else DynamicName(body=other)
+        return DynamicName(
+            body=self.body,
+            subscript=(
+                other if self.subscript is None
+                else self.subscript.add_subscript(other)
+            )
+        )
 
     @overload
     @classmethod
@@ -188,9 +254,12 @@ class UID[T:Term](Term):
     @classmethod
     def field(cls, _type: Type[T]):
         return field(default_factory=lambda: cls(_type))
+    
+    def to_latex(self) -> str:
+        return self._name.to_latex() if self._name is not None else f'\\text{{{self._type.__qualname__}}}_{{{self._id}}}'
 
 @dataclass(frozen=True)
-class UTerm(Term, ABC):
+class UTerm(Term):
     uid: UID[Self] = field(default_factory=lambda: UID(UTerm)) # type: ignore
     def __init_subclass__(cls) -> None:
         cls.__dataclass_fields__['uid'].default_factory = lambda: UID(cls)
@@ -206,14 +275,29 @@ def deep_reconstruct[T](target: T, func: Callable[[T], T]) -> T: ...
 @overload
 def deep_reconstruct[T](target: Prod[T], func: Callable[[T], T]) -> Prod[T]: ...
 def deep_reconstruct(target, func):
+    '''
+    Rebuild `target` with `func` applied to each of its parts.
+
+    A part that comes back as the very same object leaves nothing to rebuild,
+    and a term all of whose parts are unchanged is returned as-is. Most of a
+    rewrite touches nothing, so this skips the bulk of the allocation - and it
+    keeps sharing that rebuilding would destroy, which matters because the next
+    pass over a term walks it once per path.
+    '''
     match target:
         case Term():
-            return type(target)(**{
-                f: func(getattr(target, f))
-                for f in target.keys()
-            })
+            values: dict[str, Any] = {}
+            changed = False
+            for name in target.keys():
+                old = getattr(target, name)
+                new = func(old)
+                changed = changed or new is not old
+                values[name] = new
+            return type(target)(**values) if changed else target
         case tuple():
-            return tuple(func(item) for item in target)
+            items = tuple(func(item) for item in target)
+            return items if any(
+                new is not old for new, old in zip(items, target)) else target
         case _:
             return target
             
@@ -229,6 +313,7 @@ class EqualityClass[T:UTerm]:
     _type: Type[T]
     bucket: set[UID[T]]
     canonical: T
+    priority: int = 0
 
     def apply[S: GeneralTerm](self, target: S, iterate: bool = True) -> S:
         match target:
@@ -237,42 +322,109 @@ class EqualityClass[T:UTerm]:
         return deep_reconstruct(target, self.apply) if iterate else target
     
     @classmethod
-    def from_iter(cls, target: Iterable[T]) -> EqualityClass[T]:
+    def from_iter(cls, target: Iterable[T], priority: int = 0) -> EqualityClass[T]:
         target = tuple(target)
-        _type = util.iallequals(map(type, target))
+        #_type = util.iallequals(map(type, target))
+        _type = type(target[0])
         return EqualityClass(
             _type=_type,
             bucket={t.uid for t in target},
             canonical=max(
                 target,
                 key=lambda uterm: uterm.uid
-            )
+            ),
+            priority=priority
         )
 
-    def merge(self, other: EqualityClass[T]) -> None | EqualityClass[T]:
+    def try_merge(self, other: EqualityClass[T]) -> None | EqualityClass[T]:
         # None represents the equality classes have no overlap, and cannot be merged.
         if self.bucket.isdisjoint(other.bucket):
             return None
         canonical = max(
-            self.canonical, other.canonical,
-            key=lambda uterm: uterm.uid
-        )
+            self, other,
+            key=lambda eq_class: (
+                eq_class.priority,
+                eq_class.canonical.uid, 
+            )
+        ).canonical
         return EqualityClass(
             _type=self._type,
             bucket=self.bucket.union(other.bucket),
-            canonical=canonical
+            canonical=canonical,
+            priority=max(self.priority, other.priority)
+        )
+    
+    def merge(self, other: EqualityClass[T]) -> EqualityClass[T]:
+        canonical = max(
+            self, other,
+            key=lambda eq_class: (
+                eq_class.priority,
+                eq_class.canonical.uid, 
+            )
+        ).canonical
+        return EqualityClass(
+            _type=self._type, # type: ignore
+            bucket=self.bucket.union(other.bucket), # type: ignore
+            canonical=canonical,
+            priority=max(self.priority, other.priority)
+        )
+    
+    @classmethod
+    def template(cls, *targets: T, priority: int = 0) -> EqualityClass[T]:
+        return cls.from_iter(targets, priority=priority)
+    
+    @classmethod
+    def set_canonical(cls, target: T, *original: T) -> EqualityClass[T]:
+        # Map the equality class of original to target. This is used for morphism transfer.
+        _type = type(target)
+        bucket = {t.uid for t in (target, *original)}
+        return EqualityClass(
+            _type=_type,
+            bucket=bucket,
+            canonical=target
         )
     
 @dataclass
 class Context:
     equality_classes: list[EqualityClass] = field(default_factory=list)
-    
+    # Live only for the duration of one top-level apply(); see there.
+    _apply_memo: dict[int, Any] | None = field(
+        default=None, repr=False, compare=False)
+
+    def buckets_set(self) -> set[UID]:
+        return {uid for eq_class in self.equality_classes for uid in eq_class.bucket} or set()
+    def __iter__(self) -> Iterator[EqualityClass]:
+        return iter(self.equality_classes)
     def apply[T: GeneralTerm](self, target: T) -> T:
-        match target:
-            case Term(uid=UID()):
-                for eq_class in self.equality_classes:
-                    target = eq_class.apply(target, iterate=False)
-        return deep_reconstruct(target, self.apply)
+        '''
+        Rewrite `target` under these equality classes.
+
+        Memoized on object identity for the duration of one top-level call.
+        Terms form a DAG, and without the memo a shared subterm is rebuilt once
+        per path - and, worse, the result comes back with less sharing than the
+        input, so every later pass has more paths to walk. Keying on identity is
+        safe because everything keyed on stays reachable from `target` for the
+        whole traversal, so no id can be recycled under us.
+        '''
+        memo, top = self._apply_memo, self._apply_memo is None
+        if top:
+            memo = self._apply_memo = {}
+        try:
+            key = id(target)  # the ORIGINAL object, before any rewriting
+            if key in memo:
+                return memo[key]
+            rewritten = target
+            match rewritten:
+                case Term(uid=UID()):
+                    for eq_class in self.equality_classes:
+                        rewritten = eq_class.apply(rewritten, iterate=False)
+            result = memo[key] = deep_reconstruct(rewritten, self.apply)
+            return result
+        finally:
+            if top:
+                self._apply_memo = None
+    def __call__[T: GeneralTerm](self, target: T) -> T:
+        return self.apply(target)
     
     def append_iter[T: UTerm](self, target: Iterable[T]) -> None:
         new_eq_class = EqualityClass.from_iter(target)
@@ -287,18 +439,31 @@ class Context:
         #     del self.equality_classes[i]
         # self.equality_classes.append(new_eq_class)
 
-    def append_bucket[T: UTerm](self, bucket: EqualityClass[T]) -> None:
+    def append_bucket[T: UTerm](self, bucket: EqualityClass[T]) -> Self:
+        # Merge must ACCUMULATE: a bucket can overlap several existing classes
+        # (a chain of identifications arriving out of order), and each merge
+        # has to fold into the union so far - merging each against the original
+        # bucket would keep only the last union and silently drop the rest.
         new_eq_class = bucket
         to_del = []
         for i, eq_class in enumerate(self.equality_classes):
-            merged = eq_class.merge(bucket)
+            merged = eq_class.try_merge(new_eq_class)
             if merged is not None:
                 new_eq_class = merged
                 to_del.append(i)
         for i in reversed(to_del):
             del self.equality_classes[i]
         self.equality_classes.append(new_eq_class)
+        return self
 
-    def append_buckets[T: UTerm](self, buckets: Iterable[EqualityClass[T]]) -> None:
+    def append_buckets[T: UTerm](self, buckets: Iterable[EqualityClass[T]]) -> Self:
         for bucket in buckets:
             self.append_bucket(bucket)
+        return self
+
+    def append_contexts[T: UTerm](self, contexts: Iterable[Context]) -> Self:
+        for context in contexts:
+            if self.buckets_set().isdisjoint(context.buckets_set()):
+                self.equality_classes.extend(context.equality_classes)
+            self.append_buckets(context.equality_classes)
+        return self

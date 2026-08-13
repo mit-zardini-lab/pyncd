@@ -1,6 +1,6 @@
 from __future__ import annotations
 from enum import Enum
-from typing import Any
+from typing import Any, Iterable, Callable
 import utilities.utilities as util
 import data_structure.Category as cat
 import data_structure.Term as fd
@@ -97,3 +97,81 @@ def is_identity(
             return is_identity(body)
         case _:
             return False
+        
+def flat_axes[B:cat.Datatype, A:cat.Axis](
+    target: Iterable[cat.Array[B, A]]
+):
+    return tuple(
+        axis
+        for array in target
+        for axis in array.shape()
+    )
+
+def type_search[T: fd.Term](
+    _type: type[T],
+    target: fd.GeneralTerm,
+    predicate: Callable[[T], bool] = lambda term: True,
+    deep: bool = True
+) -> Iterable[T]:
+    _predicate = lambda term: isinstance(term, _type) and predicate(term)
+    return search(target, _predicate, deep) # type: ignore
+
+def search[T: fd.Term](
+        target: fd.GeneralTerm,
+        predicate: Callable[[fd.Term], bool],
+        deep: bool = True
+) -> Iterable[T]:
+    '''
+    Every subterm of `target` satisfying `predicate`, each yielded once.
+
+    Terms form a DAG, so `search_repeat` reaches a shared subterm once per path
+    - it is named for yielding those repeats. Since the results are deduplicated
+    anyway, a subterm already visited can be skipped outright, which turns the
+    walk from one over paths into one over nodes; fusing attention took 333k
+    recursive calls from 1.4k roots before this. Identity keys are safe because
+    every node visited stays reachable from `target` for the whole traversal.
+    '''
+    seen: set[int] = set()
+
+    def walk(node: fd.GeneralTerm) -> Iterable[T]:
+        if id(node) in seen:
+            return
+        seen.add(id(node))
+        match node:
+            case fd.Term() if predicate(node):
+                yield node # type: ignore
+                if not deep:
+                    return
+        match node:
+            case fd.Term():
+                segments = node.dict().values()
+            case tuple():
+                segments = node
+            case _:
+                return
+        for segment in segments:
+            yield from walk(segment)
+
+    return util.unique_iterable(walk(target))
+
+def search_repeat[T:fd.Term](
+        target: fd.GeneralTerm, 
+        predicate: Callable[[fd.Term], bool],
+        deep: bool = True) -> Iterable[T]:
+    match target:
+        case fd.Term() if predicate(target):
+            yield target # type: ignore
+            if not deep:
+                return
+    match target:
+        case fd.Term():
+            segments = target.dict().values()
+        case tuple():
+            segments = target
+        case _:
+            return
+    yield from (
+        subterm
+        for segment in segments
+        for subterm in search_repeat(segment, predicate, deep)
+    )

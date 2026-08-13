@@ -17,6 +17,7 @@ import math
 from abc import ABC
 from enum import Enum
 import data_structure.Numeric as nm
+from collections.abc import Sequence
 
 import data_structure.Term as fd # for 'foundations'
 import utilities.utilities as util
@@ -31,7 +32,7 @@ type ProdCategory[L, M:Morphism] = \
     )
 
 @dataclass(frozen=True)
-class ProdObject[L](fd.Term):
+class ProdObject[L](fd.Term, Sequence[L]):
     content: fd.Prod[L] = ()
 
     def identity(self) -> Rearrangement[L]:
@@ -45,19 +46,14 @@ class ProdObject[L](fd.Term):
     def from_iter(cls, xs: Iterable[L]) -> ProdObject[L]:
         return cls(content=tuple(xs))
 
-    def __iter__(self) -> Iterator[L]:
-        return iter(self.content)
     def __len__(self) -> int:
         return len(self.content)
-    @overload
-    def __getitem__(self, index: slice) -> fd.Prod[L]: ...
-    @overload
-    def __getitem__(self, index: int) -> L: ...
-    def __getitem__(self, index: int | slice) -> L | fd.Prod[L]:
+    def __getitem__(self, index):
         return self.content[index]
+
     
 @dataclass(frozen=True)
-class Morphism[L](fd.Term, ABC):
+class Morphism[L](fd.Term):
     def dom(self) -> ProdObject[L]:
         raise NotImplementedError()
     def cod(self) -> ProdObject[L]:
@@ -139,15 +135,20 @@ class ProductOfMorphisms[L, M: Morphism](Morphism[L]):
         return ProdObject.from_iter(segment for m in self.content for segment in m.dom())
     def cod(self) -> ProdObject[L]:
         return ProdObject.from_iter(segment for m in self.content for segment in m.cod())
-    
-    def partition[T](self, target: fd.Prod[T]) -> Iterable[tuple[M, fd.Prod[T]]]:
+
+
+    def partition_object[T](self, target: ProdObject[T]) -> Iterable[tuple[M, ProdObject[T]]]:
+        return ((m, ProdObject(xs)) for m, xs in self.partition(tuple(target)))
+
+    def partition[T](self, target: Sequence[T]) -> Iterable[tuple[M, fd.Prod[T]]]: # type: ignore
+        _target = tuple(target)
         start = 0
         for m in self.content:
             end = start + len(m.dom())
-            yield (m, target[start:end])
+            yield (m, type(target)(_target[start:end])) # type: ignore
             start = end
 
-    def partition_codomain[T](self, target: fd.Prod[T]) -> Iterable[tuple[M, fd.Prod[T]]]:
+    def partition_codomain[T](self, target: Sequence[T]) -> Iterable[tuple[M, Sequence[T]]]:
         start = 0
         for m in self.content:
             end = start + len(m.cod())
@@ -183,3 +184,9 @@ class Rearrangement[L](Morphism[L]):
             for i in range(len(self._dom))
         )
     
+    def pairwise(self) -> fd.Prod[tuple[int, int]]:
+        return tuple(
+            (i, j)
+            for i, _ in enumerate(self._dom)
+            for j, m in enumerate(self.mapping) if m == i
+        )

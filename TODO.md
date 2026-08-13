@@ -1,4 +1,0 @@
-- [x] Fix display to accomodate various cases
-- [ ] Add all operations present in Transformers
-- [ ] Cleanup Operators to make constructors more consistent
-- [ ] Create a "formal name" characteristic.

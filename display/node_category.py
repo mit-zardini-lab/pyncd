@@ -7,26 +7,72 @@ import term_utilities.term_utilities as tutil
 import utilities.justification as js
 from typing import Literal, Iterable, Callable
 
+import display.Color as cl
+
 '''
 Basic Infrastructure - straight rendering.
 
 '''
+
+def uid_color(uid: fd.UID | fd.UTerm) -> cl.Color:
+    return cl.HexadecimalColor.from_hue(
+        (uid._id if isinstance(uid, fd.UID) else uid.uid._id)
+    )
+
+def str_numeric(target: nm.Numeric, bound: bool = False) -> str:
+    match target:
+        case nm.Integer():
+            result = str(target._value)
+            bound = False
+        case nm.Associative():
+            result = target.sep.join(str_numeric(x, bound=True) for x in target.content)
+        case nm.Power():
+            base_str = str_numeric(target.base, bound=True)
+            exponent_str = str_numeric(target.exponent, bound=True)
+            result = f'{base_str}^{exponent_str}'
+        case _:
+            result = str(target)
+    return f'({result})' if bound else result
+
+def display_numeric(
+    target: nm.Numeric,
+    size: int = 2,
+):
+    if isinstance(target, nm.FreeNumeric):
+        return display_uterm(target, size) # type: ignore
+    return Box.TextBox(str_numeric(target))
+        
 def display_uterm(
-    target: fd.UTerm
+    target: fd.UTerm,
+    size: int = 2
 ) -> Box.Box:
+    return Box.TextBox(str_uterm(target, size))
+
+def str_uterm(
+    target: fd.UTerm,
+    size: int = 2
+) -> str:
     text = ''
     if target.uid._name is not None:
-        text = f'{target.uid._name.to_bodies()}  '[:2]
+        text = f'{target.uid._name.to_bodies()}  '[:size]
     else:
-        text = f'  {target.uid._id:X}'[-2:]
-    return Box.TextBox(text)
+        text = f'  {target.uid._id:X}'[-size:]
+    return text
+
+def str_axis(
+    axis: cat.Axis
+) -> str:
+    body_str = (
+        f'{str_numeric(axis._size)}'
+        if isinstance(axis._size, nm.Integer)
+        else str_uterm(axis, 2)
+    )
+    return body_str
 
 def display_axis(
     axis: cat.Axis
 ) -> Box.Box:
-    if isinstance(axis._size, nm.Integer):
-        return Box.TextBox(f'{axis._size._value}')
-    return display_uterm(axis)
+    return Box.TextBox(str_axis(axis))
 
 def display_long_axis(
     axis: cat.Axis,
@@ -38,26 +84,32 @@ def display_long_axis(
         display_axis(axis),
         *((Box.Fill(extension, min_width=2, min_height=1),) if 'right' in sides else ()),
     ))
-    
+
+def str_datatype(
+    target: cat.Datatype
+) -> str:
+    return type(target).__qualname__[:2]
+
 def datatype(
     target: cat.Datatype
 ) -> Box.Box:
-    return Box.TextBox(type(target).__qualname__[:2])
+    return Box.TextBox(str_datatype(target))
 
 def display_array[B: cat.Datatype, A: cat.Axis](
     target: cat.Array[B, A] | cat.Weave[B, A],
-    display_axis: Callable[
+    _display_axis: Callable[
         [A | cat.WeaveMode], 
-        Box.Box],
-    display_datatype: Callable[[B], Box.Box] | None = None,
+        Box.Box] | None = None,
+    _display_datatype: Callable[[B], Box.Box] | None = None,
 ) -> Box.Box:
-    display_datatype = display_datatype or datatype
+    _display_axis = _display_axis or display_axis # type: ignore
+    _display_datatype = _display_datatype or datatype
     return Box.Vertical((
         *(
-            display_axis(axis)
+            _display_axis(axis) # type: ignore
             for axis in target._shape
         ),
-        display_datatype(target.datatype)
+        _display_datatype(target.datatype)
     ))
 
 def reindexed_weave[B:cat.Datatype, A:cat.Axis](
@@ -88,7 +140,6 @@ def reindexed_weave_std[B:cat.Datatype, A:cat.Axis](
         ),
         datatype(weave.datatype)
     ))
-    # TODO: improve this middle part
     name = f'{reindexing.name}   '[:3] if isinstance(reindexing, cat.StrideMorphism) else 'eta'
     middle = Box.TextBox(name)
     return Box.Horizontal((left, middle))

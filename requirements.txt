@@ -1,2 +1,11 @@
+# Core: running the notebooks and talking to the tsncd page.
 ipykernel
 websockets
+
+# `_guide/1ConstructionRules.ipynb` compares terms against a real CAS.
+sympy
+
+# Compiling models to PyTorch (torch_compile, Results.ipynb, Transformer.ipynb)
+# is a separate install, as is headless figure rendering:
+#     pip install torch einops
+#     pip install -r requirements-headless.txt

@@ -16,15 +16,18 @@ attention_core = qk_matmul @ softmax @ mask @ sv_matmul
 
 ## Description
 
-This is a package for formally expressing deep learning models based on [Neural Circuit Diagrams](https://openreview.net/forum?id=RyZB4qXEgt), [FlashAttention on a Napkin](https://openreview.net/forum?id=pF2ukh7HxA), [Spherical Attention](https://arxiv.org/abs/2505.09326) and a [GPU Mode presentation](https://www.youtube.com/watch?v=hAoY2bpRIKg). The main goal of this package is to provide a simple and intuitive way to define and visualize deep learning models, while also allowing for formal reasoning about their properties. In `data_structure`, you will find a high-level implementation of the structural aspects of deep learning models.
+This is a package for formally expressing deep learning models based on [Weaves, Wires and Morphisms](https://openreview.net/forum?id=GiO8eom0jD), [Neural Circuit Diagrams](https://openreview.net/forum?id=RyZB4qXEgt), [FlashAttention on a Napkin](https://openreview.net/forum?id=pF2ukh7HxA), [Spherical Attention](https://arxiv.org/abs/2505.09326), and a [GPU Mode presentation](https://www.youtube.com/watch?v=hAoY2bpRIKg). The main goal of this package is to provide a simple and intuitive way to define and visualize deep learning models, while also allowing for formal reasoning about their properties. In `data_structure`, you will find a high-level implementation of the structural aspects of deep learning models.
 
 The other folders provide utilities. These are;
 
  - `construction_helpers`: Allows models to be defined via operator overloading, `@` (for sequential composition), `*` (for parallel "products") and `>>` (for batch lifting). When using `@`, axes are automatically aligned.
  - `data_transfer` and `websocket_transfer`: These packages provide JSON encoding and communication over WebSockets, integrating with the [`tsncd`](https://github.com/mit-zardini-lab/tsncd) package for displaying diagrams.
  - `torch_compile`: This package allows algebraic descriptions to be converted into PyTorch modules.
- - `display`: This package allows for textual display of algebraic expressions.
- - `graphs`: This package implements the mathematical process of [converting morphisms in a symmetric monoidal category into hypergraphs](https://arxiv.org/pdf/2305.08768), which opens up flexible algebraic manipulation in the future.
+ - `display`: This package allows for textual display of algebraic expressions, including numeric expressions (`display_numeric`) and hypergraphs (`display_graph`).
+ - `term_utilities`: Utilities for searching and classifying terms, and for generating configurations that assign concrete sizes to the free numerics in a model.
+ - `graphs`: This package implements the mathematical process of [converting morphisms in a symmetric monoidal category into hypergraphs](https://arxiv.org/pdf/2305.08768), and back again. A hypergraph discards the particular bracketing of an expression, so the round trip recovers a canonical form; `Hypergraph2Morphism.recycle` uses this to normalize an expression before it is displayed.
+ - `solver`: Symbolic algebra over the `Numeric` terms used for axis sizes, expanding expressions into a sum-of-products form.
+ - `deepseek`: The additional operators needed to express [DeepSeek-V3](https://arxiv.org/abs/2412.19437) - a `Complex` datatype with rotary position embeddings, and the `TopK` gate and `SparseAxis` behind its mixture-of-experts layers.
 
 These utilities build on the core data structure. They feed into a "web" of tools that allow for algebraic manipulation, diagrammatic visualization, and execution of deep learning models. For instance, we can compose from algebraic constructs to the Python data structure, to PyTorch or diagrammatic visualizations. Given the underlying mathematical structure of the data structure, we can imitate mathematical transforms such as product categories to hypergraphs.
 
@@ -42,10 +45,47 @@ These utilities build on the core data structure. They feed into a "web" of tool
  ![The p0, p1 indexes of the output correspond to the reindexed locations along the input.]( _guide/figures/broadcast_weave.png)
 
 # Setup
- - ***This package requires Python 3.14.***
+ - ***This package requires Python 3.13 or newer***, for the generic syntax
+   and `type` statements the data structure is written in. Install the rest with
+   `pip install -r requirements.txt`.
 
- - For diagrammatic visualization, the [`tsncd`](https://github.com/mit-zardini-lab/tsncd) package is required. We run `python run_server.py` (requires `pip install websockets`) in an independent terminal. When the server is running, the browser connects on refresh. As in `Transformer.ipynb`, we connect from Python, updating the data in the server.
+ - For diagrammatic visualization, the [`tsncd`](https://github.com/mit-zardini-lab/tsncd) package is required. We run `python run_server.py` (requires `pip install websockets`) in an independent terminal. When the server is running, the browser connects on refresh. As in `example_notebooks/Transformer.ipynb`, we connect from Python, updating the data in the server.
 
- - The `minimum_working_example.py` both hosts a server and has command line inputs for various components which are sent to the server for visaulization.
+ - The `example_notebooks/minimum_working_example.py` both hosts a server and has command line inputs for various components which are sent to the server for visaulization.
 
  - For compiling deep learning models, [PyTorch](https://pytorch.org/) and [Einops](https://einops.rocks/) (`pip install einops`) are required.
+
+ - Diagrams can come back into the notebook as images rather than staying in the
+ browser. `websocket_transfer.capture.capture_morphism` has the open page draw the
+ term and returns the picture, so the cell keeps it and it survives export; with no
+ page open it prints the term as text instead. `AttentionIsAllYouNeed.ipynb` is
+ built this way.
+
+ - To rebuild figures with no browser window at all - a directory of PDFs for a
+ paper, where the result should not depend on which tab happened to be focused -
+ `websocket_transfer.headless` brings its own Chromium and needs no server:
+
+   ```python
+   await save_figures({'attention': attention, 'convolution': convolution})
+   ```
+
+   It needs `pip install -r requirements-headless.txt`, then `playwright install
+ chromium`, and a built bundle (`npm run build` in the `tsncd` checkout). Both
+ paths share one wire format, documented in
+ [`websocket_transfer/PROTOCOL.md`](websocket_transfer/PROTOCOL.md).
+
+# Examples
+The runnable examples live in `example_notebooks/`. Each one begins by importing
+`fix_notebook_dir`, which puts the repository root on `sys.path` and makes it the
+working directory, so the examples run whether the kernel starts in that folder or
+in the repository root.
+
+ - `Attention.ipynb`, `Convolution.ipynb` and `Transformer.ipynb` build up the standard components of a transformer.
+ - `AlgebraicTransformer.ipynb` assembles the same transformer purely algebraically, using the overloaded operators.
+ - `AttentionIsAllYouNeed.ipynb` builds the original two-tower encoder-decoder of Vaswani et al. (2017), with cross-attention, section by section.
+ - `DeepSeekV3.ipynb` expresses DeepSeek-V3, including its mixture-of-experts layers and multi-head latent attention.
+ - `Results.ipynb` walks through autoalignment, configuration generation, PyTorch compilation and graph processing in turn.
+ - `AttentionPoster.ipynb` is the annotated attention figure used for the poster (see `_guide/poster/`).
+ - `minimum_working_example.py` hosts a server and renders any of the above from the command line.
+
+Separately, `_guide/` contains self-contained notebooks on the construction rules and on the 2-category the diagrams live in.

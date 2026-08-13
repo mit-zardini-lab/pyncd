@@ -10,13 +10,14 @@ import term_utilities.generate_config as gc
 import display.node_category as node_cat
 
 def display_config(
-    config_log: gc.ConfigLog[Any]
+    config_log: gc.ConfigLog[Any],
+    size: int = 10
 ) -> Box.Box:
     terms = config_log.terms
     names = Box.Vertical((
         Box.TextBox('Name'),
         *(
-            node_cat.display_uterm(term)
+            node_cat.display_uterm(term, size)
             for term in terms
         )
     ))

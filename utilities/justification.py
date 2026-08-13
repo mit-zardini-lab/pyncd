@@ -70,8 +70,12 @@ def justify_str(
     mode: JustifyMode = JustifyMode.LEFT,
     separator: str | None = None
 ):
+    # Imported here rather than at module scope: display/__init__ imports
+    # node_category, which imports this module, so a top-level import would
+    # be circular.
+    import display.Color as Color
     if length is not None:
-        total_length = sum(len(s) for s in target)
+        total_length = sum(len(Color.original(s)) for s in target)
         desired_buffers = length - total_length
         length = desired_buffers + len(target)
     return ''.join(

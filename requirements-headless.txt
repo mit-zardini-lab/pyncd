@@ -1,0 +1,9 @@
+# Extras for `websocket_transfer/headless.py`, which renders figures without a
+# browser window open. Kept out of `requirements.txt` because Playwright also
+# downloads a browser:
+#
+#     pip install -r requirements-headless.txt
+#     playwright install chromium
+#
+-r requirements.txt
+playwright

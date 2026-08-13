@@ -34,13 +34,13 @@ A note on __xxx__ methods.
     category).
 '''
 
-type BroadcastedCategory[B:Datatype, A:sc.Axis] = pc.ProdCategory[Array[B, A], Broadcasted[B, A]]
+type BroadcastedCategory[B:Datatype, A:sc.Axis = sc.Axis] = pc.ProdCategory[Array[B, A], Broadcasted[B, A]]
 
 # Conveniences
 type AxisObjectoid[A:sc.Axis] = A | pc.ProdObject[A] | fd.Prod[AxisObjectoid[A]]
 type BroadcastedObjectoid[B:Datatype, A:sc.Axis] = 'B | AxisObjectoid[A] | fd.Prod[BroadcastedObjectoid[B, A]]'
 @dataclass(frozen=True)
-class Datatype(fd.Term, ABC):
+class Datatype(fd.Term):
     # Conveniences
     @overload
     def __rrshift__[A:sc.Axis](self, other: AxisObjectoid[A]) -> pc.ProdObject[Array[Self, A]]: ...
@@ -114,6 +114,9 @@ class Weave[B: Datatype, A: sc.Axis](fd.Term):
             if isinstance(axis, sc.Axis)
         )
 
+    def target_idx(self) -> fd.Prod[int]:
+        return tuple(self.select_target(range(len(self._shape))))
+
     def imprint[T](
             self, 
             tiling_imprint: Iterable[T], 
@@ -125,6 +128,19 @@ class Weave[B: Datatype, A: sc.Axis](fd.Term):
             for axis in self._shape
         )
     
+    def imprint_target[B2: Datatype, A2:sc.Axis](
+            self,
+            new_target: Array[B2, A2],
+    ) -> Weave[B2, A2]:
+        new_target_shape = iter(new_target.shape())
+        return Weave(
+            datatype=new_target.datatype,
+            _shape=tuple(
+                next(new_target_shape) if isinstance(axis, sc.Axis) else axis
+                for axis in self._shape
+            )
+        )
+        
     def imprint_axes[T](
             self,
             tiling_imprint: Iterable[T],
@@ -147,15 +163,43 @@ class Weave[B: Datatype, A: sc.Axis](fd.Term):
             )
         )
     
+    def rearrangement(self, degree: Iterable[A]) -> pc.Rearrangement[A]:
+        # goes from degree : target => weaved ie mixed
+        degree_size = sum(isinstance(mode, WeaveMode) for mode in self._shape)
+        degree_idx = iter(range(degree_size))
+        target_idx = iter(range(len(self._shape) - degree_size))
+        mapping = tuple(
+            next(degree_idx) if isinstance(axis, WeaveMode)
+            else degree_size + next(target_idx)
+            for axis in self._shape
+        )
+        return pc.Rearrangement(
+            mapping=mapping,
+            _dom=(*degree, *self.target().shape())
+        )
+    
+    def inverse_rearrangement(self, degree: Iterable[A]) -> pc.Rearrangement[A]:
+        degree_spots = (i for i, axis in enumerate(self._shape) if isinstance(axis, WeaveMode))
+        target_spots = (i for i, axis in enumerate(self._shape) if not isinstance(axis, WeaveMode))
+        mapping = (*degree_spots, *target_spots)
+        _dom = self.imprint_to_degree(degree).shape()
+        return pc.Rearrangement(mapping, tuple(_dom))
+
+    @classmethod
+    def from_arrays(cls, arrays: Iterable[Array[B, A]]) -> fd.Prod[Weave[B, A]]:
+        return tuple(Weave(
+            datatype=array.datatype,
+            _shape=tuple(array.shape())
+        ) for array in arrays)
+    
 @dataclass(frozen=True)
-class Operator(fd.Term, ABC):
+class Operator(fd.Term):
     name: fd.DynamicName | None = None
 
     def bc_signature[B: Datatype](
         self,
         signature: str = '',
         datatype: B = Reals(),
-        give_names: bool = True,
     ) -> Broadcasted[B, sc.RawAxis]:
         raise NotImplementedError()
 
@@ -167,10 +211,18 @@ class Broadcasted[B: Datatype, A: sc.Axis, O: Operator = Any](pc.Morphism[Array[
     reindexings: fd.Prod[sc.StrideCategory[A]] = ()
 
     def degree(self) -> pc.ProdObject[A]:
-        return util.iallequals(
-            morphism.dom()
-            for morphism in self.reindexings
-        )
+        if len(self.reindexings) == 0:
+            return pc.ProdObject()
+        try:
+            return util.iallequals(
+                    morphism.dom()
+                    for morphism in self.reindexings
+                )
+        except Exception:
+            # for morphism in self.reindexings:
+            #     print(morphism.dom())
+            print(self.operator)
+            raise ValueError("Inconsistent reindexing morphisms in Broadcasted morphism.")
     
     def dom(self) -> pc.ProdObject[Array[B, A]]:
         return pc.ProdObject.from_iter(
@@ -183,3 +235,13 @@ class Broadcasted[B: Datatype, A: sc.Axis, O: Operator = Any](pc.Morphism[Array[
             weave.imprint_to_degree(self.degree())
             for weave in self.output_weaves
         )
+    
+    def target(self) -> Self:
+        return Broadcasted(
+            operator=self.operator,
+            input_weaves=tuple(
+                Weave(weave.datatype, weave._shape) for weave in self.input_weaves),
+            output_weaves=tuple(
+                Weave(weave.datatype, weave._shape) for weave in self.output_weaves),
+            reindexings=tuple(pc.ProdObject().identity() for _ in self.reindexings)
+        ) # type: ignore

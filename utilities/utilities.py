@@ -48,12 +48,20 @@ def join_with_none[T](target: Iterable[T], separator: T | None) -> Iterator[T]:
             break
         yield separator
 
-def unique_iterable[T](target: Iterable[T]) -> Iterator[T]:
-    seen: set[T] = set()
+def unique_iterable[T, S=T](target: Iterable[T], unique_test: Callable[[T], S] = lambda x: x) -> Iterator[T]:
+    seen: set[S] = set()
     for item in target:
-        if item not in seen:
-            seen.add(item)
+        key = unique_test(item)
+        if key not in seen:
+            seen.add(key)
             yield item
+
+def unique_tuple[T, S=T](target: Iterable[T], unique_test: Callable[[T], S] = lambda x: x) -> Prod[T]:
+    return tuple(unique_iterable(target, unique_test=unique_test))
+
+def difference[S](first: Iterable[S], second: Iterable[S]) -> Prod[S]:
+    set_second = set(second)
+    return tuple(x for x in first if x not in set_second)
 
 def deconcatenate(target: Prod[int], dom_length: int | None = None) -> Prod[tuple[int, int]]:
     dom_length = dom_length or max(target) + 1
@@ -71,9 +79,17 @@ def concat[T, Y=T](xss: Iterable[Iterable[T]], func: Callable[[T], Y] = lambda x
         for x in xs
     )
 
-def intersection[T](xs: Iterable[T], ys: Iterable[T]) -> Prod[T]:
-    set_ys = set(ys)
-    return tuple(x for x in xs if x in set_ys)
+def unique_concat[T, S=T](target: Iterable[Iterable[T]], unique_test: Callable[[T], S] = lambda x: x) -> Iterator[T]:
+    return unique_iterable(
+        concat(target),
+        unique_test=unique_test
+    )
+
+def intersection[T, S=T](xs: Iterable[T], ys: Iterable[T], unique_test: Callable[[T], S] = lambda x: x) -> Prod[T]:
+    set_ys = set(unique_test(y) for y in ys)
+    return tuple(x for x in xs if unique_test(x) in set_ys)
+
+
 
 def predicate_partition[T](xs: Iterable[T], predicate: Callable[[T], bool]) -> tuple[Prod[T], Prod[T]]:
     true_part: list[T] = []
@@ -81,3 +97,46 @@ def predicate_partition[T](xs: Iterable[T], predicate: Callable[[T], bool]) -> t
     for x in xs:
         (true_part if predicate(x) else false_part).append(x)
     return tuple(true_part), tuple(false_part)
+
+class Multidict[K, V]:
+    def __init__(self, generator: Iterable[tuple[K, V]] | None = None):
+        if generator is None:
+            generator = ()
+        self.mapping: dict[K, set[V]] = {}
+        self.update(generator)
+
+    def __getitem__(self, key: K) -> set[V]:
+        return self.mapping.get(key, set())
+        
+    def __contains__(self, key: K) -> bool:
+        return key in self.mapping
+    
+    def union(self, targets: Iterable[K]) -> set[V]:
+        return set().union(*(self.mapping.get(k, set()) for k in targets))
+    
+    def __iter__(self) -> Iterator[K]:
+        return iter(self.mapping)
+
+    def find_key(self, value: V) -> K | None:
+        for k, vs in self.mapping.items():
+            if value in vs:
+                return k
+        return None
+    
+    def items(self):
+        return self.mapping.items()
+    
+    def keys(self):
+        return self.mapping.keys()
+    
+    def append(self, key: K, *value: V):
+        if key not in self.mapping:
+            self.mapping[key] = set()
+        self.mapping[key].update(value)
+
+    def update(self, generator: Iterable[tuple[K, V]]):
+        for k, v in generator:
+            if k not in self.mapping:
+                self.mapping[k] = set()
+            self.mapping[k].add(v)
+        return self
