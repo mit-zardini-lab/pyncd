@@ -72,6 +72,7 @@ def display_settings(
     axisHover: wst.AxisHover | None = None,
     axisLabelFontSize: float | None = None,
     title: str | None = None,
+    heading: wst.PageHeading | None = None,
 ) -> wst.RenderHandlerSettings:
     '''
     Collect the display options into the partial dict the client expects.
@@ -103,8 +104,10 @@ def display_settings(
     `axisLabelFontSize` is the size, in em, of the label an axis carries on its
     wire.
 
-    `title` names what the page shows. The heading of the page and the name of
-    its tab then read `tsncd - <title>`.
+    `title` names what the page shows. The name of the tab then reads
+    `tsncd - <title>`. `heading` says whether the page writes that text as a
+    heading over the figure, and is sent as the value of the `PageHeading`
+    given. The client writes no heading where none is sent.
     '''
     settings: wst.RenderHandlerSettings = {}
     converted_dark_mode = convert_color_mode(darkMode)
@@ -132,6 +135,8 @@ def display_settings(
         settings['axisLabelFontSize'] = axisLabelFontSize
     if title is not None:
         settings['title'] = title
+    if heading is not None:
+        settings['heading'] = heading.value
     return settings
 
 
@@ -151,6 +156,7 @@ async def send_morphism(
     axisHover: wst.AxisHover | None = None,
     axisLabelFontSize: float | None = None,
     title: str | None = None,
+    heading: wst.PageHeading | None = None,
     auxiliary: wst.DiagramAuxiliary | None = None,
 ) -> None:
     '''
@@ -176,5 +182,5 @@ async def send_morphism(
         settings=display_settings(
             darkMode, debugBorders, coreDebug, width, subBlocks,
             drawnBlockTags, tapeLabels, legend, inspectionBoxes,
-            axisHover, axisLabelFontSize, title),
+            axisHover, axisLabelFontSize, title, heading),
         auxiliary=auxiliary)

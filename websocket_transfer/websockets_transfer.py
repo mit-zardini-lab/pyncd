@@ -71,6 +71,15 @@ class AxisHover(enum.Enum):
     EVERYWHERE = 'everywhere'
 
 
+class PageHeading(enum.Enum):
+    '''Whether the open page writes a heading over the figure. Under `NONE`, the
+    client's default, the page holds the figure alone, so it stands as a page of
+    a site that writes its own heading above it. Under `TITLE` the heading reads
+    `tsncd - <title>`, which the tab reads under either.'''
+    NONE = 'none'
+    TITLE = 'title'
+
+
 class RenderHandlerSettings(TypedDict, total=False):
     '''
     Display options forwarded verbatim to the TypeScript client. It mirrors
@@ -117,9 +126,14 @@ class RenderHandlerSettings(TypedDict, total=False):
     # its legend row alone, `everywhere` from any wire or name of it as well,
     # and `off` nowhere. The value of an `AxisHover`.
     axisHover: Literal['off', 'legend', 'everywhere']
-    # The name of what the page shows. The heading of the page and the name of
-    # its tab read `tsncd - <title>`, and `tsncd` when no title is sent.
+    # The name of what the page shows. The name of the tab reads
+    # `tsncd - <title>`, and `tsncd` when no title is sent, and the heading of
+    # the page reads the same text where `heading` shows it.
     title: str
+    # Whether the page writes a heading over the figure: `none`, the client's
+    # default, or `title`, which shows the text the tab reads. The value of a
+    # `PageHeading`.
+    heading: Literal['none', 'title']
     # The size, in em, of the label an axis carries on its wire. The client's
     # default is 0.8, and the layout measures the label at the size it is drawn.
     axisLabelFontSize: float

@@ -110,7 +110,33 @@ reach one moved the page under the pointer, which closed the box and opened anot
 pointer where it fits, stands above the pointer where it fits there and does not fit
 below, so the region the pointer rests on stays visible, and is otherwise held against
 the bottom edge of the window. A box too wide for the room to the right is held against
-the right edge. The placement runs when the box opens with its text and again when its
+the right edge. A box is a core width with a padding either side of it, which
+`boxWidths.ts` holds, and the core width is 1000 pixels. The user ruled on 2026-09-21 that
+a box stays width-constrained and its body a multiline render, and then that a box is a
+padding and a core width, that the drawing and its padding fit inside the core width, and
+that the text occupies the core width. A box is therefore 1030 pixels wide, with the same padding
+either side of its text, and each line of its text is 1000. A box taller than the
+window scrolls, and a browser draws the scrollbar of such a box inside it, where the
+scrollbar takes room from the content, so a box showing one is laid out that much
+wider again, 1045 pixels where the scrollbar takes fifteen. `give_box_its_core_width`
+lays the box out at the core width and its padding, measures what the scrollbar took
+from the content there, and lays it out again with that room beside the core, so the
+text of a box occupies the core width whether the box scrolls or not and the
+scrollbar stands beside the text rather than over it. A browser drawing its
+scrollbars over the content takes nothing and the box keeps the first width. The user
+asked for the room on 2026-09-21, after the Full Attention box, whose body occupies
+the whole core width, showed a horizontal scrollbar for the fifteen pixels its
+vertical scrollbar had taken, and then asked for it in the boxes that show a
+scrollbar alone, because reserving it in every box left a wider gap right of the text
+than left of it. The wires and the labels of a drawing reach past the
+container that holds it, and the container is given the room they take as its margin once
+it is drawn, so the ink of a drawing stands inside the box. The overhang is measured only
+after the drawing stands in the document, so the first drawing of a term is wrapped at the
+core width less the room the draw layers take, which is ten pixels either side, and a
+drawing that comes out wider than the core width is drawn again wrapped narrower.
+`inspectionBoxes.ts` wraps a drawing three times at most, because a row of one wide
+operation is drawn wider than the width it was wrapped at, and the bodies of the Sliding
+Window Attention and the Engram of layer 1 each need the second drawing. The placement runs when the box opens with its text and again when its
 diagram arrives, and the box is never taller than the window less an eight-pixel margin,
 so it fits wherever the pointer is. A box taller than that room scrolls, and the head
 stays at the top edge of the box while the rest scrolls beneath it, as the user asked on
@@ -477,7 +503,9 @@ sliding-window mode with its legend inline, the query RMSNorm and a linear map w
 out with their parameters on the tape, the operators explained in place, the references
 of every block, the whole model sent to the page with the boxes on, and the
 same figure written to `outputs/pages/DeepSeekV41Flash.html`. The notebook's settings carry
-`title='DeepSeekV4.1'`, so the page and the file are headed `tsncd - DeepSeekV4.1`.
+`title='DeepSeekV4.1'`, so the tab of the page and of the file reads `tsncd - DeepSeekV4.1`.
+Neither writes a heading over the figure, because `DiagramSettings.heading` is
+`PageHeading.NONE` unless a notebook asks for `PageHeading.TITLE`.
 
 ## See also
 

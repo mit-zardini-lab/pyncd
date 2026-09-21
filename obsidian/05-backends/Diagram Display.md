@@ -211,9 +211,15 @@ sets the drawn size of its block. The sentences `cast_presentation.py` and
 `notebooks/display/display_wording.json`, loaded by `display_wording.DisplayWording`, so
 that a page switches them with the rest.
 
-`DiagramSettings.title` names what the page shows. The heading of the open page and of an
-`HTML` file then reads `tsncd - <title>`, and `tsncd` where the setting is `None`. A
-captured image holds the figure alone, so an `INLINE` run does not show the title.
+`DiagramSettings.title` names what the page shows. The name of the tab of the open page and
+of an `HTML` file then reads `tsncd - <title>`, and `tsncd` where the setting is `None`.
+`DiagramSettings.heading` says whether that text is also written as a heading over the
+figure. `PageHeading.NONE`, the default since 2026-09-21, holds the figure alone, so an
+`HTML` file stands as a page of a site that writes its own heading above it, and
+`PageHeading.TITLE` writes the heading. A captured image holds the figure alone, so an
+`INLINE` run shows neither. The open page and an `HTML` file are painted in the canvas
+colour of the figure's theme from the moment they open and show a turning ring until the
+figure is drawn, per *A page that carries its own message* in [[Diagram Wire Format]].
 
 `DiagramSettings.tape` says how a `Para`'s grabs and drops are shown. `ABSORBED`, the
 default since 2026-09-12, passes a term holding grabs or drops through `to_para_wrap` just

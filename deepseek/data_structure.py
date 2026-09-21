@@ -79,17 +79,6 @@ def conjugate_complex_values[B: cat.Datatype, A: cat.Axis](
         nm.Conjugate(nm.x), base=array, name=CONJUGATE_NAME)
 
 
-def table_name(
-    kind: type[Rotary],
-    given: str | fd.DynamicName | None,
-) -> fd.DynamicName:
-    '''The name of a rotary table: `given` where a caller supplies one, and the name
-    the class declares otherwise.'''
-    if given is not None:
-        return fd.DynamicName.from_str(given)
-    return kind.__dataclass_fields__['name'].default
-
-
 def table_over_positions_and_pairs[B: cat.Datatype, A: cat.Axis, O: Rotary](
     operator: O,
     positions: A | None,
@@ -153,13 +142,24 @@ class Rotary(cat.Operator):
         position_stride: nm.Numeric = nm.Integer(1),
         real: B = cat.Reals(),
         name: str | fd.DynamicName | None = None,
-    ) -> cat.Broadcasted[Complex[B], A, Rotary]:
+    ) -> cat.Broadcasted[Complex[B], A, 'Rotary']:
         '''The table over `(positions, pairs)`, per `table_over_positions_and_pairs`.
         `name` defaults to the name the class declares.'''
         return table_over_positions_and_pairs(
             cls(base=base, position_stride=position_stride,
                 name=table_name(cls, name)),
             positions, pairs, real)
+
+
+def table_name(
+    kind: type[Rotary],
+    given: str | fd.DynamicName | None,
+) -> fd.DynamicName:
+    '''The name of a rotary table: `given` where a caller supplies one, and the name
+    the class declares otherwise.'''
+    if given is not None:
+        return fd.DynamicName.from_str(given)
+    return kind.__dataclass_fields__['name'].default
 
 
 @dataclass(frozen=True)
@@ -195,7 +195,7 @@ class YarnRotary(Rotary):
         ramp_end: nm.Numeric = nm.Integer(1),
         real: B = cat.Reals(),
         name: str | fd.DynamicName | None = None,
-    ) -> cat.Broadcasted[Complex[B], A, YarnRotary]:
+    ) -> cat.Broadcasted[Complex[B], A, 'YarnRotary']:
         '''The table over `(positions, pairs)`, per `table_over_positions_and_pairs`.
         `name` defaults to the name the class declares.'''
         return table_over_positions_and_pairs(

@@ -100,7 +100,7 @@ A term to display. A notebook sends it, and the server relays it to every diagra
     "debugBorders": false, "coreDebug": false,
     "width": 750, "subBlocks": true, "drawnBlockTags": [],
     "tapeLabels": true, "legend": false, "inspectionBoxes": false,
-    "title": "DeepSeekV4.1"
+    "title": "DeepSeekV4.1", "heading": "none"
   },
   "auxiliary": { "legend": [ … ], "blocks": { … }, "expansions": { … } }
 }
@@ -245,16 +245,30 @@ a box was opened from is highlighted while the box is open. Clicking locks a
 box open. Several boxes may be locked at once, one per block or operator, and
 each holds the boxes opened inside it.
 Clicking the page outside every box closes them all, as does the escape key.
+A box is a core width of 1000 pixels with a padding of 14 either side of it, so
+a box is 1030 pixels wide. A box taller than the window scrolls, and the scrollbar
+a browser draws inside such a box takes room from its content, so a box showing one
+is laid out that much wider again, 1045 pixels where the scrollbar takes fifteen.
+The text of a box occupies the core width either way, and the scrollbar stands
+beside it. The diagram inside a box is wrapped so that the drawing and the ink
+that overhangs it together occupy the core width. A window with no room for 1030
+pixels holds a box of the room it has, less an eight-pixel margin either side.
 What each box shows arrives in the `auxiliary` field.
 
-`title` (no default) names what the page shows. The heading of the page and the name of
-its tab read `tsncd - <title>`, so a message sent with `"title": "DeepSeekV4.1"` heads the
-page `tsncd - DeepSeekV4.1`. A message that sends no title returns both to `tsncd`, because
-the settings of each message are merged over the defaults. Only the display target writes
-the heading. An off-screen capture and the diagram inside an inspection box draw with the
-same settings and leave the heading as it was. A captured image holds the diagram alone, so
-the title does not appear in one. `display_settings(title=...)` sends it, and a notebook
-sets it as `DiagramSettings.title`. The user asked for the setting on 2026-09-16.
+`title` (no default) names what the page shows. The name of the tab reads `tsncd - <title>`,
+so a message sent with `"title": "DeepSeekV4.1"` names the tab `tsncd - DeepSeekV4.1`, and
+a message that sends no title returns it to `tsncd`, because the settings of each message
+are merged over the defaults. The user asked for the setting on 2026-09-16.
+
+`heading` (default `none`) says whether the same text is written as a heading over the
+figure. Under `none` the page holds the figure alone, so it stands as a page of a site
+that writes its own heading above it. Under `title` the heading reads what the tab reads.
+Only the display target writes the tab and the heading. An off-screen capture and the
+diagram inside an inspection box draw with the same settings and leave both as they were.
+A captured image holds the diagram alone, so neither appears in one.
+`display_settings(title=..., heading=...)` sends both, and a notebook sets them as
+`DiagramSettings.title` and `DiagramSettings.heading`. The user asked on 2026-09-21 for a
+page with no heading, so that it stands as a subpage of a site, and made it the default.
 
 ### A page that carries its own message
 
@@ -280,6 +294,15 @@ the whole DeepSeek-V4.1-Flash model, of which the bundle is 0.95 MiB. A notebook
 one with `DiagramMode.HTML`, under `DiagramSettings.page_directory`, named by the `slug` of
 the call. `websocket_transfer/validate_standalone_page.py` checks the assembly without a
 browser. The user asked for the file on 2026-09-16.
+
+The page is painted in the canvas colour of the dark theme by its own stylesheet, before
+the bundle runs, and shows a turning ring in the element `page-loading` until its figure
+is drawn. Once the message is read, and before its term is built, tsncd's
+`src/display/loadingScreen.ts` repaints the page in the theme of the message, so a light
+figure arrives on a light page and no white page stands where a dark figure is about to.
+The first draw removes the ring, and a page whose figure cannot be drawn writes the reason
+where the ring stood. A page with no message of its own shows the ring while it fetches
+the figure it boots with. The page background initially uses the dark theme until the message is read.
 
 ### A page that carries its localisations
 

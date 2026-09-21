@@ -129,10 +129,15 @@ both tables, as `notebooks/sota/DeepSeekV41Flash/operator_explanations.py` does.
 wire. tsncd draws the label at 0.8 em where the setting is `None`, and measures
 the room the label needs at the size it draws it.
 
-`title` names what the page shows. The heading of the tsncd page and the name of
-its tab read `tsncd - <title>` under BROWSER and in a file HTML writes, and
-`tsncd` where the setting is `None`. A captured image holds the figure alone, so
-the title does not appear in an INLINE run.
+`title` names what the page shows. The name of the tsncd page's tab reads
+`tsncd - <title>` under BROWSER and in a file HTML writes, and `tsncd` where the
+setting is `None`. A captured image holds the figure alone, so the title does
+not appear in an INLINE run.
+
+`heading` says whether the page writes that text as a heading over the figure.
+`PageHeading.NONE`, the default, holds the figure alone, so a file HTML writes
+stands as a page of a site that writes its own heading above it.
+`PageHeading.TITLE` writes the heading.
 
 An agent executing a notebook in the background does not edit the notebook to
 change its mode. It sets `PYNCD_DIAGRAMS` in the environment of the process
@@ -334,6 +339,7 @@ class DiagramSettings:
     dark_mode: ColorMode | bool | None = None
     timeout: int = 30
     title: str | None = None
+    heading: wst.PageHeading = wst.PageHeading.NONE
     # The wordings an HTML page switches its descriptions between, the first
     # being the text module the figure was built from.
     localisations: tuple[localise_descriptions.Localisation, ...] = ()
@@ -348,6 +354,7 @@ SubBlocks = remember_drawn_blocks.SubBlocks
 CastPresentation = cast_presentation.CastPresentation
 AdvancedDisplay = advanced_display.AdvancedDisplay
 AxisHover = wst.AxisHover
+PageHeading = wst.PageHeading
 forget_drawn_blocks = remember_drawn_blocks.forget_drawn_blocks
 
 # The one environment variable read here. `notebooks/execute_notebook.py` sets
@@ -730,6 +737,7 @@ async def _send_to_open_page(
             axisHover=settings.axis_hover,
             axisLabelFontSize=settings.axis_label_font_size,
             title=settings.title,
+            heading=settings.heading,
             auxiliary=auxiliary)
     return None
 
@@ -748,7 +756,8 @@ def page_settings(settings: DiagramSettings) -> wst.RenderHandlerSettings:
             settings.advanced_display),
         axisHover=settings.axis_hover,
         axisLabelFontSize=settings.axis_label_font_size,
-        title=settings.title)
+        title=settings.title,
+        heading=settings.heading)
 
 
 PACKAGE_WORDING_FILES: tuple[pathlib.Path, ...] = (

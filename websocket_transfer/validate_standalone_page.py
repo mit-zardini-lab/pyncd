@@ -9,7 +9,8 @@ and holds the bundle and the message, that the message read back out of the page
 message written into it, that text which would end a `script` element early is escaped
 in the bundle and in the message, that a bundle which loads its fonts from files is
 refused, that the localisations of a page are written as a third element between the
-message and the bundle, and that the `title` display setting reaches the message.
+message and the bundle, and that the `title` and `heading` display settings reach the
+message.
 
 The checks build a stand-in for tsncd's `dist/` in a temporary directory, so they need
 no tsncd checkout. Whether the written page draws when it is opened from a disk with no
@@ -167,6 +168,10 @@ def check_the_localisations_are_written_between_the_message_and_the_bundle() -> 
 def check_the_title_reaches_the_message() -> None:
     if send_morphism.display_settings(title='DeepSeekV4.1') != {'title': 'DeepSeekV4.1'}:
         raise AssertionError('display_settings does not carry the title')
+    if send_morphism.display_settings(heading=wst.PageHeading.TITLE) != {'heading': 'title'}:
+        raise AssertionError('display_settings does not carry the heading')
+    if 'heading' in send_morphism.display_settings(title='DeepSeekV4.1'):
+        raise AssertionError('display_settings sends a heading nobody asked for')
     if 'title' in send_morphism.display_settings(width=900):
         raise AssertionError('a send with no title carries one')
 
