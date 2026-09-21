@@ -1,0 +1,4 @@
+Python: 3.13.3
+VS Code: 1.129.0
+Jupyter extension (ms-toolsai.jupyter): 2025.9.1
+ipykernel: 6.29.5

@@ -2,10 +2,11 @@
 Rendering figures without a browser window open.
 
 `capture.capture_morphism` needs a tsncd page up, because that page is what
-draws. That is the right trade for working in a notebook - the diagram you are
-looking at is the one you get - but it is the wrong one for rebuilding a
-directory of paper figures, where the output should not depend on which tab
-happened to be focused. So this module brings its own browser.
+draws. Depending on the open page is the right trade for working in a
+notebook, since the diagram on screen is the diagram that comes back. It is
+the wrong trade for rebuilding a directory of paper figures, where the output
+should not depend on which tab happened to be focused. This module therefore
+brings its own browser.
 
     # a named set into ./outputs, as PDFs
     await save_figures({'attention': attention, 'convolution': convolution})
@@ -39,7 +40,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-import data_transfer.json as dtj
+import data_transfer.term_json as dtj
 import websocket_transfer.send_morphism as sm
 import websocket_transfer.websockets_transfer as wst
 
@@ -50,18 +51,30 @@ type CaptureFormat = Literal['png', 'svg', 'pdf']
 '''
 Strips the page back to the diagram alone before capturing it.
 
-A tight crop means making the diagram *be* the page: the heading goes, the
-body's own spacing goes, and the margin we do want is reapplied as padding.
-Only the container moves - every overlay is positioned within it, so the
-drawing itself is unaffected.
+A tight crop means making the diagram the whole page. The heading goes, the
+body's own spacing goes, and the wanted margin is reapplied as padding. Only
+the container moves, and every overlay is positioned within it, so the drawing
+itself is unaffected.
+
+The body is sized `max-content` rather than `fit-content`, because `fit-content`
+is capped at the viewport width and a figure wider than the viewport then
+overflows the body. `isolated` also gives the body the capture box as a minimum
+size, because the container is translated to put the overlay's overhang at the
+origin and the translate does not grow the body's padding box, so the page's
+scroll width ended ten pixels before the clip's right edge and Playwright
+trimmed the clip to it. The legend of the advanced display sits at the right
+edge of the figure and was the first thing cut.
 '''
 ISOLATION_CSS = '''
     body > *:not(#diagram) {{ display: none !important; }}
     body {{
         margin: 0 !important;
         padding: {padding}px !important;
-        width: fit-content !important;
-        {background}
+        width: max-content !important;
+        background-color: {background} !important;
+    }}
+    #diagram {{
+        background-color: transparent !important;
     }}
 '''
 
@@ -72,16 +85,16 @@ DEFAULT_VIEWPORT = {'width': 1600, 'height': 1200}
 UNSET: Any = object()
 
 '''
-Where to look for the built tsncd bundle. `TSNCD_DIST` wins; otherwise we try
-the checkout layout these two repositories are normally cloned into, as
-siblings.
+Where to look for the built tsncd bundle. `TSNCD_DIST` wins. Failing that, the
+search covers the two names a tsncd checkout beside this repository is given,
+`tsncd` and `tsncd-public`.
 '''
 DIST_ENV_VAR = 'TSNCD_DIST'
-SIBLING_DIST_CANDIDATES = ('tsncd/dist',)
+SIBLING_DIST_CANDIDATES = ('tsncd/dist', 'tsncd-public/dist')
 
 
 def find_dist(dist: str | pathlib.Path | None = None) -> pathlib.Path:
-    '''Locate tsncd's `dist/`, with an error that says how to produce it.'''
+    '''Locate tsncd's `dist/`, raising an error that states how to build it.'''
     candidates: list[pathlib.Path] = []
     if dist is not None:
         candidates = [pathlib.Path(dist)]
@@ -131,18 +144,34 @@ def serve_directory(directory: pathlib.Path):
         thread.join(timeout=5)
 
 
+WEBSOCKET_THAT_NEVER_CONNECTS = '''
+window.WebSocket = class {
+    constructor() { this.readyState = 3; }
+    addEventListener() {}
+    removeEventListener() {}
+    send() {}
+    close() {}
+};
+'''
+'''The page of the bundle opens a socket to the relay server on port 8765 whenever it is
+loaded with no embedded message. A relay that holds a figure answers with it, and the
+answer arrives after the first `render_json` of a fresh page and replaces the figure
+that call drew, so the first capture of a run came out as the relay's figure. The
+headless page therefore gets a socket that never opens, and `readyState` 3 is CLOSED.'''
+
+
 @dataclass
 class HeadlessRenderer:
     '''
     A browser held open across many renders.
 
-    Startup - launching Chromium, loading the bundle, warming the KaTeX fonts -
-    costs far more than any single diagram, so the point of the context manager
-    is to pay it once for a whole batch.
+    Startup costs far more than any single diagram, because it launches
+    Chromium, loads the bundle and warms the KaTeX fonts. The context manager
+    exists to pay that cost once for a whole batch.
     '''
     scale: float = 2.0
     padding: int = 16
-    background: str | None = '#ffffff'
+    background: str | None = 'auto'
     dist: str | pathlib.Path | None = None
     viewport: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_VIEWPORT))
 
@@ -167,11 +196,13 @@ class HeadlessRenderer:
             self._stack.push_async_callback(browser.close)
             context = await browser.new_context(
                 viewport=self.viewport,
-                # Playwright sets pixel density per context, not per screenshot,
-                # so the resolution of every figure in a batch is fixed here.
+                # Playwright sets the pixel density per context rather than
+                # per screenshot, so the resolution of every figure in a batch
+                # is fixed here.
                 device_scale_factor=self.scale)
             page = await context.new_page()
             page.on('pageerror', lambda error: print(f'[tsncd page error] {error}'))
+            await page.add_init_script(WEBSOCKET_THAT_NEVER_CONNECTS)
             await page.goto(url, wait_until='load')
             # Installed at the end of the entry point's DOMContentLoaded
             # handler, so its presence means the renderer is fully wired up.
@@ -201,33 +232,75 @@ class HeadlessRenderer:
         self,
         data: str | dict,
         settings: wst.RenderHandlerSettings | None = None,
+        auxiliary: wst.DiagramAuxiliary | None = None,
     ) -> None:
         '''
         Draw an already-exported term, leaving it on the page to be captured.
 
         Takes the same payload that goes over the websocket, so a `.json`
         export saved next to a notebook can be redrawn without reconstructing
-        the morphism that produced it.
+        the morphism that produced it. `auxiliary` is the field of the same
+        name a message carries, for the legend and the inspection boxes.
         '''
         await self.page.evaluate(
-            'async ([data, settings]) => await window.tsncd.render(data, settings)',
-            [data, settings or {}])
+            'async ([data, settings, auxiliary]) => '
+            'await window.tsncd.render(data, settings, auxiliary ?? undefined)',
+            [data, settings or {}, auxiliary])
 
     async def render(
         self,
         target: Sendable,
         recycle: bool = False,
         *,
-        darkMode: bool | None = None,
-        debugBorders: bool | None = False,
+        darkMode: wst.ColorMode | bool | None = None,
+        debugBorders: bool | None = None,
         coreDebug: bool | None = None,
         width: int | None = None,
+        subBlocks: bool | None = None,
+        drawnBlockTags: list[int] | None = None,
+        tapeLabels: bool | None = None,
+        legend: bool | None = None,
+        inspectionBoxes: bool | None = None,
+        axisHover: wst.AxisHover | None = None,
+        axisLabelFontSize: float | None = None,
+        auxiliary: wst.DiagramAuxiliary | None = None,
     ) -> None:
-        '''Draw `target` in the headless page, leaving it there to be captured.'''
+        '''Draw `target` in the headless page, leaving it there to be captured.
+        `auxiliary` is assembled from the morphism this call draws, so a caller
+        that passes it converts first.'''
         morphism = sm.to_morphism(target, recycle=recycle)
         await self.render_json(
             dtj.TermJSONConverter.export_to_json(morphism),
-            sm.display_settings(darkMode, debugBorders, coreDebug, width))
+            sm.display_settings(
+                darkMode, debugBorders, coreDebug, width, subBlocks,
+                drawnBlockTags, tapeLabels, legend, inspectionBoxes,
+                axisHover, axisLabelFontSize),
+            auxiliary)
+
+    async def resolve_capture_background(
+        self,
+        background: str | None,
+    ) -> str | None:
+        '''Resolve `auto` for Playwright's page-level capture.'''
+        if background != 'auto':
+            return background
+        resolved_background = await self.page.evaluate('''() => {
+            if (window.tsncd.captureBackground !== undefined) {
+                return window.tsncd.captureBackground('auto');
+            }
+            const diagram = document.getElementById('diagram');
+            const computed = getComputedStyle(diagram).backgroundColor;
+            return computed === 'rgba(0, 0, 0, 0)' || computed === 'transparent'
+                ? '#ffffff'
+                : computed;
+        }''')
+        if resolved_background is not None and not isinstance(
+            resolved_background, str
+        ):
+            raise TypeError(
+                'tsncd resolved the capture background to '
+                f'{resolved_background!r}, expected a CSS colour or None.')
+        return resolved_background
 
     async def capture_rendered(
         self,
@@ -241,17 +314,18 @@ class HeadlessRenderer:
 
         Three formats, and the choice matters:
 
-        `png` is Playwright's own screenshot - a real browser paint, so nothing
-        about fonts or overlays can be lost in translation. The safe default.
+        `png` is Playwright's own screenshot, which is a real browser paint,
+        so nothing about the fonts or the overlays is lost in serialisation.
+        It is the default.
 
         `pdf` is Chromium's print pipeline, and is what to use for a figure
         going into a paper: true vector, real embedded text, and a file in the
         tens of KB.
 
-        `svg` goes through the in-page serialiser, which reproduces the diagram
-        by inlining the full computed style of every element - correct, but it
-        runs to megabytes on a diagram of any size, most of it CSS that has
-        nothing to do with the drawing. Prefer `pdf` unless something
+        `svg` goes through the in-page serialiser, which reproduces the
+        diagram by inlining the full computed style of every element. It is
+        correct, and it runs to megabytes on a diagram of any size, most of it
+        CSS with no bearing on the drawing. Prefer `pdf` unless something
         downstream genuinely needs SVG.
         '''
         padding = self.padding if padding is None else padding
@@ -265,21 +339,23 @@ class HeadlessRenderer:
                 {'format': 'svg', 'padding': padding, 'background': background})
             return wst.result_to_bytes(result)
 
-        async with self.isolated(padding, background) as box:
+        resolved_background = await self.resolve_capture_background(background)
+        async with self.isolated(padding, resolved_background) as box:
             if format == 'pdf':
                 return await self.page.pdf(
                     width=f'{box["width"]}px',
                     height=f'{box["height"]}px',
                     margin={'top': '0', 'right': '0', 'bottom': '0', 'left': '0'},
-                    print_background=background is not None,
+                    print_background=resolved_background is not None,
                     prefer_css_page_size=False)
             return await self.page.screenshot(
                 clip={'x': 0, 'y': 0,
                       'width': box['width'], 'height': box['height']},
-                # The diagram routinely runs past the viewport; without this the
-                # clip is silently intersected with what is on screen.
+                # The diagram routinely runs past the viewport. Without
+                # this the clip is silently intersected with what is on
+                # screen.
                 full_page=True,
-                omit_background=background is None,
+                omit_background=resolved_background is None,
                 type='png')
 
     @contextlib.asynccontextmanager
@@ -288,11 +364,11 @@ class HeadlessRenderer:
         Put the diagram alone on the page with its corner at the origin, and
         yield the box it occupies.
 
-        Both the screenshot and the print need the region they want to be a
-        region that exists. A capture box reaches outside the page whenever the
-        wanted padding exceeds the page's own - the overlay already overhangs
-        the container - and Playwright silently clamps a clip to the page
-        rather than complaining, quietly trimming the margin. Moving the
+        Both the screenshot and the print need the region they are given to
+        be a region that exists. A capture box reaches outside the page
+        whenever the requested padding exceeds the page's own, because the
+        overlay already overhangs the container, and Playwright clamps a clip
+        to the page without reporting it, which trims the margin. Moving the
         diagram to the origin instead makes the box valid by construction.
 
         Everything is undone afterwards, so a batch can mix formats without one
@@ -300,25 +376,31 @@ class HeadlessRenderer:
         '''
         style = await self.page.add_style_tag(content=ISOLATION_CSS.format(
             padding=padding,
-            background=(f'background-color: {background} !important;'
-                        if background is not None else '')))
+            background=background if background is not None else 'transparent'))
         try:
             # Measured after the stylesheet lands, since hiding the heading and
             # dropping the body's spacing has moved everything. `bounds`
             # covers the overlay's overhang, which the page's own scroll size
-            # would miss above and to the left - overflow in the negative
-            # direction does not extend a scroll box.
+            # would miss above and to the left, because overflow in the
+            # negative direction does not extend a scroll box.
             box = await self.page.evaluate(
                 '(padding) => window.tsncd.bounds(padding)', padding)
-            await self.page.evaluate('''([x, y]) => {
+            await self.page.evaluate('''([x, y, width, height]) => {
                 document.getElementById('diagram').style.transform =
                     `translate(${-x}px, ${-y}px)`;
-            }''', [box['x'], box['y']])
+                document.body.style.boxSizing = 'border-box';
+                document.body.style.minWidth = `${width}px`;
+                document.body.style.minHeight = `${height}px`;
+            }''', [box['x'], box['y'], box['width'], box['height']])
             yield box
         finally:
             await style.evaluate('node => node.remove()')
-            await self.page.evaluate(
-                "() => { document.getElementById('diagram').style.transform = ''; }")
+            await self.page.evaluate('''() => {
+                document.getElementById('diagram').style.transform = '';
+                document.body.style.boxSizing = '';
+                document.body.style.minWidth = '';
+                document.body.style.minHeight = '';
+            }''')
 
     async def capture(
         self,
@@ -328,15 +410,28 @@ class HeadlessRenderer:
         format: CaptureFormat = 'png',
         padding: int | None = None,
         background: str | None = UNSET,
-        darkMode: bool | None = None,
-        debugBorders: bool | None = False,
+        darkMode: wst.ColorMode | bool | None = None,
+        debugBorders: bool | None = None,
         coreDebug: bool | None = None,
         width: int | None = None,
+        subBlocks: bool | None = None,
+        drawnBlockTags: list[int] | None = None,
+        tapeLabels: bool | None = None,
+        legend: bool | None = None,
+        inspectionBoxes: bool | None = None,
+        axisHover: wst.AxisHover | None = None,
+        axisLabelFontSize: float | None = None,
+        auxiliary: wst.DiagramAuxiliary | None = None,
     ) -> bytes:
         '''Render `target` and return the image bytes.'''
         await self.render(
             target, recycle=recycle, darkMode=darkMode,
-            debugBorders=debugBorders, coreDebug=coreDebug, width=width)
+            debugBorders=debugBorders, coreDebug=coreDebug, width=width,
+            subBlocks=subBlocks, drawnBlockTags=drawnBlockTags,
+            tapeLabels=tapeLabels, legend=legend,
+            inspectionBoxes=inspectionBoxes, axisHover=axisHover,
+            axisLabelFontSize=axisLabelFontSize,
+            auxiliary=auxiliary)
         return await self.capture_rendered(
             format=format, padding=padding, background=background)
 
@@ -373,8 +468,8 @@ async def capture_headless(
     '''
     One-shot capture, for when there is a single figure to make.
 
-    Launches and tears down a browser around the one render; use
-    `HeadlessRenderer` directly for more than a couple.
+    It launches and tears down a browser around the one render. Use
+    `HeadlessRenderer` directly for more than a couple of figures.
     '''
     async with HeadlessRenderer(scale=scale, dist=dist) as renderer:
         return await renderer.capture(target, recycle=recycle, **options)
@@ -387,9 +482,9 @@ def output_directory(directory: str | pathlib.Path | None = None) -> pathlib.Pat
     '''
     Where figures land: `directory`, or `./outputs` beside the caller.
 
-    Relative to the working directory, which for a notebook is the directory
-    the notebook sits in - so figures land next to the work that produced them
-    without anyone having to say where.
+    It is relative to the working directory, which for a notebook is the
+    directory the notebook sits in, so figures land beside the work that
+    produced them without anyone having to say where.
 
     Always absolute, including when `directory` was given as a relative path.
     The saved paths are handed back to the caller to report or open, and a
@@ -419,20 +514,21 @@ async def save_figures(
         })
         # -> ./outputs/attention.pdf, ./outputs/convolution.pdf
 
-    Names, not paths: each key becomes a filename under `directory`, which
-    defaults to `./outputs`. A name may carry its own extension to override
-    `format` for that one figure, and may include subdirectories:
+    Each key is a name rather than a path, and becomes a filename under
+    `directory`, which defaults to `./outputs`. A name may carry its own
+    extension, which overrides `format` for that one figure, and it may
+    include subdirectories:
 
         await save_figures(
             {'fig1.pdf': attention, 'raster/fig1.png': attention},
             'paper/figures')
 
-    `format` defaults to PDF, which is what a paper wants - vector, embedded
-    text, and smaller than the equivalent PNG.
+    `format` defaults to PDF, because a paper needs vector output with real
+    embedded text, and the file is smaller than the equivalent PNG.
 
-    Remaining options are passed to each capture, so they apply to every
-    figure in the set - `width=1400` to flatten them all, for instance. For
-    per-figure settings, use `HeadlessRenderer` directly and call `save`.
+    The remaining options are passed to each capture, so they apply to every
+    figure in the set. `width=1400` flattens them all, for instance. For a
+    setting per figure, use `HeadlessRenderer` directly and call `save`.
 
     One browser is launched for the whole set, which is the point: startup
     costs far more than any single diagram.

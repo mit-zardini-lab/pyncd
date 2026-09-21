@@ -1,11 +1,13 @@
 import asyncio
 import base64
 from dataclasses import dataclass, field
+import enum
 import uuid
 import websockets
+from collections.abc import Mapping
 from typing import TypedDict, Literal, Any, NotRequired
 import json
-import data_transfer.json as dtj
+import data_transfer.term_json as dtj
 import data_structure.Term as fd
 import random
 
@@ -13,18 +15,22 @@ import random
 type Websocket = Any
 
 '''
-The design is as follows:
- - We have a SERVER. The SERVER runs independently from Jupyter Notebook.
- - A CLIENT connects to the SERVER via WebSocket, and can send messages to it.
- - TypeScript Browser connects to the SERVER. It then receives the latest term from the CLIENT.
+The three parties, and what each does:
 
-Display is one-way, but capture is not: a `renderRequest` carries a term out to
+ - The server runs independently of the Jupyter kernel.
+ - A data client, meaning a notebook, connects to the server over a
+   WebSocket and sends it messages.
+ - A diagram client, meaning a browser page running tsncd, connects to the
+   server and receives the latest term the data client sent.
+
+Display is one-way and capture is not. A `renderRequest` carries a term out to
 the browser and an image comes back on a `renderResult`, correlated by
 `requestId` because the two travel over different connections. The renderer
-cannot run outside a browser - the diagram's geometry only exists once CSS has
-laid it out - so this round trip is how a notebook gets a picture at all.
+cannot run outside a browser, because the diagram's geometry exists only once
+CSS has laid it out, so the round trip is how a notebook gets a picture at all.
 
-The wire format is written up in `tsncd`'s `PROTOCOL.md`; keep the two in step.
+The wire format is written up in `obsidian/05-backends/Diagram Wire Format.md`,
+mirrored at `tsncd/PROTOCOL.md`. Keep the two in step.
 '''
 
 SERVER_HOST = 'localhost'
@@ -33,7 +39,7 @@ SERVER_URI = f'ws://{SERVER_HOST}:{SERVER_PORT}'
 
 '''
 A captured PNG runs to several megabytes once base64'd, and `websockets`
-defaults to rejecting frames above 1 MiB - which drops the connection mid
+defaults to rejecting a frame above 1 MiB, which drops the connection mid
 capture instead of reporting anything useful. Both ends have to raise it.
 '''
 MAX_MESSAGE_BYTES = 64 * 2**20
@@ -49,35 +55,177 @@ class HandshakeMessage(TypedDict):
     clientVersion: str
     clientID: str
 
+class ColorMode(enum.Enum):
+    DARK = 'dark'
+    LIGHT = 'light'
+
+
+class AxisHover(enum.Enum):
+    '''Where an axis answers the pointer in a figure. Under `LEGEND`, the client's
+    default, resting the pointer on the axis's legend row halos every wire of the
+    axis and glows every name of it, and the wires and names answer no pointer.
+    Under `EVERYWHERE` a wire or a name of the axis lights the same, and the
+    legend row with it. Under `OFF` no halo is drawn and nothing answers.'''
+    OFF = 'off'
+    LEGEND = 'legend'
+    EVERYWHERE = 'everywhere'
+
+
 class RenderHandlerSettings(TypedDict, total=False):
     '''
-    Display options forwarded verbatim to the TypeScript client; mirrors
+    Display options forwarded verbatim to the TypeScript client. It mirrors
     `src/display/Render/RenderHandlerSettings.ts`.
 
-    Partial by design - the client merges whatever arrives over its own
+    Partial by design, because the client merges whatever arrives over its own
     defaults, so omitting a key leaves that option at its default.
     '''
     darkMode: bool
+    blockBackground: Literal['none', 'subtle', 'medium', 'strong']
+    blockHoverIntensity: float
     debugBorders: bool
     coreDebug: bool
     # Wrap width in px, and so the diagram's aspect ratio: narrower means more
     # rows and a taller figure, wider means fewer rows and a flatter one.
     width: int
+    # Whether `BlockOperator` bodies are drawn as sub-diagrams beside the main
+    # figure (the client's default). Off, the figure is the high-level view
+    # alone, so that each body can be rendered as its own figure.
+    subBlocks: bool
+    # The `BlockTag`s whose bodies have already been drawn, each as its
+    # `uid._id`. The client leaves a body named here out and still draws the
+    # box in the main figure. The sender keeps the record, because the client
+    # wipes its render target on every message and a capture draws into a
+    # second target that never saw the first.
+    # `notebooks/display/remember_drawn_blocks.py` keeps it for a notebook.
+    drawnBlockTags: list[int]
+    # Whether a Grab and a Drop are labelled with the tape slot they reach.
+    # On by default (the client's): the two are the same parameter but are
+    # drawn in different rows with no line between them, so the label is what
+    # pairs them. The label is the slot's name where it has one, which
+    # `para.new_slot` assigns as 's0', 's1' and so on, and two hex digits of
+    # its UID where it has none, with a hue derived from that UID.
+    tapeLabels: bool
+    # Whether a table of the term's axes, each with its size and its code name,
+    # is drawn beside the figure. Off by default. The rows travel in the
+    # `auxiliary` field of the message.
+    legend: bool
+    # Whether a block or an operator with a standard expansion opens an
+    # inspection box when the pointer rests on it. Off by default. What a box
+    # shows travels in the `auxiliary` field of the message.
+    inspectionBoxes: bool
+    # Where an axis answers the pointer: `legend`, the client's default, from
+    # its legend row alone, `everywhere` from any wire or name of it as well,
+    # and `off` nowhere. The value of an `AxisHover`.
+    axisHover: Literal['off', 'legend', 'everywhere']
+    # The name of what the page shows. The heading of the page and the name of
+    # its tab read `tsncd - <title>`, and `tsncd` when no title is sent.
+    title: str
+    # The size, in em, of the label an axis carries on its wire. The client's
+    # default is 0.8, and the layout measures the label at the size it is drawn.
+    axisLabelFontSize: float
+
+
+class AxisLegendRow(TypedDict):
+    '''One row of the legend: the axis as latex and as text, the integer its
+    size comes to or `None`, the code forms of its name and of its size, and the
+    uid of every axis of the term the row stands for. tsncd links the row to the
+    wires of the figure through the uids, so resting the pointer on the row
+    halos those wires and resting it on one of them shades the row.'''
+    latex: str
+    text: str
+    size: int | None
+    codeName: str | None
+    sizeCodeName: str | None
+    uids: list[int]
+
+class CodeReferenceRecord(TypedDict):
+    '''A `cat.CodeReference` on the wire, with its url resolved. `icon` names the
+    icon tsncd draws before the link, `huggingface` for a link into a repository
+    on Hugging Face, or is `None`.'''
+    label: str
+    url: str | None
+    path: str | None
+    line: int | None
+    endLine: int | None
+    icon: str | None
+
+class BlockInformation(TypedDict):
+    '''What an inspection box shows for a block, beside the block's body. `formula`
+    is LaTeX drawn under the title. A block whose aesthetics say
+    `cat.BlockDrawing.BODY_IN_PLACE` is drawn in the figure as its body alone, and
+    its box shows these fields and no body.'''
+    title: str | None
+    formula: str | None
+    description: str | None
+    references: list[CodeReferenceRecord]
+
+class OperatorExpansion(TypedDict):
+    '''What an inspection box shows for an operator with a standard expansion.
+    `expansion` is the expanded morphism as its own exported term, and
+    `auxiliary` is the auxiliary information of that morphism, so an operator
+    inside the expansion can be opened in turn. `references` are the places in a
+    codebase the operator stands for, listed under the description.'''
+    operator: str
+    latex: str | None
+    formula: str
+    description: str
+    expansion: str
+    auxiliary: 'DiagramAuxiliary'
+    references: list[CodeReferenceRecord]
+
+class DiagramAuxiliary(TypedDict, total=False):
+    '''
+    Information sent beside a term for the legend and the inspection boxes.
+    It mirrors `src/advanced_display/AuxiliaryInformation.ts`. Every part is
+    optional, and a message with no `auxiliary` field draws as it did before the
+    field existed. `blocks` is keyed by the uid of each block's tag and
+    `expansions` by the number tsncd's importer gives each `Broadcasted`, both
+    as strings, which is how JSON keys an object.
+    `websocket_transfer/auxiliary_information.py` assembles it.
+    '''
+    legend: list[AxisLegendRow]
+    blocks: dict[str, BlockInformation]
+    expansions: dict[str, OperatorExpansion]
+
+class LocalisedExpansion(TypedDict, total=False):
+    '''The description of an expansion under one localisation, where it differs
+    from the exported one, and the localised descriptions of its nested auxiliary,
+    where any differ.'''
+    description: str
+    auxiliary: 'LocalisedDescriptions'
+
+class LocalisedDescriptions(TypedDict):
+    '''The descriptions of one localisation that differ from the ones of the
+    `DiagramAuxiliary` a page was exported with, keyed as that auxiliary keys them.
+    `websocket_transfer/localise_descriptions.py` assembles it, and it mirrors
+    `src/data_transfer/embedded_localisations.ts`.'''
+    blocks: dict[str, str]
+    expansions: dict[str, LocalisedExpansion]
+
+class EmbeddedLocalisations(TypedDict):
+    '''What a standalone page carries for its localisation toggle: the name of
+    the localisation the page was exported with, and every localisation by name,
+    in the order the toggle lists them. Only descriptions are localised, because a
+    title sets the drawn size of its block.'''
+    default: str
+    localisations: dict[str, LocalisedDescriptions]
 
 class DataUpdate(TypedDict):
     msgType: Literal['dataUpdate']
     data: dtj.JSONDataStructure
     settings: NotRequired[RenderHandlerSettings]
+    auxiliary: NotRequired[DiagramAuxiliary]
 
 class DataRequest(TypedDict):
     msgType: Literal['dataRequest']
 
 class CaptureOptions(TypedDict, total=False):
     '''
-    How the image should be cut; mirrors `src/data_transfer/capture.ts`.
+    How the image should be cut. It mirrors `src/data_transfer/capture.ts`.
 
-    Partial like `RenderHandlerSettings`, and for the same reason - an omitted
-    key takes the client's default rather than whatever was asked for last.
+    Partial like `RenderHandlerSettings`, and for the same reason: an omitted
+    key takes the client's default rather than whatever the previous send
+    left behind.
 
     `padding` is not cosmetic. `HTMLDrawHandler` places its SVG layers at
     (-10, -10) relative to the diagram container, so a capture with no margin
@@ -92,15 +240,16 @@ class RenderRequest(TypedDict):
     '''
     A `dataUpdate` whose sender is waiting for an image of the result.
 
-    `disturbDisplay` decides whether that render lands on screen. Left out or
+    `disturbDisplay` settles whether that render lands on screen. Left out or
     true, it does, and the capture doubles as a send. False, and the browser
     draws into an off-screen target instead, leaving whatever is on screen -
-    and the term the server holds for reloads - exactly as it was.
+    and the term the server holds for a reload, exactly as it was.
     '''
     msgType: Literal['renderRequest']
     requestId: str
     data: dtj.JSONDataStructure
     settings: NotRequired[RenderHandlerSettings]
+    auxiliary: NotRequired[DiagramAuxiliary]
     capture: NotRequired[CaptureOptions]
     disturbDisplay: NotRequired[bool]
 
@@ -134,6 +283,7 @@ class HandlerInformation:
 class DataServer:
     data_structure: dtj.JSONDataStructure | None = None
     settings: RenderHandlerSettings = field(default_factory=RenderHandlerSettings)
+    auxiliary: DiagramAuxiliary | None = None
     diagram_clients: dict[str, Websocket] = field(default_factory=dict)
     data_clients: dict[str, Websocket] = field(default_factory=dict)
     message_queue: asyncio.Queue[str] = field(default_factory=asyncio.Queue)
@@ -177,7 +327,7 @@ class DataServer:
             if client.clientType == 'DiagramClient'
         ]
 
-    async def send_to_diagrams(self, message: str):
+    async def send_to_diagrams(self, message: str) -> None:
         for socket in self.diagram_sockets():
             await socket.send(message)
 
@@ -193,27 +343,18 @@ class DataServer:
                     print('Sending data.')
                     await self.send_to_one(
                         handlerInformation.socket,
-                        json.dumps({
-                            'msgType': 'dataUpdate',
-                            'data': self.data_structure,
-                            'settings': self.settings
-                        })
+                        json.dumps(self.held_data_update())
                     )
                 return handlerInformation, {'msgType': 'Connected'}
             case {'msgType': 'dataUpdate', 'data': data}:
                 # Mapping patterns match on a subset, so a client that sends no
-                # settings still lands here - it just gets the empty dict, and
+                # settings still lands here, and receives the empty dict, and
                 # the TypeScript side falls back to its own defaults.
                 self.data_structure = data
                 self.settings = msg.get('settings') or RenderHandlerSettings()
+                self.auxiliary = msg.get('auxiliary')
                 print('Data Updated.')
-                await self.send_to_diagrams(
-                    json.dumps({
-                        'msgType': 'dataUpdate',
-                        'data': data,
-                        'settings': self.settings
-                    })
-                )
+                await self.send_to_diagrams(json.dumps(self.held_data_update()))
                 return handlerInformation, {'msgType': 'DataReceived'}
             case {'msgType': 'renderRequest', 'requestId': requestId, 'data': data}:
                 disturb = msg.get('disturbDisplay', True)
@@ -222,6 +363,7 @@ class DataServer:
                     # after the capture comes back up on the same diagram.
                     self.data_structure = data
                     self.settings = msg.get('settings') or RenderHandlerSettings()
+                    self.auxiliary = msg.get('auxiliary')
                 else:
                     # Deliberately not stored. Overwriting here would leave the
                     # display intact only until the next reload, which is a
@@ -241,17 +383,17 @@ class DataServer:
                 print(f'Render requested: {requestId}.')
                 self.pending_captures[requestId] = handlerInformation.socket
                 # Every diagram client renders, so they all stay on the same
-                # term; only the first image back is used.
-                await self.send_to_diagrams(json.dumps({
+                # term, and only the first image back is used.
+                await self.send_to_diagrams(json.dumps(with_auxiliary({
                     'msgType': 'renderRequest',
                     'requestId': requestId,
                     'data': data,
-                    # The request's own settings, not `self.settings` - the
+                    # The request's own settings rather than `self.settings`, because the
                     # latter is only kept current for renders that disturb.
                     'settings': msg.get('settings') or RenderHandlerSettings(),
                     'capture': msg.get('capture') or CaptureOptions(),
                     'disturbDisplay': disturb,
-                }))
+                }, msg.get('auxiliary'))))
                 return handlerInformation, {
                     'msgType': 'RenderRequested', 'requestId': requestId}
             case {'msgType': 'renderResult', 'requestId': requestId}:
@@ -268,23 +410,28 @@ class DataServer:
             case {'msgType': 'dataRequest'}:
                 print('Data Requested.')
                 if self.data_structure is not None:
-                    return handlerInformation, {
-                        'msgType': 'dataUpdate',
-                        'data': self.data_structure,
-                        'settings': self.settings
-                    }
+                    return handlerInformation, self.held_data_update()
                 else:
                     return handlerInformation, {'msgType': 'No Data Available'}
             case _:
                 raise ValueError('Unknown message type: ' + str(msg))
 
-    async def worker(self):
+    def held_data_update(self) -> DataUpdate:
+        '''The term the server holds, as the `dataUpdate` a reconnecting page is
+        sent, with the auxiliary information where the sender gave any.'''
+        return with_auxiliary({
+            'msgType': 'dataUpdate',
+            'data': self.data_structure,
+            'settings': self.settings,
+        }, self.auxiliary)
+
+    async def worker(self) -> None:
         while True:
             message = await self.message_queue.get()
             # for client in self.connected_clients:
             #     await client.send(message)
 
-    async def main(self):
+    async def main(self) -> None:
         async with websockets.serve(
                 self.handler, SERVER_HOST, SERVER_PORT,
                 max_size=MAX_MESSAGE_BYTES):
@@ -296,11 +443,15 @@ class DataClient:
     handshake: str
     data: str
     settings: RenderHandlerSettings = field(default_factory=RenderHandlerSettings)
-    # Set to ask for an image back, which turns the send into a `renderRequest`
+    # Set to request an image back, which turns the send into a `renderRequest`
     # and keeps the connection open until the reply lands.
     capture: CaptureOptions | None = None
     timeout: float = DEFAULT_CAPTURE_TIMEOUT
     disturb_display: bool = True
+    # What the legend and the inspection boxes show, sent beside the term.
+    # `None` leaves the field out of the message, and the page draws as it
+    # did before the field existed.
+    auxiliary: DiagramAuxiliary | None = None
     result: RenderResult | None = field(default=None, init=False)
 
     @classmethod
@@ -311,6 +462,7 @@ class DataClient:
         capture: CaptureOptions | None = None,
         timeout: float = DEFAULT_CAPTURE_TIMEOUT,
         disturb_display: bool = True,
+        auxiliary: DiagramAuxiliary | None = None,
     ) -> RenderResult | None:
         handshake: HandshakeMessage = {
             'msgType': 'identify',
@@ -325,11 +477,12 @@ class DataClient:
             settings=settings if settings is not None else RenderHandlerSettings(),
             capture=capture,
             timeout=timeout,
-            disturb_display=disturb_display)
+            disturb_display=disturb_display,
+            auxiliary=auxiliary)
         await client.main()
         return client.result
 
-    async def main(self):
+    async def main(self) -> None:
         try:
             async with websockets.connect(
                     SERVER_URI, max_size=MAX_MESSAGE_BYTES) as websocket:
@@ -337,11 +490,11 @@ class DataClient:
                 connected = await websocket.recv()
                 print(f'Received from server: {connected}')
                 if self.capture is None:
-                    await websocket.send(json.dumps({
+                    await websocket.send(json.dumps(with_auxiliary({
                         'msgType': 'dataUpdate',
                         'data': self.data,
                         'settings': self.settings
-                    }))
+                    }, self.auxiliary)))
                     response = await websocket.recv()
                     print(f"Received from server: {response}")
                 else:
@@ -362,19 +515,20 @@ class DataClient:
 
         The server acknowledges the request before the browser has drawn
         anything, and the acknowledgement arrives on this same socket, so the
-        reply cannot simply be the next message - we read until the matching
+        reply cannot be identified as the next message, so the client reads until
+    the matching
         `requestId` shows up. The whole wait is bounded, because a browser that
         is wedged would otherwise hang the notebook cell indefinitely.
         '''
         requestId = uuid.uuid4().hex
-        await websocket.send(json.dumps({
+        await websocket.send(json.dumps(with_auxiliary({
             'msgType': 'renderRequest',
             'requestId': requestId,
             'data': self.data,
             'settings': self.settings,
             'capture': self.capture or CaptureOptions(),
             'disturbDisplay': self.disturb_display,
-        }))
+        }, self.auxiliary)))
         async with asyncio.timeout(self.timeout):
             while True:
                 message = json.loads(await websocket.recv())
@@ -382,12 +536,23 @@ class DataClient:
                         and message.get('requestId') == requestId):
                     return message
 
+def with_auxiliary[M: Mapping[str, Any]](
+    message: M, auxiliary: DiagramAuxiliary | None,
+) -> M:
+    '''`message` with the `auxiliary` field where there is any, and as it stands
+    where there is none, so a message with nothing to show beside the term is
+    the message an older page reads.'''
+    if auxiliary is None:
+        return message
+    return {**message, 'auxiliary': auxiliary}  # type: ignore[return-value]
+
 async def send_term(
     term: fd.GeneralTerm,
     settings: RenderHandlerSettings | None = None,
-):
+    auxiliary: DiagramAuxiliary | None = None,
+) -> None:
     print('Sending term to server...')
-    await DataClient.template(term, settings=settings)
+    await DataClient.template(term, settings=settings, auxiliary=auxiliary)
 
 async def capture_term(
     term: fd.GeneralTerm,
@@ -395,14 +560,15 @@ async def capture_term(
     capture: CaptureOptions | None = None,
     timeout: float = DEFAULT_CAPTURE_TIMEOUT,
     disturb_display: bool = True,
+    auxiliary: DiagramAuxiliary | None = None,
 ) -> bytes:
     '''
     Render `term` in the connected browser and return the image bytes it drew.
 
-    With `disturb_display` the diagram also lands on screen; without it the
+    With `disturb_display` the diagram also lands on screen. Without it the
     browser draws off-screen and the display is left alone.
 
-    Requires a diagram page to be open either way - it is that page which does
+    It requires a diagram page to be open either way, because that page is what does
     the rendering, and there is nowhere else it could happen.
     `websocket_transfer.headless` covers the case where there is no browser to
     hand.
@@ -410,7 +576,7 @@ async def capture_term(
     print('Requesting render from server...')
     result = await DataClient.template(
         term, settings=settings, capture=capture, timeout=timeout,
-        disturb_display=disturb_display)
+        disturb_display=disturb_display, auxiliary=auxiliary)
     if result is None:
         raise CaptureError('No render result was returned.')
     return result_to_bytes(result)

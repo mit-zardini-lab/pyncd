@@ -14,17 +14,25 @@ def unsqueeze_guide[T](
         degree_size: int,
         mapping: tuple[int, ...],
         imprint: Sequence[T]):
-    # Think of the degree size as:
-    # (0, 1, 2)
-    # And the mapping might be:
-    # (0,    2)
-    # This should instruct us to make;
-    # (p, 1, r)
-    # By rehaping with a one
+    '''The shape that places an operand's dims at the degree positions its
+    mapping names, with a size of 1 at every degree position it does not read.
+    `mapping[k]` is the degree position operand dim `k` reads, and the mapping
+    must be increasing, which `broadcast_to_degree` arranges by permuting
+    first.'''
     return tuple(
-        imprint[i] if i in mapping else 1
+        imprint[mapping.index(i)] if i in mapping else 1
         for i in range(degree_size)
     )
+
+
+def broadcast_to_degree(x, degree_size: int, mapping: tuple[int, ...]):
+    '''`x` as a view over the degree: permuted so that its dims read the
+    degree positions in increasing order, then reshaped with a size of 1 at
+    each degree position the mapping does not name.'''
+    order = sorted(range(len(mapping)), key=lambda k: mapping[k])
+    if order != list(range(len(mapping))):
+        x = x.permute(order)
+    return x.reshape(unsqueeze_guide(degree_size, tuple(sorted(mapping)), x.shape))
 
 def is_semantically_broadcastable(target: cat.Broadcasted) -> bool:
     return (
@@ -38,7 +46,7 @@ def is_semantically_broadcastable(target: cat.Broadcasted) -> bool:
         and
         all(
             tutil.is_mappable(eta)
-            and no_swaps(tutil.get_mapping(eta))
+            and len(set(tutil.get_mapping(eta))) == len(tutil.get_mapping(eta))
             for eta in target.reindexings
         )
     )

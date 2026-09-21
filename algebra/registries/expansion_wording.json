@@ -1,0 +1,21 @@
+{
+  "name": "Current",
+  "wordings": {
+    "L1_NORM_EXPANSION_DESCRIPTION": "Each value divided by the sum over the axis the operator consumes, with the epsilon of the operator added to the sum, written as a copy, a contraction, a reciprocal and a product. An axis whose values have all underflowed to zero would be divided by zero without the epsilon.",
+    "L2_NORM_EXPANSION_DESCRIPTION": "Each value divided by the root of the sum of the squares over the axes the operator consumes, written as a copy, a square, a contraction, an inverse square root and a product. The result has length one, and no learned weight follows it.",
+    "SOFTMAX_EXPANSION_DESCRIPTION": "The exponential of each score divided by the sum of the exponentials over the axis the operator consumes, which is the exponential followed by the L1 norm.",
+    "NORMALIZE_EXPANSION_DESCRIPTION": "Each value divided by the root of the mean of the squares over the normalised axes, with the epsilon of the operator added under the root. The gain, which is one learned weight per position of the normalised axes, multiplies the result where the operator declares one, and the bias is added after it where the operator declares one.",
+    "DECONCATENATION_EXPANSION_DESCRIPTION": "A deconcatenation cuts one axis into the parts that fill it. Part k of the result at position j is the input at position j plus the sizes of the parts before part k. The expansion copies the input once for each part and reads each copy through an affine view shifted by that sum.",
+    "LEARNED_ARRAY_DESCRIPTION": "A learned array. It reads no input, so its weight is the whole of its result, and the array is read from the tape.",
+    "LINEAR_MAP_SENTENCE": "A learned linear map. The weight holds one value for every pair of an input position and an output position, and the map contracts the input against the weight over the input positions.",
+    "LINEAR_INDEX_OPERAND_SENTENCE": "The index operand names which of the weights the map reads, and it is not summed over.",
+    "LINEAR_BIAS_SENTENCE": "It then adds the bias, one learned value per output position.",
+    "LINEAR_ARRAYS_FROM_THE_TAPE_SENTENCE": "The arrays are read from the tape, and they are shared by every position of the axes the map is broadcast over.",
+    "ROTARY_TURN_SENTENCE": "Each pair of channels is one point in the plane, and a rotary embedding turns that point counterclockwise about the origin by an angle that grows with the position.",
+    "ROTARY_TABLE_UNIT_STRIDE_SENTENCE": "The table holds the turn for every position of {position_letter} and every pair of {pair_letter}, as a complex number of length one whose angle is the position times the frequency of the pair.",
+    "ROTARY_TABLE_STRIDE_SENTENCE": "The table holds the turn for every index of {position_letter} and every pair of {pair_letter}, as a complex number of length one whose angle is the token position {stride} i times the frequency of the pair, with i the index along {position_letter}.",
+    "ROTARY_FASTEST_PAIR_SENTENCE": "Pair 0 has the frequency one and turns fastest, and each later pair turns more slowly than the pair before it by one constant ratio.",
+    "ROTARY_FASTEST_PAIR_BEFORE_YARN_SENTENCE": "Pair 0 has the frequency one and turns fastest, and before YaRN each later pair turns more slowly than the pair before it by one constant ratio.",
+    "YARN_SENTENCE": "YaRN keeps the frequency of the fastest pairs and divides the frequency of the slowest pairs by its factor, so that a context that many times longer than the trained one turns the slow pairs through angles seen in training."
+  }
+}

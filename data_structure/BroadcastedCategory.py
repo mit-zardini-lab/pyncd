@@ -25,13 +25,15 @@ import data_structure.StrideCategory as sc
 
 B = TypeVar('B', covariant=True)
 
-'''
-A note on __xxx__ methods.
-    These are used to easily construct expressions, while avoiding the complexities of the data structure.
-    We associate __mul__ to a monoidal product. Between 'object-like' (Objectoid) entities, it returns an object.
-    Between 'morphism-like' entities, it returns a morphism. Objectoids include Axes, ProdObject[Axis], and tuples
-    thereof (for the stride category) and Datatypes, Arrays, and tuples thereof (for the broadcasted
-    category).
+'''What the dunder methods below do.
+
+The overloads construct expressions without the caller building the data structure
+by hand.
+
+`__mul__` is the monoidal product. Between two objectoids it returns an object, and
+between two morphisms it returns a morphism. An objectoid is an `Axis`, a
+`ProdObject[Axis]` or a tuple of those for the stride category, and a `Datatype`, an
+`Array` or a tuple of those for the broadcasted category.
 '''
 
 type BroadcastedCategory[B:Datatype, A:sc.Axis = sc.Axis] = pc.ProdCategory[Array[B, A], Broadcasted[B, A]]
@@ -194,7 +196,7 @@ class Weave[B: Datatype, A: sc.Axis](fd.Term):
     
 @dataclass(frozen=True)
 class Operator(fd.Term):
-    name: fd.DynamicName | None = None
+    name: fd.DynamicName | None
 
     def bc_signature[B: Datatype](
         self,
@@ -205,24 +207,53 @@ class Operator(fd.Term):
 
 @dataclass(frozen=True)
 class Broadcasted[B: Datatype, A: sc.Axis, O: Operator = Any](pc.Morphism[Array[B, A]]):
+    '''An operator broadcast over a degree, with one reindexing per input.
+
+    The degree is the common domain of the reindexings, so a morphism whose own
+    domain is empty has no reindexing to derive it from. `backup_degree` carries
+    the degree of a morphism with an empty domain and is `None` for every other
+    morphism, so `has_empty_domain` and `backup_degree is not None` report the
+    same condition. `__post_init__` enforces the correspondence, and gives a
+    morphism constructed with an empty domain and no `backup_degree` the empty
+    one.
+
+    An operator with no operands, broadcast over a degree, computes once per
+    index of the degree. One value repeated over the degree is a different
+    morphism, and a sampler distinguishes the two.
+    '''
     operator: O
     input_weaves: fd.Prod[Weave[B, A]] = ()
     output_weaves: fd.Prod[Weave[B, A]] = ()
     reindexings: fd.Prod[sc.StrideCategory[A]] = ()
+    backup_degree: pc.ProdObject[A] | None = None
+
+    def __post_init__(self) -> None:
+        if len(self.input_weaves) != len(self.reindexings):
+            raise ValueError(
+                "The number of input weaves must match the number of reindexings.")
+        if self.has_empty_domain():
+            if self.backup_degree is None:
+                object.__setattr__(self, 'backup_degree', pc.ProdObject())
+        elif self.backup_degree is not None:
+            raise ValueError(
+                "backup_degree belongs to a Broadcasted with an empty domain "
+                "alone; with inputs the degree is the reindexings' domain.")
+
+    def has_empty_domain(self) -> bool:
+        return len(self.input_weaves) == 0
 
     def degree(self) -> pc.ProdObject[A]:
-        if len(self.reindexings) == 0:
-            return pc.ProdObject()
+        if self.backup_degree is not None:
+            return self.backup_degree
         try:
             return util.iallequals(
                     morphism.dom()
                     for morphism in self.reindexings
                 )
         except Exception:
-            # for morphism in self.reindexings:
-            #     print(morphism.dom())
-            print(self.operator)
-            raise ValueError("Inconsistent reindexing morphisms in Broadcasted morphism.")
+            raise ValueError(
+                "Inconsistent reindexing morphisms in Broadcasted morphism: "
+                f"{self.operator}.")
     
     def dom(self) -> pc.ProdObject[Array[B, A]]:
         return pc.ProdObject.from_iter(
@@ -243,5 +274,6 @@ class Broadcasted[B: Datatype, A: sc.Axis, O: Operator = Any](pc.Morphism[Array[
                 Weave(weave.datatype, weave._shape) for weave in self.input_weaves),
             output_weaves=tuple(
                 Weave(weave.datatype, weave._shape) for weave in self.output_weaves),
-            reindexings=tuple(pc.ProdObject().identity() for _ in self.reindexings)
+            reindexings=tuple(pc.ProdObject().identity() for _ in self.reindexings),
+            backup_degree=None if self.reindexings else pc.ProdObject(),
         ) # type: ignore

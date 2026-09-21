@@ -10,13 +10,13 @@ from typing import Literal, Iterable, Callable
 import display.Color as cl
 import display.node_category as dcat
 
-import graphs.Hypergraph as hg
+import graphs.data_structure.Hypergraph as hg
 
-def box_graph(target: hg.Hypergraph) -> Box.Box:
+def display_graph(target: hg.Hypergraph, offset: int = 2) -> Box.Box:
     header = Box.Horizontal(
-        (*(dcat.display_uterm(dom) for dom in target.udom()),
+        (*(dcat.display_uterm(dom) for dom in target.dom),
          Box.TextBox(' => '),
-         *(dcat.display_uterm(cod) for cod in target.ucod())
+         *(dcat.display_uterm(cod) for cod in target.cod)
          ),
          justify_mode=js.JustifyMode.LEFT
     )
@@ -27,7 +27,7 @@ def box_graph(target: hg.Hypergraph) -> Box.Box:
             core = Box.Padded(
                 display_graph(target.body, offset=offset)
             )
-        case hg.AuxiliaryGraph():
+        case hg.Multigraph():
             core = Box.Horizontal(
                 (Box.Fill('|', min_width=offset),
                  Box.Vertical.from_iter(

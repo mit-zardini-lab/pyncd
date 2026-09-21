@@ -52,22 +52,23 @@ def str_uterm(
     target: fd.UTerm,
     size: int = 2
 ) -> str:
-    text = ''
     if target.uid._name is not None:
-        text = f'{target.uid._name.to_bodies()}  '[:size]
-    else:
-        text = f'  {target.uid._id:X}'[-size:]
-    return text
+        body = target.uid._name.to_bodies()
+        # Don't silently truncate a name that doesn't fit in `size` - that's
+        # how a real (but long) name ends up looking like unlabelled noise
+        # next to everything else's short abbreviation. Show it in full
+        # instead.
+        return body if len(body) > size else f'{body}  '[:size]
+    return f'  {target.uid._id:X}'[-size:]
 
 def str_axis(
     axis: cat.Axis
 ) -> str:
-    body_str = (
+    return (
         f'{str_numeric(axis._size)}'
         if isinstance(axis._size, nm.Integer)
         else str_uterm(axis, 2)
     )
-    return body_str
 
 def display_axis(
     axis: cat.Axis
@@ -140,6 +141,7 @@ def reindexed_weave_std[B:cat.Datatype, A:cat.Axis](
         ),
         datatype(weave.datatype)
     ))
+    # TODO: improve this middle part
     name = f'{reindexing.name}   '[:3] if isinstance(reindexing, cat.StrideMorphism) else 'eta'
     middle = Box.TextBox(name)
     return Box.Horizontal((left, middle))

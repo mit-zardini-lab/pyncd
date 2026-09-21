@@ -38,11 +38,13 @@ def generic_signature[B: cat.Datatype = cat.Reals](
     SignatureSegment, 
     fd.Prod[cat.Weave[B, cat.RawAxis]], 
     fd.Prod[cat.Weave[B, cat.RawAxis]], 
-    fd.Prod[cat.Rearrangement[cat.RawAxis]]]:
+    fd.Prod[cat.Rearrangement[cat.RawAxis]],
+    cat.ProdObject[cat.RawAxis]]:
     '''
-    Symbols that appear on the left and right are broadcasted.
+    Symbols that appear on the right are broadcasted - degree. One that
+    appears on the right only is *repeated along*: it is still degree, and the
+    reindexings simply do not name it, which is what a broadcast is.
     Symbols that appear only on the left are absorbed.
-    Symbols that appear only on the right are produced.
     
     :param signature: Description
     :type signature: str
@@ -64,9 +66,8 @@ def generic_signature[B: cat.Datatype = cat.Reals](
                    for name in segment}
     
     axes_names = input_names | output_names
-    broadcasted_names = input_names & output_names
+    broadcasted_names = output_names
     absorbed_names = input_names - broadcasted_names
-    produced_names = output_names - broadcasted_names
 
     degree_names = util.iallequals(
         tuple(name for name in segment
@@ -93,11 +94,7 @@ def generic_signature[B: cat.Datatype = cat.Reals](
     output_weaves = tuple(
         cat.Weave(
             datatype,
-            tuple(
-                axes[name] if name in produced_names
-                else cat.WeaveMode.TILED
-                for name in segment
-            )
+            (cat.WeaveMode.TILED,) * len(segment)
         )
         for segment in output_segments
     )
@@ -126,4 +123,6 @@ def generic_signature[B: cat.Datatype = cat.Reals](
         for segment in input_segments
     )
 
-    return segment_signature, input_weaves, output_weaves, reindexings
+    # The degree is handed back separately: with no inputs there is no
+    # reindexing to carry it, and the caller puts it in `backup_degree`.
+    return segment_signature, input_weaves, output_weaves, reindexings, cat.ProdObject(degree)

@@ -1,3 +1,17 @@
+'''Reading structure back out of a term.
+
+Two kinds of question are answered here. `identify_category`, `is_mappable`,
+`get_mapping` and `is_identity` decide what a morphism is by matching on the
+constructors of the product category. `search` and `type_search` find the subterms of
+a term that satisfy a predicate.
+
+Terms form an immutable directed acyclic graph with heavy sharing, so a traversal that
+follows paths rather than nodes visits a subterm reachable fifty ways fifty times.
+Fusing attention once produced 8.3 million calls to `hash` over a result holding 35
+thousand distinct objects. Three functions accounted for that total, and all three now
+avoid it by memoising: `Term.__hash__`, `Context.apply` and `search` below. Write any
+new traversal here so that it visits each node once.
+'''
 from __future__ import annotations
 from enum import Enum
 from typing import Any, Iterable, Callable

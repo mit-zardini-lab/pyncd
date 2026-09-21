@@ -1,0 +1,16 @@
+{
+  "name": "Current",
+  "wordings": {
+    "ELEMENTWISE_MAP_SENTENCE": "An elementwise map. Every value x of the input is replaced by the value y the formula gives at it.",
+    "CAST_EVERY_VALUE_ROUNDED_SENTENCE": "Every value is replaced by the nearest number the written format holds.",
+    "CAST_BITS_AGAINST_PHRASE": "holds an element in {written_bits} bits against the {read_bits} of the operand's format",
+    "CAST_FEWER_BITS_SENTENCE": "The written format {against}, so every value is replaced by the nearest number the written format holds.",
+    "CAST_MORE_BITS_SENTENCE": "The written format {against}, and holds every number that format holds, so no value changes.",
+    "CAST_SAME_BITS_SENTENCE": "The two formats hold an element in the same number of bits and hold different numbers, so a value the written format does not hold is replaced by its nearest number.",
+    "SCALE_GROUP_OF_CONSECUTIVE_VALUES_PHRASE": "{channels} consecutive values",
+    "SCALE_GROUP_OF_A_BLOCK_PHRASE": "block of {channels} by {rows}",
+    "SCALE_SENTENCE": "One scale held in {form} is shared by every {group}, and the value denoted by an element is the element multiplied by the scale of its group.",
+    "CAST_READS_SENTENCE": "The cast reads a value held in {read} and writes it in {written}.",
+    "CAST_WIRE_LABEL_SENTENCE": "The wire on each side of the cast is labelled with its quantisation."
+  }
+}

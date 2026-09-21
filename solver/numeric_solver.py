@@ -2,7 +2,9 @@ import data_structure.Term as fd
 import data_structure.Category as cat
 import data_structure.Numeric as nm
 
-### SOME NUMERIC ALGEBRA
+# ==========================================================================
+# Numeric algebra, mirroring `data_structure/Numeric.py`.
+# ==========================================================================
 import itertools
 import utilities.utilities as util
 

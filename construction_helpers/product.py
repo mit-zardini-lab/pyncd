@@ -1,16 +1,20 @@
+'''The parallel product, `*`.
+
+    Object   * Object   -> Object
+    Object   * Morphism -> Morphism
+    Morphism * Morphism -> Morphism
+
+A tuple of targets flattens, so a product may be written with nesting and read
+back without it. Where either side is a morphism the whole product is a
+morphism, and each object is carried through as its own identity.
+
+`obsidian/02-categories/Product Categories.md` describes the category.
+'''
 from __future__ import annotations
 from typing import Callable, Iterable, Iterator, overload
 import data_structure.Term as fd
 import data_structure.Category as cat
 import data_structure.Numeric as nm
-
-'''
-Multiplication looks like:
-    - Object * Object     -> Object
-    - Object * Morphism   -> Morphism
-    - Morphism * Morphism -> Morphism
-Multiplication also supports flattening a tuple of targets.
-'''
 
 type ProductObjectTarget[L, T=L] = (
     L | T
@@ -25,7 +29,8 @@ type ProductMorphismTarget[L, M:cat.Morphism, T=L] = (
     | fd.Prod[ProductMorphismTarget[L, M, T]]
 )
 
-def contains_morphism[L,M:cat.Morphism,T=L](target: ProductMorphismTarget[L, M, T]):
+def contains_morphism[L,M:cat.Morphism,T=L](
+        target: ProductMorphismTarget[L, M, T]) -> bool:
     match target:
         case tuple():
             return any(contains_morphism(segment) for segment in target)
@@ -37,11 +42,17 @@ def contains_morphism[L,M:cat.Morphism,T=L](target: ProductMorphismTarget[L, M, 
 def target_expand[L,M:cat.Morphism,T=L](
         target: ProductMorphismTarget[L, M, T],
         conversion: Callable[[L | T], L] = lambda x: x) -> fd.Prod[L | cat.ProdCategory[L, M]]:
+    '''Flatten the nesting into one sequence of objects and morphisms.
+
+    A `Rearrangement` with an empty mapping and an empty domain is the identity
+    on the unit object, and it is dropped rather than expanded, because it
+    occupies no position in a product.
+    '''
     match target:
         case tuple() | cat.ProdObject() | cat.ProductOfMorphisms():
             return tuple(
-                segment 
-                for member in target 
+                segment
+                for member in target
                 for segment in target_expand(member, conversion)) # type: ignore
         case cat.Rearrangement(mapping=(), _dom=()):
             return ()
@@ -49,7 +60,7 @@ def target_expand[L,M:cat.Morphism,T=L](
             return (target,) # type: ignore
         case _:
             return (conversion(target),)
-        
+
 def object_product[L, T=L](
     target: ProductObjectTarget[L, T],
     conversion: Callable[[L | T], L] = lambda x: x
@@ -58,6 +69,7 @@ def object_product[L, T=L](
     return cat.ProdObject(content_expanded) # type: ignore
 
 def to_morphism[L, M: cat.Morphism](target: Iterable[L | cat.ProdCategory[L, M]]) -> Iterator[cat.ProdCategory[L, M]]:
+    '''Replace each run of adjacent objects with the identity on their product.'''
     accumulated: list[L] = []
     for member in target:
         match member:
@@ -94,6 +106,7 @@ def datatype_converter[B: cat.Datatype, A: cat.Axis](target: B | cat.Array[B, A]
     return target
 
 def axis_converter[A:cat.Axis](target: A | str | fd.DynamicName | nm.Numeric) -> A | cat.RawAxis:
+    '''A numeric gives an axis of that size, named by the numeric's own LaTeX.'''
     match target:
         case str() | fd.DynamicName():
             return cat.RawAxis.named(target)
@@ -102,16 +115,20 @@ def axis_converter[A:cat.Axis](target: A | str | fd.DynamicName | nm.Numeric) ->
             return fd.DynamicName.from_str(target.to_latex()).capture(sized)
         case _:
             return target
-    #return cat.RawAxis.named(target) if isinstance(target, (str, fd.DynamicName)) else target
 
-def full_converter(target):
+def full_converter[L](
+    target: L | cat.Datatype | str | fd.DynamicName
+) -> L | cat.Array | cat.RawAxis:
     if isinstance(target, cat.Datatype):
         return cat.Array(datatype=target)
     elif isinstance(target, (str, fd.DynamicName)):
         return cat.RawAxis.named(target)
     return target
 
-def datatype_product(*target):
+def datatype_product(
+    *target: ProductMorphismTarget[cat.Array | cat.RawAxis, cat.Morphism,
+                                   cat.Datatype | str | fd.DynamicName]
+) -> cat.ProdCategory | cat.ProdObject:
     return general_product(target, full_converter) # type: ignore
 
 cat.Datatype.__mul__   = datatype_product # type: ignore

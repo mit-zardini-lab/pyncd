@@ -40,6 +40,8 @@ def display_numeric(
             return display_uterm(target, 4) # type: ignore
         case nm.Integer():
             return Box.TextBox(str(target._value))
+        case nm.UnitOfMeasure():
+            return Box.TextBox(target.symbol)
         case nm.Associative():
             return Box.Horizontal((
                 Box.TextBox('('),

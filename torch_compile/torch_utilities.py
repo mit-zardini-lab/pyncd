@@ -27,7 +27,7 @@ class Weights(nn.Module):
         self.bias = nn.Parameter(torch.empty(bias_size, **factory_kwargs)) if bias_size else None
         self.reset_parameters()
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if self.bias is not None:
             fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
@@ -62,6 +62,9 @@ class Multilinear(nn.Module):
         # Reshape the input. The last axes should match, else there's an error.
         x_shape = x_in.shape
         assert tuple(x_shape[-len(self.in_size):]) == self.in_size
+        # TODO: Double check this
+        # x_dims = list(range(len(x_in.shape) - len(self.in_size), len(self.in_size)))
+        # w_dims = list(range(len(self.in_size)))
         x_out = torch.tensordot(x_in, self.weights.weight, len(self.in_size)) # type: ignore
         if self.bias:
             x_out += self.weights.bias

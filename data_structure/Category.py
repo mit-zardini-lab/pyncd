@@ -7,7 +7,11 @@ from data_structure.ProductCategory import (
     ProductOfMorphisms,
     Rearrangement,
     BlockTag,
-    BlockAesthetics
+    BlockAesthetics,
+    BlockDrawing,
+    CodeReference,
+    DefinedExpression,
+    SidesOfADefinitionDisagree,
 )
 from data_structure.StrideCategory import (
     StrideCategory,
@@ -37,6 +41,10 @@ __all__ = [
     'Rearrangement',
     'BlockTag',
     'BlockAesthetics',
+    'BlockDrawing',
+    'CodeReference',
+    'DefinedExpression',
+    'SidesOfADefinitionDisagree',
     'Block',
     'StrideCategory',
     'Axis',

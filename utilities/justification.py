@@ -1,7 +1,15 @@
+'''Padding a sequence out to a fixed length.
+
+`display` lays a diagram out by column, so every cell in a column has to occupy the
+same number of screen positions. `justify` works on a sequence of items and pads it
+with copies of one `buffer` item. `justify_str` is the string case, and corrects for
+the ANSI colour escapes a coloured cell carries, which occupy no screen position.
+'''
 from __future__ import annotations
 from typing import Callable, Iterable, Iterator, overload, Sequence
 from enum import Enum
 import utilities.utilities as util
+import display.Color as Color
 
 class JustifyMode(Enum):
     LEFT = 'left'     # 'Hello      '
@@ -16,7 +24,14 @@ def justify[T](
     length: int | None = None,
     mode: JustifyMode = JustifyMode.LEFT,
     separator: T | None = None
-):
+) -> Iterator[T]:
+    '''`target` padded with `buffer` items until it holds `length` items.
+
+    `length` counts every item, including the separators. A `length` of None yields
+    `target` unpadded, and a `length` shorter than `target` truncates from the right.
+    `SPREAD` on a single item falls through to `CENTER`, because there is no gap to
+    distribute the padding into.
+    '''
     target = tuple(target)
     seperated_form = tuple(util.join_with_none(target, separator))
     if length is None:
@@ -48,7 +63,13 @@ def spread[T](
     target: Sequence[T],
     buffer: T,
     length: int,
-):
+) -> Iterator[T]:
+    '''`target` with the padding shared out between its gaps, to fill `length` items.
+
+    Every gap receives the same number of `buffer` items. The remainder is divided
+    between the first gap and the last. `target` must hold at least two items, because
+    a shorter sequence has no gap to divide by.
+    '''
     extra_space = length - len(target)
     extra_space = length - len(target)
     number_gaps = len(target) - 1
@@ -69,11 +90,15 @@ def justify_str(
     buffer: str = ' ',
     mode: JustifyMode = JustifyMode.LEFT,
     separator: str | None = None
-):
-    # Imported here rather than at module scope: display/__init__ imports
-    # node_category, which imports this module, so a top-level import would
-    # be circular.
-    import display.Color as Color
+) -> str:
+    '''The strings in `target` joined into one line `length` screen positions wide.
+
+    `Color.original` strips the ANSI escapes before measuring, so a coloured string
+    is padded to the width a reader sees rather than to the width of its bytes. Each
+    `buffer` must be one screen position wide, because the width is converted into a
+    count of items for `justify`. The conversion counts the strings in `target` alone,
+    so passing a `separator` widens the result past `length`.
+    '''
     if length is not None:
         total_length = sum(len(Color.original(s)) for s in target)
         desired_buffers = length - total_length

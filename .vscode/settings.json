@@ -1,0 +1,8 @@
+{
+    "workbench.colorTheme": "Ayu Dark",
+    // Start every notebook's kernel at the repo root (not the notebook's own
+    // folder) so bare-name imports like `import construction_helpers` resolve
+    // for notebooks in subdirectories (e.g. experimental_notebooks/) exactly as
+    // they do for the notebooks at the repo root.
+    "jupyter.notebookFileRoot": "${workspaceFolder}"
+}

@@ -3,7 +3,7 @@ import display.Box as Box
 import display.node_category as cat
 import display.display_numeric as nm
 import display.display_graph as graph
-import graphs.Hypergraph as hg
+import graphs.data_structure.Hypergraph as hg
 
 
 __all__ = [
@@ -26,7 +26,7 @@ def print_graph(target: hg.Hypergraph) -> None:
             print('--- START BLOCK ---')
             print_graph(target.body)
             print('---  END BLOCK  ---')
-        case hg.AuxiliaryGraph():
+        case hg.Multigraph():
             for subgraph in target.subgraphs():
                 print('##############')
                 print_graph(subgraph)

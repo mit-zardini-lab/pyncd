@@ -1,0 +1,505 @@
+{
+  "name": "Current",
+  "wordings": {
+    "CORE_TITLE": "\\text{Attention Core}",
+    "SOFTMAX_STEPS_SENTENCE": "The query scores against the latent at every slot. The scores are exponentiated. One copy is summed into the denominator together with the exponentiated sink logit. The reciprocal of that sum scales the exponentials contracted against the latents.",
+    "CORE_DESCRIPTION": [
+      "The attention core computes one head's softmax over the window slots, the selected entries and the learned sink. The two kinds of latent are laid end to end along one slot axis.",
+      "$SOFTMAX_STEPS_SENTENCE"
+    ],
+    "WINDOW_CORE_DESCRIPTION": [
+      "The attention core computes one head's softmax over the window slots and the learned sink.",
+      "$SOFTMAX_STEPS_SENTENCE"
+    ],
+    "TWO_BRANCH_DESCRIPTION": "The same softmax is written with the window slots and the selected entries as two branches. Each branch scores the query against its own latents and exponentiates. The two denominators and the exponentiated sink logit are summed. The reciprocal of the sum scales the two numerators added together.",
+    "FULL_TITLE": "\\text{Full Attention}",
+    "REINDEX_TITLE": "\\text{Reindex Attention}",
+    "REUSE_TITLE": "\\text{Reuse Attention}",
+    "WINDOW_TITLE": "\\text{Sliding Window Attention}",
+    "ENCODER_FULL_ATTENTION_DESCRIPTION": "In the Full mode of an encoder group the layer compresses two consecutive tokens of its hidden state into each entry, computes the shared indexer keys, scores every entry reached by each query and keeps the 512 best, gathers their latents, and attends over the window and the gathered entries under one softmax. The entries and the selection are dropped onto the tape for the Reuse layers of the same group.",
+    "DECODER_FULL_ATTENTION_DESCRIPTION": "In the Full mode of the decoder the layer projects each token of its hidden state into one entry, computes the shared indexer keys, scores every entry reached by each query, publishes the candidate pool of the best blocks of distances, keeps the 512 best entries, gathers their latents, and attends over the window and the gathered entries under one softmax. The entries, the keys, the pool and the selection are dropped onto the tape for every later decoder layer.",
+    "REINDEX_ATTENTION_DESCRIPTION": "In the Reindex mode the layer grabs the entries, the indexer keys and the candidate pool written by the decoder's Full layer, scores its own queries at the distances held by the pool and nowhere else, keeps the 512 best entries, gathers their latents, and attends over the window and the gathered entries under one softmax. The new selection is dropped onto the tape for the Reuse layers of the same group.",
+    "REUSE_ATTENTION_DESCRIPTION": "In the Reuse mode the layer grabs the entries and the selection written by a preceding layer, computes its own query and window latents from its own hidden state, gathers the latents of the selected entries, attends over the window and the gathered entries under one softmax, and projects the result back to the residual width.",
+    "WINDOW_ATTENTION_DESCRIPTION": "In the sliding-window mode of the first two layers each layer computes its query and its window latents from its own hidden state, attends over the last 128 tokens and the learned sink with no compressed entries, and projects the result back to the residual width.",
+    "POOL_TITLE": "\\text{Candidate Pool}",
+    "SCORES_INTO_DISTANCES_SENTENCE": "The block turns one token's indexer scores into the distances each Reindex layer scores inside.",
+    "SELECT_CANDIDATE_BLOCKS_OF_ONE_TOKEN_DESCRIPTION": [
+      "$SCORES_INTO_DISTANCES_SENTENCE",
+      "The distances are split into blocks of eight. Each block keeps its best score. The 2048 best blocks are kept. The eight distances of every kept block are laid out along the candidate axis."
+    ],
+    "OUTPUT_TITLE": "\\text{Grouped Output Projection}",
+    "PROJECT_ONE_QUERY_DESCRIPTION": "The projection maps one query's 64 heads into the residual width. The heads are cut into eight groups of eight. Each group's values are mapped to its own 1024-wide rank by a weight of its own. One final weight reads all eight ranks together.",
+    "INDEXER_TITLE": "\\text{Lightning Indexer}",
+    "SCORE_TITLE": "\\text{Indexer Scores}",
+    "GATHER_TITLE": "\\text{Entry Gather}",
+    "SCORE_EVERY_QUERY_DESCRIPTION": "The block returns one query's combined score against every entry reached by the query. Each of the 32 indexer heads scores the query's low rank against the entry's key. The score is rectified. Each head's rectified score is scaled in the sum by a weight read off the hidden state. The released code computes the score with an ordinary 16-bit multiply over keys and queries that were rounded to four bits and written back as 16-bit numbers. The score is therefore the one given by a four-bit multiply.",
+    "GATHER_DESCRIPTION": "The gather reads the latents of the selected entries. The compressed entries are read back from every entry and merged onto the queries the way the indexer reads its keys. One latent is read per slot at the distance held by the selection for that slot.",
+    "RELATIVE_INDEXER_DESCRIPTION": "The lightning indexer runs over one kind of entry. The shared indexer keys are read back from every entry and merged onto the queries, so each query holds the keys of the entries reached by that query. The scoring box scores one query against those keys.",
+    "COMPRESSOR_TITLE": "\\text{Compressor}",
+    "POOL_TOKENS_INTO_ENTRIES_DESCRIPTION": "In the ratio-2 compressor two consecutive tokens form one entry. Each token is projected to a value and to a gate. A softmax over the two tokens of each channel weights the values. The weighted sum is normalised.",
+    "PROJECT_TOKENS_INTO_ENTRIES_DESCRIPTION": "In the ratio-1 compressor each token is one entry. The token is projected to the latent width and normalised.",
+    "EXPERTS_TITLE": "\\text{Routed Experts}",
+    "GATE_TITLE": "\\text{Expert Gate}",
+    "SHARED_TITLE": "\\text{Shared Expert}",
+    "MIXTURE_TITLE": "\\text{Mixture of Experts}",
+    "EXPERT_BODY_CLAUSE": "a gate projection through a sigmoid weighted input and an up projection multiplied together, then a down projection back to the residual width",
+    "ROUTED_EXPERTS_DESCRIPTION": "The routed experts run on one token: $EXPERT_BODY_CLAUSE. The diagonal keeps the expert chosen by each of the six slots.",
+    "SHARED_EXPERT_DESCRIPTION": "Every token runs the shared expert, at the same expert width and with no router: $EXPERT_BODY_CLAUSE.",
+    "MIX_ONE_TOKEN_DESCRIPTION": "One token passes through the mixture. The gate box chooses six experts and weights them. The outputs of the six are summed under their gates. The shared expert's output is added. The token's hidden state is added as the residual.",
+    "EXPERT_GATE_DESCRIPTION": "The gate box computes one token's gates over the routed experts. The router scores every expert. The correction bias is added to one copy of the scores. The six experts are chosen from that copy. The unbiased scores are read at the chosen slots. The six gates are divided by their sum and scaled by the route scale.",
+    "SINKHORN_TITLE": "\\text{Sinkhorn Normalisation}",
+    "COEFFICIENTS_TITLE": "\\text{Mixing Coefficients}",
+    "MHC_TITLE": "\\text{Single-Pass mHC}",
+    "PREDICT_ONE_TOKEN_DESCRIPTION": "The block predicts one token's mixing coefficients. The token's four streams are divided by their root mean square, with no learned weight after the division. Three linear maps read the divided streams. One gives the collapse vector through a sigmoid. One gives the output vector through a doubled sigmoid. One gives the four-by-four combine matrix. An exponential and twenty rounds of Sinkhorn normalisation make that matrix doubly stochastic.",
+    "MHC_SUBLAYER_DESCRIPTION": "One sublayer runs inside the four-stream residual. The coefficients are predicted from the four streams. The streams are collapsed by the vector predicted by the previous sublayer and then normalised. The body runs on the result. The output vector times the body's result is added to the combine matrix applied to the four streams.",
+    "SINKHORN_DESCRIPTION": "One round of Sinkhorn normalisation divides each row of the combine matrix by its sum, then each column by its sum. The first round follows the exponential of every entry. The exponential and the first round together are the row softmax of the released kernel.",
+    "MIXTURE_SUBLAYER_CLAUSE": "and a mixture sublayer, each inside the four-stream residual.",
+    "SLIDING_WINDOW_SUBLAYERS_CLAUSE": "a sliding-window attention sublayer $MIXTURE_SUBLAYER_CLAUSE",
+    "ENCODER_GROUP_LAYERS_CLAUSE": "a Full layer that compresses two tokens into each entry and writes the entries and the selection, followed by five Reuse layers that read them.",
+    "REINDEX_GROUP_LAYERS_CLAUSE": "a Reindex layer that scores inside the candidate pool and writes a fresh selection, followed by three Reuse layers that read it.",
+    "SWA_BLOCK_DESCRIPTION": "One of the two sliding-window layers: $SLIDING_WINDOW_SUBLAYERS_CLAUSE",
+    "ENCODER_REUSE_BLOCK_DESCRIPTION": "One of the five Reuse layers of an encoder group: a Reuse attention sublayer reading the entries and the selection written by the group's Full layer, $MIXTURE_SUBLAYER_CLAUSE",
+    "ENCODER_GROUP_DESCRIPTION": "One of the three encoder groups: $ENCODER_GROUP_LAYERS_CLAUSE",
+    "DECODER_REUSE_BLOCK_DESCRIPTION": "One of the three Reuse layers under the decoder's Full layer: a Reuse attention sublayer reading the entries and the selection written by that layer, $MIXTURE_SUBLAYER_CLAUSE",
+    "REINDEX_REUSE_BLOCK_DESCRIPTION": "One of the three Reuse layers of a Reindex group: a Reuse attention sublayer reading the entries written by the decoder's Full layer and the selection written by the group's Reindex layer, $MIXTURE_SUBLAYER_CLAUSE",
+    "REINDEX_GROUP_DESCRIPTION": "One of the four Reindex groups of the decoder: $REINDEX_GROUP_LAYERS_CLAUSE",
+    "EMBED_DESCRIPTION": "The token identifiers are looked up in the embedding table. The lookup gives one hidden state per token.",
+    "UNEMBED_DESCRIPTION": "The final hidden state is normalised and projected onto the vocabulary. A softmax turns the projection into probabilities.",
+    "SELECT_DESCRIPTION": "Reads the payload at the positions kept by a selection and multiplies each value read by the value held there by the selection. The payload keeps its dense axis. The result rides the sparse axis of the selection.",
+    "INDEX_SELECT_DESCRIPTION": "Reads the payload at an index that arrives as data. The index is a natural number below the size of the axis it reads along. The operator is broadcast over every other axis, so one entry is read per index.",
+    "EMBEDDING_DESCRIPTION": "Looks up the row of the embedding table named by the token identifier. The table holds one row of the hidden width for every entry of the vocabulary.",
+    "CONCATENATE_AXES_DESCRIPTION": "Writes each input onto its own run of the concatenated axis. The second run comes after the first. The size of that axis is therefore the sum of the sizes of the parts. Every other axis is carried through unchanged.",
+    "MERGED_POSITIONS_DESCRIPTION": "Turns the number of a selected block into the positions of the entries held by the block. Block i_P holds one entry per offset i_u, at position |u| i_P + i_u. The result therefore carries the offset axis.",
+    "WINDOW_VIEW_DESCRIPTION": "The view is the sliding window. Slot i_w of query i_x reads the token i_w places before the query. A slot that reaches before the first token holds no value. The guarded axis w|x records which slots hold no value.",
+    "GROUP_VIEW_DESCRIPTION": "Cuts one axis into consecutive groups of equal size, so a position of the result is a group and a place inside it. The attention cuts the heads into groups for the grouped output projection. The ratio-2 compressor cuts the tokens into entries of two. The pixel unshuffle of the image pathway cuts the rows of the patch grid into cell rows of three and its columns into cell columns of three.",
+    "BACK_VIEW_DESCRIPTION": "Counts entries back from the entry named by a position. Distance i_r of entry i_b reads the entry i_r places before it. A distance that reaches before the first entry holds no value.",
+    "POSITION_VIEW_DESCRIPTION": "This view is a renaming with stride one. Under the ratio-1 compressor each token is one entry, so entry i_B reads token i_B.",
+    "BLOCK_VIEW_DESCRIPTION": "Cuts the distances reached by a query into blocks of |u| consecutive distances. Offset i_u of block i_P reads distance |u| i_P + i_u. The candidate pool keeps the best score of each block.",
+    "SCORE_SCALE_SENTENCE": "Every score is multiplied by one over the square root of the latent width, which is 512 in the released model, before it is exponentiated. The scale keeps the spread of the scores the same at any width, so the softmax does not put nearly all of its weight on one slot. The sink logit is one learned number per head that lets the head give part of its weight to no slot. The sink logit is exponentiated with no scale.",
+    "SCALED_CORE_DESCRIPTION": [
+      "$CORE_DESCRIPTION",
+      "$SCORE_SCALE_SENTENCE"
+    ],
+    "SCALED_WINDOW_CORE_DESCRIPTION": [
+      "$WINDOW_CORE_DESCRIPTION",
+      "$SCORE_SCALE_SENTENCE"
+    ],
+    "TOKEN_TITLE": "\\text{Rotary Embedding}",
+    "ROTARY_OUTPUT_TITLE": "\\text{Inverse Rotary Embedding}",
+    "ENCODER_ENTRY_TITLE": "\\text{Rotary Embedding of the Encoder Entries}",
+    "DECODER_ENTRY_TITLE": "\\text{Rotary Embedding of the Decoder Entries}",
+    "INDEXER_QUERY_TITLE": "\\text{Rotary Embedding of the Indexer Queries}",
+    "ENCODER_KEY_TITLE": "\\text{Rotary Embedding of the Encoder Indexer Keys}",
+    "DECODER_KEY_TITLE": "\\text{Rotary Embedding of the Decoder Indexer Keys}",
+    "PAIRS_OF_A_LATENT": "The last 64 of the 512 channels of each vector are taken two at a time as points in a plane. The rotation turns each point about the origin.",
+    "PAIRS_OF_AN_INDEXER_VECTOR": "The last 64 of the 128 channels of each vector are taken two at a time as points in a plane. The rotation turns each point about the origin.",
+    "TURN_BY_THE_TOKEN": "The angle of the turn grows with the position of the token. Each pair of channels turns at a speed of its own.",
+    "SCORE_BY_DISTANCE": "A query and a key that are both turned score against each other by how far apart their tokens are, because the product of two turned points depends on the difference of the two angles.",
+    "REST_OF_A_LATENT": "The other 448 channels pass through unchanged.",
+    "REST_OF_AN_INDEXER_VECTOR": "The other 64 channels pass through unchanged.",
+    "TABLE_IN_THE_BOX": "The circle in the box is the table of turns, which holds one turn for every position and every pair of channels.",
+    "CONJUGATE_AFTER_THE_TABLE": "The map after the circle takes the conjugate of every turn, which is the turn through the same angle in the other direction.",
+    "EXPLAIN_CHANNEL_JOIN_DESCRIPTION": "Joins the channels left alone by the rotation and the rotated channels back into one vector. The run left alone comes first and the rotated run comes after it. The result has the channel axis the vector arrived on, so an operation that reads the vector reads the same axis whether or not the vector was rotated.",
+    "PAIRS_AS_COMPLEX_DESCRIPTION": "Reads every two adjacent channels as one complex number, with the first channel as the real part and the second as the imaginary part. A complex number is a point in a plane. Multiplying the point by a complex number of length one turns it about the origin, so the rotation of a pair is one product.",
+    "DECOMPLEX_DESCRIPTION": "Writes every complex number back as two adjacent channels, with the real part first and the imaginary part second. The operation undoes the reading of the channels as pairs.",
+    "TOKEN_LATENTS_DESCRIPTION": [
+      "Each vector is rotated by the position of its token. The operation is called a rotary embedding.",
+      "$PAIRS_OF_A_LATENT",
+      "$TURN_BY_THE_TOKEN",
+      "$SCORE_BY_DISTANCE",
+      "$REST_OF_A_LATENT",
+      "$TABLE_IN_THE_BOX",
+      "The released code rotates the query of every head and the window latent of every token this way. The window latent is both the key and the value of its token."
+    ],
+    "ATTENTION_OUTPUT_DESCRIPTION": [
+      "The last 64 of the 512 channels of each attention output are taken two at a time as points in a plane. Each point is turned back by the angle of the position of its query.",
+      "The output of a query is a weighted sum of latents. Each latent in the sum was turned by the angle of its own position. That position is the token for a window latent or a decoder entry, and the first token of its group for an encoder entry.",
+      "Each latent in the sum is then left turned by the difference between that position and the position of the query, so the output carries no position counted from the start of the context.",
+      "$REST_OF_A_LATENT",
+      "$TABLE_IN_THE_BOX",
+      "$CONJUGATE_AFTER_THE_TABLE"
+    ],
+    "ENCODER_ENTRIES_DESCRIPTION": [
+      "Each compressed entry of an encoder group stands for two consecutive tokens. The entry is rotated by the position of the first of the two, which is twice the index of the entry.",
+      "$PAIRS_OF_A_LATENT",
+      "$REST_OF_A_LATENT",
+      "$TABLE_IN_THE_BOX",
+      "The indexer keys are made from the entries before the rotation. The attention of this layer and of every layer that reuses the entries reads the entries after the rotation."
+    ],
+    "DECODER_ENTRIES_DESCRIPTION": [
+      "Each compressed entry of the decoder stands for one token. The entry is rotated by the position of that token.",
+      "$PAIRS_OF_A_LATENT",
+      "$REST_OF_A_LATENT",
+      "$TABLE_IN_THE_BOX",
+      "The indexer keys are made from the entries before the rotation. The attention of this layer and of every later layer of the decoder reads the entries after the rotation."
+    ],
+    "INDEXER_QUERIES_DESCRIPTION": [
+      "Each indexer query is rotated by the position of its token, once for each of the 32 indexer heads.",
+      "$PAIRS_OF_AN_INDEXER_VECTOR",
+      "$TURN_BY_THE_TOKEN",
+      "$SCORE_BY_DISTANCE",
+      "$REST_OF_AN_INDEXER_VECTOR",
+      "$TABLE_IN_THE_BOX",
+      "The indexer holds no table of its own. Its queries and keys are rotated with the table of the attention layer it belongs to."
+    ],
+    "ENCODER_INDEXER_KEYS_DESCRIPTION": [
+      "Each indexer key of an encoder group is made from one compressed entry, which stands for two consecutive tokens. The key is rotated by the position of the first of the two tokens, which is twice the index of the entry.",
+      "$PAIRS_OF_AN_INDEXER_VECTOR",
+      "$REST_OF_AN_INDEXER_VECTOR",
+      "$TABLE_IN_THE_BOX"
+    ],
+    "DECODER_INDEXER_KEYS_DESCRIPTION": [
+      "Each indexer key of the decoder is made from one compressed entry, which stands for one token. The key is rotated by the position of that token.",
+      "$PAIRS_OF_AN_INDEXER_VECTOR",
+      "$REST_OF_AN_INDEXER_VECTOR",
+      "$TABLE_IN_THE_BOX"
+    ],
+    "ROTATED_SCORE_EVERY_QUERY_DESCRIPTION": "One query is scored against every compressed entry reached by the query. The entries read by the attention are chosen from the scores. Each of the 32 indexer heads takes the product of its rotated and rounded indexer query with the key of the entry. A negative product is set to zero. The 32 results are summed under one weight per head, which is read off the hidden state of the token. The weights are multiplied by one over the square root of the key width times the head count, which is 1/64 in the released model. The released code computes the product with an ordinary 16-bit multiply over keys and queries that were rounded to four bits and written back as 16-bit numbers. The score is therefore the one given by a four-bit multiply. The reference implementation takes neither the smaller key cache nor the faster scoring.",
+    "ROTATED_RELATIVE_INDEXER_DESCRIPTION": "The lightning indexer scores every compressed entry reached by a query, so that the attention reads the best-scoring entries alone. The indexer query of every head is projected from the low-rank query latent, rotated by the position of its token and rounded to the four-bit FP4 format. The shared indexer keys arrive rotated and rounded. The keys are read back from every entry and merged onto the queries, so each query holds the keys of the entries reached by that query. The scoring box scores one query against those keys. The rounding makes the scores equal those of a system that keeps the keys as four-bit numbers and scores them on the four-bit hardware path. The released code is a reference implementation. It keeps the rounded keys and queries as 16-bit numbers and scores in 16-bit, so it takes neither the smaller cache nor the faster scoring.",
+    "ENTRY_TITLE": "\\text{FP4 Round Trip of an Entry}",
+    "QUANTISED_INDEXER_TITLE": "\\text{FP4 Round Trip in the Indexer}",
+    "QUANTISED_WINDOW_TITLE": "\\text{FP8 Round Trip of a Window Latent}",
+    "CEILING_DESCRIPTION": "Rounds a number up to the nearest whole number. Here the number is the logarithm to base two of a scale, so two to the power of the result is the smallest power of two at or above the scale. The released kernel reads the exponent bits of the scale and adds one where any mantissa bit is set. The package has no numeric for a ceiling or a floor, so this step is a generic operator.",
+    "SCALE_GROUP_SPLIT_DESCRIPTION": "Cuts the channels of one latent into consecutive groups of equal size. Channel i_y of group i_E reads channel |y| i_E + i_y of the latent. Every group is rounded with a scale of its own, so one large channel reduces the precision of its own group and of no other group.",
+    "CHANNEL_GROUPS_SENTENCE": "The channels are cut into groups of {size}.",
+    "ROUND_EVERY_GROUP_SENTENCE": "Each group is divided by a scale of its own. Every channel is rounded to the nearest number of the {form} form. The group is multiplied by its scale again.",
+    "E2M1_NUMBERS_SENTENCE": "The E2M1 numbers are 0, 0.5, 1, 1.5, 2, 3, 4 and 6 with either sign.",
+    "POWER_OF_TWO_SCALE_SENTENCE": "The scale of a group is its largest magnitude divided by {largest} and rounded up to a power of two. The scale is therefore stored as an exponent alone, which is the {exponent_form} form.",
+    "SCALE_ROUNDING_SENTENCES": "A logarithm to base two, a ceiling and a power of two state the rounding of the scale. The ceiling is a generic operator because the package has no numeric for it.",
+    "ENTRY_ROUND_TRIP_DESCRIPTION": [
+      "The box rounds one compressed entry the way the released cache holds it.",
+      {
+        "ref": "CHANNEL_GROUPS_SENTENCE",
+        "fills": {
+          "size": 16
+        }
+      },
+      {
+        "ref": "ROUND_EVERY_GROUP_SENTENCE",
+        "fills": {
+          "form": "four-bit E2M1"
+        }
+      },
+      "$E2M1_NUMBERS_SENTENCE",
+      "The scale of a group is its largest magnitude divided by 6, so the largest channel of the group divides to 6. The scale is itself rounded to eight bits in the E4M3 form. The entries are kept for the whole context. They are therefore the largest thing held in memory by a request while text is generated. Four bits for each channel take close to half the memory of the eight bits used by DeepSeek-V4. The released code rounds an entry in place after it has rotated the entry, so every layer that reads the cache reads the rounded values."
+    ],
+    "INDEXER_ROUND_TRIP_DESCRIPTION": [
+      "The box rounds one indexer key or one indexer query the way the released indexer scores with it.",
+      {
+        "ref": "CHANNEL_GROUPS_SENTENCE",
+        "fills": {
+          "size": 32
+        }
+      },
+      {
+        "ref": "ROUND_EVERY_GROUP_SENTENCE",
+        "fills": {
+          "form": "four-bit E2M1"
+        }
+      },
+      "$E2M1_NUMBERS_SENTENCE",
+      {
+        "ref": "POWER_OF_TWO_SCALE_SENTENCE",
+        "fills": {
+          "largest": 6,
+          "exponent_form": "E8M0"
+        }
+      },
+      "$SCALE_ROUNDING_SENTENCES",
+      "The keys of every entry are kept for the whole context. The released report gives the smaller key cache and the faster scoring as the reasons for four bits. A system that keeps the keys as four-bit numbers with one scale per group holds them in about a quarter of the memory of 16-bit keys and can score them on the hardware path for four-bit numbers. The released code is a reference implementation and takes neither saving. It rounds a key and a query in place after it has rotated them, writes the rounded values back as 16-bit numbers, keeps the key cache in 16-bit, and scores with the ordinary 16-bit multiply. Its scores equal those of the four-bit system, because reading a four-bit key back gives the rounded number returned by this box. The rounding is therefore kept. The saving is not taken."
+    ],
+    "WINDOW_ROUND_TRIP_DESCRIPTION": [
+      "The box rounds one token's window latent the way the released window cache holds it.",
+      {
+        "ref": "CHANNEL_GROUPS_SENTENCE",
+        "fills": {
+          "size": 32
+        }
+      },
+      {
+        "ref": "ROUND_EVERY_GROUP_SENTENCE",
+        "fills": {
+          "form": "eight-bit E4M3"
+        }
+      },
+      "The largest E4M3 number is 448.",
+      {
+        "ref": "POWER_OF_TWO_SCALE_SENTENCE",
+        "fills": {
+          "largest": 448,
+          "exponent_form": "UE8M0"
+        }
+      },
+      "$SCALE_ROUNDING_SENTENCES",
+      "The window cache holds the latents of the newest 128 tokens in every layer. The released report says the window cache stays at eight bits because the window latents are sensitive to quantisation. The released code rounds a window latent in place after it has rotated the latent."
+    ],
+    "CAST_INTO_DESCRIPTION": "Rounds each value to the nearest number held by the {form} form. The form has {stored_numbers}. The operator names the datatype read and the datatype returned. The package writes no formula for the rounding.",
+    "CAST_OUT_OF_DESCRIPTION": "Reads each {form} number as a real. No value changes. The operations that follow are computed in reals, as the released kernel computes them in 32-bit floats.",
+    "PIN_TITLE": "\\text{Pinned Newest Block}",
+    "PIN_NEWEST_BLOCK_DESCRIPTION": "The block of the eight newest entries is always kept as a candidate. Positive infinity is written at block 0 and added to the block scores. Every other block keeps its score. No score is larger than infinity, so the Top-2048 that follows keeps block 0. The released code numbers its blocks by absolute entry. The newest block of the released code is still filling and holds between one and eight entries, so an older block that is full could score higher. The released code pins the newest block so that a full older block cannot displace it. The model drawn here numbers the blocks by distance back from the newest entry reached by a query, so block 0 holds the newest entries of every query. Once a query has reached eight entries, block 0 holds eight of them. Every entry pinned by the released code is therefore in block 0, beside up to seven older entries.",
+    "PINNED_SELECT_CANDIDATE_BLOCKS_OF_ONE_TOKEN_DESCRIPTION": [
+      "$SCORES_INTO_DISTANCES_SENTENCE",
+      "The distances are split into blocks of eight. Each block keeps its best score. The block of the eight newest entries is pinned. The 2048 best blocks are kept. The eight distances of every kept block are laid out along the candidate axis."
+    ],
+    "ROTATED_AND_ROUNDED": "The query and the window latents are rotated by the positions of their tokens. The window latents are then rounded to the eight-bit FP8 format, as the released window cache holds them.",
+    "SCALED_AND_ROTATED_BACK": "The scores are multiplied by one over the square root of the latent width before the softmax. The result of the attention is rotated back by the position of its query before the output projection.",
+    "SCORE_AND_ATTEND_SENTENCE": "The layer scores every entry reached by each query and keeps the 512 best. The layer then attends over the window and the kept entries under one softmax.",
+    "SCALED_ENCODER_FULL_ATTENTION_DESCRIPTION": [
+      "The Full layer of an encoder group compresses every two consecutive tokens of its hidden state into one entry and makes one indexer key from each entry. The layer rotates and rounds both as the released caches hold them.",
+      "$ROTATED_AND_ROUNDED",
+      "$SCORE_AND_ATTEND_SENTENCE",
+      "$SCALED_AND_ROTATED_BACK",
+      "The entries and the selection are stored on the tape, which holds what one layer leaves for another. The Reuse layers of the same group read the entries and the selection there."
+    ],
+    "SCALED_DECODER_FULL_ATTENTION_DESCRIPTION": [
+      "The Full layer of the decoder projects each token of its hidden state into one entry and makes one indexer key from each entry. The layer rotates and rounds both as the released caches hold them.",
+      "$ROTATED_AND_ROUNDED",
+      "$SCORE_AND_ATTEND_SENTENCE",
+      "$SCALED_AND_ROTATED_BACK",
+      "The layer also keeps the 2048 best blocks of eight entries as the candidate pool. The newest block is always among them. The layer stores the entries, the keys, the pool and the selection on the tape, which holds them for every later decoder layer."
+    ],
+    "SCALED_REINDEX_ATTENTION_DESCRIPTION": [
+      "A Reindex layer reads the entries, the indexer keys and the candidate pool from the tape, which holds what the Full layer of the decoder left for later layers. All three arrive rotated and rounded.",
+      "$ROTATED_AND_ROUNDED",
+      "The layer scores its own rotated and rounded indexer queries against the entries of the pool alone and keeps the 512 best. The layer then attends over the window and the kept entries under one softmax.",
+      "$SCALED_AND_ROTATED_BACK",
+      "The new selection is stored on the tape, where the Reuse layers of the same group read it."
+    ],
+    "SCALED_REUSE_ATTENTION_DESCRIPTION": [
+      "A Reuse layer reads the entries and the selection from the tape, which holds what an earlier layer left for it. The layer therefore compresses no tokens and scores no entries. The entries arrive rotated and rounded. The layer computes its own query and window latents from its own hidden state.",
+      "$ROTATED_AND_ROUNDED",
+      "The layer reads the latents of the selected entries and attends over the window and those entries under one softmax.",
+      "$SCALED_AND_ROTATED_BACK"
+    ],
+    "SCALED_WINDOW_ATTENTION_DESCRIPTION": [
+      "Each of the first two layers attends over the last 128 tokens alone. The layer computes its query and one window latent per token from its own hidden state. The window latent is both the key and the value of its token.",
+      "$ROTATED_AND_ROUNDED",
+      "These two layers rotate with the base 10000. Every layer from 2 to 39 rotates with the base 160000 and YaRN, which slows the slowest rotations for contexts longer than the trained one. The softmax also holds a learned sink, which is one number per head that lets the head give part of its weight to no token.",
+      "$SCALED_AND_ROTATED_BACK"
+    ],
+    "TEMPERED_ROUTED_EXPERTS_DESCRIPTION": "The routed experts run on one token. A gate projection is limited from above at the SwiGLU limit and passes through the SiLU activation. An up projection is limited to the range from minus the limit to the limit. The two are multiplied. A down projection returns the product to the residual width. The diagonal keeps the expert chosen by each of the six slots. The two limits come from training, where they keep the activations inside the range represented by the FP8 and FP4 number formats. The SiLU is close to zero at every large negative input, so the gate branch is bounded on that side without a limit.",
+    "TEMPERED_SHARED_EXPERT_DESCRIPTION": "Every token runs the shared expert, which has the expert width of a routed expert and no router. A gate projection is limited from above at the SwiGLU limit and passes through the SiLU activation. An up projection is limited on both sides. The two are multiplied. A down projection returns the product to the residual width. The limits are the ones applied by the routed experts. The limits keep the activations inside the range represented by the FP8 and FP4 number formats.",
+    "MIXTURE_ENTRY_SENTENCE": "One token passes through the mixture.",
+    "SUM_UNDER_GATES_SENTENCE": "The outputs of the six are summed under their gates. The output of the shared expert is added.",
+    "TEMPERED_MIX_ONE_TOKEN_DESCRIPTION": [
+      "$MIXTURE_ENTRY_SENTENCE",
+      "The gate box reads the hidden state and the modality of the token. The gate box then chooses six experts and weights them.",
+      "$SUM_UNDER_GATES_SENTENCE",
+      "The modality is zero for a text token and one for a token inside an image span."
+    ],
+    "GATE_TEMPERATURE_SENTENCES": "The gate box computes the gates of one token over the routed experts. The router scores every expert. The scores are divided by a temperature before the score function. A temperature of one leaves the scores unchanged. The released configuration sets none, so the released value is one.",
+    "GATE_SIGN_AND_NORMALISATION_SENTENCES": "A chosen slot carries one where the biased score of its expert is above zero and zero elsewhere. The score without the bias is multiplied by that number. The score function returns a value above zero. The number is therefore one unless the bias of a chosen expert is at or below minus its score. The released code reads the score without the bias at every chosen expert whatever the sign of the biased score. The expression and the released code therefore differ in that one case, where the expression gives the expert a gate of zero. The six gates are divided by their sum plus a small epsilon and scaled by the route scale. The epsilon keeps the division defined when all six scores have underflowed to zero.",
+    "TEMPERED_EXPERT_GATE_DESCRIPTION": [
+      "$GATE_TEMPERATURE_SENTENCES",
+      "A correction bias is added to one copy of the scores. The six experts are chosen from that copy. The released model holds two bias vectors. One is for a text token and one is for a token inside an image span. The vector is selected by the modality of the token. The load of the experts is therefore balanced for each kind of token separately.",
+      "$GATE_SIGN_AND_NORMALISATION_SENTENCES"
+    ],
+    "FIRST_ROUND_TITLE": "\\text{First Sinkhorn Round}",
+    "LATER_ROUND_TITLE": "\\text{Sinkhorn Round}",
+    "FIRST_SINKHORN_ROUND_DESCRIPTION": "The first round of Sinkhorn normalisation differs from the nineteen after it. Every entry of the combine matrix is replaced by its exponential. Each row is divided by its sum. The exponential and the division together are a softmax along the row. The released kernel then adds a small epsilon to every entry. The exponential of a large negative number underflows to zero. With the epsilon such an entry is still above zero. Each column is then divided by its sum plus the same epsilon.",
+    "LATER_SINKHORN_ROUNDS_DESCRIPTION": "Each of the nineteen later rounds of Sinkhorn normalisation divides every row of the combine matrix by its sum plus a small epsilon. Each round then divides every column by its sum plus the same epsilon. A row or a column that sums to zero would otherwise be divided by zero. The epsilon keeps the division defined. After the rounds every row and every column sums to about one. A matrix with those sums is doubly stochastic. Each new stream is therefore a weighted average of the four old streams. The sum of the streams is kept.",
+    "EPSILON_PREDICT_ONE_TOKEN_DESCRIPTION": "This block predicts the mixing coefficients of one token. The four streams are normalised together. Three linear maps read the normalised streams. The first gives the collapse vector through a sigmoid plus a small epsilon, so the weight of a stream is above zero. The second gives the output vector through a doubled sigmoid. The third gives the four-by-four combine matrix. Twenty rounds of Sinkhorn normalisation make that matrix nearly doubly stochastic. Every row and every column of that matrix sums to about one.",
+    "EPSILON_MHC_SUBLAYER_DESCRIPTION": "One sublayer runs inside the four-stream residual. The coefficients are predicted from the four streams. The streams are summed into one hidden state under the collapse vector predicted by the previous sublayer. The hidden state is normalised. The body runs on the result. The output vector times the body's result is added to the combine matrix applied to the four streams. The collapse vector predicted here goes to the next sublayer.",
+    "TOKEN_MAP_TITLE": "\\text{Token Map}",
+    "HASH_TITLE": "\\text{N-gram Hash}",
+    "TABLE_TITLE": "\\text{N-gram Table}",
+    "ENGRAM_GATE_TITLE": "\\text{Engram Gate}",
+    "MAP_TOKENS_TO_COMPRESSED_IDENTIFIERS_DESCRIPTION": "Each token identifier is replaced by the identifier of its normalised text. The normalisation lowercases the text, removes accents and joins runs of white space. The tokens The, the and THE therefore receive one identifier. The n-grams that hold them address the same rows. The map is a lookup in a table M that has one entry for every token identifier and returns one of 99,092 compressed identifiers. The table is fixed. The released code builds it once from the tokenizer. Training never changes it.",
+    "ENGRAM_GATE_SENTENCES": "A stream receives the looked-up value multiplied by its gate. Each stream of a token is multiplied channel by channel with its key and with a learned weight. The products are summed over the channels. The sum is divided by the root mean square of the stream, by the root mean square of the key and by the square root of the width. Multiplying the stream or the key by a positive constant therefore leaves the result unchanged. The two root mean squares have an epsilon under the root and no learned gain. The gate is the sigmoid of the signed square root of that number. The gate is above one half where the sum is positive and below one half where the sum is negative.",
+    "GATE_EVERY_STREAM_DESCRIPTION": [
+      "$ENGRAM_GATE_SENTENCES",
+      "The modality of a token is zero for text and one for a token of an image. The gate is multiplied by one minus the modality. The multiplication sets the gate to zero at every image token. An image token therefore receives nothing from Engram."
+    ],
+    "ENGRAM_GATE_WITHOUT_THE_MODALITY_DESCRIPTION": [
+      "$ENGRAM_GATE_SENTENCES",
+      "The released code multiplies the gate by one minus the modality of the token. The multiplication sets the gate to zero at an image token. A model that reads text alone holds no image token."
+    ],
+    "ENGRAM_MODULE_SENTENCES": "Engram is a memory. The model reads the memory by looking up short runs of text. An n-gram here is the run of the last two, three or four token identifiers that ends at a token. The three n-grams of each token are hashed into row numbers of a large learned table. The rows are read. The rows are projected into one key for each of the four residual streams and one value shared by the streams. Each stream is compared with its key. The comparison gives a gate g between zero and one. The value v times the gate is added to the stream.",
+    "ENGRAM_LAYERS_SENTENCE": "The module runs on the residual that enters layer {layer}. Layers 1 and 14 each hold a module with a table and weights of its own.",
+    "ENGRAM_BLOCK_DESCRIPTION": [
+      "$ENGRAM_MODULE_SENTENCES",
+      "The module reads the token identifiers and the modality of every token from the two tape slots written by the input of the model. The modality records whether the token is text or part of an image.",
+      "$ENGRAM_LAYERS_SENTENCE"
+    ],
+    "ENGRAM_MODULE_OF_LAYER_DESCRIPTION": [
+      "$ENGRAM_MODULE_SENTENCES",
+      "The module reads the four-stream residual and the identifier of every token. The released model runs the module on the residual that enters layer {layer}. Layers 1 and 14 each hold a module with a table, two projections and a gate weight of their own."
+    ],
+    "ENGRAM_TABLE_DESCRIPTION": "Each of the 24 row numbers of a token, one for every n-gram order and hash head, is looked up in the learned table of this layer, which gives 24 vectors of width |D| = 256. One linear map reads the 24 vectors together and gives one key for each residual stream. A second map gives one value shared by every stream. The released code holds the two maps as one weight and cuts its result in two. The table of layer {layer} has {rows} rows, which is the sum of the 24 primes of the layer. The released code stores the rows in FP8 with one scale for every 32 channels and converts a row to reals when the row is read.",
+    "NGRAM_TABLE_ROW_DESCRIPTION": "Returns the learned row of width 256 named by a row number, from the n-gram table of layer {layer}, which holds {rows} rows. One token looks up 24 rows, one for every n-gram order and hash head. The released code stores the rows in FP8 with one scale for every 32 channels and converts a row to reals when the row is read.",
+    "HASH_WRITTEN_OUT_DESCRIPTION": "An n-gram here is the run of the last two, three or four compressed identifiers that ends at a token. A table with one row for every possible n-gram would be too large, because 99,092 identifiers give about 10^20 different runs of four. Each n-gram is therefore hashed into one of about sixteen million rows per order and head. The hash is written out over integer operators. Each of the |L| identifiers is multiplied by the fixed odd multiplier of its slot. A multiplier is below 2^63 divided by the identifier bound, so every product is below 2^63 and is a 64-bit integer. The view named prefix reads, for each order, the products of the newest two, three or four slots. A slot not reached by the order holds the unit. The bitwise exclusive or of those products is one 64-bit integer per order. The exclusive or is defined on bit patterns, so the products carry a bound that is a power of two. The remainder of that integer after division by the prime of the order and the head is below that prime. The primes are one fixed array over the |G||K| pairs of an order and a head. The array holds the successive primes above 16,000,000 in the order the released layout draws them. The offset of a pair is the sum of the primes before it. The primes before a pair are read through the view named before and summed. The remainder plus the offset is therefore a row number in a range used by no other pair. The table has as many rows as the primes sum to. The primes and the offsets are then read over the orders and the heads. Two n-grams may share a row under one head and seldom share one under another, because the eight heads divide by eight different primes.",
+    "HASH_OF_LAYER_SENTENCE": "The multipliers, the primes and the offsets belong to layer {layer}. The table addressed by that layer holds {rows} rows, which is the sum of its 24 primes.",
+    "HASH_CAST_DESCRIPTION": "Pyncd represents Natural values as a bounded datatype. Here the cast names the correct size for the subsequent embedding, which uses the bound to determine its size.",
+    "HELD_IN_SENTENCE": "The value read and the value written are both held in {format}.",
+    "PATHWAY_TITLE": "\\text{Image Pathway}",
+    "ENCODER_TITLE": "\\text{Vision Encoder}",
+    "PROJECTOR_TITLE": "\\text{Pixel Unshuffle and Projector}",
+    "CELL_WRITE_TITLE": "\\text{Write of the Image Cells}",
+    "DELIMITER_WRITE_TITLE": "\\text{Write of the Span Delimiters}",
+    "ENCODE_PATCHES_DESCRIPTION": "An image is cut into squares of fourteen by fourteen pixels, called patches. Each patch arrives as a vector of |F| = 588 numbers. The vision encoder turns each patch into a vector of width |M| = 1024 that describes the patch in the context of the whole image. It is a second transformer of 32 layers. Each layer has an attention of sixteen heads and a SwiGLU of hidden width 2816. In the attention every patch reads every patch of the image with no causal condition. Its rotary embedding rotates by two positions. Half of the channel pairs are rotated by the row of the patch and the other half by the column. The embedding pairs channel i with channel i + 32. The rotary operator of this package takes one position and pairs adjacent channels, so it does not state that rotation. The encoder is drawn as one generic operator. The encoder consumes the whole patch grid because its attention reads every patch.",
+    "PROJECT_CELLS_DESCRIPTION": "The patch grid is read as a grid of cells. Each cell is three patches high and three wide. An image therefore takes one token for every nine patches. The row of a patch is the cell row times three plus an offset within the cell. The column reads the same way. The view named cell is therefore the product of one group view per grid axis and the identity on the features. A rearrangement brings the two cell indices to the front. The nine feature vectors of a cell are then handed out together as the offsets and the feature index. A linear map with a bias takes the 9 x 1024 = 9216 numbers of a cell to the residual width. A GELU follows. A second linear map with a bias keeps the residual width. The released unfold hands a cell out with the feature index first, so the rows of the first weight stand in a different order here. The released code pads the patch grid with zeros to a multiple of three. The expression takes a grid that is already a whole number of cells.",
+    "WRITE_CELL_FEATURES_DESCRIPTION": "Each cell of the image occupies one token of the sequence. The feature of the cell replaces the embedding at that token. The token position of every cell arrives as data, so no fixed index map states the write. An Inject adds each value at the token named by its index and leaves zero at every other token. One Inject writes the features of the cells. A second writes a one at the same tokens. One minus its result is one at every token that holds no cell. The residual times that array, plus the injected features, is the residual with the rows of the cells replaced. Two cells of one image never occupy one token, so no two values are added at one position.",
+    "WRITE_SPAN_DELIMITERS_DESCRIPTION": "In the token sequence an image is a span that opens with a start token, holds the cells row by row with a new-line token after every row, and closes with an end token. The span therefore has |H'| + 2 delimiters. The axis Delta counts the delimiters. The model learns one vector for each of the three kinds of delimiter. The vector of every delimiter is selected by its kind. The vectors are written into the residual at the positions of the delimiters in the way the features of the cells are written.",
+    "IMAGE_PATHWAY_DESCRIPTION": "The pathway turns an image into rows of the residual. The vision encoder gives every patch of the image a feature. The pixel unshuffle gathers the patches into cells of three by three. The projector maps each cell to the residual width. The result replaces the embedding at the token occupied by the cell. The pathway stands after the embedding and before the copy into the four residual streams. The expression states one image. The released code repeats the steps for every image of the prompt.",
+    "DSPARK_TITLE": "\\text{DSpark Drafter}",
+    "TAP_TITLE": "\\text{Stream Mean}",
+    "BACKBONE_STATE_TITLE": "\\text{Backbone State}",
+    "HEAD_TITLE": "\\text{Draft Head}",
+    "SAMPLER_TITLE": "\\text{Gumbel-Max Sampler}",
+    "MARKOV_TITLE": "\\text{Markov Head}",
+    "CONFIDENCE_TITLE": "\\text{Confidence Head}",
+    "STEP_TITLE": "\\text{Draft Step}",
+    "CHAIN_TITLE": "\\text{Draft Chain}",
+    "DROP_STREAM_MEAN_DESCRIPTION": "The residual that enters the layer is averaged over its four streams and written to the tape. DSpark reads the averages of the last three layers after the backbone has run. The released code takes the residual before the layer runs, so the average describes what the layer was given.",
+    "PROJECT_STREAM_MEANS_DESCRIPTION": "The block returns the one hidden state through which DSpark reads the backbone. The three stream means are read at the last token. Each is projected by a weight of its own. The three results are added and normalised. The released code lays the three means end to end and applies one weight. That weight gives the same sum.",
+    "HEAD_OVER_DRAFT_POSITIONS_DESCRIPTION": "The head turns the hidden state of each draft position into one score per entry of the vocabulary, called a logit. The normalisation has a gain of its own. The projection is the output head of the backbone, which is shared by DSpark. A draft is therefore scored with the same weight applied by the backbone to its own tokens.",
+    "SAMPLE_FROM_PROBABILITIES_DESCRIPTION": "Picks one token at random so that each token is picked with its own probability. One random number is drawn for every entry of the vocabulary. Each probability is divided by its random number. The entry with the largest ratio is the token. The method is called Gumbel-max, because the logarithm of such a ratio is a logit plus a draw from the Gumbel distribution. The released code says it uses the method because `torch.multinomial` makes the GPU wait for the CPU. Every sampler in the figure stands for random numbers of its own.",
+    "MARKOV_HEAD_DESCRIPTION": "Makes each draft depend on the draft before it. The trunk computes the hidden states of all five positions in one pass, before any draft is known. The logits of a position therefore do not depend on which tokens were drafted before it. The Markov head looks the token before the position up in a small embedding table and projects the row onto the vocabulary. The step adds the result to the logits. A chain in which each item depends on the item before it alone is called a Markov chain.",
+    "CONFIDENCE_HEAD_DESCRIPTION": "Returns one number for a draft position. The number is read off the hidden state of the position before the draft norm and the Markov embedding of the token before it. Section 2.4.3 of the technical report says the number predicts the probability that the backbone accepts the draft of the position, given that the backbone accepted the drafts before that position. The released head returns the projection itself and applies no sigmoid, so the number is an unbounded score. The released code holds no step that turns the score into a probability. The technical report says the head predicts the probability that a draft passes the check. The product of the first k of those probabilities estimates the probability that the first k drafts all pass. A scheduler uses that estimate, with the measured throughput of the serving engine, to choose how many of the five drafts the backbone checks. The released code returns the five numbers and holds no scheduler.",
+    "DRAFT_STEP_DESCRIPTION": "Drafts one token. The step reads the logits and the hidden state of its own position and the token of the position before, which for the first step is the accepted token. The Markov head turns that token into a bias. The bias is added to the logits. The sum is divided by the sampling temperature and turned into probabilities. The sampler draws the draft. The confidence head scores the position. The released sampler divides by the temperature or by 10^-5, whichever is larger. At a temperature of exactly zero it returns the position of the largest logit and draws no random number. The expression states the division for a temperature of at least 10^-5.",
+    "DRAFT_CHAIN_DESCRIPTION": "The chain runs the five draft steps in order. The logits and the hidden state of each position are read off the draft axis. The first step reads the accepted token. Every later step reads the draft of the step before it. The chain returns the five drafts and the five confidences. In the released code the same chain is a loop over the five positions.",
+    "DSPARK_BLOCK_DESCRIPTION": "DSpark guesses the five tokens that follow the token just produced by the backbone. A guessed token is called a draft. A pass of the backbone over six positions takes little longer than a pass over one, because at generation time most of a pass is spent reading the weights and the caches from memory. The next pass can therefore check the five drafts together. It keeps the drafts up to the first one that differs from the token produced by the backbone at that position. Every draft kept saves one pass of the forty layers. DSpark has three layers with 3 of 128 routed experts active, so drafting takes a small part of a pass. The block samples the token produced by the backbone, called the accepted token, from the probabilities of the last position. It reads from the tape the residual that entered layers 37, 38 and 39, averaged over the four streams, and projects the three averages at the last position onto one hidden state. The released forward_spec drafts only at a decode step, where the backbone has read one token. In the pass that reads the prompt it projects the three averages at every position. Each draft layer writes the latents of the last 128 projected states into its window cache. The function returns no draft. The expression states the computation of a decode step at the last position of the sequence read by the expression. The draft trunk turns that state and the accepted token into one hidden state per draft position. The output head of the backbone scores each position. Five draft steps sample the five drafts one after another, each with a confidence. The released code holds this forward pass and no scheduler that calls it. The output head of the model applies no temperature before its softmax. Applying no temperature is the same as the released default temperature of 1.",
+    "LAST_POSITION_DESCRIPTION": "Reads the last token of the sequence. The row has no stride and the shift |x| - 1, so every entry of the result comes from that one position. The backbone samples its token from the last position. DSpark drafts from the state of the backbone at the same position.",
+    "ONLY_SLOT_DESCRIPTION": "Reads the one slot of a top-1 selection, so the token is a single number with no axis.",
+    "DRAFT_POSITION_DESCRIPTION": "Reads draft position {position} off the draft axis. The row has no stride and the shift {position}, so every entry of the result comes from that one position. Step {position} of the draft chain reads the logits and the hidden state of the position this way.",
+    "WINDOW_LAYER_TITLE": "\\text{Sliding Window Layer}",
+    "REUSE_LAYER_TITLE": "\\text{Reuse Layer}",
+    "TAPPED_REUSE_LAYER_TITLE": "\\text{Tapped Reuse Layer}",
+    "ENCODER_GROUP_TITLE": "\\text{Encoder Group}",
+    "THIRD_ENCODER_GROUP_TITLE": "\\text{Third Encoder Group}",
+    "REINDEX_GROUP_TITLE": "\\text{Reindex Group}",
+    "FOURTH_REINDEX_GROUP_TITLE": "\\text{Fourth Reindex Group}",
+    "ENCODER_GROUPS_DESCRIPTION": [
+      "One of the first two encoder groups, which are layers 2 to 13: $ENCODER_GROUP_LAYERS_CLAUSE",
+      "The released model has three encoder groups. The third is drawn on its own after this block, because Engram is applied to the residual before its first layer."
+    ],
+    "THIRD_GROUP_REUSE_BLOCK_DESCRIPTION": "One of the five Reuse layers of the third encoder group: a Reuse attention sublayer reading member 2 of the entries and of the selection, written by the Full layer of the third group, $MIXTURE_SUBLAYER_CLAUSE",
+    "THIRD_ENCODER_GROUP_DESCRIPTION": "The third encoder group, which is layers 14 to 19: a Full layer followed by five Reuse layers, as in the two groups before it. The group is drawn on its own because Engram is applied to the residual before layer 14, which is the first layer of this group. A step that runs before the third group and before no other group cannot stand inside a block that repeats the same body three times, so the third group cannot be an iteration of that block. The two groups before it write the members 0 and 1 of the entries and of the selection, one member per iteration. This group writes and reads member 2, which is named by the constant 2 because no counter runs here.",
+    "REINDEX_GROUPS_DESCRIPTION": [
+      "One of the first three Reindex groups of the decoder, which are layers 24 to 35: $REINDEX_GROUP_LAYERS_CLAUSE",
+      "The released model has four Reindex groups. The fourth is drawn on its own after this block, because DSpark reads the residual that enters each of its three Reuse layers."
+    ],
+    "FOURTH_REINDEX_GROUP_DESCRIPTION": "The fourth Reindex group, which is layers 36 to 39: a Reindex layer followed by three Reuse layers, as in the three groups before it. The group is drawn on its own because DSpark reads the residual that enters the last three layers of the model, which are the three Reuse layers of this group and of no other. A tap inside the repeated Reindex group would write the residual of all twelve Reuse layers, so this group cannot be an iteration of that block. The three groups before it write the members 0, 1 and 2 of the selection, one member per iteration. This group writes and reads member 3, which is named by the constant 3 because no group counter runs here.",
+    "WINDOW_LAYER_DESCRIPTION": "Layer {layer_number}, one of the two sliding-window layers: $SLIDING_WINDOW_SUBLAYERS_CLAUSE {engram_sentence}",
+    "TAPPED_REUSE_BLOCK_DESCRIPTION": "The layer is one of the last three layers of the model, which are layers {first_layer} to {last_layer}. Before the layer runs, the residual that enters it is averaged over its four streams. The average is written to the tape, at the member named by the counter r of this block. DSpark reads the three members after the last layer. The layer itself is a Reuse layer: a Reuse attention sublayer reading the entries written by the decoder's Full layer and member 3 of the selection, written by the Reindex layer of this group, $MIXTURE_SUBLAYER_CLAUSE",
+    "INPUTS_TITLE": "\\text{Model Inputs}",
+    "EMBEDDING_TITLE": "\\text{Embedding}",
+    "PUBLISH_IDENTIFIERS_AND_MODALITY_DESCRIPTION": "The model reads the token identifiers and the modality of every token. The modality is zero for a text token and one for a token inside an image span. The released code computes the modality as `token_types >= 0`. Both arrays are read again far inside the model. Engram hashes the token identifiers before layers 1 and 14. The router of every layer chooses its correction bias by the modality. Engram gives an image token a gate of zero. A sublayer of the model reads the hidden state alone, so the two arrays travel on the tape. This box writes each array to its slot once. The embedding reads a second copy of the token identifiers. The released code passes the mask to every layer as an argument and computes the hashes of Engram once, before the first layer.",
+    "EMBED_TOKEN_IDENTIFIERS_DESCRIPTION": [
+      "$EMBED_DESCRIPTION",
+      "Every token of an image span carries the same placeholder identifier. The image pathway replaces the row given to the token by the embedding."
+    ],
+    "TEXT_ONLY_ENGRAM_BLOCK_DESCRIPTION": [
+      "$ENGRAM_MODULE_SENTENCES",
+      "The module reads the token identifiers from the tape slot written by the input of the model.",
+      "$ENGRAM_LAYERS_SENTENCE"
+    ],
+    "TEXT_ONLY_MIXTURE_MIX_ONE_TOKEN_DESCRIPTION": [
+      "$MIXTURE_ENTRY_SENTENCE",
+      "The gate box reads the hidden state of the token, chooses six experts and weights them.",
+      "$SUM_UNDER_GATES_SENTENCE"
+    ],
+    "TEXT_ONLY_MIXTURE_EXPERT_GATE_DESCRIPTION": [
+      "$GATE_TEMPERATURE_SENTENCES",
+      "A correction bias of one learned number per expert is added to one copy of the scores. The six experts are chosen from that copy. The released model holds a second bias for a token inside an image span. A model that reads text alone never reaches that bias.",
+      "$GATE_SIGN_AND_NORMALISATION_SENTENCES"
+    ],
+    "TEXT_ONLY_REINDEX_GROUPS_DESCRIPTION": [
+      "One of the four Reindex groups of the decoder, which are layers 24 to 39: $REINDEX_GROUP_LAYERS_CLAUSE",
+      "Each iteration writes and reads the member of the selection named by the group counter l. The multimodal model writes the fourth group on its own, because DSpark reads the residual that enters each of its three Reuse layers. This model has no DSpark to read that residual."
+    ],
+    "PUBLISH_IDENTIFIERS_DESCRIPTION": "The model reads the token identifiers of the prompt. The identifiers are read again far inside the model, because Engram hashes them before layers 1 and 14. A sublayer of the model reads the hidden state alone. The identifiers therefore travel on the tape. This box writes them to their slot once. The embedding reads a second copy. The released code computes the hashes of Engram once, before the first layer.",
+    "VISION_ENCODER_DESCRIPTION": "An image is cut into patches of fourteen by fourteen pixels. The vision encoder turns each patch into a vector of width 1024 that describes the patch in the context of the whole image. It is a second transformer of 32 layers. Each layer has an attention of sixteen heads in which every patch reads every patch of the image, and a SwiGLU of hidden width 2816. The rotary embedding of the encoder rotates the first sixteen channel pairs of a head by the row of the patch and the last sixteen by the column. It pairs channel i with channel i + 32, where the rotary operator of the language model takes one position and pairs adjacent channels. The encoder is drawn as one operator because it is a whole second model. It consumes the patch grid because its attention reads every patch.",
+    "DRAFT_TRUNK_DESCRIPTION": "The expression keeps the three draft layers of DSpark as one operator. The trunk embeds the accepted token and four copies of a noise token with the backbone's embedding table. The embedding gives five positions. The trunk copies each position into four streams. Three layers built like the backbone's layers at a smaller size then run on the five positions. Every position attends to all five and to a window of the last 128 projected backbone states. The layers keep those states in a cache of their own between decode steps. The result is the hidden state of each of the five positions after the streams are collapsed into one.",
+    "EXPONENTIAL_DRAW_DESCRIPTION": "One random number is drawn for every entry of the vocabulary, independently from the exponential distribution of rate 1. The sampler divides each probability by its number and keeps the entry with the largest ratio. Every token is therefore picked with its own probability. A random number is no function of the operands, so it is the one part of the sampler that no standard operator states. The sampler box stands six times in DSpark, once for the accepted token and once in each draft step. Each box stands for fresh draws.",
+    "TOKEN_MAP_DESCRIPTION": "Replaces a token identifier by the identifier of the token's normalised text, so that tokens such as The, the and THE hash alike. The table M is fixed. The released code builds it once from the tokenizer. Training never changes it. The result of the table is a natural number below 99,092.",
+    "MARKOV_EMBEDDING_DESCRIPTION": "Looks up the rank-256 embedding of the token that entered a draft step, from a table of the Markov head with one row per entry of the vocabulary. The Markov projection maps the embedding onto the vocabulary. The result is added to the logits of the next draft position. Each draft therefore depends on the draft before it. The confidence head reads the same embedding.",
+    "ONES_DESCRIPTION": "The array holds one at every index. Injected at the token positions of the cells of an image, or of the delimiters of its span, it marks the tokens replaced by the write. One minus the injected array is one at every token with nothing written to it.",
+    "POSITIVE_INFINITY_DESCRIPTION": "Positive infinity is larger than every score. Written at block 0 and added to the block scores of a query, it puts the block of the newest entries ahead of every other block, so the Top-2048 over the blocks keeps that block.",
+    "INJECT_DESCRIPTION": "Adds each value at the position named by its index and leaves zero at every other position. The positions arrive as data, so no fixed index map states the write. The image pathway writes the features of the cells of an image and the vectors of the span delimiters this way. Two writes of one image never share a position, so no two values are added.",
+    "LOOKBACK_VIEW_DESCRIPTION": "The view is the lookback of Engram. Slot i_L of token i_x reads the token i_L places before it. Slot 0 is therefore the token itself. The four slots hold the longest n-gram. A slot that reaches before the first token holds no value. The guarded axis L|x records which slots hold no value. The same view reads the compressed identifiers and the modality.",
+    "PREFIX_VIEW_DESCRIPTION": "The view is the prefix of the lookback slots read by each n-gram order. The order i_G reads the slot i_L' + i_G + 1 - |G| of the products. The order therefore covers the newest i_G + 2 slots. The slots not reached by the order hold no value. The exclusive or that follows ignores those slots, so one reduction gives the hash of the 2-gram, the 3-gram and the 4-gram.",
+    "PRIMES_BEFORE_VIEW_DESCRIPTION": "The view reads the primes that stand before each pair of an n-gram order and a hash head. The pair i_GK reads the prime at i_GK' + i_GK - |GK|. The primes before the pair therefore fill the last i_GK slots. The earlier slots hold no value. The sum over the slots is the offset of the pair. The rows of that pair begin at the offset in the table.",
+    "PAIR_VIEW_DESCRIPTION": "The view reads an array over the |G||K| pairs as an array over the n-gram orders and the hash heads. The pair |K| i_G + i_K stands at the order i_G and the head i_K. The released layout draws the primes in that order. The primes and the offsets are both read this way.",
+    "QUERY_DOWN_PROJECTION_ROLE": "The query down projection maps each token's hidden state to the query latent of width q. The attention query and the indexer query are both made from that latent.",
+    "QUERY_UP_PROJECTION_ROLE": "The query up projection maps the normalised query latent to one query of the latent width c for each of the h heads.",
+    "WINDOW_LATENT_PROJECTION_ROLE": "The window latent projection maps each token's hidden state to one latent of width c. Every head reads that latent as both the key and the value of that token inside the sliding window.",
+    "SINK_LOGIT_ROLE": "The sink logit is one learned number per head. Its exponential joins the denominator of the head's softmax and carries no value, so a head can give part of its weight to no slot.",
+    "OUTPUT_PROJECTION_FIRST_HALF_ROLE": "In the first half of the grouped output projection the heads are cut into g groups. Each group has a weight of its own that maps its j heads of width c to a rank of width o.",
+    "OUTPUT_PROJECTION_SECOND_HALF_ROLE": "In the second half of the grouped output projection one weight reads the g ranks together and maps them to the residual width m.",
+    "ROUTER_ROLE": "The router scores one token's hidden state against each of the e routed experts. The square root of the softplus of a score is the expert's gate.",
+    "CORRECTION_BIAS_ROLE": "The correction bias of the router, one learned number per expert, is added to a copy of the gates. The experts of a token are chosen from that copy. The gates without the bias weight the experts chosen. The bias therefore balances the load and does not scale a result.",
+    "EXPERT_GATE_PROJECTION_ROLE": "The gate projection of the routed experts is `w1` of the released expert. The weight holds the projection of every expert, from the residual width m to the expert width f. Its result passes through the sigmoid weighted input before it multiplies the up projection.",
+    "EXPERT_UP_PROJECTION_ROLE": "The up projection of the routed experts is `w3` of the released expert. The weight holds the projection of every expert, from the residual width m to the expert width f.",
+    "EXPERT_DOWN_PROJECTION_ROLE": "The down projection of the routed experts is `w2` of the released expert. The weight holds the projection of every expert, from the expert width f back to the residual width m.",
+    "SHARED_GATE_PROJECTION_ROLE": "This weight is the gate projection of the shared expert, which every token runs with no router.",
+    "SHARED_UP_PROJECTION_ROLE": "This weight is the up projection of the shared expert, which every token runs with no router.",
+    "SHARED_DOWN_PROJECTION_ROLE": "This weight is the down projection of the shared expert, back to the residual width m.",
+    "COMPRESSOR_VALUE_PROJECTION_ROLE": "The value projection of the compressor maps a token's hidden state to the latent width c. A compressed entry is made from the values of the tokens covered by the entry.",
+    "COMPRESSOR_GATE_PROJECTION_ROLE": "The gate projection of the compressor maps a token's hidden state to one gate per latent channel. A softmax over the tokens of an entry turns the gates into the weights that pool the values.",
+    "INDEXER_KEY_PROJECTION_ROLE": "The indexer key projection maps the latent of each compressed entry to one key of width d, read by every indexer head.",
+    "INDEXER_QUERY_PROJECTION_ROLE": "The indexer query projection maps the query latent to one query of width d for each of the i indexer heads.",
+    "INDEXER_HEAD_WEIGHTS_ROLE": "The indexer head weights, `weights_proj` of the released indexer, read one number per indexer head off the token's hidden state. Each head's score is scaled in the combined score by the number read for that head.",
+    "COLLAPSE_PROJECTION_ROLE": "The collapse projection of the hyper-connection maps the n normalised streams of a token to the collapse vector, one number per stream. A sigmoid keeps the collapse vector between zero and one. The released code holds the projection as the first n rows of `hc_attn_fn` or `hc_ffn_fn`, times the first entry of `hc_attn_scale`, with the first n entries of `hc_attn_base` as its bias.",
+    "OUTPUT_VECTOR_PROJECTION_ROLE": "The output projection of the hyper-connection maps the n normalised streams of a token to the output vector, one number per stream. A doubled sigmoid keeps the output vector between zero and two. The released code holds the projection as the second n rows of `hc_attn_fn` or `hc_ffn_fn`, times the second entry of `hc_attn_scale`, with the second n entries of `hc_attn_base` as its bias.",
+    "COMBINE_PROJECTION_ROLE": "The combine projection of the hyper-connection maps the n normalised streams of a token to an n by N matrix. The exponential and the Sinkhorn rounds after the projection make that matrix doubly stochastic. The released code holds the projection as the last n N rows of `hc_attn_fn` or `hc_ffn_fn`, times the third entry of `hc_attn_scale`, with the last n N entries of `hc_attn_base` as its bias.",
+    "OUTPUT_HEAD_ROLE": "The output head maps the final hidden state onto the vocabulary. The softmax after the head gives the probability of each token.",
+    "ENGRAM_KEY_PROJECTION_ROLE": "The key projection of the Engram module of layer {layer} reads the 24 looked-up vectors of a token together and gives one key of the residual width for each of the four residual streams. The released code holds the projection as the first 4 x 5120 outputs of `wkv`, which has no bias.",
+    "ENGRAM_VALUE_PROJECTION_ROLE": "The value projection of the Engram module of layer {layer} reads the same 24 vectors and gives one value of the residual width. Every stream receives that value under its own gate. The released code holds the projection as the last 5120 outputs of `wkv`.",
+    "ENGRAM_GATE_WEIGHT_ROLE": "The weight of the Engram gate of layer {layer}, one learned number for each stream and channel, multiplies the product of the stream and its key before the sum over the channels. The released code holds two arrays, `q_weight` and `k_weight`, and uses only their product.",
+    "ENGRAM_MULTIPLIERS_ROLE": "The multipliers of the hash of layer {layer} are one odd integer per lookback slot. They are drawn once for that layer from a random number generator seeded by the layer, so the two Engram layers hash differently. An identifier is below the identifier bound. A multiplier is below 2^63 divided by that bound. The product of the two is therefore below 2^63 and is a 64-bit integer with nothing cast.",
+    "ENGRAM_PRIMES_ROLE": "The primes of the hash of layer {layer} are one for each of the |G||K| pairs of an n-gram order and a hash head, in the order the released layout draws them: the successive primes above the row count given by the configuration for one pair, sixteen million. The datatype of the array is the naturals below the bound p-bar, which is one bound standing over every prime of the layer, because a wire carries one datatype. A remainder after division by a prime is below that prime, so the same bound holds every remainder as well. The table of layer {layer} has {rows} rows, which is the sum of its primes. The offset of a pair is the sum of the primes before it. The row ranges of the pairs are therefore disjoint.",
+    "SQRT_SOFTPLUS_ROLE": "The score function of the router is `sqrtsoftplus` in the released configuration. The softplus makes the score of an expert positive. The square root of the positive score is taken. The result is the gate of the expert.",
+    "ROUTE_SCALE_ROLE": "The six gates of a token sum to one after the normalisation. The route scale multiplies each gate by 1.5.",
+    "SILU_ROLE": "The activation of an expert is SiLU. The gate projection passes through SiLU before it multiplies the up projection.",
+    "COLLAPSE_SIGMOID_ROLE": "The sigmoid is applied to the collapse vector of a hyper-connection, so the weight of each stream lies between zero and one.",
+    "OUTPUT_DOUBLED_SIGMOID_ROLE": "Twice the sigmoid is applied to the output vector of a hyper-connection, so the weight of each stream lies between zero and two.",
+    "NORMALISING_RECIPROCAL_ROLE": "This map is the reciprocal of a normalising sum. The attention core divides each exponentiated score by the sum over its slots and the sink. The division is written as a product with this reciprocal.",
+    "ENGRAM_STREAM_GATE_ROLE": "This map is the gate of one residual stream in Engram, from the normalised dot product of the stream with its key. The magnitude of the product is held at or above epsilon. The square root of the magnitude takes the sign of the product back. The sigmoid of that signed root is the weight given by the stream to the n-gram value.",
+    "ENGRAM_GATE_ROLE": "This map is the gate of the Engram module. The normalised dot product of a stream with its key is divided by the square root of the width. The magnitude of that product is kept at or above one millionth. The square root of the magnitude is taken. The sign of the dot product is put back. A sigmoid follows.",
+    "RMSNORM_ROLE": "A root-mean-square normalisation of the released `RMSNorm` class has the epsilon `norm_eps` of the released configuration under the root and a learned gain per channel. The normalisation applied by DSpark to the projected backbone state is one of these normalisations. The hyper-connection and Engram normalisations have no gain and are written out in primitives instead.",
+    "SCORE_SCALE_ROLE": "This map multiplies every attention score by one over the square root of the latent width, which is 512 in the released model. A score is a sum over the 512 channels of a latent, so its spread grows with the square root of that width. The scale keeps the spread the same at any width, so the softmax does not put nearly all of its weight on one slot. The model drawn without the omitted mechanisms folds this factor into the query weight.",
+    "INDEXER_HEAD_SCALE_ROLE": "This map multiplies the weight of every indexer head by 1/64. The released indexer multiplies by one over the square root of the key width, which is 128, and by one over the square root of the head count, which is 32. The model drawn without the omitted mechanisms folds this factor into the weight `w^{I}`.",
+    "GATE_LIMIT_ROLE": "This map limits the gate branch of an expert from above. A value above the SwiGLU limit, which is 10 in the released configuration, is replaced by the limit. Every other value is kept. The limit comes from training, where it keeps the activations inside the range represented by the FP8 and FP4 number formats.",
+    "UP_LIMIT_ROLE": "This map limits the up branch of an expert on both sides. A value above the SwiGLU limit is replaced by the limit. A value below minus the limit is replaced by minus the limit. Every other value is kept. The limit is 10 in the released configuration and comes from training, where it keeps the activations inside the range represented by the FP8 and FP4 number formats.",
+    "TEMPERATURE_ROLE": "This map divides the logit of every expert by the temperature of the router, before the score function. A temperature of one leaves the logits unchanged. The released configuration sets none, so the released value is one. A larger temperature would bring the scores of the experts closer together.",
+    "MODALITY_BIAS_ROLE": "This weight is the correction bias of the router, chosen by the modality of the token. The weight holds two vectors of one learned number per expert, `bias` for a text token and `bias_vl` for a token inside an image span. The vector selected by the modality is added to a copy of the gates. The experts of the token are chosen from that copy. The gates without the bias weight the experts chosen. The bias therefore changes which experts run. The bias leaves the weight of a chosen expert unchanged as long as the biased score of that expert is above zero.",
+    "MHC_EPSILON_ROLE": "This map adds the epsilon of the hyper-connections, `hc_eps` in the released configuration, which is one millionth. The epsilon is added to the collapse vector after the sigmoid and to the combine matrix after the row softmax. Every value is therefore above zero.",
+    "TOP_K_WEIGHTS_DESCRIPTION": "Keeps the largest scores along the axis consumed and hands each out at the position it came from. The result rides a sparse axis, labelled with the count kept and the axis selected over, which holds that many live positions. No index is therefore handed out beside the scores.",
+    "TOP_K_WEIGHTS_SELECT_DESCRIPTION": "Keeps the largest scores along the axis consumed and hands out two arrays on a dense axis: the scores kept, and the position each came from as a natural number.",
+    "TOP_K_ONLY_WEIGHTS_DESCRIPTION": "Keeps the largest scores along the axis consumed and hands them out on a dense axis. The position each came from is not handed out.",
+    "TOP_K_ONLY_SELECTION_DESCRIPTION": "Keeps the positions of the largest scores along the axis consumed and hands out no score, because nothing reads a score after the selection. Each result is a natural number, one per slot of the result's axis. A slot with no entry to hold reads the unit.",
+    "TOP_K_OVER_POSITIONS_SENTENCE": "The entries selected over are themselves a selection from a wider axis. A second operand holds the position of each on that axis. A position handed out is therefore read from the second operand.",
+    "COVARIANT_VIEW_WRITES_EACH_SENTENCE": "Writes the input at each position to the output at the position given for it by the row of the formula.",
+    "COVARIANT_VIEW_WRITES_ONE_SENTENCE": "Writes one at the position named by the row of the formula.",
+    "COVARIANT_VIEW_WRITES_INPUT_SENTENCE": "Writes the input at the position named by the row of the formula.",
+    "COVARIANT_VIEW_BROADCAST_SENTENCE": "The input does not carry every axis read by the row, so one copy of the input is written for every position of the missing axes.",
+    "COVARIANT_VIEW_UNIT_SENTENCE": "An output position written by no input position holds the unit of the datatype. An ordinary view reads in the other direction. It takes the output at each position from the input at the position named by its row.",
+    "MAGNITUDE_ROLE": "The magnitude of a channel is the channel without its sign. The largest magnitude of a group sets the scale of the group.",
+    "SCALE_BY_SIX_ROLE": "This map divides the largest magnitude of a group by 6, the largest number held by the E2M1 form. A group divided by this scale has its largest channel at 6.",
+    "SCALE_BY_448_ROLE": "This map divides the largest magnitude of a group by 448, the largest number held by the E4M3 form. A group divided by this scale has its largest channel at 448.",
+    "SCALE_FLOOR_E4M3_ROLE": "Keeps the scale of a group at or above 2^-9, the smallest number above zero held by the E4M3 form, so a group of zeros is not divided by zero. The released kernel keeps the largest magnitude at or above 6 times 2^-9 before it divides by 6, which is the same function.",
+    "SCALE_FLOOR_E8M0_ROLE": "Keeps the scale of a group at or above 2^-126, so a group of zeros is not divided by zero. The released kernel keeps the largest magnitude at or above 6 times 2^-126 before it divides by 6, which is the same function.",
+    "MAGNITUDE_FLOOR_ROLE": "Keeps the largest magnitude of a group at or above 10^-4, so a group of zeros is not divided by zero.",
+    "LOG2_SCALE_ROLE": "This map takes the logarithm to base two of the scale. The ceiling of this number is the exponent of the smallest power of two at or above the scale.",
+    "CLAMP_E2M1_ROLE": "Keeps a divided channel between -6 and 6, the range of the E2M1 form. A scale rounded up to a power of two leaves every channel inside the range. A scale rounded through E4M3 can round down. The clamp then holds the largest channel at 6.",
+    "CLAMP_E4M3_ROLE": "Keeps a divided channel between -448 and 448, the range of the E4M3 form. The scale is rounded up, so every channel is already inside the range.",
+    "E2M1_STORED_NUMBERS": "four bits: a sign, two exponent bits and one mantissa bit. The numbers are 0, 0.5, 1, 1.5, 2, 3, 4 and 6 with either sign",
+    "E4M3_STORED_NUMBERS": "eight bits: a sign, four exponent bits and three mantissa bits. The largest number is 448 and the smallest above zero is 2^-9",
+    "WINDOW_ROTARY_TABLE_ROLE": "The table of rotary factors of the two sliding-window layers holds one complex number of length one for every token position and channel pair. The released `precompute_freqs_cis` computes it with the base 10000 and no YaRN correction. The released `apply_rotary_emb` multiplies the pairs by the table.",
+    "YARN_ROTARY_TABLE_ROLE": "The table of rotary factors of every layer that holds compressed entries has one complex number of length one for every position and channel pair. The released `precompute_freqs_cis` computes it with the base 160000 and the YaRN correction, which divides the frequency of the slow channel pairs by 16 and fades the pairs between the ramp ends across.",
+    "GELU_ROLE": "The activation of the image projector, the exact GELU, multiplies a value by the probability that a standard normal draw lies below the value.",
+    "PROJECTOR_FIRST_MAP_ROLE": "The first linear map of the image projector is `aligner.w1`, with a bias. It maps the 9 x 1024 numbers of a cell of three by three patches to the residual width. Its input axes are in the order (U, V, M), which is the order the pixel unshuffle hands a cell out in when it is written as one group view per grid axis. The released `F.unfold` hands a cell out with the feature index first, so the rows of the released weight stand in the order (M, U, V).",
+    "PROJECTOR_SECOND_MAP_ROLE": "The second linear map of the image projector is `aligner.w2`, with a bias. It follows the GELU and keeps the residual width.",
+    "DELIMITER_VECTORS_ROLE": "The three learned delimiter vectors of an image span are `image_start`, `image_newline` and `image_end`. The vector of a delimiter is selected by its kind. Kind 0 is the start of the span. Kind 1 is the new line after a row of cells. Kind 2 is the end. The numbering of the kinds is the expression's own.",
+    "MAIN_PROJECTION_ROLE": "This weight is one third of the released `main_proj`, which projects the backbone state read by DSpark. This third reads the stream mean of layer {layer}, which is member {member} of the slot, at the last token. The released weight reads the three means laid end to end, which is the sum of three maps.",
+    "MARKOV_PROJECTION_ROLE": "The projection of the Markov head maps the rank-Z embedding of the token before a draft position onto the vocabulary. The result is added to the logits of the position. Each draft therefore depends on the draft before it.",
+    "CONFIDENCE_STATE_HALF_ROLE": "This half of the confidence projection reads the hidden state of a draft position. The released weight reads the hidden state and the Markov embedding laid end to end, which is the sum of two maps.",
+    "CONFIDENCE_MARKOV_HALF_ROLE": "This half of the confidence projection reads the Markov embedding of the token before a draft position. The released weight reads the hidden state and the Markov embedding laid end to end, which is the sum of two maps.",
+    "FIRST_WINDOW_LAYER_SENTENCE": "The released model has two such layers. They are drawn one by one because Engram is applied to the residual between them. The two layers are therefore not two iterations of one repeated block.",
+    "SECOND_WINDOW_LAYER_SENTENCE": "The Engram of layer 1 has been added to the residual read by this layer.",
+    "ROUNDING_KERNEL_DESCRIPTION": "The released code runs this rounding kernel in front of every projection whose weight is FP8 or FP4. The channels of a row are cut into groups of 32. The largest magnitude of a group, kept at or above 10^-4, is divided by 448 and rounded up to a power of two, which is the UE8M0 scale of the group. Each channel is divided by the scale, kept between -448 and 448, and rounded to the nearest E4M3 number. The wire after the cast carries the E4M3 element of every channel and the scale of every group. The value denoted by the wire is the element multiplied by the scale. The GEMM reading the wire multiplies its FP32 accumulator by the scale of the operand and by the scale of the weight. The product is therefore of the values written above. A cast to E4M3 with no scale would saturate above 448 and flush to zero below 2^-9.",
+    "FILE_QUANTISATION_SENTENCE": "The file holds it in {quantisation}.",
+    "WEIGHT_QUANTISATION_SENTENCE": "The released model reads this weight at {quantisation}."
+  }
+}

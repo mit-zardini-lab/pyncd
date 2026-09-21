@@ -1,16 +1,31 @@
-import os
-import sys
+'''Sending the example expressions to an open tsncd page, one at a time.
 
-# Puts the repository root on sys.path and makes it the working directory, so the
-# imports and relative paths below resolve. See fix_notebook_dir.py.
+Run it from the repository root, with a tsncd page open in a browser:
+
+    python example_notebooks/minimum_working_example.py
+
+It runs `run_server.py` as a subprocess, which holds the relay for as long as the
+menu is open. The menu numbers the expressions built by the notebooks in this
+folder, and the one that is chosen is sent to the page. Each expression is also
+printed with `display.print_category`, which draws it in the terminal and needs
+no browser.
+
+The notebooks draw through `notebooks/display/notebook_diagrams.py` instead,
+which captures the figure from a headless browser and embeds it in the cell. This
+script is the other route: the relay on port 8765 and a page that a person is
+looking at.
+
+Written by Claude Opus 5 (1M context) at reasoning effort high, 2026-09-20.
+'''
+import sys; sys.path[:0] = ['.', 'notebooks']
 import fix_notebook_dir
 
-# The rendered diagrams use box-drawing characters, which the default Windows
-# console code page cannot encode.
-if hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+import asyncio
+import os
+import subprocess
+from typing import Any, Callable, Literal
 
-import construction_helpers as ch # Needed for @ auto-alignment
+import construction_helpers as ch  # noqa: F401 - operator overloads
 import data_structure.Category as cat
 import data_structure.Numeric as nm
 import data_structure.Operators as ops
@@ -18,16 +33,13 @@ import data_structure.Term as fd
 import display as dpl
 import websocket_transfer.websockets_transfer as wst
 
-import subprocess
-import asyncio
-
-from typing import (
-    Callable,
-    Any,
-    Literal
-)
+# `print_category` draws with box-drawing characters, which the default Windows
+# console code page cannot encode.
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 commands: dict[str, Callable[[], Any]] = {}
+
 
 def attach_command(name: str):
     def name_wrapper(func):
@@ -35,92 +47,77 @@ def attach_command(name: str):
         return func
     return name_wrapper
 
-#################
-## CONVOLUTION ##
-#################
+
+async def print_and_send(term: cat.Morphism, name: str) -> None:
+    print(name)
+    dpl.print_category(term)
+    await wst.send_term(term)
 
 
-def convolution_matrix():
+def convolution_matrix() -> cat.Morphism:
     convolution_reindexing = cat.StrideMorphism.from_matrix(
         (1, 1),
-        dom_names = ("x'", 'w'),
+        dom_names=("x'", 'w'),
         cod_names=('x',),
         name='+'
     )
-    c_in_axis = fd.DynamicName('c', fd.DynamicName('in')).capture(cat.RawAxis())
-    convolution_matrix = (convolution_reindexing * c_in_axis) >> cat.Reals()
-    return convolution_matrix
+    input_channels = fd.DynamicName('c', fd.DynamicName('in')).capture(cat.RawAxis())
+    return (convolution_reindexing * input_channels) >> cat.Reals()
+
 
 @attach_command('Convolution Matrix')
-async def render_convolution():
-    print('Convolution Matrix')
-    _convolution_matrix = convolution_matrix()
-    dpl.print_category(_convolution_matrix)
-    await wst.send_term(_convolution_matrix)
+async def send_convolution_matrix() -> None:
+    await print_and_send(convolution_matrix(), 'Convolution Matrix')
 
-def convolution_full():
-    _convolution_matrix = convolution_matrix()
-    c_out = fd.DynamicName('c', fd.DynamicName('out')).capture(cat.RawAxis())
-    linear = ops.Linear.template(2, c_out)
-    convolution_full = _convolution_matrix @ linear
-    return convolution_full
 
-@attach_command('Convolution Full')
-async def render_convolution_full():
-    print('Convolution Full')
-    _convolution_full = convolution_full()
-    dpl.print_category(_convolution_full)
-    await wst.send_term(_convolution_full)
+def convolution() -> cat.Morphism:
+    output_channels = fd.DynamicName('c', fd.DynamicName('out')).capture(cat.RawAxis())
+    return convolution_matrix() @ ops.Linear.template(2, output_channels)
 
-#################
-## TRANSFORMER ##
-#################
 
-def attention_core():
-    qk_matmul = ops.Einops.template('q h k, x h k -> h q x')
-    softmax = ops.SoftMax.template()
-    mask = ops.WeightedTriangularLower().template()
-    sv_matmul = ops.Einops.template('h q x, x h k -> q h k')
-    _attention_core = cat.Block.template(
-        qk_matmul @ softmax @ mask @ sv_matmul,
+@attach_command('Convolution')
+async def send_convolution() -> None:
+    await print_and_send(convolution(), 'Convolution')
+
+
+def attention_core() -> cat.Morphism:
+    return cat.Block.template(
+        ops.Einops.template('q h k, x h k -> h q x')
+        @ ops.SoftMax.template()
+        @ ops.WeightedTriangularLower.template()
+        @ ops.Einops.template('h q x, x h k -> q h k'),
         title='Attention Core',
         fill_color='#C5BEDF'
     )
-    return _attention_core
+
 
 @attach_command('Attention Core')
-async def render_attention_core():
-    print('Attention Core')
-    _attention_core = attention_core()
-    dpl.print_category(_attention_core)
-    await wst.send_term(_attention_core)
+async def send_attention_core() -> None:
+    await print_and_send(attention_core(), 'Attention Core')
 
-def attention_layer():
-    _attention_core = attention_core()
-    Lq = ops.Linear.template(('m',), 2, 'q')
-    Lk = ops.Linear.template(('m',), 2, 'k')
-    Lv = ops.Linear.template(('m',), 2, 'v')
-    Lo = ops.Linear.template(2, ('m',), 'o')
-    _attention_layer = (Lq * Lk * Lv) @ _attention_core @ Lo
-    return _attention_layer
+
+def attention_layer() -> cat.Morphism:
+    query = ops.Linear.template(('m',), 2, 'q')
+    key = ops.Linear.template(('m',), 2, 'k')
+    value = ops.Linear.template(('m',), 2, 'v')
+    output = ops.Linear.template(2, ('m',), 'o')
+    return (query * key * value) @ attention_core() @ output
+
 
 @attach_command('Attention Layer')
-async def render_attention_layer():
-    print('Attention Layer')
-    _attention_layer = attention_layer()
-    dpl.print_category(_attention_layer)
-    await wst.send_term(_attention_layer)
+async def send_attention_layer() -> None:
+    await print_and_send(attention_layer(), 'Attention Layer')
 
-def res(target: cat.BroadcastedCategory):
-    addition = ops.AdditionOp.template()
-    norm = ops.Normalize.template()
+
+def residual(target: cat.BroadcastedCategory) -> cat.Morphism:
     return cat.Block.template(
-        (0,0) @ target @ ops.AdditionOp.template() @ ops.Normalize.template(),
+        (0, 0) @ target @ ops.AdditionOp.template() @ ops.Normalize.template(),
         title='Add \\& Norm',
         fill_color='#F1F4C1'
     )
 
-def ffn_layer():
+
+def feed_forward() -> cat.Morphism:
     return cat.Block.template(
         ops.Linear.template(1, ('d_ff',), 'in')
         @ ops.Elementwise.template()
@@ -129,59 +126,50 @@ def ffn_layer():
         fill_color='#C1E8F7'
     )
 
-@attach_command('FFN Layer')
-async def render_ffn_layer():
-    print('FFN Layer')
-    _ffn_layer = ffn_layer()
-    dpl.print_category(_ffn_layer)
-    await wst.send_term(_ffn_layer)
 
-def transformer_core():
-    _attention_layer = attention_layer()
-    _ffn_layer = ffn_layer()
-    # The layer below is repeated, so it has to map its domain back to itself.
-    # Attention takes three inputs - the query, key and value sources - so the
-    # single incoming wire is fanned out to all three first.
-    res_attention = res((0, 0, 0) @ _attention_layer)
-    res_ffn = res(_ffn_layer)
-    _transformer = cat.Block.template(
-        res_attention @ res_ffn,
+@attach_command('Feed Forward')
+async def send_feed_forward() -> None:
+    await print_and_send(feed_forward(), 'Feed Forward')
+
+
+def transformer_layers() -> cat.Morphism:
+    # Attention reads the query, the key and the value, so the copied wire is
+    # fanned out to three in front of it.
+    return cat.Block.template(
+        residual((0, 0, 0) @ attention_layer()) @ residual(feed_forward()),
         title='Transformer Layer',
         fill_color='#F3F3F4',
         repetition=nm.Integer(6)
     )
-    return _transformer
 
-def transformer():
-    vocab_size = fd.DynamicName('v', settings=fd.DynamicNameSettings(overline=True))
+
+def transformer() -> cat.Morphism:
+    vocabulary = fd.DynamicName('v', settings=fd.DynamicNameSettings(overline=True))
     embedding = cat.Block.template(
-        ops.Embedding.template(vocab_size,),
+        ops.Embedding.template(vocabulary),
         title='Embedding',
         fill_color='#FCE0E1')
     aggregator = cat.Block.template(
-        ops.Linear.template(1, (vocab_size,)) @ ops.SoftMax.template(),
+        ops.Linear.template(1, (vocabulary,)) @ ops.SoftMax.template(),
         title='Aggregator',
         fill_color='#DBDFEF'
     )
-    attention_ffn_network = transformer_core()
-    _transformer = embedding @ attention_ffn_network @ aggregator
-    return _transformer
+    return embedding @ transformer_layers() @ aggregator
+
 
 @attach_command('Transformer')
-async def render_transformer():
-    print('Transformer')
-    _transformer = transformer()
-    dpl.print_category(_transformer) # type: ignore
-    await wst.send_term(_transformer)
+async def send_transformer() -> None:
+    await print_and_send(transformer(), 'Transformer')
 
-def print_options():
+
+def print_options() -> None:
     print('Available commands:')
     for i, command in enumerate(commands):
         print(f'({i}) {command}')
     print('(q) Quit')
 
-async def ask_input() -> None | Literal['Quit']:
 
+async def ask_input() -> None | Literal['Quit']:
     while True:
         print_options()
         choice = input('Enter command number, or q to quit: ')
@@ -190,9 +178,10 @@ async def ask_input() -> None | Literal['Quit']:
         try:
             command_name = list(commands.keys())[int(choice)]
         except (ValueError, IndexError):
-            print('Invalid choice. Please enter a valid command number, or q to quit.')
+            print(f'{choice!r} is not one of 0 to {len(commands) - 1} or q.')
             continue
         await commands[command_name]()
+
 
 if __name__ == '__main__':
     server = subprocess.Popen(
