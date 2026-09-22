@@ -795,3 +795,64 @@ long-running server keeps executing the code it started with.
 - [[Diagram Display]] — what the diagram itself shows
 - [[Agent Display]] — the SSA listing to read instead, when there is no browser
 - [[Notebooks]] — how a notebook reaches this path through `notebook_diagrams.py`
+
+## FAST selects experimental rendering optimizations
+
+`settings.displayMode` accepts `fast` (the default) or `slow`. Python exposes
+`DisplayMode.SLOW` and `DisplayMode.FAST` through `display_settings(displayMode=...)`
+and `DiagramSettings.display_mode`. The delivery mode, such as HTML or BROWSER,
+is independent. SLOW retains the existing renderer and inspection preparation.
+FAST measures diagram positions together before drawing and prepares inspection
+diagrams when opened, retaining their content for reuse. The setting propagates
+to inspection diagrams and capture targets.
+
+An exported HTML page accepts `?displayMode=slow` or `?displayMode=fast` in its
+address. A valid override takes precedence over its embedded setting, while an
+absent or invalid value leaves that setting unchanged. The override applies only
+to standalone pages and does not change the relay's held settings.
+
+## COMPRESSED exports share JSON values by content
+
+`TermJSONConverter.export_to_json(term, export_form=TermExportForm.COMPRESSED)`
+and `export(..., export_form=...)` select the experimental compressed format.
+`TermExportForm.UID_REFERENCES` remains the default and emits the existing
+`uid_repository`/`data` envelope unchanged. The Python `import_from_json` method
+and the TypeScript `TermJSONConverter.import` method accept both forms.
+
+A compressed document has this envelope:
+
+```json
+{
+  "export_form": "compressed",
+  "version": 1,
+  "value_repository": [[0, "x"], [0, 7], [2, [0, 1]]],
+  "data": 2
+}
+```
+
+The example decodes to `{"x": 7}`. Each repository entry is `[kind, payload]`:
+kind 0 holds a scalar, kind 1 holds an array of reference indices, and kind 2
+holds alternating field-name and field-value indices. Every child reference
+points to an earlier record. `data` identifies the root. For a term export, that
+root is the original envelope containing `uid_repository` and `data`.
+
+The Python compressor hashes each record with SHA-256 and checks the encoded
+record inside each hash bucket, so a hash collision cannot merge distinct values.
+Equal objects, arrays, field names and scalar values share records. References
+are compact integer indices within the document; full hashes are not repeated
+on the wire. Object field order participates in the record because TypeScript
+constructors consume those fields positionally. Boolean and numeric scalar
+values remain distinct. Unsupported versions, malformed records, missing
+references and references to the current or a later record are rejected.
+
+Decoding shares JSON containers, which callers treat as read-only. Term
+construction still visits each non-UID occurrence separately. Only UID terms
+retain the existing object-identity cache, so operation occurrence numbers and
+auxiliary expansion keys keep their meaning. Compression is independent of the
+FAST/SLOW rendering setting.
+
+Repositories are currently local to each term export. The main expression and
+inspection expressions can each use COMPRESSED, but do not yet share a repository
+with one another. Smaller raw JSON does not guarantee a smaller HTTP-compressed
+download; the experimental full DeepSeek page is 4.94 MB instead of 14.07 MB,
+while Brotli sizes are 492 KB and 478 KB respectively.

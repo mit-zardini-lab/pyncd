@@ -3,11 +3,14 @@ import data_structure.Term as fd
 import json
 import enum
 from typing import TypedDict
+import data_transfer.json_compression as json_compression
+
+TermExportForm = json_compression.TermExportForm
 
 type JSONType = dict[str, JSONType] | list[JSONType] | str | int | float | bool | None
 
 class JSONDataStructure(TypedDict):
-    uid_repository: dict[fd.IDType, JSONType]
+    uid_repository: dict[str, JSONType]
     data: JSONType
 
 def json_main(target) -> bool:
@@ -77,22 +80,55 @@ class TermJSONConverter:
                 raise ValueError(f"Invalid JSON data for reconstruction: {data}")
             
     @classmethod
-    def export(cls, data: fd.GeneralTerm, target_file: str, indent: None | int = 4) -> None:
-        converter = cls()
-        json_data = converter.to_json(data)
-        json_export: JSONDataStructure = {
-            'uid_repository': converter.uid_repository,
-            'data': json_data
-        }
-        with open(target_file, 'w') as json_file:
-            json.dump(json_export, json_file, indent=indent)
+    def export(
+        cls, data: fd.GeneralTerm, target_file: str, indent: None | int = 4,
+        *, export_form: TermExportForm = TermExportForm.UID_REFERENCES,
+    ) -> None:
+        with open(target_file, 'w', encoding='utf-8') as json_file:
+            json_file.write(cls.export_to_json(data, indent, export_form=export_form))
 
     @classmethod
-    def export_to_json(cls, data: fd.GeneralTerm, indent: None | int = None) -> str:
+    def export_document(
+        cls, data: fd.GeneralTerm,
+        export_form: TermExportForm = TermExportForm.UID_REFERENCES,
+    ) -> JSONDataStructure | json_compression.CompressedJSON:
         converter = cls()
         json_data = converter.to_json(data)
         json_export: JSONDataStructure = {
-            'uid_repository': converter.uid_repository,
+            'uid_repository': {
+                str(key): value for key, value in converter.uid_repository.items()},
             'data': json_data
         }
-        return json.dumps(json_export, indent=indent)
+        if export_form is TermExportForm.COMPRESSED:
+            return json_compression.compress_json(json_export)
+        if export_form is TermExportForm.UID_REFERENCES:
+            return json_export
+        raise ValueError(f'Unsupported term export form {export_form!r}')
+
+    @classmethod
+    def export_to_json(
+        cls, data: fd.GeneralTerm, indent: None | int = None,
+        *, export_form: TermExportForm = TermExportForm.UID_REFERENCES,
+    ) -> str:
+        document = cls.export_document(data, export_form)
+        separators = (',', ':') if (
+            export_form is TermExportForm.COMPRESSED and indent is None) else None
+        return json.dumps(document, indent=indent, separators=separators)
+
+    @classmethod
+    def import_from_json(cls, exported: str | dict) -> fd.GeneralTerm:
+        document = json.loads(exported) if isinstance(exported, str) else exported
+        if not isinstance(document, dict):
+            raise ValueError('A term export must be a JSON object')
+        if document.get('export_form') not in (
+                None, TermExportForm.UID_REFERENCES.value,
+                TermExportForm.COMPRESSED.value):
+            raise ValueError(f'Unsupported term export form {document["export_form"]!r}')
+        if document.get('export_form') == TermExportForm.COMPRESSED.value:
+            document = json_compression.decompress_json(document)
+        if not isinstance(document, dict) or not {
+                'uid_repository', 'data'} <= document.keys():
+            raise ValueError('A term export must contain uid_repository and data')
+        converter = cls(uid_repository={
+            int(key): value for key, value in document['uid_repository'].items()})
+        return converter.reconstruct(document['data'])

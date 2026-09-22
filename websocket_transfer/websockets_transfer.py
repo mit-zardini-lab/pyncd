@@ -60,6 +60,11 @@ class ColorMode(enum.Enum):
     LIGHT = 'light'
 
 
+class DisplayMode(enum.Enum):
+    SLOW = 'slow'
+    FAST = 'fast'
+
+
 class AxisHover(enum.Enum):
     '''Where an axis answers the pointer in a figure. Under `LEGEND`, the client's
     default, resting the pointer on the axis's legend row halos every wire of the
@@ -88,6 +93,7 @@ class RenderHandlerSettings(TypedDict, total=False):
     Partial by design, because the client merges whatever arrives over its own
     defaults, so omitting a key leaves that option at its default.
     '''
+    displayMode: Literal['slow', 'fast']
     darkMode: bool
     blockBackground: Literal['none', 'subtle', 'medium', 'strong']
     blockHoverIntensity: float

@@ -507,6 +507,16 @@ same figure written to `outputs/pages/DeepSeekV41Flash.html`. The notebook's set
 Neither writes a heading over the figure, because `DiagramSettings.heading` is
 `PageHeading.NONE` unless a notebook asks for `PageHeading.TITLE`.
 
+Inspection boxes use the visible viewport when placing a box after mobile panning
+or zooming. Their height is limited to 80% of that viewport, with vertical
+scrolling and extra width for a scrollbar where the screen has room. The title,
+controls and description stay in view during horizontal scrolling.
+
+Mouse hover opens an unlocked box. A touch tap opens and locks the box on release,
+so the opening tap cannot follow a reference link in the newly placed box. A
+second tap can follow the link. The close button shares the lock control's row
+and has a larger hit area on devices with touch input.
+
 ## See also
 
 - [[Diagram Wire Format]] — the `auxiliary` field and the two settings

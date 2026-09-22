@@ -73,6 +73,7 @@ def display_settings(
     axisLabelFontSize: float | None = None,
     title: str | None = None,
     heading: wst.PageHeading | None = None,
+    displayMode: wst.DisplayMode | None = None,
 ) -> wst.RenderHandlerSettings:
     '''
     Collect the display options into the partial dict the client expects.
@@ -137,6 +138,8 @@ def display_settings(
         settings['title'] = title
     if heading is not None:
         settings['heading'] = heading.value
+    if displayMode is not None:
+        settings['displayMode'] = displayMode.value
     return settings
 
 
@@ -158,6 +161,7 @@ async def send_morphism(
     title: str | None = None,
     heading: wst.PageHeading | None = None,
     auxiliary: wst.DiagramAuxiliary | None = None,
+    displayMode: wst.DisplayMode | None = None,
 ) -> None:
     '''
     Display `target`, converting it to a morphism first if it is a hypergraph.
@@ -182,5 +186,5 @@ async def send_morphism(
         settings=display_settings(
             darkMode, debugBorders, coreDebug, width, subBlocks,
             drawnBlockTags, tapeLabels, legend, inspectionBoxes,
-            axisHover, axisLabelFontSize, title, heading),
+            axisHover, axisLabelFontSize, title, heading, displayMode),
         auxiliary=auxiliary)

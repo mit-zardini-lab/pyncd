@@ -216,6 +216,7 @@ import notebooks.display.tape_presentation as tape_presentation
 TSNCD_DIST_FALLBACK = '../tsncd/dist'
 
 ColorMode = wst.ColorMode
+DisplayMode = wst.DisplayMode
 
 
 class DiagramMode(enum.Enum):
@@ -289,6 +290,7 @@ class DiagramSettings:
     passing it to `show_diagram` as a keyword argument.
     '''
     mode: DiagramMode = DiagramMode.INLINE
+    display_mode: DisplayMode = DisplayMode.FAST
     width: int | None = None
     block_recycling: block_recycling.BlockRecycling = (
         block_recycling.BlockRecycling.AS_WRITTEN)
@@ -451,6 +453,7 @@ async def _capture_headless(
                 settings.advanced_display),
             axisHover=settings.axis_hover,
             axisLabelFontSize=settings.axis_label_font_size,
+            displayMode=settings.display_mode,
             auxiliary=auxiliary)
 
     try:
@@ -736,6 +739,7 @@ async def _send_to_open_page(
                 settings.advanced_display),
             axisHover=settings.axis_hover,
             axisLabelFontSize=settings.axis_label_font_size,
+            displayMode=settings.display_mode,
             title=settings.title,
             heading=settings.heading,
             auxiliary=auxiliary)
@@ -757,7 +761,8 @@ def page_settings(settings: DiagramSettings) -> wst.RenderHandlerSettings:
         axisHover=settings.axis_hover,
         axisLabelFontSize=settings.axis_label_font_size,
         title=settings.title,
-        heading=settings.heading)
+        heading=settings.heading,
+        displayMode=settings.display_mode)
 
 
 PACKAGE_WORDING_FILES: tuple[pathlib.Path, ...] = (

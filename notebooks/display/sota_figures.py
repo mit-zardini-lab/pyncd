@@ -57,6 +57,7 @@ import websocket_transfer.send_morphism as send_morphism
 
 from notebooks.display.notebook_diagrams import (
     DiagramMode as DiagramMode,
+    DisplayMode as DisplayMode,
     DiagramSettings as DiagramSettings,
     SETTINGS as SETTINGS,
     SubBlocks as SubBlocks,
@@ -80,7 +81,8 @@ async def show(term: send_morphism.Sendable, caption: str | None = None,
                advanced_display: AdvancedDisplay | None = None,
                casts: CastPresentation | None = None,
                slug: str = 'term',
-               settings: DiagramSettings | None = None) -> None:
+               settings: DiagramSettings | None = None,
+               display_mode: DisplayMode | None = None) -> None:
     '''Draw a term. `width` sets the wrap width, so it sets the figure's
     proportions rather than its scale, and a wide term wants more.
     `sub_blocks=SubBlocks.NO_BODIES` leaves the `BlockOperator` bodies out,
@@ -92,6 +94,8 @@ async def show(term: send_morphism.Sendable, caption: str | None = None,
     `casts` stand in for the fields of the same name for this call. `slug` names the file
     `DiagramMode.HTML` or `DiagramMode.DUMP` writes.'''
     chosen = settings if settings is not None else SETTINGS
+    if display_mode is not None:
+        chosen = dataclasses.replace(chosen, display_mode=display_mode)
     if mode is not None:
         chosen = dataclasses.replace(chosen, mode=mode)
     if sub_blocks is not None:

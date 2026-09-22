@@ -263,6 +263,7 @@ class HeadlessRenderer:
         inspectionBoxes: bool | None = None,
         axisHover: wst.AxisHover | None = None,
         axisLabelFontSize: float | None = None,
+        displayMode: wst.DisplayMode | None = None,
         auxiliary: wst.DiagramAuxiliary | None = None,
     ) -> None:
         '''Draw `target` in the headless page, leaving it there to be captured.
@@ -274,7 +275,7 @@ class HeadlessRenderer:
             sm.display_settings(
                 darkMode, debugBorders, coreDebug, width, subBlocks,
                 drawnBlockTags, tapeLabels, legend, inspectionBoxes,
-                axisHover, axisLabelFontSize),
+                axisHover, axisLabelFontSize, displayMode=displayMode),
             auxiliary)
 
     async def resolve_capture_background(
@@ -421,6 +422,7 @@ class HeadlessRenderer:
         inspectionBoxes: bool | None = None,
         axisHover: wst.AxisHover | None = None,
         axisLabelFontSize: float | None = None,
+        displayMode: wst.DisplayMode | None = None,
         auxiliary: wst.DiagramAuxiliary | None = None,
     ) -> bytes:
         '''Render `target` and return the image bytes.'''
@@ -431,6 +433,7 @@ class HeadlessRenderer:
             tapeLabels=tapeLabels, legend=legend,
             inspectionBoxes=inspectionBoxes, axisHover=axisHover,
             axisLabelFontSize=axisLabelFontSize,
+            displayMode=displayMode,
             auxiliary=auxiliary)
         return await self.capture_rendered(
             format=format, padding=padding, background=background)
