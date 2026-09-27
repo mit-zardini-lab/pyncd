@@ -69,10 +69,18 @@ def take_the_greater_partial_maximum() -> cat.Operator:
     '''A maximum over an axis is the maximum of the maxima over any division of that
     axis.
 
-    The accumulator and the operator are both `ops.Maximum`, which is pointwise,
-    consumes no axis and costs one tick either way. A row maximum can therefore be a
-    reduction with its own accumulator and `Shuffle` over the grid the row sum uses,
-    rather than only a stream-carried fold, and FlashAttention-2 uses the reduction
-    form with one lane partition carrying two exchanges.
+    The accumulator and the operator are both `ops.Maximum`, which is pointwise and
+    consumes no axis. A row maximum can therefore be computed over the parts of a row
+    separately and the partial maxima combined by the same operator, as the partial
+    sums of a row sum are, and FlashAttention-2 combines the partial maxima of one lane
+    partition in two exchanges.
     '''
     return ops.Maximum()
+
+
+@register(ops.Product)
+def multiply_the_partial_products() -> cat.Operator:
+    '''A product over an axis is the product of the products over any division of that
+    axis. The accumulator and the operator are both `ops.Product`, which is pointwise
+    and consumes no axis, as the accumulator of a `Maximum` is.'''
+    return ops.Product()

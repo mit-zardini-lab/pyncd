@@ -69,7 +69,7 @@ links go in a table under the graph.
 
 ## Naming
 
-Folders are numbered by layer, from `01-foundations` to `07-para`, so that the file tree
+Folders are numbered by layer, from `01-foundations` to `08-caching`, so that the file tree
 reads in dependency order. A note is Title Case with spaces and is named after the concept
 rather than the file, so it is `[[Leaf Splicing]]` rather than `leaf_splicing.py`. One
 concept goes in one note.

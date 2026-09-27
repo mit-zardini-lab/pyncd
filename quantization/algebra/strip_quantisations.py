@@ -1,32 +1,32 @@
-# Claude Opus 5 (1M context), effort high.
+# Claude Opus 5 (1M context), effort high. Restated by Claude Opus 5.5 (1M context),
+# effort 40, on 2026-09-27, as the three steps the user set out for dequantisation.
 '''Every quantisation removed from a model, leaving the mathematics underneath.
 
 `quantization.processing.quantise_model` writes a quantisation onto every wire of a
 model and puts a `TypeConvert` named `cast` wherever an operation requires another. The
 functor here is the other direction. It takes the quantised model back to the
-expression in the reals it was made from: every `Quantified` wrapper, and the
-`BlockScale` carried by one, is taken off every datatype of every wire and every weight,
-and every `TypeConvert` reading one quantisation of a value into another quantisation of
-the same value is deleted, with the operations reading its result redirected onto the
-wire its operand came from.
+expression in the reals it was made from, in the three steps the user set out on
+2026-09-27:
 
-A quantisation-free view is how the arithmetic of a model is read once the formats have
-been settled. Two figures of one mechanism, one carrying the formats and one carrying
-none, differ in the casts alone, and the second is the expression a derivation runs on,
-because a cast is a change of representation and contributes no arithmetic.
+1. `without_quantisations` takes every `Quantified` wrapper, and the `BlockScale`
+   carried by one, off every datatype of every wire and every weight.
+2. `turn_casts_into_identities` writes the identity on its operand in place of every
+   `TypeConvert` that then reads and writes one datatype. A conversion that still
+   converts, such as one between two different mathematical values, stays.
+3. `algebra.remove_identities.remove_identities` takes the identities out of the
+   compositions, the products, the blocks and the boxes that hold them, from the leaves
+   upwards, so no identity is left where the categorical laws remove it.
 
-The deletion is the functor's own rule rather than a splice. `apply_root` returns the
-identity `cat.Rearrangement` on the wire the cast reads, and `construction_helpers`
-drops an identity out of a composition and out of a product, so the operations after
-the cast read the wire in front of it and no operation stands between them. The
-datatypes are taken off by `_Unquantified`, which is `fd.deep_reconstruct` memoised on
-object identity, so a subterm reachable along many paths is rewritten once and a subterm
-holding no quantisation comes back as the object it went in as.
+tsncd applies the same functor in the browser, as `dequantise`, to draw the unquantised
+variant of a page, and a page applies it to the figure as presented, where a cast may
+stand in a box explaining it or as the body of a `ParaWrap`. The explaining box is a
+block holding the identity once its cast is one, and step 3 removes it. A `ParaWrap`
+that grabs or drops keeps the identity as its body.
 
-No rule here differs by operator, so the package registers nothing. The one question
-asked of an operation is whether it is a conversion between two quantisations of one
-value, and `converts_between_two_quantisations` answers it from the source and the
-target the conversion carries.
+Every step is `fd.deep_reconstruct` memoised on object identity, so a subterm reachable
+along many paths is rewritten once and a subterm the step does not change comes back as
+the object it went in as. No rule here differs by operator, so the package registers
+nothing.
 
 `obsidian/04-quantization/Stripping Quantisations.md` states the functor, and
 `obsidian/04-quantization/Quantization.md` states the pass it inverts.
@@ -36,12 +36,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-import construction_helpers.simple_helper as chsh
+import algebra.remove_identities as remove_identities
 import data_structure.Category as cat
-import data_structure.Operators as ops
 import data_structure.Term as fd
-import graphs.processing.hypergraph_functor as functor
-import para.data_structure.ParaWrap as para_wrap
 import quantization.data_structure.Quantization as Quantization
 import term_utilities.term_utilities as tutil
 
@@ -85,101 +82,49 @@ def without_quantisations[T: fd.GeneralTerm](target: T) -> T:
     return _Unquantified()(target)
 
 
-def converts_between_two_quantisations(convert: Quantization.TypeConvert) -> bool:
-    '''Whether `convert` reads one quantisation of a value into another quantisation of
-    the same value.
-
-    Both sides carry a quantisation, and the two datatypes are the same once the
-    quantisations are taken off them, so the conversion changes the format of the value
-    and changes no part of the mathematics. A conversion into a datatype carrying no
-    quantisation, and a conversion between two different mathematical values, fail one
-    of the two tests and are left in place.
-    '''
-    return (Quantization.quantisation_of(convert.source) is not None
-            and Quantization.quantisation_of(convert.target) is not None
-            and without_quantisations(convert.source)
-            == without_quantisations(convert.target))
+def converts_nothing_once_dequantised(convert: Quantization.TypeConvert) -> bool:
+    '''Whether `convert` reads and writes the same datatype once the quantisations are
+    taken off its source and its target. A cast between two quantisations of one value
+    does, and so does a conversion from a quantised value into the same value
+    unquantised. A conversion between two different mathematical values does not.'''
+    return without_quantisations(convert.source) == without_quantisations(convert.target)
 
 
-def is_a_conversion_between_two_quantisations(morphism: cat.Morphism) -> bool:
-    '''Whether `morphism` is one operation whose operator is such a conversion.'''
+def reads_and_writes_one_datatype(morphism: object) -> bool:
+    '''Whether `morphism` is one operation whose operator is a `TypeConvert` with the
+    same source and target, reading and writing the same arrays through identity
+    reindexings.'''
     return (isinstance(morphism, cat.Broadcasted)
             and isinstance(morphism.operator, Quantization.TypeConvert)
-            and converts_between_two_quantisations(morphism.operator))
+            and morphism.operator.source == morphism.operator.target
+            and morphism.dom() == morphism.cod()
+            and all(tutil.is_identity(reindexing)
+                    for reindexing in morphism.reindexings))
 
 
 @dataclass
-class StripQuantisations(functor.Endofunctor[cat.Array, cat.Broadcasted]):
-    '''The functor taking a quantised model to the expression in the reals under it.
+class _CastsAsIdentities:
+    '''The walk of `turn_casts_into_identities`, memoised on object identity as
+    `_Unquantified` is.'''
+    _rewritten_by_identity: dict[int, tuple[Any, Any]] = field(default_factory=dict)
 
-    `apply_object` takes the quantisation off the array carried by a wire.
-    `apply_root` returns the identity on that array for a conversion between two
-    quantisations, so the composition it stood in loses it, and returns every other
-    operation with the quantisations taken off its weaves, its operator and the slot of
-    the tape it reads or writes. The body of a box is a morphism of its own and is taken
-    through the functor, so a cast the pass wrote inside a box is removed there too.
+    def __call__[T](self, target: T) -> T:
+        found = self._rewritten_by_identity.get(id(target))
+        if found is not None:
+            return found[1]
+        rewritten = fd.deep_reconstruct(target, self)
+        if reads_and_writes_one_datatype(rewritten):
+            rewritten = remove_identities.identity_on_the_domain_of(rewritten)
+        self._rewritten_by_identity[id(target)] = (target, rewritten)
+        return rewritten
 
-    `unquantified` is shared by every step, so one Grab written inside a box and
-    recorded a second time on the operator of that box is rewritten once and the two
-    occurrences stay the same term.
-    '''
-    unquantified: _Unquantified = field(default_factory=_Unquantified)
 
-    def apply_object(self, target: cat.Array) -> cat.Array:
-        return self.unquantified(target)
-
-    def apply_root(self, target: cat.Broadcasted) -> cat.ProdCategory[
-            cat.Array, cat.Broadcasted]:
-        if is_a_conversion_between_two_quantisations(target):
-            return self.apply_prod_object(target.dom()).identity()
-        match target:
-            case para_wrap.ParaWrap(body=cat.Broadcasted() as box):
-                return self.unquantified(target.reconstruct(body=self._box(box)))
-            case cat.Broadcasted(operator=ops.BlockOperator()):
-                return self.unquantified(self._box(target))
-        return self.unquantified(target)
-
-    def _box(self, target: cat.Broadcasted) -> cat.Broadcasted:
-        '''`target` with the body of the block it holds taken through the functor.'''
-        operator = target.operator
-        if not isinstance(operator, ops.BlockOperator):
-            return target
-        block = operator.block
-        body = self.apply_category(block.body)
-        if body is block.body:
-            return target
-        return target.reconstruct(
-            operator=operator.reconstruct(block=block.reconstruct(body=body)))
-
-    def apply_category(self, target: cat.ProdCategory[cat.Array, cat.Broadcasted]
-                       ) -> cat.ProdCategory[cat.Array, cat.Broadcasted]:
-        '''`target` with the functor applied to its parts, and `target` itself where
-        every part came back as the object it went in as.
-
-        `Functor.apply_category` rebuilds a composition, a product and a block from the
-        parts returned to it. Rebuilding unconditionally turns the directed acyclic
-        graph of a term into a tree, and every later pass then walks the term once per
-        path through it, which is the rule `fd.deep_reconstruct` states. The cases below
-        are the cases of `Functor.apply_category` with that rule applied to each.
-        '''
-        match target:
-            case cat.Composed(content=parts):
-                rewritten = fd.deep_reconstruct(parts, self.apply_category)
-                return (target if rewritten is parts
-                        else chsh.make_composed(*rewritten))
-            case cat.ProductOfMorphisms(content=parts):
-                rewritten = fd.deep_reconstruct(parts, self.apply_category)
-                return (target if rewritten is parts
-                        else chsh.make_product(*rewritten))
-            case cat.Block(body=body):
-                rewritten = self.apply_category(body)
-                return (target if rewritten is body
-                        else target.reconstruct(body=rewritten))
-            case cat.Rearrangement(_dom=dom):
-                rewritten = fd.deep_reconstruct(dom, self.apply_object)
-                return (target if rewritten is dom
-                        else target.reconstruct(_dom=rewritten))
-        return self.apply_root(target)  # type: ignore[arg-type]
+def turn_casts_into_identities[T](target: T) -> T:
+    '''`target` with the identity on its operand written in place of every operation
+    `reads_and_writes_one_datatype` finds, inside the body of every box and every
+    `ParaWrap` as well. Applied after `without_quantisations`, it turns into the
+    identity every cast `converts_nothing_once_dequantised` finds.'''
+    return _CastsAsIdentities()(target)
 
 
 def holds_a_quantisation(morphism: cat.Morphism) -> bool:
@@ -188,15 +133,14 @@ def holds_a_quantisation(morphism: cat.Morphism) -> bool:
 
 
 def strip_quantisations(morphism: cat.Morphism) -> cat.Morphism:
-    '''`morphism` with every quantisation removed, and `morphism` itself where it
-    carries none.
+    '''`morphism` with every quantisation removed, every cast that then converts
+    nothing turned into the identity, and every identity removed where the categorical
+    laws allow, and `morphism` itself where it carries no quantisation.
 
-    Every wire and every weight loses the `Quantified` wrapper it carried, together
-    with the `BlockScale` that wrapper held, and every conversion between two
-    quantisations of one value is deleted, so the operations that read the value read
-    the wire its operand came from. A model carrying no quantisation is returned as it
-    stands, which also makes the functor idempotent: the model it returns carries none.
+    The functor is idempotent for the second reason: the model it returns carries no
+    quantisation, so stripping it again returns it.
     '''
     if not holds_a_quantisation(morphism):
         return morphism
-    return StripQuantisations()(morphism)
+    return remove_identities.remove_identities(
+        turn_casts_into_identities(without_quantisations(morphism)))

@@ -99,7 +99,7 @@ SMALLEST_E4M3_SCALE = nm.Power.template(nm.Integer(2), nm.Integer(-9))
 SMALLEST_POWER_OF_TWO_SCALE = nm.Power.template(nm.Integer(2), nm.Integer(-126))
 SMALLEST_FP8_GROUP_MAXIMUM = nm.Power.template(nm.Integer(10), nm.Integer(-4))
 
-SCALE_GROUP_SPLIT = 'qgrp'
+SCALE_GROUP_SPLIT = '\\mathrm{ScaleGroup}'
 LOGARITHM_TO_BASE_TWO = '\\log_{2} x'
 CEILING = '\\lceil x \\rceil'
 CAST_TO_THE_REALS = 'R'

@@ -1,6 +1,6 @@
 ---
 tags: [layer/para, concept]
-code: para/algebra/pathway_collapse.py, algebra/operator_expansion.py
+code: para/algebra/pathway_collapse.py, para/algebra/recompute_contraction_slots.py, para/algebra/store_operands_of_views.py, algebra/operator_expansion.py, notebooks/website/tutorial/derive_training_step.py
 status: evolving
 ---
 
@@ -20,8 +20,9 @@ Option A is what eager attention does, because autograd saves the softmax output
 is what bounded the context length before FlashAttention.
 
 `pathway_collapse.dedup_and_collapse` produces option A. This note records the trade-off,
-why the row statistic stays on the tape under both options, and the rewrite that would
-produce option B.
+why the row statistic stays on the tape under both options, the rewrite that produces
+option B, and the rewrite that stores the keys and the values of a causal attention
+once per token.
 
 ## The tape the derivation produces beside FlashAttention's
 
@@ -60,11 +61,12 @@ more.
 
 **Bandwidth.** Option A writes $e$ to HBM in the forward pass and reads it back in the
 backward pass, 4 bytes per element in bf16. An H100 performs roughly 300 FLOPs in the
-time it moves one byte, so those 4 bytes buy about 1200 FLOPs, and the recompute costs
+time it moves one byte, so moving those 4 bytes takes the time of about 1200 FLOPs, and
+the recompute costs
 $2d$ FLOPs per element, 128 to 256 at $d = 64$ to $128$. Recomputing is cheaper than
 storing by 5 to 10 times even with unlimited memory. The backward kernel already holds
 the $Q$ and $K$ tiles in shared memory for the $\mathrm{d}Q$ and $\mathrm{d}K$ matmuls,
-so the extra matmul moves no data. This is the argument of Dao et al. (2022).
+so the extra matmul moves no data. Dao et al. (2022) make the same argument.
 
 **Precision.** Option A stores $e$ or $P$ in the activation datatype, usually bf16.
 Option B recomputes it in fp32 registers from bf16 $Q$ and $K$, and forms
@@ -109,25 +111,75 @@ reciprocal's residual, because the numeric derivative of $x^{-1}$ is $-z^{-2}$.
 the slot from $z$ to $r$, because the backward pass reads $z$ only through the reciprocal.
 The tape holds the value the backward pass reads, which is the form FlashAttention stores.
 
-## The rewrite that would produce option B
+## The rewrite that produces option B
 
-No pass in `pathway_collapse` replaces a `Grab` by a recomputation through an `Einops`.
-`migrate_drops` spends memory to remove a recomputation, and
-`recompute_elementwise_slots` spends a recomputation to remove a slot, across a pointwise
-map alone. The exponent sits one pointwise map behind a contraction of two taped values,
-so neither reaches it.
+`migrate_drops` in `pathway_collapse` keeps a value on the tape to remove a
+recomputation, and `recompute_elementwise_slots` recomputes a value to remove a slot,
+across a pointwise map alone. The exponent sits one pointwise map behind a contraction of
+two taped values, so neither reaches it.
 
-The rule is: where the forward pass drops $f(\mathrm{Einops}(a, b))$ and $a$ and $b$ are
-already on the tape, delete the drop and replace every grab of it by
-$\mathrm{Grab}(a), \mathrm{Grab}(b) \to \mathrm{Einops} \to f$. On attention it removes
-`s4`, leaves the five slots FlashAttention stores, and adds one `Einops` and one
-`Arithmetic` to the backward pass, which is the FlashAttention backward with its
-recomputed $QK^{\top}$.
+`para.algebra.recompute_contraction_slots.recompute_contraction_slots` reaches one
+contraction further. Where the forward pass drops $f(\mathrm{Einops}(a, b))$, with $f$ a chain of pointwise maps and additions, and $a$ and $b$ are already on the tape, it deletes the drop and replaces every grab of it by $\mathrm{Grab}(a), \mathrm{Grab}(b) \to \mathrm{Einops} \to f$, rebuilt onto the wire the grab produced so that its readers do not move. On attention it removes `s4`, leaves the five slots FlashAttention stores, and adds one `Einops` and one `Arithmetic` to the backward pass, which is the FlashAttention backward with its recomputed $QK^{\top}$.
+
+An addition in the chain has side operands, such as the negated maximum a shifted
+softmax adds to its scores before the exponent. A side operand is rebuilt from a slot of
+its own. The wire it is a pointwise image of is grabbed where the forward pass drops it
+already, and dropped to a new slot otherwise. The new slot is small, because a side
+operand is broadcast over the axis the chain's contraction produced. On the shifted
+expansion the exponent is $\mathrm{e}^{QK^{\top} - m}$, and the backward pass rebuilds it
+from $Q$, $K$ and the maximum $m$, which joins the tape at $[q]$, so the recomputation is
+as stable as the forward pass.
 
 Which of the two policies is right is the number of bytes kept on the tape against the
 arithmetic a rebuild costs, and the ratio of the two on the hardware the pair will run on.
-`migrate_drops` and `recompute_elementwise_slots` leave that decision to the person
-calling them, and no pass in this repository makes it.
+`migrate_drops`, `recompute_elementwise_slots` and `recompute_contraction_slots` leave
+that decision to the person calling them, and a caller that names no slots has
+`recompute_contraction_slots` rebuild every slot it can. The training step of the
+tutorial pages rebuilds every such slot.
+
+## Storing the operand of a view
+
+Causal attention reads the keys and the values through a mask, a view that holds token
+$i_{x} - i_{w}$ at slot $i_{w}$ of token $i_{x}$. The collapse saves the arrays returned
+by the mask, at $[x, w|x, d]$, because the backward pass reads them there. A view
+computes nothing, so `para.algebra.store_operands_of_views.store_operands_of_views` moves
+such a drop to the array the chain of views reads, where that array has fewer axes, and
+replays the views after every grab of the slot in the backward pass. The slot keeps its
+name and holds the array the views read. Where that array is on the tape already, the
+drop of the result is deleted and its grabs read the slot that holds the array. A view
+left with no reader once its drop is gone, such as the view of the state that the
+CausalSlide computes only to save it, is deleted with the drop.
+
+The recomputation of the exponent runs first. `recompute_chain_of` needs both operands of
+the contraction on the tape, and the masked keys leave the tape once their drop has moved
+to the keys.
+
+## The tutorial training step
+
+`notebooks/website/tutorial/derive_training_step.py` collapses the derived pair with
+`dedup_and_collapse`, then applies `recompute_contraction_slots` to every slot it can
+rebuild, then `store_operands_of_views`, then `pathway_collapse.dedup_roots`, which merges
+the grabs and the views the two rewrites repeat. `TrainingStep.recomputed` holds the
+result, and the training variant of each tutorial page draws it, per
+[[Website Notebooks]].
+
+The tape of scaled dot-product attention then holds $Q$, $K$, $V$, $O$ and $r$, the five
+arrays FlashAttention stores. The tape of causal self-attention with weights and a
+residual connection holds six arrays: the state at $[x, m]$, $Q$, $K$ and $V$ at
+$[x, d]$, the result of the attention before $W^{O}$ at $[x, d]$, and $r$ at $[x]$. The
+state and the result before $W^{O}$ are the inputs of the learned matrices, which the
+gradient of each matrix reads. The weighted model is derived as built, with the mask after
+the projections, because the CausalSlide runs $W^{K}$ and $W^{V}$ over every slot, and its
+tape then holds the keys and the values at $[x, w|x, d]$. The forward variant of its page
+still draws the CausalSlide.
+
+`validate_attention.py` checks that the collapsed tape holds the exponentials of the
+scores, that the backward pass rebuilds them from the queries and the keys, and that the
+forward pass saves five arrays. `validate_attention_with_weights_and_residual.py` checks
+that the training step is derived from the model as built, that a training step of the
+CausalSlide would save keys and values for every slot, that the forward pass saves six
+arrays, and that the backward pass reads the keys and the values through the mask. Both
+compare the gradients of the training step with `torch.autograd`.
 
 ## Detecting a quadratic slot from the shape
 
@@ -147,13 +199,16 @@ be read off the shape alone.
 
 ## Gaps
 
-- **The rewrite above is not implemented.** `migrate_drops` and
-  `recompute_elementwise_slots` reach a pointwise map and nothing further, so the exponent
-  stays on the tape.
 - **The tape holds $m$ and $r$ as two slots where FlashAttention holds one $L$.** Folding
   the two into $L$ needs the collapse rule the section above names.
 - **A slot produced by a `Linear` is not rebuilt**, because the chain finder reads an
   `Einops` and a pointwise map and nothing else.
+- **The chain finder does not read through a view.** `recompute_chain_of` does not
+  follow an operand back through a view to a taped array, so the recomputation has to
+  run before `store_operands_of_views`. A chain finder that reads through views would
+  let the two rewrites run in either order.
+- **Nothing chooses which slots to rebuild.** The public code has no cost of a slot,
+  so a caller names the slots or rebuilds every one the rule reaches.
 
 ## See also
 
@@ -161,3 +216,4 @@ be read off the shape alone.
 - [[Backpropagation]] — how each operator declares its residual
 - [[Expression Simplification]] — the two expansions of a softmax
 - [[Notebooks]] — what each notebook of the repository demonstrates
+- [[Website Notebooks]] — the tutorial pages that draw the training step

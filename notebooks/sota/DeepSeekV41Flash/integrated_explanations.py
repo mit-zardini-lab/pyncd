@@ -63,6 +63,7 @@ import term_utilities.term_utilities as tutil
 from websocket_transfer.auxiliary_information import OperatorRole
 
 import notebooks.display.explain_operators as explain_operators
+import notebooks.display.explain_reindexings as explain_reindexings
 import notebooks.display.notebook_diagrams as notebook_diagrams
 import notebooks.sota.DeepSeekV41Flash.omitted_mechanisms as omitted_mechanisms
 import notebooks.sota.DeepSeekV41Flash.operator_explanations as operator_explanations
@@ -344,11 +345,20 @@ def names_of_hidden_arithmetics(broadcasts: tuple[cat.Broadcasted, ...]) -> set[
 
 
 def names_of_reindexings(broadcasts: tuple[cat.Broadcasted, ...]) -> set[str]:
-    return {stride.name.to_bodies()
-            for node in broadcasts
-            for reindexing in node.reindexings
-            for stride in tutil.type_search(cat.StrideMorphism, reindexing)
-            if stride.name is not None}
+    '''The names of the stride morphisms in the reindexings of `broadcasts`, and the
+    name of each view whose reindexing `explain_reindexings.present` draws under the
+    name of the view.'''
+    strides = {stride.name.to_bodies()
+               for node in broadcasts
+               for reindexing in node.reindexings
+               for stride in tutil.type_search(cat.StrideMorphism, reindexing)
+               if stride.name is not None}
+    rearranging_views = {
+        node.operator.name.to_bodies()
+        for node in broadcasts
+        if isinstance(node.operator, ops.View) and node.operator.name is not None
+        and any(map(explain_reindexings.is_named_by_its_view_alone, node.reindexings))}
+    return strides | rearranging_views
 
 
 def sorted_difference(names: set[str], table: Mapping[str, object]) -> tuple[str, ...]:

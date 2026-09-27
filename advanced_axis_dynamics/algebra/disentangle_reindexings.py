@@ -105,6 +105,25 @@ def states_the_identity[A: sc.Axis](dom: fd.Prod[A], rows: Rows[A]) -> bool:
         for position, (axis, strides, shift) in enumerate(rows))
 
 
+def states_a_rearrangement[A: sc.Axis](dom: fd.Prod[A], rows: Rows[A]) -> bool:
+    '''Whether every row of `rows` reads one axis of `dom` as that same axis, at unit
+    stride and with no shift, so that the rows only copy, permute or delete `dom`.'''
+    return all(
+        nm.is_zero(shift)
+        and sum(not nm.is_zero(stride) for stride in strides) == 1
+        and any(stride == nm.Integer(1) and axis == dom[position]
+                for position, stride in enumerate(strides))
+        for axis, strides, shift in rows)
+
+
+def domain_positions_read_by[A: sc.Axis](rows: Rows[A]) -> fd.Prod[int]:
+    '''The domain position each row of a rearrangement reads, in the order of the
+    rows.'''
+    return tuple(next(position for position, stride in enumerate(strides)
+                      if not nm.is_zero(stride))
+                 for _, strides, _ in rows)
+
+
 def sliced_component[A: sc.Axis](
     morphism: sc.StrideMorphism[A],
     component: ReindexingComponent) -> tuple[fd.Prod[A], Rows[A]]:
@@ -125,19 +144,23 @@ def factor_of_component[A: sc.Axis](
     component: ReindexingComponent,
     names_the_whole_map: bool,
 ) -> sc.StrideCategory[A]:
-    '''The map `component` states, as an identity where it is the identity on its axis
-    and as a fresh `sc.StrideMorphism` otherwise.
+    '''The map `component` states, as an identity where it is the identity on its axis,
+    as a `pc.Rearrangement` where it only copies or deletes its axis and carries no
+    name, and as a fresh `sc.StrideMorphism` otherwise.
 
     The morphism's name names the whole map, so a factor takes it only where every other
     factor is an identity and the factor is therefore that map beside axes it leaves
-    alone.
+    alone. A diagonal drawn as a rearrangement is a dot on its wire, where a
+    `sc.StrideMorphism` of two unit rows draws as a hexagon.
     '''
     factor_dom, factor_rows = sliced_component(morphism, component)
     if states_the_identity(factor_dom, factor_rows):
         return pc.ProdObject(factor_dom).identity()
+    name = morphism.name if names_the_whole_map else None
+    if name is None and states_a_rearrangement(factor_dom, factor_rows):
+        return pc.Rearrangement(domain_positions_read_by(factor_rows), factor_dom)
     return sc.StrideMorphism(
-        _dom=factor_dom, _cod_stride_shift=factor_rows,
-        name=morphism.name if names_the_whole_map else None)
+        _dom=factor_dom, _cod_stride_shift=factor_rows, name=name)
 
 
 def disentangled_stride_morphism[A: sc.Axis](
@@ -145,8 +168,8 @@ def disentangled_stride_morphism[A: sc.Axis](
     '''`morphism` as the product of its independent factors, with the rearrangements its
     components need where they interleave.
 
-    A morphism of one component that is not an identity is returned as the same object,
-    which keeps the sharing every other pass depends on.
+    A morphism of one component that is neither an identity nor a rearrangement is
+    returned as the same object, which keeps the sharing every other pass depends on.
     '''
     dom = tuple(morphism._dom)
     rows = morphism._cod_stride_shift
@@ -160,7 +183,7 @@ def disentangled_stride_morphism[A: sc.Axis](
                                 in zip(components, identities)
                                 if other is not component))
         for component in components)
-    if len(factors) == 1 and not identities[0]:
+    if len(factors) == 1 and isinstance(factors[0], sc.StrideMorphism):
         return morphism
     domain_order = tuple(position for component in components
                          for position in component.domain_positions)

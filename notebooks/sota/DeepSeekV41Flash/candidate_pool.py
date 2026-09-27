@@ -42,19 +42,21 @@ from notebooks.sota.DeepSeekV41Flash.block_titles_and_descriptions import TEXT a
 
 POOL_COLOUR = '#F5E6D9'
 POOL_BOX = 'Pool'
+BLOCK_VIEW_NAME = '\\mathrm{Block}'
+CANDIDATE_VIEW_NAME = '\\mathrm{Candidate}'
 
 BLOCK_SPLIT = sc.StrideMorphism(
     _dom=(P, u),
     _cod_stride_shift=((reach_d, (u.local_size(), nm.Integer(1)), nm.Integer(0)),),
-    name=fd.DynamicName('blk'))
-BLOCK_VIEW = mark_sparse_domains.guarded_view(reindexing=(BLOCK_SPLIT,), name='blk')
+    name=fd.DynamicName(BLOCK_VIEW_NAME))
+BLOCK_VIEW = mark_sparse_domains.guarded_view(reindexing=(BLOCK_SPLIT,), name=BLOCK_VIEW_NAME)
 u_reach = BLOCK_VIEW.cod()[0].shape()[1]
 P_reach = mark_sparse_domains.sparse_axis_after_fold(u_reach)
 KEEP_BLOCKS = dst.TopK.template(k=npool, axis=P_reach, name='p/P',
                                 form=dst.SelectionForm.ONLY_SELECTION)
 p_axis, = KEEP_BLOCKS.cod()[0].shape()
 COVER = dst.merge_selected_positions(BLOCK_SPLIT, p_axis, cat.ProdObject(()), C,
-                                     name='cand')
+                                     name=CANDIDATE_VIEW_NAME)
 POOL = cat.Array(cat.Natural(B.local_size()), (x, C))
 back_d = entries_back_axis(B)
 REINDEX_SELECT = dst.TopK.template(k=nsel, axis=C, selected_axis=s_d, positions_of=back_d,

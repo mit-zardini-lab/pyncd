@@ -6,7 +6,10 @@ Written by Claude Fable 5.1, reasoning effort 80, in
 `notebooks.sota.DeepSeekV41Flash.dspark_drafter`. Moved here by Claude Opus 5,
 effort high, on 2026-09-19, when the user asked for every mechanism to be stated in
 its newest form. The tap that writes the three means onto the tape, and the
-placement of DSpark at the end of the model, stay in that module.
+placement of DSpark at the end of the model, stay in that module. The step and the
+chain that hand out the distributions, and the writes onto the draft axis, were added
+by Claude Opus 5.5 (1M context), effort high, on 2026-09-25, for one cycle of
+speculative decoding.
 
 The backbone produces one token per pass. DSpark is a second model of three layers that
 guesses the five tokens after it, so that the next pass of the backbone can check the
@@ -27,6 +30,15 @@ last position of the sequence the expression reads.
     markov_head, confidence_head, draft_step
                             one draft step and the two heads it holds, each a box
     draft_chain             the five steps written out
+    draft_step_handing_out_its_distribution, draft_chain_handing_out_distributions
+                            the same step and chain with the distribution each draft
+                            is sampled from handed out beside it, which the
+                            verification of the next pass reads
+    write_at_draft_position, stack_on_draft_positions, stack_the_drafts
+                            the result of each step written at its draft position,
+                            the covariant reading of the row `read_draft_position`
+                            reads, and the five writes of one kind added into one
+                            array over the draft axis
     accept_token            the token the backbone produced, sampled from the
                             probabilities of the last position
     draft_five_tokens       the whole drafter, from the probabilities and the three
@@ -64,6 +76,7 @@ import functools
 import operator
 from collections.abc import Iterable
 
+import advanced_axis_dynamics.data_structure.Operators as aops
 import algebra.einops_simplification as einops_simplification
 import construction_helpers as ch  # noqa: F401 - the @, * and >> overloads
 import data_structure.Category as cat
@@ -79,7 +92,7 @@ from notebooks.sota.DeepSeekV41Flash.construction_idioms import (
     boxed, hold, over, route)
 from notebooks.sota.DeepSeekV41Flash.declared_axes import R, m, n, x
 from notebooks.sota.DeepSeekV41Flash.gumbel_max_sampler import (
-    SAMPLED_TOKEN, SAMPLER, temper_logits)
+    DISTRIBUTION, SAMPLED_TOKEN, SAMPLER, temper_logits)
 from notebooks.sota.DeepSeekV41Flash.omitted_mechanisms import (
     DRAFT_STATE, DRAFT_STATES, LOGITS, MARKOV_EMBEDDING, S, VOCABULARY, Z,
     generic_operator)
@@ -110,6 +123,7 @@ CONFIDENCE_OF_EMBEDDING_NAME = 'W^{\\mathrm{conf}}_Z'
 MARKOV_BOX = 'Mkv'
 CONFIDENCE_BOX = 'Conf'
 STEP_BOX = 'Step'
+STACK_BOX = 'Stack'
 
 DSPARK_COLOUR = '#FCEFDC'
 PART_COLOUR = '#F8E3C5'
@@ -282,29 +296,37 @@ def read_every_draft_position() -> cat.Morphism:
             @ product_of((reads[0], hold(SAMPLED_TOKEN), *reads[1:])))
 
 
-def run_draft_step(position: int) -> cat.Morphism:
-    '''The step of `position` applied between the results of the steps before it and
-    the reads of the steps after it, and its draft copied to the step after it.'''
-    finished = RESULTS_OF_ONE_STEP * position
+def run_draft_step(
+    position: int,
+    step: cat.Morphism = DRAFT_STEP,
+    results_of_one_step: tuple[cat.Array, ...] = RESULTS_OF_ONE_STEP,
+) -> cat.Morphism:
+    '''`step` applied at `position` between the results of the steps before it and the
+    reads of the steps after it, and its draft, the first of `results_of_one_step`,
+    copied to the step after it.'''
+    finished = results_of_one_step * position
     pending = READS_OF_ONE_POSITION * (DRAFT_STEPS - 1 - position)
-    applied = product_of((*map(hold, finished), DRAFT_STEP, *map(hold, pending)))
+    applied = product_of((*map(hold, finished), step, *map(hold, pending)))
     if not pending:
         return applied
-    results = (*finished, *RESULTS_OF_ONE_STEP, *pending)
+    results = (*finished, *results_of_one_step, *pending)
     drafted = len(finished)
-    after_next_reads = drafted + len(RESULTS_OF_ONE_STEP) + len(READS_OF_ONE_POSITION)
+    after_next_reads = drafted + len(results_of_one_step) + len(READS_OF_ONE_POSITION)
     return applied @ route(
         (*range(after_next_reads), drafted, *range(after_next_reads, len(results))),
         results)
 
 
-def gather_drafts_and_confidences() -> cat.Rearrangement:
-    '''The five drafts ahead of the five confidences, each in the order of the steps.'''
-    wires = len(RESULTS_OF_ONE_STEP) * DRAFT_STEPS
+def gather_drafts_and_confidences(
+    results_of_one_step: tuple[cat.Array, ...] = RESULTS_OF_ONE_STEP,
+) -> cat.Rearrangement:
+    '''The results of the five steps grouped by kind, the five drafts first, each kind
+    in the order of the steps.'''
+    kinds = len(results_of_one_step)
+    wires = kinds * DRAFT_STEPS
     return route(
-        (*range(0, wires, len(RESULTS_OF_ONE_STEP)),
-         *range(1, wires, len(RESULTS_OF_ONE_STEP))),
-        RESULTS_OF_ONE_STEP * DRAFT_STEPS)
+        tuple(wire for kind in range(kinds) for wire in range(kind, wires, kinds)),
+        results_of_one_step * DRAFT_STEPS)
 
 
 def draft_chain() -> cat.Block:
@@ -319,6 +341,121 @@ def draft_chain() -> cat.Block:
                  '\\lambda[k], g[k], \\mathrm{token}_{k}), \\quad k = 0, \\dots, 4'),
         description=text.DRAFT_CHAIN_DESCRIPTION,
         references=(model_lines(1146, 1156), inference_config_lines(7)))
+
+
+RESULTS_OF_A_STEP_WITH_ITS_DISTRIBUTION = (SAMPLED_TOKEN, DISTRIBUTION, CONFIDENCE)
+
+
+def draft_step_handing_out_its_distribution() -> cat.Block:
+    '''One draft position, as `draft_step`, with the distribution its draft is sampled
+    from handed out between the draft and the confidence, because the verification of
+    the next pass reads it.'''
+    return cat.Block.template(
+        (hold(LOGITS) * hold(DRAFT_STATE) * MARKOV_HEAD)
+        @ route((0, 2, 1, 3), (LOGITS, DRAFT_STATE, LOGITS, MARKOV_EMBEDDING))
+        @ ((over((VOCABULARY,), ops.AdditionOp.template()) @ temper_logits()
+            @ route((0, 0), (DISTRIBUTION,)) @ (SAMPLER * hold(DISTRIBUTION)))
+           * CONFIDENCE_HEAD),
+        title=text.STEP_TITLE, fill_color=STEP_COLOUR,
+        formula=('\\mathrm{token}_{k+1} \\sim q[k] = \\mathrm{softmax}\\big( '
+                 '(\\lambda[k] + \\mathrm{bias}(\\mathrm{token}_{k})) / \\vartheta '
+                 '\\big)'),
+        description=text.DRAFT_STEP_WITH_DISTRIBUTION_DESCRIPTION,
+        references=(model_lines(1149, 1153), model_lines(1288, 1291)))
+
+
+DRAFT_STEP_WITH_ITS_DISTRIBUTION = boxed(
+    draft_step_handing_out_its_distribution(), STEP_BOX)
+
+
+def draft_chain_handing_out_distributions() -> cat.Block:
+    '''The five draft steps in order, each handing out its draft, the distribution it
+    was sampled from and its confidence.'''
+    return cat.Block.template(
+        composition_of((
+            read_every_draft_position(),
+            *(run_draft_step(position, DRAFT_STEP_WITH_ITS_DISTRIBUTION,
+                             RESULTS_OF_A_STEP_WITH_ITS_DISTRIBUTION)
+              for position in range(DRAFT_STEPS)),
+            gather_drafts_and_confidences(RESULTS_OF_A_STEP_WITH_ITS_DISTRIBUTION))),
+        title=text.CHAIN_TITLE, fill_color=DSPARK_COLOUR,
+        formula=('(\\mathrm{token}_{k+1}, q[k], \\mathrm{conf}_{k}) = \\mathrm{Step}( '
+                 '\\lambda[k], g[k], \\mathrm{token}_{k}), \\quad k = 0, \\dots, 4'),
+        description=text.DRAFT_CHAIN_WITH_DISTRIBUTIONS_DESCRIPTION,
+        references=(model_lines(1146, 1156), inference_config_lines(7)))
+
+
+def draft_position_write_name(position: int) -> str:
+    return f'put_{position}'
+
+
+def write_at_draft_position(
+    position: int, datatype: cat.Datatype, trailing_axes: tuple[cat.Axis, ...],
+) -> cat.Broadcasted:
+    '''A result of step `position` written at draft position `position` of an array
+    whose first axis is the draft axis. The row is the row `read_draft_position`
+    reads, read covariantly, so every other draft position holds the universal unit,
+    which is zero for the addition that joins the five writes.'''
+    name = fd.DynamicName.from_str(draft_position_write_name(position))
+    row = sc.StrideMorphism(
+        _dom=(), _cod_stride_shift=((S, (), nm.Integer(position)),), name=name)
+    tiled = (cat.WeaveMode.TILED,) * len(trailing_axes)
+    return cat.Broadcasted(
+        operator=aops.CovariantView(reindexing=row, name=name),
+        input_weaves=(cat.Weave(datatype, tiled),),
+        output_weaves=(cat.Weave(datatype, (S, *tiled)),),
+        reindexings=(cat.ProdObject(tuple(trailing_axes)).identity(),))
+
+
+def add_the_writes(
+    operand: cat.Datatype, result: cat.Datatype, shape: tuple[cat.Axis, ...],
+) -> cat.Broadcasted:
+    '''The five writes added position by position.'''
+    tiled = (cat.WeaveMode.TILED,) * len(shape)
+    return cat.Broadcasted(
+        operator=ops.AdditionOp(),
+        input_weaves=(cat.Weave(operand, tiled),) * DRAFT_STEPS,
+        output_weaves=(cat.Weave(result, tiled),),
+        reindexings=(cat.ProdObject(tuple(shape)).identity(),) * DRAFT_STEPS)
+
+
+SUM_OF_THE_DRAFT_WRITES = cat.Natural(
+    nm.Integer(DRAFT_STEPS) * SAMPLED_TOKEN.datatype.max_value)
+
+
+def stack_on_draft_positions(
+    datatype: cat.Datatype, trailing_axes: tuple[cat.Axis, ...],
+) -> cat.BroadcastedCategory:
+    '''The five results of one kind, one per step, written onto the draft axis. The
+    addition of five naturals declares the sum of their bounds, so the drafted tokens
+    are cast back to a token, which changes no value because every position holds one
+    token and four zeros.'''
+    writes = product_of(write_at_draft_position(position, datatype, trailing_axes)
+                        for position in range(DRAFT_STEPS))
+    shape = (S, *trailing_axes)
+    if not isinstance(datatype, cat.Natural):
+        return writes @ add_the_writes(datatype, datatype, shape)
+    return (writes @ add_the_writes(datatype, SUM_OF_THE_DRAFT_WRITES, shape)
+            @ ops.Cast.template(cat.Array(SUM_OF_THE_DRAFT_WRITES, shape), to=datatype))
+
+
+def stack_the_drafts() -> cat.Block:
+    '''The five drafts, the five distributions and the five confidences, each kind
+    written onto the draft axis, which is the form the prefix survival and the
+    verification of the next pass read.'''
+    return cat.Block.template(
+        stack_on_draft_positions(SAMPLED_TOKEN.datatype, ())
+        * stack_on_draft_positions(R, (VOCABULARY,))
+        * stack_on_draft_positions(R, ()),
+        title=text.STACK_TITLE, fill_color=PART_COLOUR,
+        formula=('t[i_{S}] = \\sum_{k = 0}^{4} [i_{S} = k]\\, \\mathrm{token}_{k+1}, '
+                 '\\quad q[i_{S}] = \\sum_{k = 0}^{4} [i_{S} = k]\\, q[k], \\quad '
+                 'z[i_{S}] = \\sum_{k = 0}^{4} [i_{S} = k]\\, \\mathrm{conf}_{k}'),
+        description=text.STACK_THE_DRAFTS_DESCRIPTION,
+        references=(model_lines(1146, 1156),))
+
+
+STACK_THE_DRAFTS = boxed(stack_the_drafts(), STACK_BOX)
 
 
 def accept_token() -> cat.BroadcastedCategory:

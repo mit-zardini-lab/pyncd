@@ -161,5 +161,9 @@ def node_with_box_named[B: cat.Datatype, A: cat.Axis](
 
 
 def named_slot(body: str, subscript: str | None = None) -> Para.TapeSlot:
+    '''An inner tape slot named `body` with `subscript`, for a value the model
+    computes and passes between its layers or its passes, which a lift over a batch
+    axis enlarges. A parameter is grabbed from a `Para.OuterTapeSlot`, per
+    `obsidian/07-para/Outer and Inner Tape Slots.md`.'''
     subscript = fd.DynamicName.from_str(subscript) if subscript else None
     return fd.DynamicName(body, subscript).capture(Para.TapeSlot())

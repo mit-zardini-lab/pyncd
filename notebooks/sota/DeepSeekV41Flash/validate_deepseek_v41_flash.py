@@ -34,6 +34,7 @@ import advanced_axis_dynamics.data_structure.AxisConcatenation as AxisConcatenat
 import advanced_axis_dynamics.data_structure.Operators as aops  # noqa: E402
 import agent_display as ad  # noqa: E402
 import algebra.discovering_broadcasts as discovering_broadcasts  # noqa: E402
+import algebra.factor_out_lift as factor_out_lift  # noqa: E402
 import algebra.write_axis_exponents as write_axis_exponents  # noqa: E402
 import data_structure.Category as cat  # noqa: E402
 import data_structure.Numeric as nm  # noqa: E402
@@ -56,6 +57,7 @@ from para.data_structure.ParaBlockOperator import (  # noqa: E402
 import notebooks.display.axis_sizes as axis_sizes  # noqa: E402
 import notebooks.display.expand_with_parameters as expand_with_parameters  # noqa: E402
 import notebooks.display.explain_operators as explain_operators  # noqa: E402
+import notebooks.display.explain_reindexings as explain_reindexings  # noqa: E402
 import notebooks.display.notebook_diagrams as notebook_diagrams  # noqa: E402
 import notebooks.display.tape_presentation as tape_presentation  # noqa: E402
 import notebooks.sota.DeepSeekV41Flash.attention_core as attention_core  # noqa: E402
@@ -825,6 +827,59 @@ def check_the_auxiliary_information() -> None:
         raise AssertionError(f'every block reference links into Hugging Face: {icons}')
 
 
+def interactive_figure_settings() -> notebook_diagrams.DiagramSettings:
+    '''The settings the figure of the whole model is sent under, with every operator
+    explained and every inspection box opened, and no diagram drawn.'''
+    return notebook_diagrams.DiagramSettings(
+        mode=notebook_diagrams.DiagramMode.OFF,
+        advanced_display=notebook_diagrams.AdvancedDisplay.INTERACTIVE,
+        operator_explanations=operator_explanations.OPERATOR_EXPLANATIONS,
+        operator_references=operator_explanations.OPERATOR_REFERENCES,
+        operator_roles=operator_explanations.OPERATOR_ROLES,
+        reindexing_explanations=operator_explanations.REINDEXING_EXPLANATIONS)
+
+
+def check_the_boxes_write_out_one_index_of_the_broadcast() -> None:
+    '''The box over each RMSNorm and each `Linear` of the figure writes out the
+    operator at one index of every axis it is broadcast over. Every such operator of
+    the model is broadcast by a lift alone, so `factor_out_lift` takes off its whole
+    degree, and the expansion in the box has the domain and the codomain of the
+    factored operator. The box over an RMSNorm broadcast over the tokens therefore
+    normalises one token, as `R[m] -> R[m]` for the residual stream and `R[q] -> R[q]`
+    for the query latent. The gain and the weight are read from outer
+    tape slots, which a lift does not enlarge, so the expansion lifted over the
+    factored axes is the operator the figure holds, per
+    `obsidian/07-para/Outer and Inner Tape Slots.md`.'''
+    settings = interactive_figure_settings()
+    sent = notebook_diagrams.present_each_side(whole_model.v41_flash, settings)
+    write_out = expand_with_parameters.write_out_under(
+        settings.expanded_parameters, settings.tape)
+    rmsnorms_over_tokens = 0
+    for node in broadcast_occurrences.number_broadcasts_in_import_order(sent):
+        if not isinstance(node.operator, (ops.Normalize, ops.Linear)):
+            continue
+        name = node.operator.name.to_latex()
+        factored = factor_out_lift.factor_out_lift(node)
+        if tuple(factored.base.degree()):
+            raise AssertionError(
+                f'{name} keeps the degree {tuple(map(axis_name, factored.base.degree()))} '
+                'once its lift is factored out')
+        written = write_out(node)
+        if written is None:
+            continue
+        if (tuple(written.dom()), tuple(written.cod())) != (
+                tuple(factored.base.dom()), tuple(factored.base.cod())):
+            raise AssertionError(f'the box over {name} writes out another morphism')
+        if (isinstance(node.operator, ops.Normalize)
+                and tuple(map(axis_name, factored.lifted_over)) == ('x',)):
+            read = [tuple(map(axis_name, array.shape())) for array in written.dom()]
+            if len(read) != 1 or len(read[0]) != 1 or read[0] == ('x',):
+                raise AssertionError(f'the box over an RMSNorm over the tokens reads {read}')
+            rmsnorms_over_tokens += 1
+    if rmsnorms_over_tokens == 0:
+        raise AssertionError('no RMSNorm of the figure is broadcast over the tokens')
+
+
 def check_the_operator_explanations() -> None:
     '''The figure the model is drawn as explains every operator. Each top-k selection, read at selected positions, embedding,
     concatenation, covariant view, merged position and elementwise map that hides part
@@ -839,14 +894,10 @@ def check_the_operator_explanations() -> None:
     that array alone, and its box links the released `RMSNorm` and `linear`. The box over a `Linear` says the role of that weight in
     the model first and links the line that declares it, and its formula names a bias
     only where the map has one. Each named reindexing of a view is wrapped in a block
-    drawn as the reindexing alone. No reference names a file of this package.'''
-    settings = notebook_diagrams.DiagramSettings(
-        mode=notebook_diagrams.DiagramMode.OFF,
-        advanced_display=notebook_diagrams.AdvancedDisplay.INTERACTIVE,
-        operator_explanations=operator_explanations.OPERATOR_EXPLANATIONS,
-        operator_references=operator_explanations.OPERATOR_REFERENCES,
-        operator_roles=operator_explanations.OPERATOR_ROLES,
-        reindexing_explanations=operator_explanations.REINDEXING_EXPLANATIONS)
+    drawn as the reindexing alone, and so is the rearrangement of each named view, which
+    is the repeat into the streams, the two diagonals and the two transposes. No
+    reference names a file of this package.'''
+    settings = interactive_figure_settings()
     sent, _, auxiliary = notebook_diagrams.package_auxiliary(
         notebook_diagrams.present_each_side(whole_model.v41_flash, settings), settings)
     for node in tutil.type_search(cat.Broadcasted, sent):
@@ -857,6 +908,9 @@ def check_the_operator_explanations() -> None:
                         for block in tutil.type_search(cat.Block, reindexing)):
                     raise AssertionError(
                         f'the reindexing {stride.name.to_latex()} is not explained')
+    unboxed_views = explain_reindexings.names_of_unexplained_views(sent)
+    if unboxed_views:
+        raise AssertionError(f'no box opens over the views {unboxed_views}')
     in_place = [b for b in tutil.type_search(cat.Block, sent)
                 if b.block_tag.aesthetics is not None
                 and b.block_tag.aesthetics.drawing is cat.BlockDrawing.BODY_IN_PLACE
@@ -1026,6 +1080,7 @@ CHECKS: tuple[Callable[[], None], ...] = (
     check_the_sparse_expansion,
     check_the_code_references,
     check_the_operator_explanations,
+    check_the_boxes_write_out_one_index_of_the_broadcast,
     check_the_auxiliary_information,
     check_the_size_placement,
     check_the_wording_file_loads_into_its_dataclass,

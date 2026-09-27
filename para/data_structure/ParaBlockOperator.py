@@ -58,6 +58,12 @@ class TapeBelowTheTopLevel(ValueError):
     `expose_tape_as_ports` cannot lift to the block's own ports.'''
 
 
+class OuterDropInBroadcastBox(ValueError):
+    '''A block broadcast over a degree drops a result onto an outer slot. The result
+    of a broadcast box carries the degree and the outer slot does not, and the box
+    has no port at which to sum over the degree.'''
+
+
 @dataclass(frozen=True)
 class ParaBlockOperator[B: cat.Datatype = cat.Reals, A: cat.Axis = cat.RawAxis](
         ops.BlockOperator[B, A]):
@@ -259,6 +265,10 @@ def box_with_wrapped_tapes_as_seeds[B: cat.Datatype, A: cat.Axis](
         raise WrapDisagreesWithBlock(
             f'{len(wrap.grabs)} grab entries and {len(wrap.drops)} drop entries over '
             f'a block with {len(block.dom())} operands and {len(block.cod())} results')
+    if any(isinstance(entry, Para.KeptAndDropped) for entry in (*wrap.grabs, *wrap.drops)):
+        raise WrapDisagreesWithBlock(
+            'a wrap over a plain box keeps and drops a wire, which the ports of a '
+            'ParaBlockOperator do not state')
     grabbed = tuple(i for i, entry in enumerate(wrap.grabs) if entry is not None)
     kept_inputs = tuple(i for i, entry in enumerate(wrap.grabs) if entry is None)
     dropped = tuple(j for j, entry in enumerate(wrap.drops) if entry is not None)
@@ -290,18 +300,32 @@ def broadcast_para_block_over_axes[B: cat.Datatype, A: cat.Axis](
     `body` at the ports and the slots on a wrap over the box it builds.
 
     `degree_readings` holds one reading per operand of `body`, as it does there.
-    A grabbed operand is read at every position of the degree, because the
-    expansion lifts the body over the whole degree and the array a grab inside
-    the lifted body reads carries every degree axis. A dropped result carries
-    the whole degree for the reason every result does.
+    An operand grabbed from an inner slot is read at every position of the
+    degree, because the expansion lifts the body over the whole degree and the
+    array a grab of an inner slot inside the lifted body reads carries every
+    degree axis. An operand grabbed from a `Para.OuterTapeSlot` is read at no
+    position of the degree, because the slot holds one array for the whole
+    broadcast. A dropped result carries the whole degree for the reason every
+    result does, so a drop onto an outer slot, which would have to sum over the
+    degree first, is refused.
     '''
     exposed = expose_tape_as_ports(body)
+    outer_drops = tuple(
+        drop.tape for drop in exposed.drops
+        if isinstance(drop.tape, Para.OuterTapeSlot))
+    if outer_drops and degree_axes:
+        raise OuterDropInBroadcastBox(
+            f'the box drops onto the outer slots {outer_drops} and is broadcast over '
+            f'{tuple(degree_axes)}')
     whole_degree = tuple(range(len(degree_axes)))
+    grab_readings = tuple(
+        () if isinstance(grab.tape, Para.OuterTapeSlot) else whole_degree
+        for grab in exposed.grabs)
     return wrap_box(_record_tape_seeds(
         discovering_broadcasts.broadcast_block_over_axes(
-            exposed.block, degree_axes,
-            (*(whole_degree,) * len(exposed.grabs), *degree_readings), name),
+            exposed.block, degree_axes, (*grab_readings, *degree_readings), name),
         body, exposed))
+
 
 
 def _record_tape_seeds[B: cat.Datatype, A: cat.Axis](
@@ -325,7 +349,10 @@ def broadcast_grabs[B: cat.Datatype, A: cat.Axis](
     array standing at the leading operand the grab was moved to.
 
     The slot is unchanged, because a slot names the value and the degree names
-    which member of it one index of the broadcast reads.
+    which member of it one index of the broadcast reads. A grab of an inner slot
+    therefore reads an array carrying the degree, and a grab of a
+    `Para.OuterTapeSlot` reads the array of the unbroadcast block, which
+    `broadcast_para_block_over_axes` leaves at its port.
     '''
     box = bare_box_of(parent)
     return tuple(
@@ -358,19 +385,23 @@ def slots_grabbed(target: fd.GeneralTerm) -> frozenset[Para.TapeSlot]:
     '''
     return frozenset(
         {grab.tape for grab in tutil.type_search(Para.Grab, target)}
-        | _slots_of(entry for wrap in tutil.type_search(para_wrap.ParaWrap, target)
+        | _slots_of(Para.grabbed_entry(entry)
+                    for wrap in tutil.type_search(para_wrap.ParaWrap, target)
                     for entry in wrap.grabs))
 
 
 def slots_dropped(target: fd.GeneralTerm) -> frozenset[Para.TapeSlot]:
     '''Every slot written anywhere in `target`, in either of the two forms
-    `slots_grabbed` reads.'''
+    `slots_grabbed` reads, an operand a wrap keeps and drops included.'''
+    wraps = tuple(tutil.type_search(para_wrap.ParaWrap, target))
     return frozenset(
         {drop.tape for drop in tutil.type_search(Para.Drop, target)}
-        | _slots_of(entry for wrap in tutil.type_search(para_wrap.ParaWrap, target)
-                    for entry in wrap.drops))
+        | _slots_of(Para.result_dropped_entry(entry)
+                    for wrap in wraps for entry in wrap.drops)
+        | _slots_of(Para.operand_dropped_entry(entry)
+                    for wrap in wraps for entry in wrap.grabs))
 
 
-def _slots_of(entries: Iterable[Para.SlotEntry]) -> frozenset[Para.TapeSlot]:
+def _slots_of(entries: Iterable[Para.NamedEntry | None]) -> frozenset[Para.TapeSlot]:
     return frozenset(Para.slot_of(entry) for entry in entries
                      if entry is not None)

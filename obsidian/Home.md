@@ -8,8 +8,9 @@ status: stable
 Written by Claude Opus 5 (1M context), effort high.
 
 `pyncd` writes a deep learning model as an algebraic expression and then derives things
-from it: neural circuit diagrams, PyTorch modules, a backward pass, and the quantisation
-every value of a released model is held in.
+from it: neural circuit diagrams, PyTorch modules, a backward pass, the quantisation
+every value of a released model is held in, and the pass that generates new tokens while
+reading the earlier ones from caches.
 
 The vault is the reading order and the reasoning behind the code. The code is the authority
 on what happens. These notes are the authority on why it is shaped that way, what rule it
@@ -31,7 +32,9 @@ An expression is rewritten in the hypergraph form of [[Hypergraphs]], where a pa
 one operation by several, per [[Leaf Splicing]], or rewrites every wire at once, per
 [[Functors]]. Differentiating a model is one such rewrite, in the category of
 [[Para Category]], and so is writing the quantisation of every value onto its wire, per
-[[Quantization]].
+[[Quantization]]. Reading a model's results at the new tokens of a pass, and carrying that
+read back through the model, derives the caches kept by a pass of generation, per
+[[Deriving Caches by Dragging the New Tokens]].
 
 ## Start here
 
@@ -44,6 +47,8 @@ one operation by several, per [[Leaf Splicing]], or rewrites every wire at once,
 | drawing an expression | [[Diagram Display]] |
 | differentiating a model | [[Training]], then [[Backpropagation]] |
 | quantising a model | [[Quantization]] |
+| deriving the cached pass of a generating model | [[Caching Between Passes]], then [[Deriving Caches by Dragging the New Tokens]] |
+| the notebooks and pages of the lab website | [[Website Notebooks]] |
 | following one expression from form to form | [[Forms of an Expression]] |
 | finding what is unfinished | [[Open Gaps]] |
 | finding what the package does not represent | [[Design Space]] |
@@ -62,6 +67,8 @@ one operation by several, per [[Leaf Splicing]], or rewrites every wire at once,
 05 backends      agent_display, display, torch_compile, websocket_transfer.
 06 practice      How to work here: the map, the invariants, validation, the gaps.
 07 para          Training as a second morphism: the tape and the reverse functor.
+08 caching       The arrays kept by a pass for the passes after it, derived from the
+                 model, and the operation counts and machine rates that cost them.
 ```
 
 Each folder's notes link downward to the code and sideways to each other. Nothing in layers
@@ -75,6 +82,7 @@ Each folder's notes link downward to the code and sideways to each other. Nothin
 - **Hypergraphs** — [[Hypergraphs]], [[Hypergraph to Morphism]], [[Hypergraph Analysis]], [[Functors]], [[Crawlers]], [[Leaf Splicing]]
 - **Quantization** — [[Quantization]], [[Stripping Quantisations]]
 - **Backends** — [[Agent Display]], [[Diagram Display]], [[Advanced Display]], [[Diagram Themes]], [[Compound Axis Labels]], [[Diagram Wire Format]], [[Terms Mirrored in tsncd]], [[Torch Compile]]
-- **Practice** — [[Repository Map]], [[Invariants]], [[Validation]], [[Notebooks]], [[Representing Models]], [[SOTA Model Notebooks]], [[Yoneda and Cartesian Tricks]], [[Debugging the Jupyter Restart Button]], [[Open Gaps]], [[Design Space]], [[Code Style]], [[Forms of an Expression]]
-- **Para** — [[Para Category]], [[Training]], [[Derivatives]], [[Backpropagation]], [[Pathway Collapse|pathway collapse]], [[Recomputing the Exponent in the Backward Pass]], [[Selection and the Reverse Pass]], [[Para Wrap]], [[Para Block Operator]], [[Show Grabbed Parameters]], [[Training Mixture of Experts Gates]], [[DeepSeek-V3 Backward Pass]]
+- **Practice** — [[Repository Map]], [[Invariants]], [[Validation]], [[Notebooks]], [[Representing Models]], [[SOTA Model Notebooks]], [[Website Notebooks]], [[Yoneda and Cartesian Tricks]], [[Debugging the Jupyter Restart Button]], [[Open Gaps]], [[Design Space]], [[Code Style]], [[Forms of an Expression]]
+- **Para** — [[Para Category]], [[Training]], [[Derivatives]], [[Backpropagation]], [[Pathway Collapse|pathway collapse]], [[Recomputing the Exponent in the Backward Pass]], [[Selection and the Reverse Pass]], [[Para Wrap]], [[Para Block Operator]], [[Show Grabbed Parameters]], [[Training Mixture of Experts Gates]], [[DeepSeek-V3 Backward Pass]], [[Outer and Inner Tape Slots]]
+- **Caching** — [[Caching Between Passes]], [[Deriving Caches by Dragging the New Tokens]], [[Operation Counts and Machine Rates]]
 - **Meta** — [[Vault Conventions]], [[Agent Log Protocol]], [[Agent Log Index]]

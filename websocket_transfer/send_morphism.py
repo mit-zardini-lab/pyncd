@@ -71,6 +71,8 @@ def display_settings(
     inspectionBoxes: bool | None = None,
     axisHover: wst.AxisHover | None = None,
     axisLabelFontSize: float | None = None,
+    form: wst.DiagramForm | None = None,
+    controls: wst.PageControls | None = None,
     title: str | None = None,
     heading: wst.PageHeading | None = None,
     displayMode: wst.DisplayMode | None = None,
@@ -105,6 +107,12 @@ def display_settings(
     `axisLabelFontSize` is the size, in em, of the label an axis carries on its
     wire.
 
+    `form` says which of the three forms the figure is drawn in, and is sent as
+    the value of the `DiagramForm` given. The client draws the all-broadcasted
+    form where none is sent. `controls` says whether the page draws the buttons
+    that switch its form and its theme, sent as the value of the `PageControls`
+    given, and the client hides them where none is sent.
+
     `title` names what the page shows. The name of the tab then reads
     `tsncd - <title>`. `heading` says whether the page writes that text as a
     heading over the figure, and is sent as the value of the `PageHeading`
@@ -134,6 +142,10 @@ def display_settings(
         settings['axisHover'] = axisHover.value
     if axisLabelFontSize is not None:
         settings['axisLabelFontSize'] = axisLabelFontSize
+    if form is not None:
+        settings['form'] = form.value
+    if controls is not None:
+        settings['controls'] = controls.value
     if title is not None:
         settings['title'] = title
     if heading is not None:
@@ -158,6 +170,8 @@ async def send_morphism(
     inspectionBoxes: bool | None = None,
     axisHover: wst.AxisHover | None = None,
     axisLabelFontSize: float | None = None,
+    form: wst.DiagramForm | None = None,
+    controls: wst.PageControls | None = None,
     title: str | None = None,
     heading: wst.PageHeading | None = None,
     auxiliary: wst.DiagramAuxiliary | None = None,
@@ -186,5 +200,6 @@ async def send_morphism(
         settings=display_settings(
             darkMode, debugBorders, coreDebug, width, subBlocks,
             drawnBlockTags, tapeLabels, legend, inspectionBoxes,
-            axisHover, axisLabelFontSize, title, heading, displayMode),
+            axisHover, axisLabelFontSize, form, controls, title, heading,
+            displayMode),
         auxiliary=auxiliary)

@@ -124,7 +124,7 @@ It checks the pass of [[Quantization]] against the quantised text-only
 DeepSeek-V4.1-Flash: that every wire carries a quantisation, that a cast stands wherever
 two neighbouring operations disagree, that the weights named by the file's own table carry
 the quantisation the table gives, and that the counts of casts by kind are what the
-released code implies. Seven further cases check the functor of
+released code implies. Eight further cases check the functor of
 [[Stripping Quantisations]], from the model holding no quantisation after stripping to a
 conversion that is not between two quantisations being kept.
 
@@ -132,25 +132,59 @@ conversion that is not between two quantisations being kept.
 
 A SOTA notebook whose model lives in a package beside it keeps its claims in a
 `validate_*.py` in that package rather than in the notebook, so the notebook keeps the
-prose and the figures. There are four:
+prose and the figures. There are six:
 
 ```bash
 python notebooks/sota/DeepSeekV41Flash/validate_quantised_text_only_model.py
 python notebooks/sota/DeepSeekV41Flash/validate_deepseek_v41_flash.py
 python notebooks/sota/DeepSeekV41Flash/validate_omitted_mechanisms.py
 python notebooks/sota/DeepSeekV41Flash/validate_deepseek_v41_flash_integrated.py
+python notebooks/sota/GLM53/validate_glm53.py
+python notebooks/sota/GLM53/validate_quantised_glm53.py
 ```
 
 The first of them holds every claim `notebooks/sota/DeepSeekV41Flash.ipynb` makes, in forty-six checks, and the
 notebook runs it in the cell after its setup cell so that a reader sees one line
-confirming each claim. [[SOTA Model Notebooks]] states what each of the four
-asserts.
+confirming each claim. The two of `notebooks/sota/GLM53/` hold the claims about the
+model and about its quantisations. [[SOTA Model Notebooks]] states what each asserts.
+
+## The website checks
+
+Each notebook under `notebooks/website/` holds prose and figures and no checks, and a
+validator beside it holds one `check_` function per claim, in the order the notebook
+states them. There are nine, one per page, and the following command runs them with the
+notebooks.
+
+```bash
+python validations/run_validations.py --name website
+```
+
+The four tutorial validators compare each training step with `torch.autograd` in float64
+through `notebooks/website/tutorial/check_gradients_in_torch.py`. The five model
+validators check the model against its released code, its quantisations, its cached pass
+where the page has one, that stripping the quantisations returns the model in the reals,
+and that every legend row of every variant of the page carries a code name.
+[[Website Notebooks]] lists every notebook with its validator.
+
+## The caching check
+
+```bash
+python caching/validate_caching.py
+```
+
+It checks the `Caching` operator and its expansion, the counts of `cache_contents`, the
+pass `derive_cached_pass` derives from causal attention, the refusal of attention with no
+causal read and of a read of the next token, the four placements of causal attention and
+their costs, and the kept axis of a sliding window, which moves the same bytes whatever
+the number of earlier tokens, per [[Deriving Caches by Dragging the New Tokens]]. The
+checks are structural, because `torch_compile` has no rule for a `Caching`.
 
 ## The figure checks
 
 ```bash
 python websocket_transfer/validate_auxiliary_information.py
 python websocket_transfer/validate_standalone_page.py
+python websocket_transfer/validate_page_variants.py
 python websocket_transfer/validate_localise_descriptions.py
 python utilities/validate_wording_json.py
 ```
@@ -158,9 +192,13 @@ python utilities/validate_wording_json.py
 The first checks the `auxiliary` field of a message, meaning the legend, the inspection
 boxes and the expansions an interactive figure carries, per [[Advanced Display]]. The
 second checks that a standalone page holds the bundle, the fonts and the message, and
-opens with no server. The third checks that a page carries each wording of its
-descriptions and switches between them. The fourth checks that every `$NAME` reference in
-a wording file resolves.
+opens with no server. The third checks a page carrying several variants of one model.
+It checks the one compressed repository of their messages, the settings read by the
+build plugin of the lab website, a derived variant naming its source and its functor,
+the refusal of inconsistent variants, and the folder and the redirect written for the
+page, per [[Diagram Display]]. The fourth checks that a page carries each wording of its
+descriptions and switches between them. The fifth checks that every `$NAME` reference
+in a wording file resolves.
 
 ## Running the validations in parallel
 
@@ -178,8 +216,8 @@ python validations/run_validations.py --list           # targets and dependencie
 python validations/run_validations.py --dependencies-of BuildingAModel
 ```
 
-A validation the registry knows about is a target, and there are thirty-four of them:
-four repository checks, twenty validators and ten notebooks. A validator is a
+A validation the registry knows about is a target, and there are fifty-six of them:
+four repository checks, thirty-three validators and nineteen notebooks. A validator is a
 `validate_*.py` script, found by that name at a feature root or under a feature, so a new
 feature's validator is run as soon as the file exists and no list has to be edited. A
 notebook is every `.ipynb` under one of the two folders `NOTEBOOK_FOLDERS` names,
@@ -253,4 +291,5 @@ seconds.
 
 - [[Invariants]] — what the checks are protecting
 - [[Notebooks]] — which notebooks run, and what each shows
+- [[Website Notebooks]] — the nine notebooks whose claims stand in a validator beside each
 - [[Agent Display]] — deterministic, and what to compare when a listing moves

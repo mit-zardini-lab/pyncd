@@ -180,6 +180,20 @@ disentangled form says so. The merged form says only that six axes are contracte
 somewhere, so anything reading the expression afterwards has to work the independence out
 again.
 
+## Choosing the order of a chain of two contractions
+
+`disentangle_einops` splits a merged contraction into independent components, and it
+leaves a connected contraction of three operands as one. A chain whose three operands are
+connected, such as a query, the key up-projection of multi-head latent attention and the
+cached latent, can be contracted with any pair first.
+`advanced_axis_dynamics/algebra/absorb_linear_maps.py` merges such a chain with
+`merge_einops`, splits it again with `contract_pair_first`, and keeps the order whose
+operation count, read by `morphism_work.read_symbolic_work`, is the smallest at bound
+sizes. No order is cheapest at every size, so the sizes are bound before the counts are
+compared. [[Deriving Caches by Dragging the New Tokens]] applies the rewrite to a derived
+pass, where it gives the absorb mode of DeepSeek-V3, and [[Operation Counts and Machine Rates]]
+states the count.
+
 ## See also
 
 - [[Operators]] — `Einops.signature`

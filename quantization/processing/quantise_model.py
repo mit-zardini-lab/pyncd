@@ -1,6 +1,7 @@
 # Claude Opus 5 (1M context), effort high. Extended by Claude Fable 5.1, effort 80, on
 # 2026-09-20, with the policy of a box, the quantisation returned by a titled block,
-# and the count of casts as written operations.
+# and the count of casts as written operations. Extended by Claude Opus 5.5 (1M
+# context), effort 40, on 2026-09-27, with the policy of a titled block.
 '''A quantisation on every wire of a model, and a cast wherever an operation requires
 another.
 
@@ -96,7 +97,12 @@ class QuantizationPolicy:
     onto the expression.
 
     `boxes` gives the `BoxPolicy` of a box by its name, for the few modules handing
-    FP32 on or never upcasting, and for a fused kernel. `block_results` gives the
+    FP32 on or never upcasting, and for a fused kernel. A block of the expression
+    whose title `boxes` names computes its operations under that policy as the body
+    of a box does, for a released module or kernel the expression writes as a titled
+    block rather than a box, and the innermost such block or box holding an
+    operation decides. The quantisation a titled block returns is the one its
+    operations compute, unless `block_results` names another. `block_results` gives the
     quantisation returned by a block at each position of its codomain, by its title,
     with `None` at a position returned as computed, for a released module ending in
     `.to(dtype)` on some of its returns and standing as a block of the expression
@@ -263,11 +269,36 @@ def _slot_uid(morphism: Para.ParaMorphism) -> fd.UID:
 
 def _quantisation_of(morphism: cat.Broadcasted, scope: Scope,
                      operands: fd.Prod[Quantisation | None],
+                     enclosing: str | None,
                      ) -> operator_quantisations.OperatorQuantisation:
     rule = operator_quantisations.rule_for(morphism.operator)
     return rule(operator_quantisations.QuantisationQuestion(
         morphism=morphism, policy=scope.policy, operand_quantisations=operands,
-        enclosing_box=scope.enclosing_box))
+        enclosing_box=enclosing))
+
+
+def _enclosing_policy_names(graph: hg.Hypergraph, scope: Scope
+                            ) -> Mapping[fd.UID, str | None]:
+    '''The name each operation of `graph` is asked about under, keyed by the
+    operation's uid: the title of the innermost block holding it whose title the
+    policy names in `boxes`, and the box owning `graph` where no such block holds
+    it.'''
+    named = scope.policy.boxes
+    found: dict[fd.UID, str | None] = {}
+
+    def walk(current: hg.Hypergraph, name: str | None) -> None:
+        match current:
+            case hg.HypergraphRoot():
+                found[current.uid] = name
+            case hg.HypergraphBlock(body=body):
+                title = block_title(current)
+                walk(body, title if title in named else name)
+            case hg.Multigraph():
+                for subgraph in current.subgraphs():
+                    walk(subgraph, name)
+
+    walk(graph, scope.enclosing_box)
+    return found
 
 
 def _wrapped_operands(
@@ -279,7 +310,7 @@ def _wrapped_operands(
     domain.'''
     wired = iter(kept)
     return tuple(
-        next(wired) if entry is None
+        next(wired) if Para.is_kept(entry)
         else _slot_quantisation(entry, array, slots, policy)
         for entry, array in zip(wrap.grabs, wrap.body.dom()))
 
@@ -316,8 +347,10 @@ def _assign_quantisations(
     assigned: dict[hg.HypergraphObject, Quantisation | None] = dict(
         zip(graph.dom, given))
     written: dict[fd.UID, Quantisation | None] = dict(scope.slots)
+    enclosing = _enclosing_policy_names(graph, scope)
     for leaf in conversion_insertion.leaves_in_dataflow_order(graph):
         morphism = leaf.wraps
+        name = enclosing.get(leaf.uid, scope.enclosing_box)
         match morphism:
             case Para.Grab():
                 assigned[leaf.cod[0]] = _slot_quantisation(
@@ -328,17 +361,22 @@ def _assign_quantisations(
                 operands = _wrapped_operands(
                     morphism, tuple(assigned.get(obj) for obj in leaf.dom),
                     written, policy)
-                results = _quantisation_of(body, scope, operands).results
+                results = _quantisation_of(body, scope, operands, name).results
+                for entry, operand in zip(morphism.grabs, operands):
+                    dropped = Para.operand_dropped_entry(entry)
+                    if dropped is not None:
+                        written[Para.slot_of(dropped).uid] = operand
                 kept = iter(leaf.cod)
                 for entry, result in zip(morphism.drops, results):
-                    if entry is None:
+                    if Para.is_kept(entry):
                         assigned[next(kept)] = result
-                    else:
-                        written[Para.slot_of(entry).uid] = result
+                    dropped = Para.result_dropped_entry(entry)
+                    if dropped is not None:
+                        written[Para.slot_of(dropped).uid] = result
             case cat.Broadcasted():
                 results = _quantisation_of(
                     morphism, scope,
-                    tuple(assigned.get(obj) for obj in leaf.dom)).results
+                    tuple(assigned.get(obj) for obj in leaf.dom), name).results
                 for obj, result in zip(leaf.cod, results):
                     assigned[obj] = result
             case _:
@@ -353,6 +391,7 @@ def _assign_quantisations(
 # ==========================================================================
 def _required_operands(
     leaf: hg.HypergraphRoot, scope: Scope, assigned: WireQuantisations,
+    enclosing: str | None,
 ) -> fd.Prod[tuple[hg.HypergraphObject, Quantisation]]:
     '''Each wire read by `leaf` and required by its rule at another quantisation,
     beside the quantisation required. A taped operand is left out, because a value
@@ -365,12 +404,12 @@ def _required_operands(
             operands = _wrapped_operands(
                 morphism, tuple(assigned.wires.get(obj) for obj in leaf.dom),
                 assigned.slots, scope.policy)
-            required = _quantisation_of(body, scope, operands).operands
+            required = _quantisation_of(body, scope, operands, enclosing).operands
             wired = tuple(required[position] for position in morphism.kept_inputs())
         case cat.Broadcasted():
             wired = _quantisation_of(
                 morphism, scope,
-                tuple(assigned.wires.get(obj) for obj in leaf.dom)).operands
+                tuple(assigned.wires.get(obj) for obj in leaf.dom), enclosing).operands
         case Para.Drop():
             wired = (scope.policy.named_slot_quantisation(
                 Para.slot_of(Para.entry_of(morphism))),)
@@ -396,10 +435,12 @@ def _conversions_required(
     '''
     arrays = {wire: wire.obj for wire in conversion_insertion.all_wires(graph)}
     scope_of = conversion_insertion.containers(graph)
+    enclosing = _enclosing_policy_names(graph, scope)
     readers: dict[
         tuple[hg.HypergraphObject, Quantisation, fd.UID], set[fd.UID]] = {}
     for leaf in conversion_insertion.leaves_in_dataflow_order(graph):
-        for wire, quantisation in _required_operands(leaf, scope, assigned):
+        for wire, quantisation in _required_operands(
+                leaf, scope, assigned, enclosing.get(leaf.uid, scope.enclosing_box)):
             readers.setdefault(
                 (wire, quantisation, scope_of[leaf.uid]), set()).add(leaf.uid)
     return tuple(
@@ -672,11 +713,11 @@ def _ported_datatypes(
     wired_operands, wired_results = iter(dom_datatypes), iter(cod_datatypes)
     return PortDatatypes(
         operands=tuple(
-            next(wired_operands) if entry is None
+            next(wired_operands) if Para.is_kept(entry)
             else _taped_datatype(entry, array, slots, policy)
             for entry, array in zip(wrap.grabs, box.dom())),
         results=tuple(
-            next(wired_results) if entry is None
+            next(wired_results) if Para.is_kept(entry)
             else _taped_datatype(entry, array, slots, policy)
             for entry, array in zip(wrap.drops, box.cod())))
 

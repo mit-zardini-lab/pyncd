@@ -58,7 +58,8 @@ from notebooks.sota.DeepSeekV41Flash.construction_idioms import (
     boxed, hold, l1_norm_over, over, route)
 from notebooks.sota.DeepSeekV41Flash.custom_operations import (
     indicator, multiply_along, sigmoid_weighted_input, sqrt_softplus)
-from notebooks.sota.DeepSeekV41Flash.declared_axes import R, e, f, kexp, m, x
+from notebooks.sota.DeepSeekV41Flash.declared_axes import (
+    CHOSEN_EXPERTS, R, e, f, kexp, m, x)
 from notebooks.sota.DeepSeekV41Flash.mixture_of_experts import (
     GATE_BOX, GATE_COLOUR, TOKEN_STATE, combine, down_projection)
 from notebooks.sota.DeepSeekV41Flash.reference_links import (
@@ -158,7 +159,7 @@ def router() -> tuple[cat.BroadcastedCategory, cat.Axis]:
     sparse expert axis. The logits are divided by the temperature before the score
     function, the biased copy of the scores chooses the six experts and the unbiased
     copy weights them.'''
-    sel = dst.TopK.template(k=kexp, axis=e, name='k/e')
+    sel = dst.TopK.template(k=kexp, axis=e, name=CHOSEN_EXPERTS)
     ke = sel.cod()[0].shape()[0]
     scores = (ops.Linear.template((m,), (e,), 'W^{R}') @ temper_scores()
               @ sqrt_softplus())

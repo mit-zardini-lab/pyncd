@@ -481,5 +481,6 @@ def unread_concatenations_dropped[L, M: cat.Morphism](
     read |= {wire.uid for wire in handed_on}
     return tuple(subgraph for subgraph in subgraphs
                  if not isinstance(subgraph, hg.HypergraphRoot)
+                 or not subgraph.cod
                  or subgraph.cod[0].uid not in concatenations
                  or subgraph.cod[0].uid in read)

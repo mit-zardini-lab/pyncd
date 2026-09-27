@@ -3,6 +3,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 from enum import Enum
+from fractions import Fraction
 from typing import Callable, Mapping
 import math
 import data_structure.Term as fd # for 'foundations'
@@ -962,3 +963,19 @@ def evaluate_integer(target: Numeric, values: Mapping[Numeric, int]) -> int:
             return math.prod(evaluate_integer(part, values) for part in parts)
     raise NotAnAffineForm(
         f'{target} holds something other than integers, symbols, sums and products')
+
+def evaluate_rational(target: Numeric, values: Mapping[Numeric, int]) -> Fraction:
+    '''The rational number `target` takes with every symbol bound by `values`,
+    where `target` is built from integers, symbols, sums, products and integer
+    powers. `Power.template` leaves a negative integer power symbolic, so a size
+    written `|d| / 2` is the product of `|d|` and `2^{-1}` and evaluates here
+    where `evaluate_integer` refuses it.'''
+    match target:
+        case Power(base=base, exponent=Integer(_value=exponent)):
+            return evaluate_rational(base, values) ** exponent
+        case Addition(content=parts):
+            return sum((evaluate_rational(part, values) for part in parts), Fraction(0))
+        case Multiplication(content=parts):
+            return math.prod((evaluate_rational(part, values) for part in parts),
+                             start=Fraction(1))
+    return Fraction(evaluate_integer(target, values))

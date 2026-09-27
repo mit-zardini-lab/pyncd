@@ -15,6 +15,12 @@ indexed by the loops outside that loop alone. A `LoopGrab` or a `LoopDrop` names
 the iteration whose member it touches in an index of its own, and is indexed here
 by the loops around it, as a plain grab and a plain drop are.
 
+A loop is not a broadcast. Whether a slot is outer or inner, per
+`obsidian/07-para/Outer and Inner Tape Slots.md`, says what a lift over a batch
+axis does to the array a grab reads, and a lift adds no member. The members here
+are indexed by the loops alone, so the weight of a layer in a stack is one member
+per iteration whatever the kind of its slot.
+
 `tape_touches` walks a morphism and returns every grab and drop with the loops
 and the blocks around it. `tape_members` groups the touches by slot and by index
 path, so a weight grabbed three times inside one loop is one member.
@@ -182,9 +188,13 @@ def _inside_block(
 
 
 def _entry_touch(
-    entry: Para.NamedEntry, side: TapeSide, array: object,
+    entry: Para.NamedEntry | Para.KeptAndDropped, side: TapeSide, array: object,
     loops: fd.Prod[LoopIndex], blocks: fd.Prod[str],
 ) -> TapeTouch:
+    '''The touch an entry of a `ParaWrap` stands for. A `Para.KeptAndDropped` on
+    either side is the drop of the slot it names.'''
+    if isinstance(entry, Para.KeptAndDropped):
+        return _entry_touch(entry.dropped, TapeSide.DROP, array, loops, blocks)
     return TapeTouch(
         slot=Para.slot_of(entry), side=side,
         is_loop_variable=isinstance(entry, Para.StreamSlot),
@@ -282,6 +292,9 @@ def _renamed_entry(
     new_name = naming(_entry_touch(entry, side, array, loops, blocks))
     if new_name is None:
         return entry
+    if isinstance(entry, Para.KeptAndDropped):
+        return entry.reconstruct(dropped=Para.entry_on_slot(
+            entry.dropped, new_name.capture(Para.slot_of(entry.dropped))))
     return Para.entry_on_slot(entry, new_name.capture(Para.slot_of(entry)))
 
 

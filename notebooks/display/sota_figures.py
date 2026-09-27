@@ -61,6 +61,8 @@ from notebooks.display.notebook_diagrams import (
     DiagramSettings as DiagramSettings,
     SETTINGS as SETTINGS,
     SubBlocks as SubBlocks,
+    DiagramForm as DiagramForm,
+    PageControls as PageControls,
     forget_drawn_blocks as forget_drawn_blocks,
     show_diagram,
 )

@@ -7,7 +7,7 @@ use the index notation of `algebra.write_index_notation`. `linear_formula` reads
 operands and the result of the `cat.Broadcasted` that carries the `Linear`, so the
 query's down projection reads
 
-    y[i_{q}] = \\sum_{i_{m} \\in m} x[i_{m}]\\, W_{W^{Qa}}[i_{m}, i_{q}]
+    y[i_{q}] = \\sum_{i_{m} \\in m} x[i_{m}]\\, W^{Qa}[i_{m}, i_{q}]
 
 and the sink logit, which has no operand, reads `y[i_{h}] = sink[i_{h}]`.
 

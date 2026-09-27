@@ -1,8 +1,8 @@
 ---
 tags: [layer/categories, concept]
-code: algebra/registries/accumulator.py, advanced_axis_dynamics/data_structure/AffineGuards.py, advanced_axis_dynamics/data_structure/AxisConcatenation.py, advanced_axis_dynamics/data_structure/Operators.py, advanced_axis_dynamics/algebra/mark_sparse_domains.py, advanced_axis_dynamics/algebra/mark_sparse_codomains.py, advanced_axis_dynamics/algebra/disentangle_reindexings.py, advanced_axis_dynamics/algebra/concatenation_expansion.py, advanced_axis_dynamics/registries/part_combination.py, advanced_axis_dynamics/registries/derivative.py, advanced_axis_dynamics/validate_advanced_axis_dynamics.py, advanced_axis_dynamics/validate_covariant_broadcast.py
+code: algebra/registries/accumulator.py, advanced_axis_dynamics/data_structure/AffineGuards.py, advanced_axis_dynamics/data_structure/AxisConcatenation.py, advanced_axis_dynamics/data_structure/Operators.py, advanced_axis_dynamics/algebra/mark_sparse_domains.py, advanced_axis_dynamics/algebra/mark_sparse_codomains.py, advanced_axis_dynamics/algebra/disentangle_reindexings.py, advanced_axis_dynamics/algebra/concatenation_expansion.py, advanced_axis_dynamics/algebra/drag_index_backwards.py, advanced_axis_dynamics/algebra/move_reads_backwards.py, advanced_axis_dynamics/algebra/slide_causal_reads_backwards.py, advanced_axis_dynamics/algebra/absorb_linear_maps.py, advanced_axis_dynamics/registries/part_combination.py, advanced_axis_dynamics/registries/derivative.py, advanced_axis_dynamics/validate_advanced_axis_dynamics.py, advanced_axis_dynamics/validate_covariant_broadcast.py
 status: partly implemented
-agent: Claude Opus 5 (1M context), reasoning effort medium, 2026-09-15; extended by Claude Opus 5 (1M context) at reasoning effort high, 2026-09-15; the concatenated axis by Claude Fable 5.1 at reasoning effort high, 2026-09-15
+agent: Claude Opus 5 (1M context), reasoning effort medium, 2026-09-15; extended by Claude Opus 5 (1M context) at reasoning effort high, 2026-09-15; the concatenated axis by Claude Fable 5.1 at reasoning effort high, 2026-09-15; the index dragged backwards by Claude Fable 5.1 at reasoning effort 80, 2026-09-25
 ---
 
 # Advanced Axis Dynamics
@@ -22,13 +22,15 @@ through the rest of the expression. And an operation that reads two axes with tw
 different forms at once has no one form to read, so the axes are concatenated and the
 form of each is **restored** by rewriting every consumer of the concatenation.
 
-The feature is written so that nothing else depends on it. `data_structure/`, `graphs/`
-and `algebra/` import none of it, and the folder is reached only by `deepseek/`, two
-modules of `para/` and
-`notebooks/sota/DeepSeekV41Flash.ipynb`, which is the one model in the repository that
-reads at a negative stride. A change here therefore leaves every other validation
-untouched, which is why the requester asked on 2026-09-15 for the machinery to be moved
-out of `data_structure/StrideCategory.py`.
+The feature is written so that the core depends on none of it. `data_structure/`,
+`graphs/` and `algebra/` import none of it. The folder is reached by `deepseek/`,
+`caching/`, the quantisation rule of a concatenation, the listing of a concatenated
+axis, and the model packages under `notebooks/`, whose masks read at a negative
+stride. A change here therefore leaves the validations of the core untouched, which is
+why the requester asked on 2026-09-15 for the machinery to be moved out of
+`data_structure/StrideCategory.py`. The feature also holds the crawls that carry an
+index or a read backwards through an expression, because a read of an axis at a
+shift is the object those crawls move.
 
 ## The axis a row states
 
@@ -40,8 +42,12 @@ $$0 \le \sum_k \sigma_k\, i_k + \sigma\, j + \beta < \text{extent},$$
 and the unit elsewhere. The form is the row of the stride morphism whose read produced the
 axis. The number of live positions is a floor of the form and is not affine, so the axis
 carries the form and derives the count. It prints as `w|x`, the axis letter, a bar and the
-guide letters. [[Padding and Masks as Sparse Axes]] states the three reads that produce one and the
-rules the unit's laws give.
+guide letters. Since 2026-09-27 its name carries the code form of the axis it replaces,
+so the legend of a figure names `w|x` by the code name of `w`. A merge that carries such
+an axis past the axis guiding it writes the axis onto a fresh one of the same body, code
+form and size, so the slots `r|b` of DeepSeek-V4.1-Flash carried into the queries come
+out as `r|x` under the code name of `r`. [[Padding and Masks as Sparse Axes]] states the
+three reads that produce one and the rules the unit's laws give.
 
 | name | what it is |
 |---|---|
@@ -363,6 +369,232 @@ concatenation's reverse rule until 2026-09-17. `algebra.define_by_expansion`
 pairs the operator with it in a `cat.DefinedExpression`, which a figure draws as the
 operator, `:=` and the expansion, per [[Product Categories]].
 
+## An index dragged backwards
+
+A morphism $F$ lifted over an axis $x$, written $[F; x]$, computes $F$ once at every index of $x$, so its result read at one index $i_t$ of $x$ is $F$ computed on the input read at $i_t$: $[F; x](z)[i_t] = F(z[i_t])$. The requester asked on 2026-09-25 for that rule to be applied by a reverse crawl, so that one index of one axis of a result is carried back through an expression to its inputs, and `advanced_axis_dynamics/algebra/drag_index_backwards.py` is the crawl. The rule holds for every `Broadcasted`, because the operator is broadcast over its degree and each reindexing maps a degree index of the result to the degree index of the operand read by it. A fixed index of the result therefore fixes the index of every operand read through a row of that index.
+
+An axis of an array is pinned at an index when the result being computed reads that
+axis at that one index. The pins of a wire are one entry per axis, the index or `None`.
+`IndexPinCrawler` is a `ReverseCrawler` over **Br** whose guide is the pins of each
+wire, per [[Crawlers]]. At a `Broadcasted` it drops the pin of every target position,
+because the operator reads the whole of the array it receives, and carries the pins of
+the degree through each reindexing with `ReindexingPinCrawler`, a `ForwardCrawler` over
+**St**, because a reindexing maps the degree of the result to the degree of the operand.
+The two directions are the contravariance of an operand in its reindexing. The crawl
+over the expression runs from the codomain to the domain, and the crawl through each
+reindexing runs from its domain to its codomain. A row of a stride morphism pins its
+codomain axis at the value taken by the row where every domain axis read by the row is pinned,
+and leaves the codomain axis free otherwise. A row reading no axis pins its codomain
+axis at its shift. A `ops.BlockOperator` computes its body on the targets of its
+operands, so the pins of its target positions are carried through the body and out to
+the operands, and only a pin on a target the body itself consumes is dropped. Every
+box of GLM-5.3 is built with every axis of the box in its target, so without that rule
+the index would stop at the gathers, the indexer and the rotations.
+
+A wire read by several operations carries the pins those operations agree on and is
+free wherever two of them differ. The requester stated the rule: an index that meets an
+expression at several points, at several result slots or through a copy, continues only
+where every one of them holds the same value. `Crawler.merge_guides` in
+`graphs/processing/hypergraph_crawler.py` was added for it. Every crawler had merged the
+guides of a wire read twice with `util.iallequals`, which raises on a disagreement, and
+the merge is now a method with that default, which `IndexPinCrawler` overrides with
+`agreed_pins`.
+
+The crawl rebuilds the expression. A pinned position carries the axis `AffineGuards.axis_pinned_at` builds, an `AffineSparseAxis` with no guide, unit stride, the negative of the index as its shift and an extent of one, which is the form $0 \le j - i_t < 1$ and holds a value at $i_t$ alone. It keeps the size of the axis it replaces and is named `x[i_t]` as one body, so a wire the index reached draws with that label and tsncd needs no new term. `PinnedAxes` makes one such axis per axis and index, so every wire pinned at one index of one axis carries one term and the rebuilt expression composes. Where an operation asks for a pin the wire before it does not carry, which happens after a copy whose branches disagree and after an operator whose target the index does not cross, the crawl writes an `ops.View` between the two, with the pinned axis on its domain, the dense axis on its codomain and the identity row between them, named `[i_t]`. `DraggedIndex.stops` lists those views in the order they were written, and `DraggedIndex.domain_pins` the pins of the inputs.
+
+| name | what it is |
+|---|---|
+| `Pins`, `free_pins`, `agreed_pins`, `pins_carried` | the pins of one array, every axis free, the pins several readers agree on, and the pins read off a rebuilt array |
+| `row_pin`, `pins_over_degree` | the index computed by a row from pinned domain axes, and the pins of an array from the pins of a degree |
+| `PinnedAxes` | one pinned axis per axis and index |
+| `ReindexingPinCrawler` | the forward crawl over **St** |
+| `IndexPinCrawler` | the reverse crawl over **Br**, with `read_pinned_positions` writing a stop |
+| `drag_index_backwards`, `codomain_pinned_at`, `DraggedIndex` | the entry point, the pins of a codomain with one axis pinned, and the result with the stops and the pinned axes |
+| `TargetPins` | what an operator does with the pins asked of its targets: a box carries them through its body, and every other operator drops them |
+| `pin_guards`, `guard_pinned_at` | the step after the crawl that substitutes the index into every guard whose guide it passed through, and the guard written by the substitution |
+
+On attention without a causal mask, the result pinned at the query index $i_t$ drags the
+index through the output projection, the contraction against the values, the softmax,
+the scale, the score contraction and the query projection, because $x$ stands in the
+degree of every one of them. The keys and the values stand at $x'$, which the softmax
+and the contraction against the values consume, so nothing pins them and their
+projections read the whole state. At the copy the query branch asks for $i_t$ and the
+two other branches ask for every position, so the index stops there and one view reads
+position $i_t$ of the state for the queries. The rebuilt expression is attention for
+one query against every key and value, which is the form a decoding step computes.
+
+### A pinned guide
+
+A guarded axis names the axes read by its form as its `guides`, so a pin on one of those axes reaches the form. The causal mask of `notebooks/classic/shared_mechanisms.py` reads the keys at $i_x - i_w$ and marks the slot axis `w|x`, which holds a value where $0 \le i_x - i_w < |x|$. With $x$ pinned at $i_t$ the slot axis becomes `w|x[i_t]`, the same form with $i_t$ substituted for $i_x$, which holds a value where $0 \le i_t - i_w < |x|$ and reads no guide. The name says that the axis is pinned up to the location of $x$. The requester asked for that reading on 2026-09-25, and later the same day for it to be written as a step after the crawl, because a covariant view relates its axes by a map the pin cannot state, and a step that reads the rebuilt expression can be told what it needs.
+
+`drag_index_backwards.pin_guards` is that step. It reads the domain and the codomain of every operation of the rebuilt expression. A guarded axis that stands on no array without the pinned form of one of its guides beside it is replaced everywhere, through an `fd.Context`, by `guard_pinned_at`: the index substituted into the form, the guide dropped, and the name `w|x[t_x]`. On the causal attention the slot axis reads no guide, has the stride $-1$, the shift $t_x$ and the extent $|x|$, and at five positions with $t_x$ bound to 2 its live slots are 0, 1 and 2. The crawl itself leaves a guide alone. The row of the mask view reads the pinned $x$ and the free $w$ together, so the key and value projections read the whole state, which is a gap listed below.
+
+Two things still stand between the substitution and a rule for every guard, and the
+step leaves such a guard alone.
+
+The guide need not be the pinned axis. An expression may batch $x$ before the guarded read, as the group view of DeepSeek-V4.1-Flash reads the queries by group and offset, $i_x = |a|\, i_b + i_a$, so the slot axis is guarded by $b$ and $a$ and not by $x$. A pin on $x$ then reaches the guides only through the reindexing that relates them, and that relation is a floor and a remainder, which no affine form states. The guides of a guarded axis are the axes its row read when the axis was marked. The axis carries no record of how those axes relate to the axes of the arrays it later stands in, so the substitution cannot be made from the axis alone.
+
+The form need not be a window. A guard may read several guides at several strides, and a guide may be pinned at an expression rather than at an index, as $2 i_t + 1$ after a strided read. Substituting a pin into such a form gives a form in the remaining guides that is still affine. Whether that form is a window, a prefix or a condition with no name the display can give it is not decided.
+
+## The read moved backwards
+
+The crawl above carries an index and leaves every operator where it stands. The
+requester asked on 2026-09-25 for a second process that carries the read itself, so
+that the index morphism slides over the expression, composes with every reindexing it
+meets and is written once where the branches of a copy agree.
+`advanced_axis_dynamics/algebra/move_reads_backwards.py` is that crawl, and it is the
+Yoneda trick of [[Yoneda and Cartesian Tricks]] run mechanically, from the result of
+an expression towards its inputs. The requester calls the whole process Yoneda sliding.
+
+A read is an `ops.View`, and its reindexing maps the axes of its result to the axes of its operand. The pending read of a wire is the reindexing of the view that would stand on it, an `sc.StrideMorphism` whose codomain is the wire's axes in order, or `None` where nothing is read. The index morphism is the read with no domain axis whose one row is the shift $t_x$, where $t_x$ is the index of the axis $x$, beside the identity on every other axis of the result, and `index_read` builds it. `ReadCrawler` is a `ReverseCrawler` over **Br** whose guide is the pending read of each wire, per [[Crawlers]].
+
+At a `Broadcasted` the read splits by the output weave. A row onto a target position
+must be the identity on that axis, because the operator reads the whole target, and
+the rows onto the degree positions form the read of the degree, from the axes the
+read returns at its tiled positions to the degree. That read composes with each
+operand's reindexing, by `compose_stride_morphisms`, after `as_stride_morphism` has
+written the reindexing as one stride morphism. A composite whose every row selects one
+degree axis at unit stride, and reads that axis as itself, stays in the operator as its
+reindexing, as a rearrangement. A row that reads one axis as another is a renaming, and
+since 2026-09-26 it moves onto the operand like any other read, because a rearrangement
+left in the operator would read an axis the operand's wire does not carry. Where any
+row does more, the composite moves onto the operand's wire as its pending read, and the
+operator keeps the projection onto the axes needed by the read, so a repeat stated by
+the operator stays in the operator. The operator is rebuilt over the read's domain, with the
+tiled positions of its weaves counted afresh, and a view whose reindexing is now the
+identity is dropped. A read the operator cannot pass, because a target row is not the
+identity, is written after it as a view, and the operands are read as they were.
+
+A composite is named after the reindexing of the view it composed into, and after the
+read where that reindexing carries no name. A view written with a `cat.Rearrangement`,
+such as the diagonal of a mixture of experts, holds its name on the `ops.View` alone, so
+since 2026-09-27 `reindexing_named_after_its_view` gives the rearrangement the view's
+name before the composition, where `ReadCrawler.read_yields_its_name` says the incoming
+read yields. A read carrying no name yields, and the derivation of a cached pass lets
+its reads `New` and `Cached` yield too. `view_of` writes a named read that only copies,
+permutes or deletes axes as rearrangements under the view's name, so a diagonal written
+out again still draws as a dot on its wire.
+
+The domain of a pending read is ordered by the first row that reads each axis, in
+`in_reading_order`, so two branches that read one wire the same way carry equal reads
+whatever the order of the degrees they came through. At a `Rearrangement` the reads
+asked of the wires copied from one wire are grouped by that equality, in `read_groups`.
+A wire whose branches all ask for one read carries it further. A wire whose branches
+disagree stops the reads, and each distinct read is written once after the copy, as a
+view whose result is copied to the branches that asked for it, which is the Cartesian
+trick of the same note.
+
+Two operators pass more, per the requester's second request of 2026-09-25. A
+`ops.BlockOperator` computes its body on the targets of its operands, so the rows onto
+its target positions are a read of the body's result. `through_box` splits the read
+into the read of the degree, carried as for any operator, and the read of the target,
+carried through the body by the same crawl and out to the operands, where
+`carry_through_operand` joins the two parts into one read on the operand's wire. An
+operator with several results passes a read where every result is read and the reads
+of the degree agree, which the channel cut of the indexer's rotation needs. An
+`ops.Arrange` writes the index of every position of its axis, so its result read
+through a row is the value of that row, and `index_values` writes it. A row with no
+domain axis is its shift, from an `ops.ConstantOp`, and a row over one axis is the
+arrangement of that axis followed by the affine map of the row, from an
+`ops.Arithmetic`. The requester stated the rule as an index that goes through an
+arrangement becoming the covariant view of the index, and noted that an arrangement is
+over one axis, so a row over several axes stops the read. `written_out` writes the
+operators of given classes out by their standard expansions inside every box, so that a
+rotary table is met as the arrangement of its positions.
+
+| name | what it is |
+|---|---|
+| `Read`, `index_read` | the pending read of a wire, and the index morphism on one axis of one result |
+| `compose_stride_morphisms`, `as_stride_morphism` | two stride morphisms composed by position, and any morphism of **St** written as one |
+| `in_reading_order`, `same_read` | the domain order the reads are compared in, and the comparison, which ignores names |
+| `split_at_weave`, `SplitRead` | the read of the degree and the weave of the result of the read |
+| `carry_through_operand`, `CarriedRead` | the composite kept or moved, the operand's weave, and the projection kept by the operator |
+| `read_groups`, `ReadGroup` | the branches of a copy that ask one wire for one read |
+| `index_values` | the values of a read's one row over its domain, which an arrangement read through it returns |
+| `written_out`, `WriteOutOperators` | the operators of given classes written out by their standard expansions, inside every box |
+| `ReadCrawler`, `move_reads_backwards`, `MovedReads` | the crawl, with `through_box` and `splits_agreeing_on_the_degree`, the entry point, and the result with the reads that reached the domain and the stops |
+
+On the attention with the causal mask the index morphism slides through the output
+projection, the contraction against the values, the softmax, the scale and the score
+contraction, dropping the axis $x$ from every wire, and reaches the mask, which
+composes into it as the read $x = t_x - j_w$ of one axis by one axis. That read moves
+in front of the key and value projections, which then run over the slot axis. At the
+copy the query branch asks for $t_x$ while the key and value branches ask for the
+composed mask, so the state is read twice and the mask's result is copied to both
+projections. The result is one vector of width $m$, the attention of one query against
+the positions before it.
+
+On the Full mode of GLM-5.3, with its rotary tables written out first, the read enters
+the query path, where the copy of the low rank agrees and the state is read once at
+$t_x$. It enters the two gathers, where the relative read of the distances composes into
+it as the read named Back, $x = t_x - j_r$, which moves in front of the key and value
+projections. It enters the indexer, whose scoring box is broadcast over the queries and
+passes it, and whose own copy of the state disagrees, the keys asking for Back and the
+head weights for $t_x$, so both are written inside the box and the indexer reads the
+state whole. In the rotation bodies the read meets the arrangement of the positions: the
+query rotation holds the constant $t_x$ where the positions stood, and the key rotation
+holds the arrangement of the distances followed by $t_x - x$.
+
+The slot axis the composed mask returns is still `w|x`, guided by the $x$ the read has
+read away, which is the pinned guide above in another form. The composite's own row
+states the guard the axis should carry, $0 \le t_x - j_w < |x|$, and
+`mark_sparse_domains.mark_sparse_domain` applied to the composite would derive it as a
+form with no guide, because $w$ is the one domain axis the row reads. That rule is the
+candidate, and it is not applied.
+
+The derivation of a cached pass is the same crawl carrying the read of the new tokens of
+a pass, per [[Deriving Caches by Dragging the New Tokens]]. `ReadCrawler.through_tape_seed`
+passes a bare tape seed, which carries no read where its array holds no axis the read
+names.
+
+## The causal reads slid backwards
+
+`advanced_axis_dynamics/algebra/slide_causal_reads_backwards.py` starts the read crawl at
+every causal read of an expression, a view whose row reads its own axis at stride one
+and other axes at strides of zero or less, and carries the read back until a copy whose
+other branches read the operand unmasked. The result is the CausalSlide, which the user
+ruled on 2026-09-26 to be the standard form of a displayed expression, per
+[[Representing Models]] and [[Yoneda and Cartesian Tricks]]. Every page of
+[[Website Notebooks]] draws its model in that form.
+`slide_causal_reads_back_past` carries each read past a given set of operators alone, a
+box among them passing its whole body. The position of the read is the placement of a
+cache, per [[Deriving Caches by Dragging the New Tokens]].
+
+The slide enters the body of every box and every `ParaWrap` since 2026-09-27. A causal
+read inside a body slides to a copy inside it or to the domain of the body, and a read
+at the domain of a box's body leaves the box as the pending read of the operand, so the
+box then reads the result of the read. A read at an operand grabbed by a wrap from the
+tape stops at the grab. Before the change the slide left a model whose causal reads sit
+inside boxes unchanged, which every model of `notebooks/sota/` is. Two reads meet at a
+copy only when they are equal, and each call of `mark_sparse_domains.guarded_view` mints
+a fresh sparse axis. GLM-5.3 therefore marks its read back once, as
+`lightning_indexer.READ_BACK`, so the key and value branches of a layer ask the latent
+for one read and the read passes the copy of the latent.
+
+A body the crawl rebuilds is a different block, and `through_box` gives it a tag derived
+from its old tag and its new body with `with_the_tag_of_its_body`, as the quantisation
+pass tags a quantised block. A figure draws one body per tag and a page opens one body
+per tag. Before the change the rotation of the window latent of DeepSeek-V4.1-Flash,
+which reads its table through the window, shared the tag of the rotation of the query
+and was drawn and opened as that rotation.
+
+## A linear map absorbed into the contraction that reads it
+
+`advanced_axis_dynamics/algebra/absorb_linear_maps.py` finds a chain of two
+contractions, the second reading the result of the first directly or through a view,
+and rewrites it into the order of its operands that costs the fewest operations at
+bound sizes. The view is carried onto the first contraction's operands by the read
+crawl, the two are merged by `einops_rearrange.merge_einops`, and `contract_pair_first`
+splits the merged contraction with a chosen pair contracted first. The operations of an
+order are counted by `morphism_work.read_symbolic_work`, per
+[[Operation Counts and Machine Rates]]. The search runs inside each scope of the
+hypergraph, so a producer and a consumer in different blocks are not paired, and a
+`Linear` whose weight is inside the operator is written as a contraction first by
+`linear_expansion.expand_linear_root`. The module sits here rather than in `algebra/`
+because it uses the read crawl. [[Einops Rearrangement]] states the merge, and
+[[Deriving Caches by Dragging the New Tokens]] applies the rewrite to the cached pass of
+multi-head latent attention, where it derives the absorb mode of DeepSeek-V3.
+
 ## What the move changed
 
 The code was `data_structure/StrideCategory.py`, which had grown past 1100 lines, and
@@ -371,8 +603,8 @@ in the move, and two things about the package did.
 
 `ops.View.template` no longer marks. Four models acquired a guard through
 `ops.Elementwise.template` and no longer do: the multi-token-prediction shift of GLM-5.2,
-the sliding windows of Kimi-K3 and of DeepSeek-V4-Flash, and the padded convolution of
-a padded convolution. Each states a read that does leave its axis, and each
+the sliding windows of Kimi-K3 and of DeepSeek-V4-Flash, and a padded convolution.
+Each states a read that does leave its axis, and each
 would carry its guard again by calling `mark_sparse_domains.guarded_view` in place of
 `ops.View.template`. None of them asserts anything about a guard and all four notebooks
 execute, so the change is recorded here rather than applied, and the requester's ruling
@@ -387,6 +619,28 @@ caller from the day it was written, and `eliminate_group` raises
 
 ## Gaps
 
+- **A row reading a pinned axis and a free axis together leaves its codomain axis
+  free.** The causal read $i_x - i_w$ at a pinned $i_x$ reads the positions $i_t - i_w$
+  for every $i_w$, which is a window, and a window is an `AffineSparseAxis` with an
+  extent rather than a pin. `drag_index_backwards.row_pin` returns `None` for such a
+  row, so a drag through a causal or windowed attention frees the keys where the window
+  would be right. A repeated block asserts that the pins leaving it equal the pins
+  entering it, so a loop whose body drops the pin raises, and the fixed point a loop
+  needs is not computed. The crawl runs on the morphism form, because the hypergraph
+  form merges the readers of a wire by identity and the view needed by a stop would have to
+  be spliced in. A pinned guide is left alone, per *A pinned guide* above, so the read
+  crawl leaves the slot axis it moves in front of the projections guided by the $x$ it
+  has read away, although the composed mask states the guard. `pin_guards` leaves a
+  guard whose guide is not the pinned axis, a guard by a form the substitution does not
+  simplify, and a `deepseek.SparseAxis`, which carries no form. The two gathers of
+  GLM-5.3 each mark a distance axis of their own, so the latent is read twice through
+  two reads that state one map over two axes, and the crawl, which compares reads by
+  their axes, writes both. [[Open Gaps]] lists these gaps.
+- **No public validator runs the index crawl.** `validate_advanced_axis_dynamics.py`
+  checks the guarded reads, the concatenation and the reverse rules, and nothing public
+  calls `drag_index_backwards`. The read crawl is checked where it is used, by the
+  validators of [[Website Notebooks]], which check the CausalSlide of each model and the
+  cached passes derived through the crawl.
 - **Nothing reads a guarded axis as anything but a dense one.** A pass that divided such
   an axis would have to classify each part as wholly live, wholly empty or straddling, and
   none does, which is the account in [[Padding and Masks as Sparse Axes]].
@@ -428,3 +682,6 @@ caller from the day it was written, and `eliminate_group` raises
 - [[Representing Models]] — how a model is written with these reads
 - [[The Universal Unit]] — what an empty position holds
 - [[Compound Axis Labels]] — how a guarded axis and a concatenated axis carry their assigned sizes
+- [[Crawlers]] — the reverse crawler both crawls extend
+- [[Deriving Caches by Dragging the New Tokens]] — the read of the new tokens of a pass,
+  carried by the read crawl, and the causal read slid back as the placement of a cache

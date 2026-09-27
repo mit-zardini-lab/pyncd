@@ -98,7 +98,6 @@ lands on the axis the fibre is summed onto.
 The implementation does not factor the context $X$ out. The transpose is built with an empty
 degree and the whole of $P$ and $Q$ in the targets of its weaves, so the transpose of a
 batched convolution consumes the batch axis rather than being broadcast over it.
- states why, and what changing it would take.
 
 The same argument is why a `cat.Rearrangement` under a `Contravariant` can never be read as
 a `Rearrangement` in the value direction. Reversing a copy is addition, and addition is not a
@@ -316,8 +315,10 @@ input pair of `TopK.complete` cannot state that, and `ArgTopK ; IndexSelect` can
 - **A residual is declared a-priori, not derived.** Defaulting it to `dom` is a policy, and it
   should be written as one.
 - **Transpose the linear legs alone.**
-- **A morphism that is already linear needs no residual.** A `Linear`, or a node, a repeat
-  included, propagates the cotangent on its own, so taping the input is pure cost. The
+- **A morphism that is already linear needs no residual.** A `Linear`, a node, a repeat
+  included, and an `Arithmetic` that multiplies by a constant each propagate the cotangent
+  on their own, so taping the input is pure cost. The `Arithmetic` case holds since
+  2026-09-27, per [[Backpropagation]]. The
   residual is `()` and should be written as `()`.
 - **A repeat need not survive into the result.** It is a `View` whose reindexing drops the
   repeated axis, which makes it a node, so whatever reads it can broadcast on its own, and

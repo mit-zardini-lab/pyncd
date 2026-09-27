@@ -38,7 +38,8 @@ from notebooks.sota.DeepSeekV41Flash.construction_idioms import (
     boxed, hold, l1_norm_over, over, route)
 from notebooks.sota.DeepSeekV41Flash.custom_operations import (
     indicator, multiply_along, sigmoid_weighted_input, sqrt_softplus, weights)
-from notebooks.sota.DeepSeekV41Flash.declared_axes import R, e, f, kexp, m, x
+from notebooks.sota.DeepSeekV41Flash.declared_axes import (
+    CHOSEN_EXPERTS, R, e, f, kexp, m, x)
 from notebooks.sota.DeepSeekV41Flash.reference_links import model_lines
 from notebooks.sota.DeepSeekV41Flash.block_titles_and_descriptions import TEXT as text
 
@@ -46,6 +47,7 @@ GATE_BOX = 'Gate'
 GATE_COLOUR = '#F7E0EF'
 MIXTURE_BOX = 'MoE'
 ROUTER_BIAS_NAME = '\\mathrm{bias}'
+DIAGONAL_VIEW_NAME = '\\mathrm{Diagonal}'
 
 TOKEN_STATE = cat.Array(R, (m,))
 
@@ -64,7 +66,7 @@ def router() -> tuple[cat.BroadcastedCategory, cat.Axis]:
     in a box together with the normalisation. The bias chooses the six experts and the
     unbiased scores weight them.'''
     scores = cat.Array(R, (e,))
-    sel = dst.TopK.template(k=kexp, axis=e, name='k/e')
+    sel = dst.TopK.template(k=kexp, axis=e, name=CHOSEN_EXPERTS)
     ke = sel.cod()[0].shape()[0]
     picked = (ops.Linear.template((m,), (e,), 'W^{R}') @ sqrt_softplus()
               @ route((0, 0), (scores,))
@@ -102,7 +104,7 @@ def down_projection(ke: cat.Axis) -> cat.BroadcastedCategory:
     return (over((ke,), ops.Linear.template((f,), (e, m), 'W^{D}'))
             @ ops.View.template(
                 reindexing=cat.Rearrangement((0, 0, 1), (ke, m)),
-                name='diag'))
+                name=DIAGONAL_VIEW_NAME))
 
 
 def routed_experts(ke: cat.Axis) -> cat.Block:

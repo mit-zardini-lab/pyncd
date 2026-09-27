@@ -93,7 +93,9 @@ The selector is an operand, because an injection has to say which of the `n` pos
 `inject.selection_slot` derives from the sparse axis through `fd.hash_id`, so the drop a
 forward expansion writes and the grab this rule writes agree on the slot with nothing
 shared between them but the axis they both name. `nm.FreeNumeric.named` derives an id the
-same way, and it is the only other place in the package that does. In the complete spelling
+same way, and it is the only other place in the package that does. The slot is inner, per
+[[Outer and Inner Tape Slots]], because each token selects its own positions, so a lift over
+a batch axis stores one index for every index of that axis. In the complete spelling
 the index is the `TopK`'s second output, and `complete_top_k` declares it as the residual,
 so `backprop` drops it in the forward pass and grabs it in the reverse. A model that
 already drops the index to a slot, which is what `expand_sparse_onto_tape` produces, then

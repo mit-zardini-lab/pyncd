@@ -11,9 +11,9 @@ reads and folds, and restored when a consumer needs the parts of an axis separat
 This folder holds that derivation.
 
 Nothing in `data_structure/`, `graphs/` or `algebra/` imports it, so a change here
-reaches only `deepseek/`, two modules of `para/` and the DeepSeek-V4.1-Flash packages
-under `notebooks/sota/`, which hold the one model that reads at a negative stride. A
-validation of anything else need not be run for a change here. It imports
+reaches only `deepseek/`, `caching/`, two modules of `para/`, and the notebooks that
+read at a negative stride or derive a cache. A validation of anything else need not
+be run for a change here. It imports
 `algebra.discovering_broadcasts` and `algebra.registries.accumulator` itself, which sit
 below it and reach nothing of it.
 
@@ -42,6 +42,31 @@ below it and reach nothing of it.
                               scope
       disentangle_reindexings the independent maps a reindexing holds, as the product
                               of one factor per connected component of its rows
+      drag_index_backwards    one index of one axis of a result carried back to the
+                              inputs by a reverse crawl, `[F; x](input)[t_x] =
+                              F(input[t_x])`, every position it reaches pinned at
+                              it, carried through the body of every box, a view
+                              written where it stops, and `pin_guards`, which
+                              afterwards substitutes the index into every guard
+                              whose guide it passed through
+      move_reads_backwards    the read of a result moved back towards the inputs by
+                              the same crawl, composed into every view it meets,
+                              carried through every operator broadcast over the axes
+                              it reads and through the body of every box, and turned
+                              into the values of the index at an arrangement, so
+                              that the index morphism `t_x` and the causal mask
+                              become one view in front of the key and value
+                              projections and the rotary table of GLM-5.3 becomes
+                              the turns of the one query
+      slide_causal_reads_backwards
+                              the same crawl started at every causal read, which
+                              moves it back to the copy it masks and gives the
+                              CausalSlide, the standard form of a displayed
+                              expression
+      absorb_linear_maps      a chain of two contractions rewritten into the order
+                              of its operands that costs the fewest operations at
+                              bound sizes, which absorbs the up-projections of
+                              multi-head latent attention into its queries
 
     registries/
       part_combination  the operator folding the partial results over the parts,
@@ -68,6 +93,10 @@ three reads that produce a guard in
 
 from advanced_axis_dynamics.algebra import (
     concatenation_expansion as concatenation_expansion)
+from advanced_axis_dynamics.algebra import (
+    drag_index_backwards as drag_index_backwards)
+from advanced_axis_dynamics.algebra import (
+    move_reads_backwards as move_reads_backwards)
 from advanced_axis_dynamics.algebra import (
     mark_sparse_codomains as mark_sparse_codomains)
 from advanced_axis_dynamics.algebra import mark_sparse_domains as mark_sparse_domains

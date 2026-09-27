@@ -1,0 +1,61 @@
+{
+  "name": "Current",
+  "wordings": {
+    "MODEL_TITLE": "\\text{DeepSeek-V3}",
+    "MODEL_DESCRIPTION": "The released DeepSeek-V3, a decoder transformer of 671 billion parameters that DeepSeek published with open weights in December 2024, at the sizes of config_671B.json of its inference code. It reads the token identifiers of a sequence and returns one score for every token of a vocabulary of 129280 at every position. The embedding is followed by 61 layers. Each layer is multi-head latent attention followed by a feed-forward sublayer, which is a dense multi-layer perceptron in the first D = 3 layers and the DeepSeek mixture of experts in the L = 58 later layers. A final RMSNorm and the head give the scores.",
+
+    "EMBEDDING_TITLE": "\\text{Embedding}",
+    "EMBEDDING_DESCRIPTION": "The token identifiers of the sequence, one per position, each an entry of a vocabulary of 129280 tokens. The embedding E holds one learned vector of m = 7168 values for every token and returns the vector of the token at each position.",
+
+    "DENSE_LAYER_TITLE": "\\text{Dense Layer}",
+    "DENSE_LAYER_DESCRIPTION": "The first D = 3 layers, each with weights of its own. Each layer applies multi-head latent attention and then the dense multi-layer perceptron, each after an RMSNorm and inside a residual connection.",
+    "MOE_LAYER_TITLE": "\\text{MoE Layer}",
+    "MOE_LAYER_DESCRIPTION": "The L = 58 later layers, each with weights of its own, which with the D dense layers make the 61 layers of the model. Each layer applies multi-head latent attention and then the DeepSeek mixture of experts, each after an RMSNorm and inside a residual connection.",
+
+    "ATTENTION_TITLE": "\\text{Multi-head Latent Attention}",
+    "ATTENTION_DESCRIPTION": "The keys and the values of every head are projected from one latent of 512 values per token, so a cache of generated tokens can hold the latent and one turned key of 64 values per token, where standard attention holds a key and a value for every head. The queries are projected through a low rank of 1536 values. Each of the h = 128 heads has a query and a key of d = 192 channels, of which d_n = 128 carry no position and d_r = 64 are turned by the rotary embedding. Every head shares the turned part of the key. Each token attends to itself and to every earlier token, and W^O maps the weighted values of the heads back to the model width.",
+    "QUERY_GENERATION_TITLE": "\\text{Q Generation}",
+    "QUERY_GENERATION_DESCRIPTION": "The query of every head, projected through a low rank. W^DQ projects the hidden state to a query latent of l_q = 1536 values, which an RMSNorm normalises. W^UQ projects the query latent to the d_n channels of every head that carry no position, and W^QR projects it to the d_r channels the rotary embedding turns. The two runs are laid end to end as the d channels of the query.",
+
+    "MLP_TITLE": "\\text{Multi-Layer Perceptron}",
+    "MLP_DESCRIPTION": "The dense feed-forward network of the first three layers, a SwiGLU with an inner width of u = 18432. W_1 and W_3 project the token to u values each, the sigmoid linear unit is applied to the first, the two are multiplied, and W_2 maps the product back to m.",
+
+    "MOE_TITLE": "\\text{DeepSeek MoE}",
+    "MOE_DESCRIPTION": "A mixture of n = 256 routed experts, of which each token reads k = 8, and one shared expert, which every token reads. The gate chooses the eight experts of each token and weights them. The output is the sum of the eight routed experts under those weights, added to the output of the shared expert.",
+    "GATE_TITLE": "\\text{Gate}",
+    "GATE_DESCRIPTION": "W^g scores each of the n experts for a token, and the sigmoid maps each score into the interval from 0 to 1. The correction bias is added to one copy of the scores, and that copy chooses the experts. The 256 experts are split into g = 8 groups of j = 32. Each group is scored by the sum of its b = 2 best biased scores, and the p = 4 best groups are kept. The eight best biased scores among the c = 128 experts of the kept groups choose the experts. The unbiased scores of the chosen experts are divided by their sum and multiplied by the route scale gamma = 2.5, so the bias changes which experts run and never scales the output of an expert.",
+    "ROUTED_EXPERTS_TITLE": "\\text{Routed Experts}",
+    "ROUTED_EXPERTS_DESCRIPTION": "Each chosen expert is a SwiGLU with an inner width of f = 2048. Each projection holds the weights of all n experts and reads those of the expert each slot chose, and the view named Diagonal keeps the output of that expert.",
+    "SHARED_EXPERTS_TITLE": "\\text{Shared Expert}",
+    "SHARED_EXPERTS_DESCRIPTION": "The one shared expert, which every token reads, a SwiGLU with an inner width of s = S f = 2048.",
+
+    "OUTPUT_TITLE": "\\text{Output Projection}",
+    "OUTPUT_DESCRIPTION": "The final RMSNorm is applied to the hidden state of every position, and the head projects it to one score for each of the 129280 tokens of the vocabulary. The released forward pass keeps the last position alone during generation, and a sampler turns its scores into probabilities.",
+
+    "TOP_TWO_DESCRIPTION": "The two highest biased scores of each group of experts. The group is scored by their sum alone, so the selection hands out the values without the positions they came from.",
+    "KEPT_GROUPS_DESCRIPTION": "The positions of the four groups with the highest scores. No score of a group is read again, so the selection hands out the positions alone.",
+    "CHOSEN_EXPERTS_DESCRIPTION": "The eight highest biased scores among the candidate experts, on the axis k/n, whose live positions are the chosen experts. Each candidate carries its position among the n experts, so the selection reports positions of n. The score of every other expert is the unit, which the operations that follow ignore.",
+    "INDEX_SELECT_DESCRIPTION": "The biased score of every candidate expert, read at the position among the n experts that the candidate holds.",
+    "SELECT_DESCRIPTION": "The unbiased score of every chosen expert, read at its live position on k/n and multiplied by the value there, which the indicator before it sets to one.",
+    "MERGED_POSITIONS_DESCRIPTION": "The position among the n experts of every expert of a kept group. Expert i_j of group i_g stands at position |j| i_g + i_j.",
+    "CANDIDATE_VIEW_DESCRIPTION": "The positions of the experts of the four kept groups laid out along the candidate axis c, the kept group first and the expert of the group second.",
+
+    "SCORE_SCALE_ROLE": "Every score multiplied by the inverse square root of d = d_n + d_r and by mu squared, with mu = 0.1 m_c ln(kappa) + 1 for the default factor m_c = 1 and the YaRN factor kappa = 40, so mu = 1.3689.",
+    "INDICATOR_ROLE": "One where a biased score is positive and zero elsewhere. Every correction bias of the released checkpoint lies between 2.02 and 8.05, and every sigmoid score lies between 0 and 1, so every biased score is positive and the indicator is one at each chosen expert.",
+    "ROUTE_SCALE_ROLE": "The normalised weights of the chosen experts multiplied by the route scale gamma = 2.5 of config_671B.json.",
+
+    "QUERY_DOWN_ROLE": "The down projection of the hidden state to the query latent of l_q values.",
+    "QUERY_UP_ROLE": "The up projection of the query latent to the query channels that carry no position, d_n per head. The released wq_b holds this projection and the one of W^QR as one weight whose output is split.",
+    "ROTARY_QUERY_ROLE": "The projection of the query latent to the query channels the rotary embedding turns, d_r per head.",
+    "CORRECTION_BIAS_ROLE": "The correction bias, one number per routed expert, added to the scores that choose the experts. DeepSeek-V3 trains it to balance the load of the experts with no auxiliary loss.",
+
+    "EMBEDDING_TABLE_ROLE": "The embedding table, which holds one learned vector of m values for every token of the vocabulary.",
+    "CACHED_MODEL_DESCRIPTION": "One pass of the released DeepSeek-V3 over the new tokens x_new, derived from the model by carrying the read of the new tokens back from its result. Each of the 61 layers reads the normalised latent and the turned key of every earlier token from two caches and computes everything else at the new tokens alone.",
+    "CACHED_ATTENTION_DESCRIPTION": "The attention of one pass. The normalised latent of 512 values and the turned key of 64 values of each new token are appended to two caches, and the causal mask reads both caches at every earlier token and at the new tokens. The queries are contracted with W^UK before the scores, so the scores are taken against the cached latent directly, and W^UV is applied after the weighted sum over the slots. The released code runs this order, its absorb mode, by default.",
+
+    "WEIGHT_QUANTISATION_SENTENCE": "The weight is held in {quantisation}.",
+    "DEQUANTISED_WEIGHT_SENTENCE": "The released code multiplies every block by its scale into BF16 before each product, because its default matrix multiply is the BF16 one.",
+
+    "GROUP_VIEW_DESCRIPTION": "The biased scores of the n experts read as g groups of j experts. Expert i_j of group i_g is expert |j| i_g + i_j, which is the view of the released code."
+  }
+}

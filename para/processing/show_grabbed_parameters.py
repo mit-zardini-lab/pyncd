@@ -43,7 +43,11 @@ alone, of a slot that carries the array's own name, and no operator is left behi
 
 The parameter's weave has no `TILED` entry and its reindexing deletes the whole
 degree, which states that the weight is shared, so every batch index reads the
-same array. The domain and codomain of the whole expression are unchanged,
+same array. The slot is a `Para.OuterTapeSlot` for the same reason, so a grab
+written here and then lifted over a further axis still reads one array, and
+grabbing the parameters of a lifted operator gives the morphism that lifting the
+grabbed operator gives once the repeat the lift writes is absorbed. The domain
+and codomain of the whole expression are unchanged,
 because a `Grab` is composition-neutral, exactly as it is in
 `backprop.forward_backward`. The result is the same morphism in `Para.Para`
 form, with its parameters named.
@@ -135,8 +139,8 @@ def parameter_arrays[B: cat.Datatype, A: cat.Axis](
     The arrays are built from the seed's own weaves, so each is the size of
     the target, which is what the operator receives with the broadcasting
     excluded. A `Linear`'s weight runs over every input and then the out
-    target, through `weight_axes`, and its bias is the out target. A
-    `Normalize`'s gain and bias are each the target itself, and it has whichever
+    target, through `weight_axes`, and its bias is the out target. The gain and
+    the bias of a `Normalize` or a `LayerNorm` are each the target itself, and it has whichever
     of the two its `gain` and `bias` fields declare, the gain first. A
     non-parametric operator returns `()`, and the transform passes it by.
     '''
@@ -153,7 +157,8 @@ def parameter_arrays[B: cat.Datatype, A: cat.Axis](
             if bias:
                 parameters.append((parameter_name('b', 'bias', name), out_target))
             return tuple(parameters)
-        case ops.Normalize(gain=gain, bias=bias):
+        case (ops.Normalize(gain=gain, bias=bias)
+              | ops.LayerNorm(gain=gain, bias=bias)):
             normalised = target.input_weaves[-1].target()
             parameters = []
             if gain:
@@ -179,12 +184,21 @@ def parameter_name(letter: str, code_form: str,
                    operator_name: fd.DynamicName | None) -> fd.DynamicName:
     '''`letter` subscripted by the operator's name, as `W_{Q}`, carrying the
     code form `weight_Q`: `code_form` joined with the operator name's own code
-    form, or with its bodies as an identifier where it has none.'''
-    return fd.DynamicName(
-        letter, subscript=operator_name,
-        code_form=fd.join_code_forms(
-            code_form,
-            operator_name.code_form_or_identifier() if operator_name is not None else None))
+    form, or with its bodies as an identifier where it has none. An operator
+    already named after the letter, as `W^{Q}` or `W_{1}`, gives the parameter
+    its own name, so the slot reads `W^{Q}` rather than `W_{W^{Q}}`.'''
+    joined_code_form = fd.join_code_forms(
+        code_form,
+        operator_name.code_form_or_identifier() if operator_name is not None else None)
+    if operator_name is not None and is_named_after_letter(operator_name, letter):
+        return operator_name.with_code_form(joined_code_form)
+    return fd.DynamicName(letter, subscript=operator_name, code_form=joined_code_form)
+
+
+def is_named_after_letter(operator_name: fd.DynamicName, letter: str) -> bool:
+    '''Whether the name is `letter` itself under a superscript or a subscript.'''
+    body = operator_name.body or ''
+    return body == letter or body.startswith(letter + '^')
 
 
 @dataclass
@@ -198,7 +212,7 @@ class ShowGrabbedParameters[B: cat.Datatype](functor.Endofunctor[
     therefore used once per derivation, in the way `backprop` resets its slot
     counter once per derivation.
     '''
-    _slots: dict[tuple[cat.Broadcasted, int], Para.TapeSlot] = field(
+    _slots: dict[tuple[cat.Broadcasted, int], Para.OuterTapeSlot] = field(
         default_factory=dict)
 
     def apply_root(self, target: cat.Broadcasted[B, cat.RawAxis]):
@@ -249,10 +263,10 @@ class ShowGrabbedParameters[B: cat.Datatype](functor.Endofunctor[
         return Para.Grab(self._slot(target, 0, name), array)
 
     def _slot(self, seed: cat.Broadcasted, index: int,
-              name: fd.DynamicName) -> Para.TapeSlot:
+              name: fd.DynamicName) -> Para.OuterTapeSlot:
         key = (seed, index)
         if key not in self._slots:
-            self._slots[key] = name.capture(Para.TapeSlot())
+            self._slots[key] = name.capture(Para.OuterTapeSlot())
         return self._slots[key]
 
 
@@ -308,19 +322,26 @@ def weight_array_in_place_of[B: cat.Datatype, A: cat.Axis](
 
 
 def box_grabbed_weights[T: fd.GeneralTerm](target: T) -> T:
-    '''`target` with every `Grab` followed by the weight box `weight_box_fed_by`
-    writes for it, so a contraction that read a grabbed weight reads the result of a
-    box that names the weight.'''
-    return _with_every_grab_rewritten(target, weight_box_fed_by)
+    '''`target` with every grab of a `Para.OuterTapeSlot` followed by the weight box
+    `weight_box_fed_by` writes for it, so a contraction that read a grabbed weight
+    reads the result of a box that names the weight. A grab of an inner slot, such
+    as the load of a cache, holds no parameter and stays as it is.'''
+    return _with_every_parameter_grab_rewritten(target, weight_box_fed_by)
 
 
 def write_grabs_as_weight_arrays[T: fd.GeneralTerm](target: T) -> T:
-    '''`target` with every `Grab` replaced by the weight array
-    `weight_array_in_place_of` writes for it, so the result reads no tape.'''
-    return _with_every_grab_rewritten(target, weight_array_in_place_of)
+    '''`target` with every grab of a `Para.OuterTapeSlot` replaced by the weight
+    array `weight_array_in_place_of` writes for it, so the result reads no parameter
+    from the tape. A grab of an inner slot, such as the load of a cache, holds no
+    parameter and stays as it is.'''
+    return _with_every_parameter_grab_rewritten(target, weight_array_in_place_of)
 
 
-def _with_every_grab_rewritten[T: fd.GeneralTerm](
+def is_grab_of_a_parameter(node: object) -> bool:
+    return isinstance(node, Para.Grab) and isinstance(node.tape, Para.OuterTapeSlot)
+
+
+def _with_every_parameter_grab_rewritten[T: fd.GeneralTerm](
     target: T,
     rewrite_grab: Callable[[Para.Grab], cat.Morphism],
 ) -> T:
@@ -330,7 +351,7 @@ def _with_every_grab_rewritten[T: fd.GeneralTerm](
     def write(node: object) -> object:
         if id(node) in rewritten:
             return rewritten[id(node)]
-        rebuilt = (rewrite_grab(node) if isinstance(node, Para.Grab)
+        rebuilt = (rewrite_grab(node) if is_grab_of_a_parameter(node)
                    else fd.deep_reconstruct(node, write))
         rewritten[id(node)] = rebuilt
         return rebuilt

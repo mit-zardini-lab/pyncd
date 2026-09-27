@@ -75,8 +75,7 @@ the shorter side.
 > stands on its own: a weight does not vary with the batch, so the batch axis is
 > honest **explicit in the einsums beside it** (`'q m, e m f -> q e f'`) and a lifted
 > weight would *say* it was drawn once per batch element. What changed is that the lift
-> is now well-formed when it is what the caller means ([[Broadcasted Category]],
->).
+> is now well-formed when it is what the caller means ([[Broadcasted Category]]).
 
 > [!warning] Bare-tuple composition infers its `Rearrangement`'s domain from *positions*
 > `(0, 1, 0, 2, 3) @ f` builds a `Rearrangement`, and its `_dom` has to be read from the first
@@ -97,6 +96,20 @@ Axes            >> BroadcastedCategory  -> BroadcastedCategory
 
 `dynamic_object_lift` is the dispatcher. [[Linear Expansion]] uses `chl` directly to
 re-lift a rewritten `Linear` over the same degree it was broadcast across.
+
+A seed that is none of the four constructions has a rule in `OBJECT_LIFTS`.
+`para/registries/object_lift.py` registers the tape seeds, and the rule reads the kind of
+the seed's slot. A grab of an inner slot reads the lifted array. A grab of an outer slot
+reads its own array and is followed by a repeat along the lifted axes. A drop of an outer
+slot is preceded by a sum along the lifted axes, which is the transpose of the repeat.
+[[Outer and Inner Tape Slots]] states the two kinds of slot. The rules exist only once
+`para/registries/object_lift.py` has been imported, and `ParaBlockOperator` imports it.
+
+`algebra/factor_out_lift.py` is the inverse of the lift of a `Broadcasted`. It counts the
+leading positions of the degree added by the lift, and it returns the axes at those
+positions beside the `Broadcasted` with those positions removed. Lifting the second over
+the first gives back the original. `notebooks/display/expand_with_parameters.py` draws the
+second inside an inspection box.
 
 ## See also
 

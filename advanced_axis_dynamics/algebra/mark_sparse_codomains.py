@@ -321,7 +321,7 @@ def merge_carrying[A: sc.Axis](morphism: sc.StrideMorphism[A],
     a merge is broadcast over enter its marking.
 
     A carried `AffineGuards.AffineSparseAxis` guided by an axis the merge consumes is
-    written onto a fresh axis of its own body and size, which the marking then guides
+    written onto a fresh axis of its own body, code form and size, which the marking then guides
     by the codomain: the slots `r|b_0` carried past the merge of `(b_0, a)` into `x`
     come out as `r|x`. Every other carried axis is written onto itself.
     '''
@@ -334,7 +334,9 @@ def merge_carrying[A: sc.Axis](morphism: sc.StrideMorphism[A],
         strides[len(dom) + position] = nm.Integer(1)
         reguided = isinstance(axis, AffineGuards.AffineSparseAxis) and any(
             guide == domain_axis for guide in axis.guides for domain_axis in dom)
-        body = fd.DynamicName.from_str(AffineGuards.axis_body(axis).split('|')[0])
+        carried_name = axis.uid._name
+        body = fd.DynamicName.from_str(AffineGuards.axis_body(axis).split('|')[0]).with_code_form(
+            None if carried_name is None else carried_name.code_form)
         target = (body.capture(sc.RawAxis(_size=axis.local_size()))
                   if reguided else axis)
         rows.append((target, tuple(strides), nm.Integer(0)))

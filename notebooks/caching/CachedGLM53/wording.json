@@ -1,0 +1,23 @@
+{
+  "name": "Current",
+  "wordings": {
+    "POSITION_OF_THIS_PASS_SENTENCE": "Token i_x of this pass stands at position |P| + i_x of the sequence, because the |P| tokens of the earlier passes stand before it, so the table of turns is written over every cached position and read at |P| + i_x by the view named pass.",
+    "QUERY_KEY_ROTATION_AT_THIS_PASS_DESCRIPTION": [
+      "The turned channels of a query head or a key of one token of this pass, read two at a time as complex numbers, each pair multiplied by the turn of its position, and written back as channels.",
+      "$POSITION_OF_THIS_PASS_SENTENCE",
+      "A key is turned before it is cached, so a cached key carries the turn of the pass that computed it."],
+    "INDEXER_ROTATION_AT_THIS_PASS_DESCRIPTION": [
+      "The first 64 channels of an indexer query or key of one token of this pass turned at its position, and the other 64 passed through.",
+      "$POSITION_OF_THIS_PASS_SENTENCE"],
+    "SCORE_AGAINST_THE_CACHE_DESCRIPTION": "The score of one query of this pass against every cached token at or before it. Each of the 32 heads scores the query against the cached indexer key, the score is scaled by |d|^{-1/2} and rectified, and the heads are summed under a weight read off the hidden state of the query.",
+    "CACHED_INDEXER_DESCRIPTION": "The lightning indexer of a Full layer. The indexer key of every token of this pass is projected, normalised and turned, and saved into the cache idx, whose result holds the indexer key of every cached token. Each query of the pass reads that cache back at |P| + i_x - i_r for every distance i_r, and the scoring box scores it against every cached token at or before it. The reference caches the indexer key with update_indexer.",
+    "QUERY_PATH_AT_THIS_PASS_DESCRIPTION": "The queries of the tokens of this pass alone, with a copy of the low rank handed to the indexer. The turned channels are turned at the positions |P| + i_x of the tokens.",
+    "QUERY_WITHOUT_LOW_RANK_AT_THIS_PASS_DESCRIPTION": "The queries of the tokens of this pass alone, for a layer that runs no indexer. The turned channels are turned at the positions |P| + i_x of the tokens.",
+    "CACHED_KEYS_AND_VALUES_DESCRIPTION": "The normalised latent of 512 channels and the turned key of 64 channels of every token of this pass, each saved into a cache of its own, lat and rot. The result of each cache holds the array of every cached token on the axis P + x, and the keys and the values of every head are expanded from the whole cache, as the reference expands them after its cache update. The cache therefore keeps 576 numbers per token and layer, where the expanded keys and values of the 64 heads hold 32,768.",
+    "GATHER_CACHED_KEYS_DESCRIPTION": "The keys of every head over the cache read back from each query of this pass at |P| + i_x - i_r, and the key at the distance held by each slot of the selection.",
+    "GATHER_CACHED_VALUES_DESCRIPTION": "The values of every head over the cache read back from each query of this pass at |P| + i_x - i_r, and the value at the distance held by each slot of the selection.",
+    "CACHED_FULL_DESCRIPTION": "The Full mode reading from its caches. The queries are computed for the tokens of this pass, the latent, the turned key and the indexer key of those tokens are saved into the caches lat, rot and idx, and the indexer selects 2048 of the cached tokens for every query of the pass.",
+    "CACHED_FULL_PUBLISHING_DESCRIPTION": "The Full mode reading from its caches, at the head of an IndexShare group. The selection of every query of this pass is dropped onto the tape slot sel, which the Shared layers of the group read in the same pass. The selection is not cached, and the next pass selects again for its own queries.",
+    "CACHED_SHARED_DESCRIPTION": "The Shared mode reading from its caches. The selection of every query of this pass is grabbed from the tape slot sel, and the latent and the turned key of the tokens of this pass are saved into the caches lat and rot. The layer runs no indexer and caches no indexer key."
+  }
+}

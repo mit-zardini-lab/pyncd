@@ -7,6 +7,7 @@ import data_structure.Operators as ops
 import data_structure.Term as fd
 import advanced_axis_dynamics.data_structure.AffineGuards as AffineGuards
 import advanced_axis_dynamics.data_structure.Operators as aops
+import quantization.data_structure.Quantization as Quantization
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Union
@@ -612,10 +613,12 @@ class TopK(cat.Operator):
 
 def selects_over_positions(target: cat.Broadcasted) -> bool:
     '''Whether `target` is a `TopK` taking the positions of the entries it selects
-    over as a second operand, per `TopK.template(positions_of=)`.'''
+    over as a second operand, per `TopK.template(positions_of=)`. The positions are
+    a `cat.Natural` under whatever wrappers the datatype carries, so a selection
+    whose positions carry a quantisation is recognised as well.'''
     return (isinstance(target.operator, TopK)
             and len(target.input_weaves) == 2
-            and isinstance(target.input_weaves[1].datatype, cat.Natural))
+            and Quantization.holds_natural_numbers(target.input_weaves[1].datatype))
 
 
 def check_form_matches_outputs(target: cat.Broadcasted) -> None:

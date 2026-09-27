@@ -1,0 +1,166 @@
+{
+  "name": "Current",
+  "wordings": {
+    "ROTARY_TITLE": "\\text{Rotary Embedding}",
+    "INDEXER_ROTARY_TITLE": "\\text{Rotary Embedding of an Indexer Vector}",
+    "PAIRS_OF_THE_TURNED_CHANNELS": "The 64 channels are taken two at a time as points in a plane, and the rotation turns each point about the origin.",
+    "TURN_BY_THE_TOKEN": "The angle of the turn grows with the position of the token, and each pair of channels turns at a speed of its own.",
+    "SCORE_BY_DISTANCE": "A query and a key that are both turned score against each other by how far apart their tokens are, because the product of two turned points depends on the difference of the two angles.",
+    "TABLE_IN_THE_BOX": "The circle in the box is the table of turns, which holds one turn for every position and every pair of channels.",
+    "HALVES_OF_THE_REFERENCE": "The reference writes the 32 real parts first and the 32 imaginary parts after them, where the box writes each pair back in place. The query and the key are written in the same order, so every score is unchanged.",
+    "QUERY_KEY_ROTATION_DESCRIPTION": [
+      "Each vector is turned by the position of its token. The operation is called a rotary embedding.",
+      "$PAIRS_OF_THE_TURNED_CHANNELS",
+      "$TURN_BY_THE_TOKEN",
+      "$SCORE_BY_DISTANCE",
+      "$TABLE_IN_THE_BOX",
+      "The attention turns the 64 turned channels of every query head and the one turned key of every token this way.",
+      "$HALVES_OF_THE_REFERENCE"
+    ],
+    "INDEXER_ROTATION_DESCRIPTION": [
+      "Each indexer vector is turned by the position of its token. The first 64 of its 128 channels are taken two at a time as points in a plane, and the rotation turns each point about the origin. The other 64 channels pass through unchanged.",
+      "$TURN_BY_THE_TOKEN",
+      "$SCORE_BY_DISTANCE",
+      "$TABLE_IN_THE_BOX",
+      "The indexer turns the indexer query of every indexer head and the indexer key of every token this way, with the table read by the attention.",
+      "$HALVES_OF_THE_REFERENCE"
+    ],
+    "CHANNEL_JOIN_DESCRIPTION": "Joins two runs of channels into one vector. The second run comes after the first, so the size of the result is the sum of the sizes of the two runs. The attention joins the 192 unturned channels and the 64 turned channels of a query or a key into 256 channels. The indexer joins its 64 turned channels and its 64 unturned channels back into 128.",
+    "CHANNEL_CUT_DESCRIPTION": "Cuts the 128 channels of an indexer vector into two runs of 64. The rotation turns the first run and leaves the second run alone.",
+    "PAIRS_AS_COMPLEX_DESCRIPTION": "Reads every two adjacent channels as one complex number, with the first channel as the real part and the second as the imaginary part. A complex number is a point in a plane. Multiplying the point by a complex number of length one turns it about the origin, so the rotation of a pair is one product.",
+    "DECOMPLEX_DESCRIPTION": "Writes every complex number back as two adjacent channels, with the real part first and the imaginary part second. The operation undoes the reading of the channels as pairs.",
+    "ROTARY_TABLE_ROLE": "The table of turns holds, for the token at position i_x and the pair of channels i_t, the complex number of length one whose angle is i_x times the frequency of the pair. The frequency of pair i_t is the rotary base raised to the power -i_t / |t|. The base is 8,000,000, so the fastest pair turns through one radian per position and the slowest pair turns through about 0.22 radians over the whole context of 1,048,576 tokens.",
+
+    "SCORE_TITLE": "\\text{Indexer Scores of One Query}",
+    "INDEXER_TITLE": "\\text{Lightning Indexer}",
+    "SCORE_EVERY_QUERY_DESCRIPTION": "The indexer scores of one query. Each of the 32 indexer heads scores the query against the key of every token at or before the query. Each score is multiplied by one over the square root of the head width of 128 and rectified, so a negative score counts as zero. A weight read off the hidden state of the query, one number per head, says how much each head counts, and the weight is multiplied by one over the square root of the head count of 32. The weighted sum over the heads is the indexer score of each token.",
+    "INDEXER_DESCRIPTION": "The lightning indexer scores every token at or before a query, so that the attention reads only the 2048 tokens with the highest scores. The indexer query is projected from the query low rank of the attention, 32 heads of 128 channels. The indexer key is projected from the hidden state, one key of 128 channels per token shared by the 32 heads, and normalised by a layer normalisation with a learned gain and bias. The first 64 channels of the query and of the key are turned by the rotary embedding. The keys are read back from every query, so distance i_r of query i_x reads the key of token i_x - i_r, and a distance that counts back past the first token holds no value. The score box then scores each query against its keys.",
+
+    "QUERY_TITLE": "\\text{Queries}",
+    "KEYS_AND_VALUES_TITLE": "\\text{Keys and Values}",
+    "QUERY_STEPS_SENTENCE": "From the low rank, one projection gives the 192 unturned channels of each of the 64 heads and a second projection gives the 64 channels turned by the rotary embedding. The reference computes the two projections as one weight, q_b_proj, and cuts the result with torch.split. The two runs are joined into 256 channels per head.",
+    "QUERY_PATH_DESCRIPTION": [
+      "The queries of every head. The hidden state is projected onto a low rank of 2048 channels and normalised. The low rank is copied, and the indexer reads one copy.",
+      "$QUERY_STEPS_SENTENCE"
+    ],
+    "QUERY_WITHOUT_LOW_RANK_DESCRIPTION": [
+      "The queries of every head. The hidden state is projected onto a low rank of 2048 channels and normalised. A layer with a shared selection runs no indexer, so the low rank is not copied.",
+      "$QUERY_STEPS_SENTENCE"
+    ],
+    "KEYS_AND_VALUES_DESCRIPTION": "The keys and the values of every head. The hidden state is projected onto a latent of 512 channels per token and normalised, and the reference caches the normalised latent. One projection of the latent gives the 192 unturned channels of the key of each of the 64 heads, and a second projection gives the 256 channels of the value of each head. A separate projection of the hidden state gives 64 channels per token. The rotary embedding turns them, and the turned channels are copied to every head. The unturned and turned channels are joined into a key of 256 channels per head. The reference computes the projection of the hidden state as one weight, kv_a_proj_with_mqa, and the projection of the latent as one weight, kv_b_proj, and cuts each result with torch.split.",
+
+    "GATHER_TITLE": "\\text{Read at the Selected Tokens}",
+    "GATHER_STEPS_SENTENCE": "The array is first read back from every query, so each query holds the entry of every token at or before it, counted back from the query. The selection holds, for every query and slot, the distance back to a kept token, and the gather reads the entry at that distance. A slot past the number of tokens at or before the query holds no value. The reference reads every token and adds minus infinity to the scores of the tokens left out by the selection, which gives the same softmax.",
+    "GATHER_KEYS_DESCRIPTION": [
+      "Reads the key of every head at each of the 2048 tokens kept by the selection.",
+      "$GATHER_STEPS_SENTENCE"
+    ],
+    "GATHER_VALUES_DESCRIPTION": [
+      "Reads the value of every head at each of the 2048 tokens kept by the selection.",
+      "$GATHER_STEPS_SENTENCE"
+    ],
+    "CORE_TITLE": "\\text{Attention Core}",
+    "CORE_DESCRIPTION": "The softmax of one query of one head over the tokens kept by the selection. The query scores against the key of every kept token, and every score is multiplied by one over the square root of the head width of 256. A softmax over the kept tokens turns the scores into weights that are positive and sum to one, and the weights sum the values of the kept tokens. The core is computed once per query and head.",
+
+    "FULL_TITLE": "\\text{Sparse Attention with Its Own Indexer}",
+    "SHARED_TITLE": "\\text{Sparse Attention with a Shared Selection}",
+    "FULL_STEPS_SENTENCE": "The layer computes its queries, keys and values, runs its own lightning indexer, and keeps for every query the 2048 tokens with the highest indexer scores. Every head attends to those tokens alone, and the output projection maps the 64 heads back onto the hidden width.",
+    "FULL_ATTENTION_DESCRIPTION": [
+      "Sparse attention in the Full mode of layers 0 and 1.",
+      "$FULL_STEPS_SENTENCE",
+      "The next layer runs its own indexer as well, so no other layer reads the selection of this layer."
+    ],
+    "FULL_ATTENTION_PUBLISHING_DESCRIPTION": [
+      "Sparse attention in the Full mode, at the head of an IndexShare group.",
+      "$FULL_STEPS_SENTENCE",
+      "The selection is dropped onto the tape slot sel, and the three layers after this one grab it from the slot."
+    ],
+    "SHARED_ATTENTION_DESCRIPTION": "Sparse attention in the Shared mode. The layer runs no indexer. It grabs from the tape slot sel the selection written by the Full layer at the head of its IndexShare group, and it computes its own queries, keys and values. Every head attends to the 2048 selected tokens alone, and the output projection maps the 64 heads back onto the hidden width. The selection depends on the hidden state of the Full layer, and the queries, keys and values depend on the hidden state of this layer.",
+
+    "DENSE_MLP_TITLE": "\\text{Dense MLP}",
+    "SWIGLU_STEPS_SENTENCE": "A gate projection and an up projection read the hidden state, the SiLU of the gate multiplies the up projection, and a down projection maps the product back onto the hidden width.",
+    "DENSE_MLP_DESCRIPTION": [
+      "The feed-forward map of layers 0 to 2, one SwiGLU of width 12,288 computed once per token.",
+      "$SWIGLU_STEPS_SENTENCE",
+      "Layers 3 to 77 hold a mixture of experts in its place."
+    ],
+    "GATE_TITLE": "\\text{Router}",
+    "EXPERTS_TITLE": "\\text{Routed Experts}",
+    "SHARED_EXPERT_TITLE": "\\text{Shared Expert}",
+    "MIXTURE_TITLE": "\\text{Mixture of Experts}",
+    "GATE_DESCRIPTION": "The router of one token. A linear map scores all 256 experts, and a sigmoid maps each score into the interval from zero to one. A learned correction bias is added to one copy of the scores, and the 8 experts with the highest biased scores are kept. The other copy, which holds no bias, is read at the kept experts, so the bias decides which experts run and does not scale their outputs. The 8 gates are divided by their sum plus the epsilon of the router and multiplied by the route scale of 2.5.",
+    "ROUTED_EXPERTS_DESCRIPTION": [
+      "The 8 experts kept by the router, each a SwiGLU of width 2048 with its own weights.",
+      "$SWIGLU_STEPS_SENTENCE",
+      "Each weight produces the expert axis, so its implicit weight holds all 256 experts, and the diagonalisation after the down projection keeps the entries where the slot and the expert agree. The result is one output of the hidden width for each kept expert."
+    ],
+    "SHARED_EXPERT_DESCRIPTION": [
+      "The shared expert, one SwiGLU of width 2048 run by every token, with no router and no gate.",
+      "$SWIGLU_STEPS_SENTENCE"
+    ],
+    "MIXTURE_DESCRIPTION": "The mixture of experts of one token, which stands in layers 3 to 77. The router keeps 8 of the 256 experts and gives each a gate, and the 8 experts run. One contraction over the 8 slots multiplies each output by its gate and sums the products, and the output of the shared expert is added. The mixture is computed once per token.",
+
+    "RESIDUAL_TITLE": "\\text{Pre-Norm Residual}",
+    "RESIDUAL_DESCRIPTION": "One sublayer inside the residual. The hidden state is normalised by an RMS normalisation with a learned gain, the sublayer reads the normalised state, and the output of the sublayer is added to the hidden state from before the normalisation. Every layer holds two such sublayers, the attention first and the feed-forward map second.",
+    "DENSE_LAYER_TITLE": "\\text{Layer with a Dense MLP}",
+    "SHARED_LAYER_TITLE": "\\text{Layer with a Shared Selection}",
+    "FIRST_GROUP_TITLE": "\\text{First IndexShare Group}",
+    "GROUP_TITLE": "\\text{IndexShare Group}",
+    "DENSE_LAYERS_DESCRIPTION": "Layers 0 and 1. Each runs sparse attention with its own indexer and the dense MLP. Layer 1 runs its own indexer and does not read the selection of layer 0.",
+    "SHARED_LAYERS_DESCRIPTION": "The three layers of an IndexShare group after its Full layer. Each runs sparse attention on the selection of the Full layer, and each runs the mixture of experts.",
+    "FIRST_GROUP_DESCRIPTION": "Layers 2 to 5, the first IndexShare group. Layer 2 runs its own indexer and the dense MLP, and it drops its selection onto the tape slot sel. Layers 3 to 5 grab the selection and run the mixture of experts. The group is written apart from the repeated group because layer 2 is the last layer with a dense MLP.",
+    "REPEATED_GROUPS_DESCRIPTION": "Layers 6 to 77, eighteen IndexShare groups of four layers. The first layer of group l, which is layer 6 + 4 l, runs its own indexer and drops its selection onto member l of the tape slot sel. The three layers after it grab that member. Every layer of the group runs the mixture of experts. One indexer serves four layers, so the model runs 21 indexers in its 78 layers.",
+
+    "EMBEDDING_TITLE": "\\text{Embedding}",
+    "OUTPUT_TITLE": "\\text{Output Logits}",
+    "EMBEDDING_BLOCK_DESCRIPTION": "The token identifiers are looked up in a table of 154,880 rows of 6,144 channels, and the lookup gives one hidden state per token.",
+    "OUTPUT_DESCRIPTION": "The final hidden state is normalised by an RMS normalisation and projected onto the 154,880 entries of the vocabulary, which gives the logits of the next token. The configuration sets tie_word_embeddings to false, so the output head has weights of its own. The reference returns the logits, and a sampler turns them into probabilities.",
+
+    "TOP_K_TOKENS_DESCRIPTION": "Keeps the 2048 tokens with the highest indexer scores and hands out the distance back to each of them. The scores are not read after the selection. A query with fewer than 2048 tokens at or before it keeps all of them, and the slots past them hold no value.",
+    "TOP_K_EXPERTS_DESCRIPTION": "Keeps the 8 largest biased scores and hands them out on the sparse expert axis k/e, whose extent is the 256 experts and which has 8 live positions. The live positions record which experts were kept.",
+    "SELECT_DESCRIPTION": "Reads the unbiased scores at the experts kept by the selection and multiplies each score by the value held there by the selection, which is one after the indicator. The result rides the sparse expert axis of the selection.",
+    "INDEX_SELECT_DESCRIPTION": "Reads the payload at an index that arrives as data. The index is a natural number below the size of the target axis of the payload. The operator is broadcast over every other axis, so one entry is read per index.",
+    "EMBEDDING_DESCRIPTION": "Looks up the row of the embedding table named by the token identifier. The table holds one row of the hidden width for every entry of the vocabulary.",
+    "BACK_VIEW_DESCRIPTION": "Counts tokens back from each query. Distance i_r of query i_x reads token i_x - i_r. A distance that counts back past the first token holds no value, and the guarded axis r|x records which distances hold no value.",
+    "REPEAT_VIEW_DESCRIPTION": "Copies the one turned key of a token to every head. The reference writes the copy as an expand, which allocates no memory.",
+    "DIAGONAL_VIEW_DESCRIPTION": "Keeps the entries where the slot and the expert agree. The down projection produces an output for every expert at every slot, and each slot reads the output of its own expert.",
+
+    "QUERY_DOWN_PROJECTION_ROLE": "Projects the hidden state onto the query low rank of 2048 channels. The reference names the weight q_a_proj.",
+    "QUERY_UNTURNED_PROJECTION_ROLE": "Projects the query low rank onto the 192 unturned channels of each of the 64 query heads. The weight holds the rows of q_b_proj whose results are cut off as q_pass in the reference.",
+    "QUERY_TURNED_PROJECTION_ROLE": "Projects the query low rank onto the 64 turned channels of each of the 64 query heads. The weight holds the rows of q_b_proj whose results are cut off as q_rot in the reference.",
+    "LATENT_PROJECTION_ROLE": "Projects the hidden state onto the key-value latent of 512 channels per token. The weight holds the first 512 rows of kv_a_proj_with_mqa.",
+    "KEY_TURNED_PROJECTION_ROLE": "Projects the hidden state onto the 64 turned channels of the one key a token shares between its heads. The weight holds the last 64 rows of kv_a_proj_with_mqa.",
+    "KEY_EXPANSION_ROLE": "Expands the latent into the 192 unturned channels of the key of each of the 64 heads. The weight holds the rows of kv_b_proj whose results are cut off as k_nope in the reference.",
+    "VALUE_EXPANSION_ROLE": "Expands the latent into the 256 channels of the value of each of the 64 heads. The weight holds the rows of kv_b_proj whose results are cut off as the value states in the reference.",
+    "OUTPUT_PROJECTION_ROLE": "Maps the values attended by the 64 heads back onto the hidden width. The reference names the weight o_proj.",
+    "INDEXER_QUERY_PROJECTION_ROLE": "Projects the query low rank onto the indexer query of each of the 32 indexer heads. The reference names the weight wq_b.",
+    "INDEXER_KEY_PROJECTION_ROLE": "Projects the hidden state onto the one indexer key of a token. The reference names the weight wk.",
+    "INDEXER_HEAD_WEIGHTS_ROLE": "Reads off the hidden state one weight per indexer head, which says how much the score of that head counts. The reference names the weight weights_proj and lists it in _keep_in_fp32_modules, which keeps it in FP32 only when the model is loaded in FP16.",
+    "ROUTER_ROLE": "Scores every one of the 256 experts from the hidden state of a token. The reference computes the scores in FP32.",
+    "CORRECTION_BIAS_ROLE": "One learned number per expert, added to the scores before the choice of the 8 experts and to no gate. The reference names the array e_score_correction_bias and keeps it in FP32.",
+    "EXPERT_GATE_PROJECTION_ROLE": "Projects the hidden state onto the gate branch of every routed expert. The weight holds the first half of the rows of gate_up_proj.",
+    "EXPERT_UP_PROJECTION_ROLE": "Projects the hidden state onto the up branch of every routed expert. The weight holds the second half of the rows of gate_up_proj.",
+    "EXPERT_DOWN_PROJECTION_ROLE": "Maps the product of the two branches of every routed expert back onto the hidden width. The reference names the weight down_proj.",
+    "SHARED_GATE_PROJECTION_ROLE": "Projects the hidden state onto the gate branch of the shared expert.",
+    "SHARED_UP_PROJECTION_ROLE": "Projects the hidden state onto the up branch of the shared expert.",
+    "SHARED_DOWN_PROJECTION_ROLE": "Maps the product of the two branches of the shared expert back onto the hidden width.",
+    "DENSE_GATE_PROJECTION_ROLE": "Projects the hidden state onto the gate branch of the dense MLP of layers 0 to 2.",
+    "DENSE_UP_PROJECTION_ROLE": "Projects the hidden state onto the up branch of the dense MLP of layers 0 to 2.",
+    "DENSE_DOWN_PROJECTION_ROLE": "Maps the product of the two branches of the dense MLP back onto the hidden width.",
+    "OUTPUT_HEAD_ROLE": "Maps the final hidden state onto the logit of every entry of the vocabulary. The reference names the weight lm_head.",
+
+    "ATTENTION_SCALE_ROLE": "Multiplies every attention score by one over the square root of the head width of 256, so the spread of the scores does not grow with the width.",
+    "INDEXER_SCORE_SCALE_ROLE": "Multiplies every indexer score by one over the square root of the indexer head width of 128, before the rectifier.",
+    "INDEXER_HEAD_SCALE_ROLE": "Multiplies the weight of every indexer head by one over the square root of the indexer head count of 32.",
+    "ROUTE_SCALE_ROLE": "Multiplies every normalised gate by the route scale of 2.5, so the 8 gates of a token sum to 2.5.",
+    "ROUTER_SIGMOID_ROLE": "Maps the score of every expert into the interval from zero to one.",
+    "SILU_ROLE": "Applies the SiLU to the gate branch, which multiplies each value by its own sigmoid.",
+    "RECTIFIER_ROLE": "Rectifies the score of every indexer head, so a negative score counts as zero.",
+    "INDICATOR_ROLE": "Replaces every kept biased score by one, so the selection keeps its positions and forgets its values.",
+
+    "ROUNDING_KERNEL_DESCRIPTION": "The FP8 projection of transformers rounds its operand in this way before every product with a weight held in FP8. The channels of a token are cut into groups of 128. The largest magnitude of a group, kept at or above 10^-4, is divided by 448, which gives the FP32 scale of the group. Each channel is divided by the scale and rounded to the nearest E4M3 number. The wire after the cast carries the E4M3 element of every channel and the scale of every group, and the value denoted by the wire is the element multiplied by the scale. The product multiplies E4M3 by E4M3 into an FP32 accumulator, multiplies the accumulator by the scale of the operand and by the scale of the block of the weight, and writes BF16. Two kernels compute the rounding. DeepGEMM rounds the operand of a dense projection on a Hopper GPU where the kernels package loads it and each process holds one GPU, and it multiplies each channel by the reciprocal of the scale. The Triton kernel rounds the operand of a dense projection otherwise, including a model spread over several GPUs by one process, and it rounds every operand of the routed experts. It divides by the scale floored at 10^-12 in place of keeping the largest magnitude at or above 10^-4. The two kernels give the same scale for every group whose largest magnitude is at least 10^-4. The scale is not rounded to a power of two, because the checkpoint declares FP32 scales.",
+    "WEIGHT_QUANTISATION_SENTENCE": "The FP8 checkpoint is read at {quantisation}.",
+    "FILE_QUANTISATION_SENTENCE": "The file holds it in {quantisation}.",
+    "EMBEDDING_TABLE_ROLE": "The table of the token embedding, which holds one row of the hidden width for every entry of the vocabulary."
+  }
+}

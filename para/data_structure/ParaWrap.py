@@ -11,7 +11,7 @@ writes it back out as the grabs, the body and the drops it stands for.
 `to_para_wrap` is the layering rule that puts a `Para` into that form for
 display. It works on the hypergraph, for the reason
 `algebra.merge_into_consumer` gives. "Read once, and by that one" is a question
-about wires, and a morphism has none. Three rewrites drive it, applied to a
+about wires, and a morphism has none. Four rewrites drive it, applied to a
 fixed point, between siblings in one scope:
 
     Grab ; seed          the grab merges into the seed it feeds. The seed
@@ -26,6 +26,16 @@ fixed point, between siblings in one scope:
                          wherever a value is computed only to be saved: a
                          weight gradient, and the index a `TopK` emits beside
                          its values.
+
+    copy ; (seed * Drop) a drop on a wire that enters the scope and is read by
+                         one seed besides the drop merges into that seed, which
+                         keeps the operand on its wire and drops it, through a
+                         `Para.KeptAndDropped` entry. The case arises in the
+                         expansion of a cache, where the concatenation reads
+                         the tokens of the pass and the cache appends them, so
+                         the grab of the cache, the concatenation and the
+                         append are one wrapped glyph. A boxed block states its
+                         tape at ports of its own and takes no such entry.
 
     (0,0) ; (id * Drop)  a drop on a wire that is also read elsewhere becomes a
                          `ParaWrap` over the copy, with the second output
@@ -69,6 +79,7 @@ from dataclasses import dataclass
 
 import data_structure.Term as fd # for 'foundations'
 import data_structure.Category as cat
+import data_structure.Operators as ops
 import graphs.data_structure.Hypergraph as hg
 import graphs.processing.Hypergraph2Morphism as h2m
 import para.data_structure.Contravariant as contravariant
@@ -86,9 +97,13 @@ class ParaWrap[L, M: cat.Morphism](cat.Morphism[L]):
     `Para.StreamSlot` stands for a `StreamGrab` or a `StreamDrop`, the seeds of a
     loop variable a stream loop carries, a `Para.LoopSlot` for a `LoopGrab` or a
     `LoopDrop`, the seeds of a slot indexed by the iteration of a repeated block,
-    and a `Para.ReductionSlot` for a `ReductionGrab` or a
-    `ReductionDrop`, the seeds of an exchange. The wrap's own `dom` and `cod` are the operands and results whose
-    entry is `None`.
+    a `Para.ReductionSlot` for a `ReductionGrab` or a `ReductionDrop`, the seeds of
+    an exchange, and a `Para.CacheTapeSlot` for a `CacheGrab` or a `CacheDrop`, the
+    seeds of a cache kept between passes. An entry that is a `Para.KeptAndDropped`,
+    on either side, stands for a value that stays on its wire and is also dropped
+    onto the slot it names. The wrap's own `dom` and `cod` are the operands and
+    results that stay on their wires, whose entry is `None` or a
+    `Para.KeptAndDropped`.
     '''
     body: M | cat.Rearrangement[L]
     grabs: fd.Prod[Para.SlotEntry]
@@ -96,39 +111,56 @@ class ParaWrap[L, M: cat.Morphism](cat.Morphism[L]):
 
     def dom(self) -> cat.ProdObject[L]:
         return cat.ProdObject.from_iter(
-            d for d, g in zip(self.body.dom(), self.grabs) if g is None)
+            d for d, g in zip(self.body.dom(), self.grabs) if Para.is_kept(g))
 
     def cod(self) -> cat.ProdObject[L]:
         return cat.ProdObject.from_iter(
-            c for c, d in zip(self.body.cod(), self.drops) if d is None)
+            c for c, d in zip(self.body.cod(), self.drops) if Para.is_kept(d))
 
     def to_base(self) -> Para.Para[L, M]:
-        input_grabs = sh.make_product(
-            *(
-                cat.ProdObject((d,)).identity() if grab is None
-                else Para.grab_of(grab, d)
-                for d, grab in zip(self.body.dom(), self.grabs)
-            )
-        )
-        core = self.body
-        output_grabs = sh.make_product(
-            *(
-                cat.ProdObject((c,)).identity() if drop is None
-                else Para.drop_of(drop, c)
-                for c, drop in zip(self.body.cod(), self.drops)
-            )
-        )
         return sh.make_composed(
-            input_grabs, core, output_grabs
+            sh.make_product(*(
+                _operand_seeds(array, entry)
+                for array, entry in zip(self.body.dom(), self.grabs))),
+            self.body,
+            sh.make_product(*(
+                _result_seeds(array, entry)
+                for array, entry in zip(self.body.cod(), self.drops))),
         ) # type: ignore
 
     # The positions in `body.dom()` and `body.cod()` that the wrap's own `dom`
     # and `cod` expose. A reader indexing `dom()` is indexing these.
     def kept_inputs(self) -> fd.Prod[int]:
-        return tuple(i for i, g in enumerate(self.grabs) if g is None)
+        return tuple(i for i, g in enumerate(self.grabs) if Para.is_kept(g))
 
     def kept_outputs(self) -> fd.Prod[int]:
-        return tuple(i for i, d in enumerate(self.drops) if d is None)
+        return tuple(i for i, d in enumerate(self.drops) if Para.is_kept(d))
+
+
+def _kept_and_dropped[L](array: L, entry: Para.NamedEntry) -> cat.Morphism[L]:
+    '''The copy of `array` with its second copy dropped onto `entry`, which is what
+    a `Para.KeptAndDropped` entry stands for on either side of a wrap.'''
+    return sh.make_composed(
+        cat.Rearrangement(mapping=(0, 0), _dom=(array,)),
+        sh.make_product(cat.ProdObject((array,)).identity(), Para.drop_of(entry, array)))
+
+
+def _operand_seeds[L](array: L, entry: Para.SlotEntry) -> cat.Morphism[L]:
+    '''The seeds an operand's entry stands for, before the body.'''
+    if entry is None:
+        return cat.ProdObject((array,)).identity()
+    if isinstance(entry, Para.KeptAndDropped):
+        return _kept_and_dropped(array, entry.dropped)
+    return Para.grab_of(entry, array)
+
+
+def _result_seeds[L](array: L, entry: Para.SlotEntry) -> cat.Morphism[L]:
+    '''The seeds a result's entry stands for, after the body.'''
+    if entry is None:
+        return cat.ProdObject((array,)).identity()
+    if isinstance(entry, Para.KeptAndDropped):
+        return _kept_and_dropped(array, entry.dropped)
+    return Para.drop_of(entry, array)
 
 type ParaWrapped[L, M: cat.Morphism] = Para.Para[L, M | ParaWrap[L, M]]
 
@@ -437,6 +469,10 @@ def _wrap_drop(
         if merged is not None:
             return merged
     producer = _producer_of(graph, wire)
+    if producer is None:
+        merged = _merge_drop_into_reader(graph, i, slot, wire, readers)
+        if merged is not None:
+            return merged
     if readers[wire] > 1 and producer is not None:
         return _copy_at_producer(graph, i, producer, slot, array, wire)
     # The identity case, where the wire comes from outside this scope and the
@@ -460,6 +496,61 @@ def _wrap_drop(
             replacements[k] = redirect.apply(subgraph)
     cod = tuple(redirect.apply(obj) for obj in graph.cod)
     return _rebuild(graph, replacements, cod)
+
+
+def _merge_drop_into_reader(
+    graph: hg.Multigraph, i: int, slot: Para.NamedEntry,
+    wire: hg.HypergraphObject, readers: Counter,
+) -> hg.Hypergraph | None:
+    '''The drop at `i` written onto the one sibling seed that reads its wire, as an
+    operand that seed keeps and drops.
+
+    `None` where the wire has a reader besides the drop and that seed, which
+    includes the scope's own codomain, and where the reader is a block, a tape
+    seed, a boxed block, a reader through a reindexing beyond a rearrangement, or
+    a reader of the wire at more than one port. A boxed block states its tape at
+    ports of its own, per `para.data_structure.ParaBlockOperator`.
+    '''
+    if readers[wire] != 2:
+        return None
+    for j, reader in enumerate(graph.subgraphs()):
+        if j == i or not any(node == wire for node in reader.dom):
+            continue
+        if (not isinstance(reader, hg.HypergraphRoot)
+                or isinstance(reader.wraps, (Para.Grab, Para.Drop))
+                or _is_boxed_block(reader.wraps)
+                or _has_non_rearrangement_reindexing(reader.wraps)):
+            return None
+        ports = [p for p, node in enumerate(reader.dom) if node == wire]
+        if len(ports) != 1:
+            return None
+        root = hg.HypergraphRoot.template(
+            _with_kept_drop(reader.wraps, ports[0], slot), reader.dom, reader.cod)
+        return _rebuild(graph, {i: None, j: root})
+    return None
+
+
+def _is_boxed_block(target: cat.Morphism) -> bool:
+    body = target.body if isinstance(target, ParaWrap) else target
+    return (isinstance(body, cat.Broadcasted)
+            and isinstance(body.operator, ops.BlockOperator))
+
+
+def _with_kept_drop(
+    target: cat.Morphism, port: int, slot: Para.NamedEntry,
+) -> ParaWrap:
+    '''`target` with the operand at `port` kept on its wire and dropped onto
+    `slot`. `port` counts the operands the morphism exposes in its own `dom()`, as
+    in `_with_grab`.'''
+    entry = Para.KeptAndDropped(dropped=slot)
+    if isinstance(target, ParaWrap):
+        index = target.kept_inputs()[port]
+        return target.reconstruct(grabs=tuple(
+            entry if i == index else grab for i, grab in enumerate(target.grabs)))
+    return ParaWrap(
+        body=target,
+        grabs=tuple(entry if i == port else None for i in range(len(target.dom()))),
+        drops=(None,) * len(target.cod()))
 
 
 def _copy_wrap(array: object, slot: Para.NamedEntry) -> ParaWrap:

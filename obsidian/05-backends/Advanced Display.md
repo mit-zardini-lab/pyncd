@@ -1,6 +1,6 @@
 ---
 tags: [layer/backends, tool]
-code: websocket_transfer/auxiliary_information.py, notebooks/display/advanced_display.py, notebooks/display/explain_operators.py, notebooks/display/explain_reindexings.py, notebooks/display/expand_with_parameters.py, algebra/registries/standard_expansions.py, algebra/write_index_notation.py, para/processing/write_linear_formula.py, data_transfer/broadcast_occurrences.py
+code: websocket_transfer/auxiliary_information.py, notebooks/display/advanced_display.py, notebooks/display/explain_operators.py, notebooks/display/explain_reindexings.py, notebooks/display/expand_with_parameters.py, notebooks/display/explain_cached_reads.py, algebra/factor_out_lift.py, algebra/registries/standard_expansions.py, algebra/write_index_notation.py, para/processing/write_linear_formula.py, data_transfer/broadcast_occurrences.py
 status: stable
 ---
 
@@ -12,8 +12,7 @@ The advanced display adds two things to a tsncd figure. A legend lists the axes 
 term beside the figure. An inspection box opens over a block or over an operator with
 a standard expansion, on the open page. The user asked for both on 2026-09-16, with the
 box's top left corner at the pointer, a click locking it open for recursive reading, a
-click outside every box closing them, and links to the code each block stands for. The
-log is.
+click outside every box closing them, and links to the code each block stands for.
 
 tsncd does no algebra, so everything a legend or a box shows is computed in this
 repository and sent beside the term, as the `auxiliary` field of a `dataUpdate` or a
@@ -41,7 +40,7 @@ name lights both, and hovering one of the two lights the row and that axis alone
 The user asked for the halo on 2026-09-16, together with a plate behind a taped array
 when the pointer rests anywhere on it, and [[Diagram Display]] states both.
 
-The user asked on 2026-09-16 for three more things of the legend, and the log is.
+The user asked on 2026-09-16 for three more things of the legend.
 
 A row reads exactly as the wire of its axis reads. The sender's `latex` is the axis name
 without its size, so the sparse axis of the router read `k/e` in the legend and
@@ -179,7 +178,7 @@ extended by the `register` decorator the rules carry. `expansion_for` walks the 
 which operators of a term can be opened. The registry is filled when
 `algebra.operator_expansion` is imported, so `auxiliary_information` imports it.
 
-The formula and the description of a row are each one text, or a function that writes the text from the `cat.Broadcasted` that carries the operator, and `StandardExpansion.formula_of` and `description_of` read either. The five rows of the package hold functions, so a formula names the axes of the operator it is shown over. For an operator over an axis $m$, and a linear map from $m$ onto $o$ named $Q$, the five rows write
+The formula and the description of a row are each one text, or a function that writes the text from the `cat.Broadcasted` that carries the operator, and `StandardExpansion.formula_of` and `description_of` read either. The six rows of the package hold functions, so a formula names the axes of the operator it is shown over. For an operator over an axis $m$, and a linear map from $m$ onto $o$ named $Q$, the six rows write
 
 | operator | formula |
 |---|---|
@@ -187,9 +186,12 @@ The formula and the description of a row are each one text, or a function that w
 | `L1Norm` | $L^{1}_{m}(v) = \frac{v}{\sum_{i_{m} \in m} v[i_{m}]}$ |
 | `L2Norm` | $L^{2}_{m}(v) = \frac{v}{\sqrt{\sum_{i_{m} \in m} v[i_{m}]^{2}}}$ |
 | `Normalize` | $\mathrm{RMSNorm}_{m}(x) = x \left(\frac{1}{|m|}\sum_{i_{m} \in m} x[i_{m}]^{2} + \epsilon\right)^{-1/2} \odot \gamma$ |
+| `LayerNorm` | $\mathrm{LayerNorm}_{m}(x) = (x - \mu) \left(\frac{1}{|m|}\sum_{i_{m} \in m} (x[i_{m}] - \mu)^{2} + \epsilon\right)^{-1/2} \odot \gamma + \beta$, with $\mu = \frac{1}{|m|}\sum_{i_{m} \in m} x[i_{m}]$ |
 | `Linear` | $y[i_{o}] = \sum_{i_{m} \in m} x[i_{m}]\, W_{Q}[i_{m}, i_{o}]$, and $+\, b_{Q}[i_{o}]$ after it where the map has a bias |
 
 The user ruled on the notation of a formula on 2026-09-17. A sum names the index it iterates and the axis the index ranges over, $\sum_{i_{m} \in m}$, where it was written $\sum_{m}$. An array is read at an index in brackets, $x[i_{m}]$, where it was written with a subscript, so the top-k selection of the V4.1 table reads $\{(j, s[j]) : \ldots\}$. The gain of the RMSNorm is the last factor, $\odot \gamma$, as the expansion multiplies it in last.
+
+`caching/registries/standard_expansions.py` registers one more row, for a `Caching`, whose formula and sentence stand in `caching/registries/cache_wording.json`. Its expansion loads the earlier tokens from the tape, lays the tokens of the pass after them and appends the tokens of the pass to the tape, per [[Caching Between Passes]]. A module that draws a cache imports the registry for its side effect.
 
 The shifted softmax of `expand_shifted_softmax` is a second form of the same operator
 and is not the standard one, so it is not registered. The row of a `Linear` is registered
@@ -228,8 +230,8 @@ the same way, and a learned array such as the sink logit is written out as its w
 alone.
 
 The user asked later on 2026-09-17 for the expansions to be drawn with no `ParaWrap`.
-`expand_with_parameters.expanded_with_weight_arrays` replaces each grab with a weight
-array, a `Linear` with no operands named after the slot, which
+`expand_with_parameters.expanded_with_weight_arrays` replaces each grab of an outer slot
+with a weight array, a `Linear` with no operands named after the slot, which
 `show_grabbed_parameters.weight_array_in_place_of` writes, per [[Show Grabbed Parameters]].
 A map `W : a -> b` becomes `[W : 1 -> ab] * hold(a)` followed by the same `Einops`, and the
 expansion holds no tape. A bias and the gain of an RMSNorm are weight arrays the same way,
@@ -243,6 +245,8 @@ array inside an expansion opens no box of its own, because
 rule returns it unchanged.
 
 `expand_normalize` already multiplied a gain operand into its result, so the RMSNorm comes out with the product by $\gamma$. A `Linear` comes out as the `Einops` that contracts its weight.
+
+The user asked on 2026-09-26 for the box over an RMSNorm broadcast over the tokens `x` to be drawn without `x`, and for a broadcast linear map to be drawn the same way. Both write-outs of `expand_with_parameters` take the lift off the operator with `algebra.factor_out_lift.factor_out_lift` before they grab its parameters, so the box over an RMSNorm of the residual stream of DeepSeek-V4.1-Flash normalises one token, `R[m] -> R[m]`, and the box over `W^{Qa}` applies the map to one token. The figure around the box states the broadcast. The gain and the weight are grabbed from outer tape slots, which a lift does not enlarge, so the expansion in the box lifted over `x` is the operator held by the figure, per [[Outer and Inner Tape Slots]]. Only the grab of an outer slot is replaced by a weight array, so the box over a `Caching` draws its load and its append on the tape.
 
 The user reviewed the boxes on 2026-09-17 and found the expansions of the weights inconsistent. The sink logit opened no box, and the biased projection $H$ of the hyper-connections was drawn as a `Linear` reading two arrays where every other map was drawn as a contraction.
 
@@ -336,7 +340,7 @@ the V4.1 model with the released lines each stands for, and beside them
 `OPERATOR_REFERENCES`, the released `RMSNorm` and `linear` that the box of an expanded
 operator links, passed as `DiagramSettings.operator_references`.
 
-The user asked for three more things of these boxes on 2026-09-17, and the log is.
+The user asked for three more things of these boxes on 2026-09-17.
 
 A row of the table is one `OperatorExplanation` for every operator of a class, or a
 function that writes the explanation from the `cat.Broadcasted` that carries the operator
@@ -412,7 +416,7 @@ pass. It replaces each named `cat.StrideMorphism` that stands in the `reindexing
 aesthetics say `BODY_IN_PLACE`, from a table keyed by the text of the reindexing's name,
 `DiagramSettings.reindexing_explanations`.
 
-The formula of the box is written from the rows of the reindexing. A reindexing of a `cat.Broadcasted` maps each position of the result to the position of the operand it reads, so the split of the distances into blocks reads $y[i_{P}, i_{u}] = x[|u|\, i_{P} + i_{u}]$ and the sliding window reads $y[i_{x}, i_{w}] = x[i_{x} - i_{w}]$. The table therefore holds the sentences and the released lines alone. `REINDEXING_EXPLANATIONS` beside the other tables of the V4.1 model explains the window, the two group splits, the count back from an entry, the stride-one renaming and the block split. It explained the three slices of the mixing coefficients until 2026-09-17, when the projection that they cut became three linear maps, per [[Representing Models]].
+The formula of the box is written from the rows of the reindexing. A reindexing of a `cat.Broadcasted` maps each position of the result to the position of the operand read there, so the split of the distances into blocks reads $y[i_{P}, i_{u}] = x[|u|\, i_{P} + i_{u}]$ and the sliding window reads $y[i_{x}, i_{w}] = x[i_{x} - i_{w}]$. The table therefore holds the sentences and the released lines alone. `REINDEXING_EXPLANATIONS` beside the other tables of the V4.1 model explains the window, the two group splits, the count back from an entry, the stride-one renaming, the block split, the repeat into the four streams, the two diagonals and the two transposes. It explained the three slices of the mixing coefficients until 2026-09-17, when the projection that they cut became three linear maps, per [[Representing Models]].
 
 The pass runs under `AdvancedDisplay.INTERACTIVE` alone, and
 `notebook_diagrams.package_auxiliary` applies it after the expansions have been
@@ -423,6 +427,29 @@ the numbering that keys the expansions is unchanged, which
 `check_a_named_reindexing_is_wrapped_in_a_block_drawn_in_place` holds. A reindexing held
 in a field of an operator, as an `aops.CovariantView` holds one, is left as it stands,
 because the operator's own box draws it and the operator is explained in place.
+
+A view that copies, deletes or permutes axes is written with a `cat.Rearrangement`,
+which has no name field, so its name stands on the `ops.View` alone. Until
+2026-09-26 no box opened over such a view, although the table of GLM-5.3 held rows
+for its repeat and its diagonal. Where the name of the view is the only name its
+reindexing carries, `present` writes the rearrangement as the stride morphism of
+the same map under the view's name, beside the identity on the trailing positions it
+carries unchanged. A map of one row, as a repeat is, is then wrapped as any named
+reindexing is and draws as a pentagon holding the name, with stride 1 on the kept
+axis and stride 0 on the copied one. A map of no row or of several rows, as a
+diagonal or a transpose is, keeps its wires, because tsncd draws such a stride
+morphism as a red hexagon narrower than the name, and the block wraps the
+rearrangement under the view's name and the formula of the stride morphism.
+`names_of_unexplained_views` lists the named views of a presented term over which no
+box opens, and the validators of the classic models, of GLM-5.3 and of the
+DeepSeek-V4.1-Flash package assert that it is empty. A view is named by a capitalised word set
+upright, per [[Representing Models]].
+
+A derived cached pass writes a read of the token axis that stops as a view named
+`New` or `Cached`, per [[Deriving Caches by Dragging the New Tokens]].
+`notebooks/display/explain_cached_reads.py` gives both names a row of the table, and
+`with_cached_read_explanations` adds the rows to the table of a figure's settings, so
+the page of every derived pass opens a box over both views.
 
 tsncd draws a block of the stride category whose aesthetics say `BODY_IN_PLACE` as its
 body alone and registers the drawn reindexing as the hover region of the block. Wherever
@@ -491,7 +518,7 @@ boxes exist on a page, because a captured image cannot answer a pointer. The pag
 open one under `DiagramMode.BROWSER`. Under `DiagramMode.HTML` it is a file that holds
 tsncd's bundle and the message, which opens from a disk with no server and no network and
 whose boxes answer the pointer as they do on the open page. The user asked for the file on
-2026-09-16, [[Diagram Wire Format]] states its form, and the log is.
+2026-09-16, and [[Diagram Wire Format]] states its form.
 
 Under `LEGEND` or `INTERACTIVE`, `show_diagram` converts the term to the morphism the
 transport sends before it assembles the auxiliary information, and passes the converted
@@ -506,6 +533,11 @@ same figure written to `outputs/pages/DeepSeekV41Flash.html`. The notebook's set
 `title='DeepSeekV4.1'`, so the tab of the page and of the file reads `tsncd - DeepSeekV4.1`.
 Neither writes a heading over the figure, because `DiagramSettings.heading` is
 `PageHeading.NONE` unless a notebook asks for `PageHeading.TITLE`.
+
+Every page of [[Website Notebooks]] draws its model this way, with an inspection box
+over every block and every operator and the bodies of the boxes left out of the
+figure, and `show_page_variants` packages the auxiliary information of each variant
+of a page, per [[Diagram Display]].
 
 Inspection boxes use the visible viewport when placing a box after mobile panning
 or zooming. Their height is limited to 80% of that viewport, with vertical

@@ -33,10 +33,8 @@ into its own node before differentiating, and the reverse pass keeps them, so th
 pass of attention arrives as 10 `Einops` and 4 `View` with rank-3 intermediates between them.
 [[Expression Simplification]] puts it back together, absorbing the nodes into their readers'
 reindexings and merging each broadcast into the sum that follows it, and what comes out is the
-five contractions of the FlashAttention backward. The notebook simplifies every pass before
-showing it, and exhibits the raw pass separately, labelled *as derived*, in the two sections
-about the scaffolding itself, which are the matmul and the expanded softmax. The derived form
-is the one to check the derivation against.
+five contractions of the FlashAttention backward. The derived form is the one to check the
+derivation against.
 
 ## Where it lives
 
@@ -130,6 +128,7 @@ along it, and a repeat is a node. There is no operator for it, and since 2026-08
 | `AdditionOp` | nothing | the cotangent to every operand, summed over its broadcast axes |
 | `SoftMax` | its output | $\mathrm{d}x = y \odot (\mathrm{d}y - \langle \mathrm{d}y, y \rangle)$ |
 | `Arithmetic` | its input | $\mathrm{d}y \odot f'(x)$, with $f'$ written out as the formula's derivative, another `Arithmetic`. `e^{x}` reverses through `e^{x}`, and `x^{-1}` through `-x^{-2}` |
+| `Arithmetic` whose formula is $c\,x$ for a constant $c$ | nothing | the same `Arithmetic` applied to the cotangent, because multiplying by a constant is linear. `derivative.multiplies_by_a_constant` is the test, and `derivative.scaling` writes the reverse. The scale $\lvert d \rvert^{-1/2}$ of the attention scores is the case. Before 2026-09-27 the rule taped the scores and multiplied the cotangent by a formula that did not read them. `check_the_backward_pass_scales_the_rebuilt_scores_and_their_gradient` in `notebooks/website/tutorial/validate_attention.py` checks that the backward pass of the tutorial's attention applies the scale of the forward pass twice, once to the scores it rebuilds and once to their cotangent |
 | `ReLU` | its input | $\mathrm{d}y \odot [x > 0]$, with the step function written as `Arithmetic<[x > 0]>`. It is the derivative of `nm.RectifiedLinear`, whose expansion is $x\,[x > 0]$, per [[Numerics]] |
 | `Elementwise` | its input | $\mathrm{d}y \odot \sigma'(x)$, with $\sigma'$ a primed `Elementwise`, because the map is a name the algebra cannot differentiate |
 | `Maximum` | nothing | the zero map, $0 \cdot \mathrm{d}m$, repeated back over the folded axis. A `Maximum` in this package shifts a softmax before its exponent, and a softmax is unchanged by a shift of its scores, so the cotangent that reaches the maximum through the shift is zero in total. The rule is declared a-priori for that use. It is not the reverse derivative of a maximum read for its own value, which would send the cotangent to the position of the largest score, and the package writes no such maximum |
@@ -147,8 +146,12 @@ The rule for `Maximum` writes its zero as a pointwise map whose formula is the c
 $0$, followed by a repeat back over the folded axis, so the cotangent stays a wire and the
 derived pass is well formed. Derived as written, the backward pass of a shifted softmax
 therefore carries a chain that computes the cotangent of the maximum, multiplies it by
-zero and adds the result to the cotangent of the scores, and the forward pass drops the
-maximum for that chain alone. `prune_zero_cotangents` removes both.
+zero and adds the result to the cotangent of the scores. `prune_zero_cotangents` removes
+that chain, and with it any slot read by that chain alone. Before 2026-09-27 the forward
+pass dropped the maximum for the negation in that chain, and the pruning removed that slot
+as well. The negation multiplies by the constant $-1$, and a multiplication by a constant
+has been reversed with no residual since then, so the shifted softmax drops nothing for its
+maximum and keeps its four slots through the pruning.
 `pathway_collapse.collapse` runs it before its other rewrites. It deletes every pointwise
 map whose formula is the constant zero and every `contraction.Zero`, together with the
 `View`s that only reindex a zero wire. Every addition that read a deleted wire is rebuilt
@@ -191,10 +194,12 @@ forward pass keeps the `Maximum`, which `para/validate_backward.py` checks.
 - **A `Grab` has no `degree`**, so a pass is detaped before anything reads it as an
   ordinary morphism. `para.algebra.detape` makes each `Drop` an extra output and each
   `Grab` an extra input, in slot order, and raises on a tape operation below the top
-  level, so a pass holding a tape operation inside a loop block cannot be detaped.
+  level, so a pass holding a tape operation inside a loop block cannot be detaped. An extra
+  input carries no record of the kind of its slot, so a pass is lifted over a batch axis
+  before it is detaped, per [[Outer and Inner Tape Slots]].
 - ~~The residual is taped once per consumer~~. Closed 2026-08-20.
-  `pathway_collapse.dedup_slots` merges same-wire `Drop`s on the hypergraph, where a wire is an
-  wire, and canonicalises the backward pass's `Grab` of the removed slot onto the kept
+  `pathway_collapse.dedup_slots` merges same-wire `Drop`s on the hypergraph, where a wire is a
+  `HypergraphObject`, and canonicalises the backward pass's `Grab` of the removed slot onto the kept
   one, so the consumers follow the node, block interiors included. The derivation still writes
   one slot per consumer, because each seed declares its residual with no global view, and the
   dedup is the post-pass, run before simplification, per [[Pathway Collapse|pathway collapse]].

@@ -263,6 +263,8 @@ class HeadlessRenderer:
         inspectionBoxes: bool | None = None,
         axisHover: wst.AxisHover | None = None,
         axisLabelFontSize: float | None = None,
+        form: wst.DiagramForm | None = None,
+        controls: wst.PageControls | None = None,
         displayMode: wst.DisplayMode | None = None,
         auxiliary: wst.DiagramAuxiliary | None = None,
     ) -> None:
@@ -275,7 +277,8 @@ class HeadlessRenderer:
             sm.display_settings(
                 darkMode, debugBorders, coreDebug, width, subBlocks,
                 drawnBlockTags, tapeLabels, legend, inspectionBoxes,
-                axisHover, axisLabelFontSize, displayMode=displayMode),
+                axisHover, axisLabelFontSize, form, controls,
+                displayMode=displayMode),
             auxiliary)
 
     async def resolve_capture_background(
@@ -422,6 +425,8 @@ class HeadlessRenderer:
         inspectionBoxes: bool | None = None,
         axisHover: wst.AxisHover | None = None,
         axisLabelFontSize: float | None = None,
+        form: wst.DiagramForm | None = None,
+        controls: wst.PageControls | None = None,
         displayMode: wst.DisplayMode | None = None,
         auxiliary: wst.DiagramAuxiliary | None = None,
     ) -> bytes:
@@ -433,6 +438,7 @@ class HeadlessRenderer:
             tapeLabels=tapeLabels, legend=legend,
             inspectionBoxes=inspectionBoxes, axisHover=axisHover,
             axisLabelFontSize=axisLabelFontSize,
+            form=form, controls=controls,
             displayMode=displayMode,
             auxiliary=auxiliary)
         return await self.capture_rendered(

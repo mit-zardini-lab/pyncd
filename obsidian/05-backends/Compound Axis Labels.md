@@ -59,10 +59,10 @@ binds, with `b`, the encoder's compressed entries, left symbolic.
 | symbol with a subscript, `T` of layer 1 | `T_{1}` | `T_{1}^{384006168}` | `T_{1:384006168}` |
 
 A symbol that carries a subscript carries it as a `fd.DynamicName`, and never as markup
-inside the body. A lowered exponent joins such a subscript after a colon, which is the
-`q_{Td:512}` rule above, and a body holding its own subscript takes the exponent as a
-second script beside it. Two subscripts are not LaTeX, so KaTeX draws the label as its
-own source in red, the colour command the renderer prepends included. The row count of
+inside the body. A lowered exponent joins such a subscript after a colon, as `T_{1:384006168}` in the
+table above, and a body holding its own subscript takes the exponent as a second script
+beside it. Two subscripts are not LaTeX, so KaTeX draws the label as its
+own source in red, including the colour command prepended by the renderer. The row count of
 an Engram table was named with the markup in its body until 2026-09-18, because a
 configuration matched a symbol by the body of its name alone and the two tables would
 otherwise have shared one key. `ConfigLog.search` now reads the bodies run together
@@ -116,9 +116,13 @@ assignments beside it, and the notebook draws the symbolic model. The two functi
 side by side in `algebra/write_axis_exponents.py`, and a term already sized, with no
 assignments to hand, still goes through the first.
 
-A size is looked up by the bodies of its name, which is how `NumericConfig.assign_values`
-matches in the first place. `evaluated_size_under` binds the symbols of one size by name
-and hands the binding to `nm.evaluate_integer`, which looks a symbol up by the term.
+A size is looked up by the bodies of its name, as `NumericConfig.assign_values` matches
+it in the first place. `evaluated_size_under` binds the symbols of one size by name and
+hands the binding to `nm.evaluate_rational`, which looks a symbol up by the term. A size
+may be built from integers, symbols, sums, products and integer powers, so a quotient by
+an integer is read as well. The rotary pairs of a head of `|d|` channels are sized
+`|d| / 2`, which comes to 64 where `|d|` is 128. A size coming to a fraction carries no
+exponent.
 
 ## Gaps
 

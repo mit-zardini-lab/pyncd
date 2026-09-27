@@ -10,6 +10,12 @@ forward pass's extra outputs to the backward pass's extra inputs by name, which
 is what a training loop does with its saved activations.
 
 `para/validate_backward.py` compiles both passes this way.
+
+An extra input carries no sign of the kind of slot it came from. A lift of the
+detaped morphism over a batch axis would lift the input of a
+`para.OuterTapeSlot` as it lifts every other input, where the lift of the grab
+would have kept one array, per `obsidian/07-para/Outer and Inner Tape Slots.md`.
+Lift a pass before it is detaped.
 '''
 from __future__ import annotations
 

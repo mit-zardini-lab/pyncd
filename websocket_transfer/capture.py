@@ -66,6 +66,8 @@ async def capture_morphism(
     subBlocks: bool | None = None,
     drawnBlockTags: list[int] | None = None,
     tapeLabels: bool | None = None,
+    form: wst.DiagramForm | None = None,
+    controls: wst.PageControls | None = None,
     format: CaptureFormat = 'png',
     scale: float = 2.0,
     padding: int = 16,
@@ -101,7 +103,8 @@ async def capture_morphism(
         sm.to_morphism(target, recycle=recycle),
         settings=sm.display_settings(
             darkMode, debugBorders, coreDebug, width, subBlocks,
-            drawnBlockTags, tapeLabels),
+            drawnBlockTags, tapeLabels,
+            form=form, controls=controls),
         capture=capture_options(format, scale, padding, background),
         timeout=timeout,
         disturb_display=disturb_display,

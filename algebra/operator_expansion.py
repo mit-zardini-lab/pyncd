@@ -156,6 +156,32 @@ def normalize_formula[B: cat.Datatype, A: cat.Axis](target: cat.Broadcasted[B, A
             rf'{scaled}')
 
 
+MEAN_SYMBOL = r'\mu'
+
+
+def layer_norm_formula[B: cat.Datatype, A: cat.Axis](
+    target: cat.Broadcasted[B, A],
+) -> str:
+    '''The layer normalisation of `target` over the axes it consumes, with the mean
+    written beside the formula it enters.'''
+    letters = consumed_letters(target)
+    operator = target.operator
+    count = write_index_notation.element_count(letters)
+    total = write_index_notation.sum_over(letters)
+    centred_read = rf'({write_index_notation.read_at("x", letters)} - {MEAN_SYMBOL})'
+    scaled = (rf'(x - {MEAN_SYMBOL}) \left(\frac{{1}}{{{count}}}{total}'
+              rf'{centred_read}^{{2}}{added_epsilon_latex(operator.epsilon)}'
+              rf'\right)^{{-1/2}}')
+    if operator.gain:
+        scaled = rf'{scaled} \odot {GAIN_SYMBOL}'
+    if operator.bias:
+        scaled = rf'{scaled} + {BIAS_SYMBOL}'
+    mean = (rf'{MEAN_SYMBOL} = \frac{{1}}{{{count}}}{total}'
+            rf'{write_index_notation.read_at("x", letters)}')
+    return (rf'\mathrm{{LayerNorm}}_{{{write_index_notation.subscript_of(letters)}}}(x) = '
+            rf'{scaled},\quad {mean}')
+
+
 def inverse_of_sum(epsilon: nm.Numeric) -> ops.Arithmetic:
     '''The map from a sum to its reciprocal, with `epsilon` added to the sum first:
     `s -> (s + epsilon)^{-1}`. At `ops.NO_EPSILON` the addition folds away and the map
@@ -547,8 +573,9 @@ def combine_normalize_parameters[B: cat.Datatype, A: cat.Axis](
         return scaled
     if len(parameters) != declared:
         raise NormalizeParametersDoNotMatchTheOperator(
-            f'a Normalize declaring gain={operator.gain} and bias={operator.bias} was '
-            f'given {len(parameters)} operands ahead of its data')
+            f'a {type(operator).__name__} declaring gain={operator.gain} and '
+            f'bias={operator.bias} was given {len(parameters)} operands ahead of its '
+            'data')
     if operator.gain and operator.bias:
         gain, bias = parameters
         gain_shape, bias_shape = parameter_shapes
@@ -572,6 +599,88 @@ class ExpandNormalize[B: cat.Datatype](functor.Endofunctor[
 
 def expand_normalizes(target):
     return ExpandNormalize()(target)
+
+
+def negated_mean(element_count: nm.Numeric) -> ops.Arithmetic:
+    '''The map from a sum of `element_count` values to the negative of their mean,
+    `s -> -s / element_count`, which a layer normalisation adds to every value.'''
+    return ops.Arithmetic(
+        formula=nm.Integer(-1) * nm.x / element_count,
+        name=fd.DynamicName(f'-x / {element_count.to_latex()}'))
+
+
+@standard_expansions.register(
+    ops.LayerNorm,
+    formula=layer_norm_formula,
+    description=(text.LAYER_NORM_EXPANSION_DESCRIPTION))
+def expand_layer_norm[B: cat.Datatype, A: cat.Axis](
+    target: cat.Broadcasted[B, A],
+) -> cat.BroadcastedCategory[B, A]:
+    '''
+    `copy ; ((sum ; -x/|m|) * id) ; add ; copy ; ((square ; sum ;
+    (x/|m| + epsilon)^{-1/2}) * id) ; scale`, at the normalisation's own degree, with
+    the gain and the bias combined as `expand_normalize` combines them. Anything that
+    is not a `LayerNorm` comes back unchanged.
+
+    The first half centres the values: the sum over the consumed axes, divided by the
+    number of values and negated, is added to every value. The second half is the
+    root-mean-square scaling `expand_normalize` writes, applied to the centred values,
+    whose mean square is their variance.
+    '''
+    if (not isinstance(target, cat.Broadcasted)
+            or not isinstance(target.operator, ops.LayerNorm)):
+        return target
+    arrays = tuple(target.dom())
+    data = arrays[-1]
+    datatype = data.datatype
+    inputs, output, _ = es.index_shapes(target)
+    shape = inputs[-1]
+    if shape != output:
+        raise ValueError(
+            f'a LayerNorm reads and writes one shape, and this one reads {shape} '
+            f'and writes {output}')
+    kept = tuple(target.input_weaves[-1].select_degree(shape))
+    element_count = functools.reduce(
+        operator.mul,
+        (axis.local_size() for axis in target.input_weaves[-1].target().shape()),
+        nm.Integer(1))
+    identity = cat.ProdObject((data,)).identity()
+
+    mean_removed = chsh.make_composed(
+        es.einsum((shape,), kept, datatype),
+        es.einsum((kept,), kept, datatype, operator=negated_mean(element_count)))
+    centred = chsh.make_composed(
+        cat.Rearrangement((0, 0), (data,)),
+        chsh.make_product(identity, mean_removed),
+        es.einsum((shape, kept), shape, datatype, operator=ops.AdditionOp()))
+
+    squared = es.einsum((shape,), shape, datatype,
+                        operator=ops.Arithmetic(formula=nm.x ** nm.Integer(2)))
+    inverse_root = chsh.make_composed(
+        es.einsum((shape,), kept, datatype),
+        es.einsum((kept,), kept, datatype,
+                  operator=inverse_root_of_mean(
+                      element_count, target.operator.epsilon)))
+    normalized = chsh.make_composed(
+        centred,
+        cat.Rearrangement((0, 0), (data,)),
+        chsh.make_product(chsh.make_composed(squared, inverse_root), identity),
+        es.einsum((kept, shape), shape, datatype))
+    return combine_normalize_parameters(target, arrays[:-1], inputs[:-1], shape,
+                                        datatype, normalized)
+
+
+@dataclass
+class ExpandLayerNorm[B: cat.Datatype](functor.Endofunctor[
+    cat.Array[B, cat.RawAxis], cat.Broadcasted[B, cat.RawAxis],
+]):
+    '''Every `LayerNorm` in a morphism or hypergraph, written out.'''
+    def apply_root(self, target: cat.Broadcasted[B, cat.RawAxis]):
+        return expand_layer_norm(target)
+
+
+def expand_layer_norms(target):
+    return ExpandLayerNorm()(target)
 
 
 @dataclass

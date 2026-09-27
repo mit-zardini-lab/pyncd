@@ -1,5 +1,6 @@
 # Claude Opus 5 (1M context), effort high. Rewritten by Claude Fable 5.1, effort 80,
-# on 2026-09-20, for the rules following the released code.
+# on 2026-09-20, for the rules following the released code. The check of a presented
+# figure added by Claude Opus 5.5 (1M context), effort 40, on 2026-09-27.
 '''Check the quantization package: the datatype, the registry, the pass and the
 quantised text-only DeepSeek-V4.1-Flash.
 
@@ -25,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import advanced_axis_dynamics.data_structure.Operators as aops
 import agent_display as ad
+import algebra.remove_identities as remove_identities
 import construction_helpers as ch  # noqa: F401 - the @ overload aligns the axes
 import data_structure.Category as cat
 import data_structure.Numeric as nm
@@ -40,6 +42,8 @@ import quantization.registries.operator_quantisations as operator_quantisations
 import term_utilities.term_utilities as tutil
 
 import notebooks.display.axis_sizes as axis_sizes
+import notebooks.display.cast_presentation as cast_presentation
+import notebooks.display.explain_operators as explain_operators
 import notebooks.display.notebook_diagrams as notebook_diagrams
 import notebooks.sota.DeepSeekV41Flash.omitted_mechanisms as omitted_mechanisms
 import notebooks.sota.DeepSeekV41Flash.operator_explanations as operator_explanations
@@ -60,7 +64,11 @@ POLICY = quantise_model.QuantizationPolicy(
     inputs=BF16, activations=BF16, scalars=FP32, rounded_operands=E4M3,
     weights={'V': FP32}, weights_by_default=E4M3,
     boxes={'K': quantise_model.BoxPolicy(
-        contractions=quantise_model.ContractionQuantisation.ACCUMULATED)},
+               contractions=quantise_model.ContractionQuantisation.ACCUMULATED),
+           'S': quantise_model.BoxPolicy(
+               contractions=quantise_model.ContractionQuantisation.SCALAR),
+           'F': quantise_model.BoxPolicy(
+               contractions=quantise_model.ContractionQuantisation.FEWEST_BITS)},
     block_results={'T': (BF16,)})
 
 
@@ -113,6 +121,23 @@ def check_a_block_scaled_quantisation() -> None:
     assert Quantization.is_cast(Quantization.TypeConvert(source=BF16, target=MXFP8))
     assert Quantization.with_quantisation(cat.Reals(), MXFP8) == MXFP8
     assert BF16.vector == nm.Integer(2) and E2M1.vector == nm.Integer(8)
+
+
+def check_a_quantisation_scaled_in_fp32() -> None:
+    '''A block scale held in FP32 rather than UE8M0, which is the scale of the FP8
+    GLM-5.3 checkpoint and of the operand rounded in front of its projections, is
+    named and described by its scale, differs from the same elements scaled in UE8M0,
+    and is what a cast into it writes.'''
+    weight = Quantization.block_scaled(E4M3, FP32, channels=128, rows=128)
+    operand = Quantization.block_scaled(E4M3, FP32, channels=128)
+    assert Quantization.format_name(weight) == 'E4M3 with FP32 per 128x128'
+    assert Quantization.format_name(operand) == 'E4M3 with FP32 per 128'
+    assert Quantization.describe_quantisation(operand) == (
+        'E4M3, 8 bits, packed 4 to a word, with one FP32 scale per 128 channels')
+    assert Quantization.describe_quantisation(weight) == (
+        'E4M3, 8 bits, packed 4 to a word, with one FP32 scale per 128 by 128 block')
+    assert operand != Quantization.block_scaled(E4M3, Quantization.UE8M0, channels=128)
+    assert Quantization.is_cast(Quantization.TypeConvert(source=BF16, target=operand))
 
 
 def check_the_quantisation_of_an_index() -> None:
@@ -184,6 +209,22 @@ def check_the_rule_of_a_contraction() -> None:
     product = ops.Einops.template('q d, q d -> q d')
     assert _ask(product, BF16, FP32, enclosing_box='K').results == (FP32,)
     assert _ask(product, BF16, BF16, enclosing_box='K').results == (BF16,)
+
+
+def check_the_rule_of_a_contraction_reading_its_operands_into_one_quantisation() -> None:
+    '''Inside a box whose code reads both operands into the scalar quantisation before
+    the product, as the GLM-5.3 indexer does, a contraction reads and returns the
+    scalar quantisation. Inside a box whose code reads the wider operand into the
+    quantisation of the other, as the FP8 experts do with their gates, a contraction
+    and a product read and return the quantisation with the fewest bits.'''
+    contraction = ops.Einops.template('q d, x d -> q x')
+    upcast = _ask(contraction, BF16, BF16, enclosing_box='S')
+    assert upcast.operands == (FP32, FP32) and upcast.results == (FP32,), upcast
+    fewest = _ask(contraction, FP32, BF16, enclosing_box='F')
+    assert fewest.operands == (BF16, BF16) and fewest.results == (BF16,), fewest
+    product = ops.Einops.template('q d, q d -> q d')
+    assert _ask(product, FP32, BF16, enclosing_box='F').results == (BF16,)
+    assert _ask(product, BF16, BF16, enclosing_box='S').results == (FP32,)
 
 
 def check_the_rule_of_the_scalar_operators() -> None:
@@ -597,18 +638,19 @@ def check_stripping_is_idempotent() -> None:
     assert ad.listing(stripped) == ad.listing(model)
 
 
-def check_a_conversion_that_is_not_between_two_quantisations_is_kept() -> None:
-    '''The functor removes a conversion whose two sides carry a quantisation of one
-    value. A conversion into a datatype carrying no quantisation, and a conversion
-    from a quantised index into a real number, each fail one of the two tests and
-    stay.'''
-    assert strip_quantisations.converts_between_two_quantisations(
+def check_a_conversion_that_still_converts_is_kept() -> None:
+    '''The functor turns into the identity a conversion that reads and writes one
+    datatype once the quantisations are taken off it, which a cast between two
+    quantisations of one value does and so does a conversion from a quantised value
+    into the same value unquantised. A conversion from a quantised index into a real
+    number still converts and stays.'''
+    assert strip_quantisations.converts_nothing_once_dequantised(
         Quantization.TypeConvert(source=BF16, target=MXFP8))
-    assert not strip_quantisations.converts_between_two_quantisations(
+    assert strip_quantisations.converts_nothing_once_dequantised(
         Quantization.TypeConvert(source=BF16, target=cat.Reals()))
     quantised_index = Quantization.with_quantisation(
         cat.Natural(nm.Integer(8)), INT32)
-    assert not strip_quantisations.converts_between_two_quantisations(
+    assert not strip_quantisations.converts_nothing_once_dequantised(
         Quantization.TypeConvert(source=quantised_index, target=BF16))
     assert strip_quantisations.without_quantisations(dst.Complex(MXFP8)) == (
         dst.Complex(cat.Reals()))
@@ -617,15 +659,47 @@ def check_a_conversion_that_is_not_between_two_quantisations_is_kept() -> None:
         Quantization.with_quantisation(bounded, INT32)) == bounded
 
 
+def check_stripping_a_presented_figure_leaves_no_cast_and_no_empty_box() -> None:
+    '''A page applies the functor to the model as the figure presents it, with the
+    tape drawn on the ports of each operation and every cast wrapped in a box that
+    explains it. Stripping that term leaves no conversion, no box whose body is the
+    identity, and the identity inside the `ParaWrap` whose body was a cast of
+    positions dropped onto the tape.'''
+    settings = notebook_diagrams.DiagramSettings(clean_quantisation_labels=False)
+    presented = notebook_diagrams.present_each_side(MODEL, settings)
+    explained = explain_operators.present(
+        presented, cast_presentation.with_cast_explained(None))
+    wrapped_casts = tuple(
+        wrap for wrap in tutil.type_search(para_wrap.ParaWrap, explained)
+        if isinstance(wrap.body, cat.Broadcasted)
+        and isinstance(wrap.body.operator, ops.BlockOperator)
+        and isinstance(wrap.body.operator.block.body, cat.Broadcasted)
+        and isinstance(wrap.body.operator.block.body.operator, Quantization.TypeConvert))
+    assert wrapped_casts, 'no cast of the presented model stands inside a ParaWrap'
+    stripped = strip_quantisations.strip_quantisations(explained)
+    left = tuple(node for node in tutil.type_search(cat.Broadcasted, stripped)
+                 if isinstance(node.operator, Quantization.TypeConvert))
+    assert not left, f'{len(left)} conversions left'
+    empty = tuple(node for node in tutil.type_search(cat.Morphism, stripped)
+                  if remove_identities.is_identity_on_its_domain(node)
+                  and not isinstance(node, cat.Rearrangement))
+    assert not empty, f'{len(empty)} identities left written as something else'
+    assert any(isinstance(wrap.body, cat.Rearrangement)
+               and tutil.is_identity(wrap.body)
+               for wrap in tutil.type_search(para_wrap.ParaWrap, stripped))
+
+
 CHECKS = (
     check_the_quantisation_of_an_unquantised_index,
     check_the_quantisation_of_a_complex_datatype,
     check_a_block_scaled_quantisation,
+    check_a_quantisation_scaled_in_fp32,
     check_the_quantisation_of_an_index,
     check_a_cast_changes_the_quantisation,
     check_the_rule_of_a_projection,
     check_the_rule_of_an_embedding,
     check_the_rule_of_a_contraction,
+    check_the_rule_of_a_contraction_reading_its_operands_into_one_quantisation,
     check_the_rule_of_the_scalar_operators,
     check_every_operator_of_the_model_has_a_rule,
     check_the_pass_on_a_projection_and_a_softmax,
@@ -650,7 +724,8 @@ CHECKS = (
     check_the_stripped_cache_round_trip_holds_the_scaling_and_no_rounding,
     check_stripping_a_model_with_no_quantisation_returns_it,
     check_stripping_is_idempotent,
-    check_a_conversion_that_is_not_between_two_quantisations_is_kept,
+    check_a_conversion_that_still_converts_is_kept,
+    check_stripping_a_presented_figure_leaves_no_cast_and_no_empty_box,
 )
 
 

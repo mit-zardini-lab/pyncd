@@ -31,7 +31,9 @@ import data_structure.Term as fd
 
 from notebooks.sota.DeepSeekV41Flash.construction_idioms import over
 from notebooks.sota.DeepSeekV41Flash.declared_axes import c, g, h, j, m, o, x
+from notebooks.sota.DeepSeekV41Flash.mixture_of_experts import DIAGONAL_VIEW_NAME
 from notebooks.sota.DeepSeekV41Flash.reference_links import model_lines
+from notebooks.sota.DeepSeekV41Flash.token_compressors import GROUP_VIEW_NAME
 from notebooks.sota.DeepSeekV41Flash.block_titles_and_descriptions import TEXT as text
 
 OUTPUT_COLOUR = '#D5C8E8'
@@ -44,9 +46,9 @@ def split_heads_into_groups() -> cat.Broadcasted:
         reindexing=(sc.StrideMorphism(
             _dom=(g, j),
             _cod_stride_shift=((h, (j.local_size(), nm.Integer(1)), nm.Integer(0)),),
-            name=fd.DynamicName('grp')),
+            name=fd.DynamicName(GROUP_VIEW_NAME)),
             cat.ProdObject((c,)).identity()),
-        name='grp')
+        name=GROUP_VIEW_NAME)
 
 
 def contract_each_group_against_its_weight() -> cat.BroadcastedCategory:
@@ -57,7 +59,7 @@ def contract_each_group_against_its_weight() -> cat.BroadcastedCategory:
     return (over((g,), ops.Linear.template((j, c), (g, o), 'W^{Oa}'))
             @ ops.View.template(
                 reindexing=cat.Rearrangement((0, 0, 1), (g, o)),
-                name='diag'))
+                name=DIAGONAL_VIEW_NAME))
 
 
 def project_one_query() -> cat.Block:

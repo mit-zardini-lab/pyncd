@@ -85,6 +85,19 @@ All four take the display settings of the `settings` channel in [[Diagram Wire F
 Beside those, `subBlocks` settles whether the body of an `ops.BlockOperator` is drawn as a
 sub-diagram beside the main figure.
 
+`width` is the wrap width, and `Multiline.ts` in tsncd fills each row greedily. A
+sequential composition places as many of its members as fit in the row. When the next
+member is a block, tsncd splits the body of the block and places the first members of the
+body whenever any of them fit, so the row ends inside that block. A row ends between two
+blocks only when the room left in it is narrower than the first member of the next block.
+For a residual connection that first member is the copy of the state, about 100 pixels
+wide with its gap. A width that leaves every block of a figure whole therefore lies in a
+window a few tens of pixels wide, just above the width of the complete blocks of a row,
+and the one width has to satisfy every row of the figure. The window moves whenever a
+block of the figure changes width. The widths of the pages of [[Website Notebooks]] were
+found by drawing each figure at a sweep of widths and measuring the fill of every block
+in the captured image.
+
 `subBlocks=False` is how a figure gets the high-level view alone, with each box's body
 rendered as its own figure. A notebook asks for that with
 `sub_blocks=SubBlocks.NO_BODIES`.
@@ -162,8 +175,9 @@ while the pointer rests on the axis's row of the legend, and the wires and names
 pointer themselves. `AxisHover.EVERYWHERE` lights the same from a wire or a name of the
 axis, in a gap or on a tape, and shades the legend row with it. `AxisHover.OFF` draws no
 halo. The axis is identified by its uid, so two axes that share a name do not light
-together. records the two interactions and the
-setting.
+together. A halo is drawn in tsncd's `DiagramTheme.highlightHaloColor`, a blue in each
+theme, since the user reported on 2026-09-26 that the black halo of the light theme,
+drawn in the colour of the wire it surrounds, did not look good.
 
 Headless capture needs `pip install -r requirements-headless.txt`,
 `playwright install chromium`, and a built `tsncd` bundle from `npm run build`.
@@ -187,7 +201,7 @@ A notebook declares a `DiagramSettings` at the top of its setup cell and passes 
 |---|---|---|
 | `INLINE` | 2 to 4 s each | captures the image back and embeds it in the cell |
 | `BROWSER` | about 15 ms | pushes it to the open page and embeds nothing |
-| `HTML` | under a second, no browser | writes the figure as one HTML file that opens with no server and no network |
+| `HTML` | under a second, no browser | writes the figure as one HTML file that opens with no server and no network, and `show_page_variants` writes several variants into one file, `index.html` in a folder named by the page |
 | `DUMP` | fast | writes the term to JSON, for a term tsncd cannot draw |
 | `LISTING` | tens of ms | prints the [[Agent Display]] listing and draws nothing |
 | `OFF` | none | skips the diagram |
@@ -196,8 +210,8 @@ Nearly all of a diagram's cost is the browser laying it out, and building the ex
 takes tens of milliseconds. Work in `BROWSER` and use `INLINE` for the run that gets
 committed.
 
-`HTML` writes `<page_directory>/<slug>.html`, which is `outputs/pages/` unless the settings
-say otherwise. The file holds tsncd's bundle, KaTeX's fonts and the message `BROWSER` would
+`show_diagram` under `HTML` writes `<page_directory>/<slug>.html`, which is
+`outputs/pages/` unless the settings say otherwise. The file holds tsncd's bundle, KaTeX's fonts and the message `BROWSER` would
 send, so the legend and the inspection boxes of [[Advanced Display]] answer the pointer in
 it. `websocket_transfer/standalone_page.py` assembles the file as text, and
 [[Diagram Wire Format]] states the embedded form under *A page that carries its own
@@ -210,6 +224,96 @@ sets the drawn size of its block. The sentences `cast_presentation.py` and
 `explain_operators.py` write into a box are entries of
 `notebooks/display/display_wording.json`, loaded by `display_wording.DisplayWording`, so
 that a page switches them with the rest.
+
+### A page of several variants
+
+`show_page_variants(variants, caption, *, settings, slug, initial=None)` draws several
+variants of one model as one page, and the page draws a selector between them. The user
+asked for it on 2026-09-27 for the model pages of the lab website, where a model is shown
+decoding with no cache, decoding from a cache and, for a tutorial model, training, each
+quantised and in the reals, per [[Website Notebooks]]. A `PageVariant` names its
+`PageVariantGroup`, a title, and a detail written under the title in the selector.
+
+A variant carrying a `term` is presented and packaged under its own `settings`, or under
+the settings of the page, exactly as `show_diagram` presents and packages a figure. A
+variant carrying no term names by `derived_from` a variant carrying one, and by `functor`
+the `PageFunctor` tsncd applies to that variant's term in the browser.
+`PageFunctor.DEQUANTISE` is the one functor, and
+`quantization/algebra/strip_quantisations.py` states it in Python, per
+[[Stripping Quantisations]]. `apply_page_functor` applies the Python statement of a
+functor to a term, which a validator compares with the model in the reals.
+
+The browser receives the source's term already presented, so the settings of a derived
+variant reach the page as display settings merged over the source's, such as the theme or
+the width, and change nothing in how the term is presented. Settings that differ from the
+source's in a field of `INSPECTION_TEXT_FIELDS`, meaning the roles of the operators, the
+tables of explanations, the references, the base of the code links or the parameters an
+expansion draws, also give the derived variant an auxiliary of its own. The auxiliary is
+written for the morphism exported by the source's message, so the unquantised variant of
+a model says what the weights of the model in the reals are. A derived variant is
+therefore given `dataclasses.replace` of the source's settings, as
+`dataclasses.replace(source_settings, operator_roles=unquantised_roles)` for the
+unquantised variant of a quantised model, with the unquantised tables of explanations
+where the model has them.
+
+`HTML` writes one file holding every variant, their messages compressed into one
+repository so that what two variants share is stored once, per *A page that carries
+several variants* in [[Diagram Wire Format]]. `LISTING` prints the listing of every
+variant under its group and title, and prints a derived variant as the Python statement
+of its functor applied to its source. `DUMP` writes each variant to a file of its own,
+`INLINE` and `BROWSER` draw the initial variant alone, and `OFF` prints the caption.
+
+A page with variants carries no localisations, and raises `LocalisedPageVariants` when
+asked to. A set of variants whose identifiers repeat, or whose derived variant names no
+variant carrying a term, or which names a functor for a variant that is not derived,
+raises `standalone_page.InconsistentVariants` with the identifiers at fault.
+`page_variant_legends(variants, settings)` returns the legend rows of every variant by
+identifier, as the page carries them, without computing the expansions of the
+inspection boxes, so a model's validator can check that every axis of every variant
+carries its code name.
+
+The user asked on 2026-09-27 for the address of a page of variants to carry no `.html`.
+`show_page_variants` under `HTML` therefore writes the page as
+`<page_directory>/<slug>/index.html`, and a web server sends that file for the address
+`<slug>/`. It prints the path of the folder. It also writes `<page_directory>/<slug>.html`,
+a page that sends a reader of `<slug>.html?query#hash` to `<slug>/?query#hash`, so a link
+written to the page as one file keeps working and keeps the variant named by its query.
+`standalone_page.save_page_folder_with_variants` writes both, and
+`standalone_page.redirect_to_page_folder` writes the redirect. For the slug `Mixtral8x7B`
+the redirect is:
+
+```html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mixtral8x7B</title>
+<script>
+location.replace("Mixtral8x7B/"
+  + (location.protocol === "file:" ? "index.html" : "")
+  + location.search + location.hash);
+</script>
+<noscript><meta http-equiv="refresh" content="0; url=Mixtral8x7B/"></noscript>
+</head>
+<body>
+<noscript><p><a href="Mixtral8x7B/">Mixtral8x7B</a></p></noscript>
+</body>
+</html>
+```
+
+A browser shows a folder opened from a disk as a list of its files, so a redirect opened
+from a disk names `index.html` inside the folder. A browser that runs no script follows
+the `meta` refresh or the link to the folder, and drops the query and the hash. The
+refresh stands inside `noscript`, so that it cannot replace the navigation started by the
+script with one that drops them. The slug is percent-encoded in the address and escaped
+in the markup. A figure written by `show_diagram` stays one file under `outputs/pages/`.
+The pages of `notebooks/website/` are written under `notebooks/website/output/`, one
+folder per group of notebooks, per [[Website Notebooks]].
+`websocket_transfer/validate_page_variants.py` checks the compressed repository of a
+page of variants, a derived variant, the refusal of inconsistent variants, the folder,
+the redirect and the escaping, with no browser.
+
+### The settings that present a term
 
 `DiagramSettings.title` names what the page shows. The name of the tab of the open page and
 of an `HTML` file then reads `tsncd - <title>`, and `tsncd` where the setting is `None`.
@@ -264,7 +368,11 @@ on a wire an operation writes in a quantisation differing from one of its inputs
 removes it from every other wire and from the weaves and tape operations at its ends, just
 before the term is drawn. The pass runs in pyncd because the wiring is explicit there, and
 tsncd draws whatever labels remain, so the renderer carries no code for the mode. With the
-setting false, every wire carrying a quantisation is labelled.
+setting false, every wire carrying a quantisation is labelled. Under the default a wire
+written at the quantisation of every operand of the operation writing it carries no
+label, and a page drawn in an arrow form labels that wire with its bare datatype. The
+pages of the five models of [[Website Notebooks]] set the field false, and their
+validators check that every wire of a quantised variant carries a quantisation.
 
 `DiagramSettings.casts` says how a conversion that changes a quantisation is drawn.
 `CastPresentation.THIN`, the default since 2026-09-20, draws it as no glyph, on a box of
@@ -292,6 +400,14 @@ formats does to a value, and the block scale of the written format where it has 
 every interactive figure holding casts carries it, and a model holding a row of its own
 for `Quantization.TypeConvert` keeps that row, as the quantised text-only
 DeepSeek-V4.1-Flash does for a cast into a stored form of a cache.
+
+The two arrow forms described below write no label on the result's axes, so under
+`ARROWS_AND_BROADCASTED` the label named by `region_element` was never placed and a thin
+cast opened no box, which the user reported on 2026-09-26. `ArrowCappedBox` registers the
+plate of every operator as its region, as the box form registers the whole box, and
+writes the datatype below the arrow of a thin cast's result in the same blue and
+registers it too. The box therefore opens from the cast's empty plate and from the
+format it wrote, with the content shown under `ARROWS_AND_BOXES`.
 
 `notebooks/display/cast_presentation.py` holds the enum and takes the name off every such
 conversion just before the term is drawn, and tsncd draws an unnamed conversion thin, in
@@ -347,6 +463,111 @@ router reads `|k|^{6} \text{ of } e^{384}`. The requester ruled the guarded form
 2026-09-15, and the general rule the
 same day.
 
+### Three forms of a figure
+
+`DiagramSettings.form` says which of three forms a figure is drawn in, and reaches tsncd
+as the display setting `form`. `DiagramForm.ALL_BROADCASTED`, the default, draws every
+array as one wire per axis and every operator with its glyph, which is how every figure
+was drawn before 2026-09-25.
+
+`ARROWS_AND_BROADCASTED` draws each array between two operators as one wire, an arrow
+stroked heavier than an axis wire and carrying a direction triangle, labelled in two
+lines. The shape stands above the arrow, its axes in square brackets separated by commas,
+in the order of the axis wires from top to bottom. The datatype stands below it, which
+is the array's quantisation where the array carries one and `\mathbb{R}` otherwise. A
+matrix of reals over `q` and `d` reads `[q, d]` over `\mathbb{R}`, and a scalar of reals
+writes `\mathbb{R}` below its arrow and no shape. An array of naturals along `x` bounded
+by `\bar{v}` reads `[x]` over `\bar{v}`, because the bound is the label a wire of that
+datatype carries. An array held in FP32 reads `[x]` over `\mathtt{FP32}`. tsncd writes
+the datatype carried by the array, and infers no quantisation from a neighbouring cast. A
+wire that climbs or falls runs level under the line of the label on the side it turns
+towards and bends beyond it, so neither line meets the wire.
+
+Under `ARROWS_AND_BROADCASTED` a `Broadcasted` is drawn by the `BroadcastedBox` that
+draws it under `ALL_BROADCASTED`, with its glyph, its cups, its reindexing node and the
+wires of the axes it is broadcast over routed around the glyph, on a plate. The plate is
+a rounded rectangle drawn under the operator on the background layer in the theme's
+surface tint, with the drop shadow the operators carry. In light mode the plate is a pale
+cool grey with the shadow, and in dark mode a shade above the canvas with no shadow,
+because the theme removes shadows there. At the left edge of the plate the arrow of each
+operand opens into the wires of its axes, and at the right edge the wires of each result
+close into its arrow. Each axis wire is named where it enters and where it leaves the
+plate, as a gap names it under `ALL_BROADCASTED`, and the fan between the arrow and the
+plate is as wide as the names need.
+
+The plate carries the name of its operator in the small type of a block title, centred
+over the glyph, unless the glyph writes the name already, which
+`OperationBox.names_itself` reports for the rectangle of a `Linear` and its kin. A class
+that registers a name in `plateNamesRegistry` in
+`src/display/Framework/arrows/plateNames.ts` has its plate carry that name, which says
+what the operator does, whatever the glyph writes. An `Einops` registers the contraction
+its signature writes and a `Linear` registers `Linear`, beside the registry. A module
+that registers a glyph in `bb.opsRegistry` registers the plate name beside it, so
+`src/display/Framework/caching/cachingBoxes.ts` registers `Cache` for a `Caching`, whose
+cylinder writes the name of the cache and reports `names_itself`, per
+[[Caching Between Passes]]. An elementwise map with one operand and one result is drawn
+on no plate, by the user's rule of 2026-09-25: its arrow runs straight through, and its
+name stands over the arrow between the two small heads `ElementwiseBox` draws. A
+`BlockOperator`, whose glyph is a titled box already, gets no plate.
+
+`ARROWS_AND_BOXES`, which the user asked for on 2026-09-26, draws the same arrows and
+every operator as a box with one arrow entering per operand and one leaving per result.
+The box is faced by what the operator is. Most operators and every elementwise map write
+their name in the middle of the box. An `Einops` writes a name read off its signature,
+which is `Matmul` for two operands with a contracted group, `Sum` for one operand with a
+contracted group, `Product` for two or more operands with none and `Contraction`
+otherwise. A softmax and the normalisations draw their glyph small inside a labelled box,
+a `Linear` draws its named rectangle, a `View` writes the name of its reindexing, and a
+`BlockOperator` draws its titled box. Nothing of the broadcasting is drawn, so the
+figure reads as a diagram of a category whose objects are arrays and whose morphisms are
+named boxes.
+
+Each box carries above it the name carried by the plate of `ARROWS_AND_BROADCASTED`, in
+the same small type, and leaves the name off where the face writes it already. The user
+asked on 2026-09-27 for the box form to write the names written by the arrow form, such
+as `Linear` and `Cache`. A `Linear` therefore reads `Linear` above the rectangle naming
+its weight, and a cache reads `Cache` above the box naming the cache. The face of an
+`Einops` writes `Matmul`, so `Matmul` is written once, inside its box. Both forms read
+the name through `plateNames.written_plate_label`, which takes the plate name registered
+by the operator's class, or the operator's own name where the class registers none, and
+leaves it off where the drawing under it writes that name. Both forms stand the name in
+a `plateNames.PlateNameStack`, which puts an empty room as tall as the name below the
+drawn box, so the box and the arrows either side stand at the heights they take with no
+name.
+
+tsncd's `src/display/Framework/arrows/` draws the two arrow forms. `ArrowRenderer`
+answers `display_morphism` with an `ArrowCappedBox` around the ordinary box,
+`BoxRenderer` answers it with an `OperatorFaceBox` faced through a registry keyed by
+operator class, and both draw every composition, product, rearrangement, block and
+multiline row of the generic renderer with one arrow per array.
+`diagramRenderTarget.termPass` chooses the renderer for each message. A run of an arrow
+from one operator to the next carries one triangle, on its longest segment, half way
+along the stretch its label leaves free. The halo of an arrow is lit by every axis of its
+array, so a legend row lights the arrows carrying the axis. A `ParaWrap` over a
+`Broadcasted` keeps its taped arrays in the columns of the operator's box, and each tape
+comes down from its free end and bends into the arrow of its array along a level stretch
+that carries the arrow's label, per [[Para Wrap]]. The choice reaches the renderer under
+`INLINE`, `BROWSER` and `HTML`, and a `LISTING` or `DUMP` run is the same under every
+value, because the term is unchanged.
+
+### The controls of a page
+
+`DiagramSettings.controls` says whether a page draws, under its heading, one row of
+controls: the selector of variants on a page carrying several, then the buttons that
+switch its form and its theme. `PageControls.SHOWN`, the default, draws the row on the
+open page and in a file `HTML` writes, outside the diagram container, so a captured
+image holds none of it, and `HIDDEN` hides the whole row, the selector with it. A switch
+redraws the term held in memory by the page with the one setting changed, so a page
+written once carries every form and both themes. A host page holding it in an iframe
+switches it through the address of the iframe or through a message it posts, per *A page
+that switches its form and its theme* in [[Diagram Wire Format]]. The page opens in the
+all-broadcasted form and the system's theme wherever its address names neither, whatever
+`DiagramSettings` wrote into the message, and an address naming an unknown parameter or
+value draws nothing, per *A page that reads its address strictly and reports its state
+to a host* in the same note.
+
+## Replacing the diagram mode from the environment
+
 An agent executing a notebook in the background sets `PYNCD_DIAGRAMS` in the kernel's
 environment, and `show_diagram` uses the mode it names in place of the declared one, so the
 notebook is not edited. `notebooks/execute_notebook.py` starts the kernel that way, with
@@ -371,8 +592,8 @@ through `websocket_transfer` directly is not reached by the override.
 > The gap is invisible for an operator whose target passes straight through. It is visible
 > for one that produces axes, because those wires enter no box and so begin in mid-air.
 > `para`'s former `Broadcast` operator was in that state, and the stray `x` floating into
-> the first operand of the `+` in the reverse of the expanded softmax was the symptom, per
->. The operator has since gone, because a repeat is a
+> the first operand of the `+` in the reverse of the expanded softmax was the symptom.
+> The operator has since gone, because a repeat is a
 > `View`, drawn by `ViewBox`. `Zero` is the same trap
 > taken to its limit, being nullary, and it has a box. `ops.Maximum`, `ops.ReLU` and
 > `ops.Dropout` were each here before it.
@@ -457,8 +678,7 @@ through `websocket_transfer` directly is not reached by the override.
 > is available only to a `Broadcasted` whose reindexing is where a reindexing normally goes.
 > `para.data_structure.transpose.ReindexTranspose` carries one in the operator instead,
 > because a `reindexings` entry always maps output indices back to input ones and a
-> transpose runs the other way, so its box builds the figure itself, per
->.
+> transpose runs the other way, so its box builds the figure itself.
 >
 > The flag to set is `reversed`, and it moves two things at once: which column is the
 > codomain, and which side the pentagon's point is on. `DefaultStrideRendererSettings` sets
@@ -526,8 +746,7 @@ through `websocket_transfer` directly is not reached by the override.
 > otherwise have built with `display_category`. Mirroring the stack reverses each row
 > and leaves the order of the rows alone, because `rh.Vertical` does not reverse its
 > children under `mirror`, so a contravariant row starts at the top right and each row
-> below it resumes at the right. records the
-> change.
+> below it resumes at the right.
 
 > [!warning] `Cannot read properties of undefined (reading 'anchors')` is a weave bug
 > It is thrown from `link_weaves` in `BroadcastedCategoryRenderer`, and it means a

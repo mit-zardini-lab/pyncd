@@ -64,7 +64,9 @@ def selection_slot(axis: cat.Axis) -> Para.TapeSlot:
     with nothing shared between them but the axis they both name.
     `nm.FreeNumeric.named` derives an id the same way and for the same reason.
     Every other id in the package is random per process, per
-    `obsidian/06-practice/Invariants.md` under *Axis identity*.
+    `obsidian/06-practice/Invariants.md` under *Axis identity*. The slot is
+    inner, because each token selects its own positions, so a lift over a batch
+    axis stores one index for every index of that axis.
     '''
     axis_name = axis.uid._name
     name = fd.DynamicName(

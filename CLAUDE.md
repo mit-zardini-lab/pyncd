@@ -3,7 +3,7 @@
 Written by Claude Opus 5 (1M context), effort high.
 
 `pyncd` formalises deep learning models as algebraic expressions and derives diagrams,
-PyTorch code, a backward pass and a quantised model from them.
+PyTorch code, a backward pass, a quantised model and a cached pass from them.
 
 `README.md` describes what the package is for. This file describes how to work in it.
 Read the writing rules below before you write any code or prose here.
@@ -563,7 +563,10 @@ feature and serves as its test, so everything it claims is asserted in text and 
 with the diagrams turned off. A SOTA notebook whose model lives in a package beside it
 is the exception, ruled on 2026-09-15: its claims live in a `validate_*.py` in that
 package, which imports the modules and is discovered by `validations/`, and the notebook
-keeps the prose and the figures. `notebooks/sota/DeepSeekV41Flash/` is the pattern.
+keeps the prose and the figures. `notebooks/sota/DeepSeekV41Flash/` is the pattern. The
+notebooks under `notebooks/website/` are pages of the lab website and hold no checks. A
+validator beside each notebook holds one `check_` function per claim, in the order the
+notebook states them, and `validations/` discovers both.
 
 These rules apply to the prose inside a code cell as much as to a markdown cell. A
 comment or a docstring in a notebook is subject to the same rules as one in a module.
@@ -575,6 +578,11 @@ do not add a script whose purpose is to write them.
 > Rejected: rendering the figures of a notebook into a `*_figures/` folder so they can be
 > viewed outside the notebook.
 > Replacement: executing the notebook with `DiagramMode.INLINE` and saving its outputs.
+
+The interactive pages under `notebooks/website/output/` are the one exception. The last
+cell of each website notebook writes its page there through
+`notebook_diagrams.show_page_variants`, and the lab website serves the page. After a
+tsncd build, `python notebooks/website/rewrite_website_pages.py` writes every page again.
 
 **Do not print an `agent_display` listing in a notebook.** A listing is the form an agent
 reads a morphism in, and a person reads the diagram. The listing is therefore a diagram
@@ -707,13 +715,22 @@ para/                 The backward pass: derivatives, tapes, pathway collapse.
 quantization/         The number format and the size in bits a value is held in, the
                       datatype conversion operator, and the pass that writes a
                       quantisation onto every wire of a model.
+caching/             The arrays kept by a pass for the passes after it: the Caching
+                      operator, whose operand is saved over the tokens of the pass
+                      and whose result is loaded over every cached token, and the
+                      derivation of a cached pass from an uncached model.
+performance_modeling/
+                      The operation count of a broadcast operation and the rates of
+                      a GPU, which caching/ reads to compare the placements of a
+                      cache. The public copy holds five files.
 
 deepseek/             Sparse axes and the sparse expansion.
 advanced_axis_dynamics/
                       The axis a read outside an axis leaves, the affine form that
                       says which of its positions hold a value, and the
-                      concatenation of two axes carrying two forms. Only deepseek/,
-                      two para modules and the V4.1 notebook import it.
+                      concatenation of two axes carrying two forms, and the crawls
+                      that carry an index or a read backwards through an expression.
+                      Nothing in data_structure/, graphs/ or algebra/ imports it.
 validations/          Every validator and notebook as a target, the import graph
                       that says which targets a modified file reaches, and the
                       runner that executes the selected targets at once.
@@ -721,6 +738,9 @@ agent_display/        A morphism as an SSA listing. Read this rather than displa
 display/, torch_compile/, websocket_transfer/, data_transfer/
                       Backends. display/ imports nothing above it.
 notebooks/            One folder per feature, plus the shared display helpers.
+                      notebooks/website/ holds the notebooks of the lab website,
+                      and notebooks/classic/, sota/ and caching/ the packages their
+                      models are built in.
 example_notebooks/    The short introductory notebooks.
 obsidian/             The vault: a note per module, mirroring these layers.
 ```
@@ -1006,8 +1026,8 @@ python validate_repository.py
 python validate_repository.py imports        # or one check at a time
 ```
 
-There are thirty-four targets: four repository checks, twenty validators and ten
-notebooks. Only code that depends on a modified feature needs validating, which is the
+There are fifty-six targets: four repository checks, thirty-three validators and
+nineteen notebooks. Only code that depends on a modified feature needs validating, which is the
 reason the features are kept in separate folders, and the default run selects exactly
 that. `--include-excluded` runs any target carrying a reason to be left out, and
 `--list` gives the reason beside each.
@@ -1022,8 +1042,11 @@ The validators are `data_structure/validate_numeric_signs.py`,
 `deepseek/validate_rotary.py`, `deepseek/validate_sparse.py`,
 `advanced_axis_dynamics/validate_advanced_axis_dynamics.py`,
 `advanced_axis_dynamics/validate_covariant_broadcast.py`,
-`quantization/validate_quantization.py`, `utilities/validate_wording_json.py`, the three
-under `websocket_transfer/`, and the three in the packages under `notebooks/sota/`.
+`quantization/validate_quantization.py`, `caching/validate_caching.py`,
+`utilities/validate_wording_json.py`, the four under `websocket_transfer/`, the six in
+the packages under `notebooks/sota/`, and the nine beside the notebooks under
+`notebooks/website/`, which `python validations/run_validations.py --name website`
+runs with those notebooks.
 `python validations/run_validations.py --list --kind validator` lists every one of them,
 because they are discovered rather than named here.
 

@@ -33,7 +33,8 @@ type RepositoryPath = str
 REPOSITORY_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 FOLDERS_WITH_NO_IMPORTABLE_CODE = frozenset({
-    '__pycache__', '.git', '.vscode', '.claude', '.ipynb_checkpoints', 'node_modules',
+    '__pycache__', '.cache', '.git', '.vscode', '.claude', '.ipynb_checkpoints',
+    'node_modules',
     'obsidian', 'outputs', '_guide',
 })
 

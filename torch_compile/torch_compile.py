@@ -323,6 +323,7 @@ ConstructedModule.add_function(ops.L2Norm, l2_normalise)
 # A `Maximum` folds the one axis in its input target, which is the axis the
 # softmax it shifts normalises over.
 ConstructedModule.add_function(ops.Maximum, torch.amax, dim=True)
+ConstructedModule.add_function(ops.Product, torch.prod, dim=True)
 ConstructedModule.add_function(
     ops.AdditionOp, lambda *xs: sum(xs[1:], xs[0]), semantic=True)
 # A node: a reindexing and nothing else. Under the semantic path a dropped
@@ -529,11 +530,30 @@ class ConstructedEmbedding[
     def forward(self, *xs):
         return self.func(*xs)
     
-def rms_normalise(tensor: torch.Tensor, epsilon: torch.Tensor) -> torch.Tensor:
+def trailing_dims(normalised_rank: int) -> tuple[int, ...]:
+    '''The last `normalised_rank` dimensions of a tensor, which hold the array the
+    target of a normalisation names. `broadcast_func` hands the function either that
+    array alone, under `torch.vmap`, or the whole tensor with the target last.'''
+    return tuple(range(-normalised_rank, 0))
+
+
+def rms_normalise(tensor: torch.Tensor, epsilon: torch.Tensor,
+                  normalised_rank: int) -> torch.Tensor:
     '''`tensor` divided by the root of the mean of its squares plus `epsilon`, over
-    every dimension of the tensor the operator is given, which is the array its target
-    names.'''
-    return tensor * torch.rsqrt(tensor.pow(2).mean() + epsilon)
+    its last `normalised_rank` dimensions, which hold the array the target names.'''
+    dims = trailing_dims(normalised_rank)
+    return tensor * torch.rsqrt(tensor.pow(2).mean(dim=dims, keepdim=True) + epsilon)
+
+
+def layer_normalise(tensor: torch.Tensor, epsilon: torch.Tensor,
+                    normalised_rank: int) -> torch.Tensor:
+    '''`tensor` with its mean subtracted and divided by the root of its variance plus
+    `epsilon`, over its last `normalised_rank` dimensions, which hold the array the
+    target names. The variance is the biased one, the mean of the squared deviations,
+    which is what `torch.nn.LayerNorm` computes.'''
+    dims = trailing_dims(normalised_rank)
+    centred = tensor - tensor.mean(dim=dims, keepdim=True)
+    return centred * torch.rsqrt(centred.pow(2).mean(dim=dims, keepdim=True) + epsilon)
 
 
 class ConstructedNorm[B: cat.Datatype, A: cat.Axis](ConstructedModule, operation_key=ops.Normalize):
@@ -543,9 +563,10 @@ class ConstructedNorm[B: cat.Datatype, A: cat.Axis](ConstructedModule, operation
     def __init__(self, target: cat.Broadcasted[B, A, ops.Normalize]) -> None:
         super().__init__(target)
         epsilon = target.operator.epsilon
+        rank = len(target.input_weaves[-1].target().shape())
         self.func = broadcast_func(target, lambda *xs: self.combine(
             *xs[:-1],
-            scaled=rms_normalise(xs[-1], epsilon_value(epsilon, xs[-1]))))
+            scaled=rms_normalise(xs[-1], epsilon_value(epsilon, xs[-1]), rank)))
 
     def combine(self, *parameters: torch.Tensor,
                 scaled: torch.Tensor) -> torch.Tensor:
@@ -562,3 +583,17 @@ class ConstructedNorm[B: cat.Datatype, A: cat.Axis](ConstructedModule, operation
 
     def forward(self, *xs: torch.Tensor):
         return self.func(*xs)
+
+
+class ConstructedLayerNorm[B: cat.Datatype, A: cat.Axis](
+        ConstructedNorm[B, A], operation_key=ops.LayerNorm):
+    '''A `LayerNorm` subtracts the mean over its target, divides by the root of the
+    variance plus its epsilon, and then applies the gain and the bias as a
+    `Normalize` does. The data is the last operand, after the grabbed parameters.'''
+    def __init__(self, target: cat.Broadcasted[B, A, ops.LayerNorm]) -> None:
+        ConstructedModule.__init__(self, target)
+        epsilon = target.operator.epsilon
+        rank = len(target.input_weaves[-1].target().shape())
+        self.func = broadcast_func(target, lambda *xs: self.combine(
+            *xs[:-1],
+            scaled=layer_normalise(xs[-1], epsilon_value(epsilon, xs[-1]), rank)))

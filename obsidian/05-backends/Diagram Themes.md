@@ -9,7 +9,7 @@ agent: Codex (GPT-6), gpt-5.6-sol (high), gpt-5.6-terra (high)
 
 A diagram theme changes the colors and surfaces used to display a term. The dark theme
 uses a charcoal canvas, light wires and labels, and outlined enclosures. It preserves
-the hue of semantic colors, including processor colors and named tape slots. The light
+the hue of semantic colors, including block colors and named tape slots. The light
 theme retains the existing colored surfaces.
 
 ## Both themes use one layout and draw pass
@@ -50,6 +50,17 @@ outline is 1.5px. A block and its associated operator share the same hover fill.
 The `blockHoverIntensity` setting defaults to 12% through the shared color operations.
 Annotation text remains unfiltered. Related blocks and tape slots share a highlight
 group within one rendered diagram.
+
+A highlight draws a halo around each wire and label lit by it, such as every wire and
+name of an axis whose legend row is under the pointer. The halo is drawn in the theme's
+highlight color, `#3d9bff` in the light theme and `#8cc8ff` in the dark theme, whatever
+the color of the wire or the text surrounded by it. tsncd's
+`DiagramTheme.highlightHaloColor` holds the two colors. A wire's halo is drawn at
+`halo_opacity` and a label's is a blurred text shadow, so the color is saturated enough
+to show at those strengths, and it is lighter in the dark theme to glow against the
+dark canvas. Until 2026-09-26 the halo was drawn in the color of the wire or the text,
+which is black in the light theme, and the user asked on that day for a color that reads
+as a glow.
 
 ## Dark block backgrounds have selectable intensity
 

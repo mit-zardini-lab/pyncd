@@ -31,11 +31,13 @@ The other folders provide utilities. These are;
  - `advanced_axis_dynamics`: A read that falls outside an axis leaves an axis only some of whose positions hold a value. This folder derives the affine form saying which positions those are, and carries it through further reads.
  - `deepseek`: The operators DeepSeek's models need, including a complex datatype with rotary position embeddings and the top-k gate behind a mixture of experts.
  - `para`: The backward pass, derived from the forward one rather than declared.
+ - `caching`: The arrays kept by a pass of generation for the passes after it. The `Caching` operator saves the array computed by a pass for its new tokens and loads the same array over every cached token. `caching/algebra/derive_cached_pass.py` derives the pass over the new tokens from an uncached model, and `caching/algebra/cost_cache_placements.py` compares every placement of its caches by the values kept per token, the operations and the bytes moved.
+ - `performance_modeling`: The operation count of a broadcast operation and the published rates of a GPU, which `caching` reads to compare the placements of a cache.
  - `term_utilities`: Reading structure back out of a term, the code references a block carries, and the configuration that gives a model's free numerics concrete sizes.
  - `utilities`: The collection types the terms are built from, and the wording files a figure's descriptions are read from.
  - `validations`: Every validator and notebook as a target, the import graph that says which targets a modified file reaches, and the runner that executes them at once.
  - `agent_display`: An expression as an SSA listing, which is easier to read as text than the diagram is.
- - `notebooks`: One folder per feature. Each notebook demonstrates a feature and asserts what it claims, so it doubles as a test.
+ - `notebooks`: One folder per feature. Each notebook demonstrates a feature and asserts what it claims, so it doubles as a test. `notebooks/website/` holds the nine notebooks of the diagrams page of the lab website, each with a validator beside it and an interactive page it writes, and `notebooks/classic/`, `notebooks/sota/` and `notebooks/caching/` hold the packages their models are built in.
  - `example_notebooks`: Short introductory notebooks, each one runnable, and `minimum_working_example.py`.
  - `obsidian`: An Obsidian vault documenting the package, one note per module or concept.
 
@@ -141,8 +143,25 @@ quantisation onto every wire and a conversion wherever an operation requires ano
 quantisation. `quantization/algebra/strip_quantisations.py` takes the quantisations off
 again and returns the model in the reals.
 
+ - We derive the pass of a generating model over its new tokens with
+`caching/algebra/derive_cached_pass.py`. It carries the read of the new tokens back
+through the model and places a cache wherever a causal read reaches an earlier token, so
+the caches a released implementation keeps are derived from the model rather than
+written by hand. `obsidian/08-caching/` states the derivation and its proof.
+
  - We read the expression as text with `agent_display`, which renders it as an SSA
 listing, and we compile it to a PyTorch module with `torch_compile`.
+
+ - `notebooks/website/` holds the notebooks behind the diagrams page of the lab website:
+four tutorial pages on attention, the transformer of *Attention Is All You Need*,
+Mixtral-8x7B, DeepSeek-V3, GLM-5.3 and DeepSeek-V4.1-Flash. The last cell of each writes
+one page under `notebooks/website/output/` holding every variant of its model, such as
+the pass over every token and the cached pass, each quantised and in the reals, with a
+selector between them. A page holds the tsncd bundle it was written with, so after a
+tsncd build we write every page again with
+`python notebooks/website/rewrite_website_pages.py`, and
+`python validations/run_validations.py --name website` runs the validator beside each
+notebook.
 
  - `notebooks/sota/DeepSeekV41Flash.ipynb` is the worked example, and the model it builds
 lives beside it in `notebooks/sota/DeepSeekV41Flash/`. We run it as a listing with

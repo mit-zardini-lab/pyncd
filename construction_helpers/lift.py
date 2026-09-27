@@ -15,7 +15,12 @@ same target as before.
 A seed that is none of the four constructions and none of `Broadcasted` carries
 its objects in a field of its own, so `OBJECT_LIFTS` holds one rule per such
 class and `register_object_lift` declares one. `para.registries.object_lift`
-registers the tape seeds, whose array is their `size`.
+registers the tape seeds, whose array is their `size`. A seed of an inner slot is
+lifted by lifting its array, and a seed of an outer slot, which holds a parameter,
+keeps its array and is followed by a repeat or preceded by a sum along the lifted
+axes, per `obsidian/07-para/Outer and Inner Tape Slots.md`. The rules are
+registered when that module is imported. `algebra.factor_out_lift` is the inverse
+of the lift of a `Broadcasted`.
 
 `obsidian/02-categories/Construction Helpers.md` is the full account.
 '''

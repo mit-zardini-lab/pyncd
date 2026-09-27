@@ -21,14 +21,26 @@ way, after finding that the sink logit opened no box. A `Linear` that selects am
 weights is not written out by the rule, and is drawn in the parametrised form, with
 its weight as an operand.
 
+Both functions write out the operator at one index of the axes it is lifted over, which
+`algebra.factor_out_lift.factor_out_lift` finds, so the box over an RMSNorm broadcast
+over the tokens `x` draws the normalisation of one token, and the box over a linear map
+broadcast over `x` draws the map applied to one token. The figure around the box states
+the broadcast. The user asked for this on 2026-09-26. The weight and the gain are grabbed
+from outer tape slots, which a lift over `x` does not enlarge, so the expansion drawn in
+the box, lifted over `x`, is the expansion of the operator the figure holds.
+`obsidian/07-para/Outer and Inner Tape Slots.md` states the argument.
+
 The two functions differ in what stands where each grab stood, and `ExpandedParameters`
 names the choice for `DiagramSettings.expanded_parameters`.
 
-`expanded_with_weight_arrays` replaces each grab with the weight array
+`expanded_with_weight_arrays` replaces each grab of a parameter with the weight array
 `show_grabbed_parameters.weight_array_in_place_of` writes, a `Linear` with no operands
 named after the slot. A map `W : a -> b` becomes `[W : 1 -> ab] * hold(a)` followed by
 the `Einops` of `ab` and `a` onto `b`, and the expansion holds no tape. The reviewer
-asked for that form on 2026-09-17, and it is the default.
+asked for that form on 2026-09-17, and it is the default. An expansion whose tape is
+inner, such as that of a cache, keeps its tape, and the function presents it under the
+tape setting of the figure. The user asked on 2026-09-26 for the box over a cache to
+draw its load, its concatenation and its append as one wrapped glyph.
 
 `expanded_with_grabbed_parameters` follows each grab with the weight box
 `show_grabbed_parameters.weight_box_fed_by` writes, and presents the result under the
@@ -49,6 +61,7 @@ from __future__ import annotations
 import enum
 import functools
 
+import algebra.factor_out_lift as factor_out_lift
 import algebra.linear_expansion as linear_expansion  # noqa: F401
 import algebra.operator_expansion as operator_expansion
 import data_structure.Category as cat
@@ -69,36 +82,42 @@ def write_out_under(
     tape: tape_presentation.TapePresentation,
 ) -> auxiliary_information.WriteOut:
     '''The function that writes an operator out for an inspection box under
-    `parameters`. `tape` is read under `READ_FROM_THE_TAPE` alone, because an
-    expansion with weight arrays holds no tape to present.'''
+    `parameters`, presenting whatever tape the expansion holds under `tape`.'''
     match parameters:
         case ExpandedParameters.WEIGHT_ARRAYS:
-            return expanded_with_weight_arrays
+            return functools.partial(expanded_with_weight_arrays, tape=tape)
         case ExpandedParameters.READ_FROM_THE_TAPE:
             return functools.partial(expanded_with_grabbed_parameters, tape=tape)
 
 
 def expanded_with_weight_arrays[B: cat.Datatype, A: cat.Axis](
     target: cat.Broadcasted[B, A],
+    tape: tape_presentation.TapePresentation,
 ) -> fd.GeneralTerm | None:
-    '''`target` with a weight array feeding each parameter of its operator, and every
-    operator of the result that the registry writes out written out. `None` where
-    `target` has no parameter and no rule writes it out. A `Linear` with an empty
-    domain, which stands for a learned array such as the sink logit, comes out as the
-    weight array of that array alone, under the name of its slot.'''
+    '''`target` at one index of the axes it is lifted over, with a weight array feeding
+    each parameter of its operator, and every operator of the result that the registry
+    writes out written out, with the tape it still holds presented under `tape`.
+    `None` where `target` has no parameter and no rule writes it out. A `Linear` with
+    an empty domain, which stands for a learned array such as the sink logit, comes out
+    as the weight array of that array alone, under the name of its slot. A weight
+    array replaces the grab of an outer slot alone, so the expansion of a cache keeps
+    its load and its append on the tape, and under `TapePresentation.ABSORBED` the
+    load, the concatenation and the append are one wrapped glyph, per
+    `para.data_structure.ParaWrap`.'''
     expanded = _expanded_with_bare_grabs(target)
     if expanded is None:
         return None
-    return show_grabbed_parameters.write_grabs_as_weight_arrays(expanded)
+    return tape_presentation.present(
+        show_grabbed_parameters.write_grabs_as_weight_arrays(expanded), tape)
 
 
 def expanded_with_grabbed_parameters[B: cat.Datatype, A: cat.Axis](
     target: cat.Broadcasted[B, A],
     tape: tape_presentation.TapePresentation,
 ) -> fd.GeneralTerm | None:
-    '''`target` with a grab feeding each parameter of its operator through a weight
-    box, and every operator of the result that the registry writes out written out,
-    presented under `tape`. `None` where `target` has no parameter and no rule
+    '''`target` at one index of the axes it is lifted over, with a grab feeding each
+    parameter of its operator through a weight box, and every operator of the result
+    that the registry writes out written out, presented under `tape`. `None` where `target` has no parameter and no rule
     writes it out, so there is nothing to draw beyond the operator itself. A
     `Linear` with an empty domain, which stands for a learned array such as the sink
     logit, comes out as the weight box of that array alone.'''
@@ -112,6 +131,7 @@ def expanded_with_grabbed_parameters[B: cat.Datatype, A: cat.Axis](
 def _expanded_with_bare_grabs[B: cat.Datatype, A: cat.Axis](
     target: cat.Broadcasted[B, A],
 ) -> fd.GeneralTerm | None:
+    operation = factor_out_lift.factor_out_lift(target).base
     expanded = operator_expansion.expand_standard_operators(
-        show_grabbed_parameters.grab_parameters(target))
-    return None if expanded == target else expanded
+        show_grabbed_parameters.grab_parameters(operation))
+    return None if expanded == operation else expanded

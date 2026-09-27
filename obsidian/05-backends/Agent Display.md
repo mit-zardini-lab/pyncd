@@ -60,26 +60,36 @@ loop N times { } a block repeated N times
 ```
 
 `listing` prints the notation above as a legend, so its output describes itself.
-`listing_without_legend` omits it, which is what `notebooks/display/notebook_listings.py`
-calls when a notebook prints many listings in a row.
+`listing_without_legend` omits it, and `notebooks/display/notebook_listings.py` calls
+it when a notebook prints many listings in a row.
+
+The scaled dot-product attention of `notebooks/website/tutorial/express_attention.py`
+reads queries `%0`, keys `%1` and values `%2`, and lists as:
 
 ```
-%11 = Einops(%4[qTλ, {dRλ}], %9[xSλ, {dRλ}]) : R@λ[qTλ, xSλ]
-%12 = Shuffle<dRλ>() : R@λ[qTλ, xSλ]
-%13 = AdditionOp<+>(%11[qTλ, xSλ], %12[qTλ, xSλ]) : R@λ[qTλ, xSλ]
+%4 = Einops(%0[q, {d}], %1[x, {d}]) : R[q, x]
+%5 = Arithmetic<|d|^{-1/2} x>(%4[q, x]) : R[q, x]
+%6 = SoftMax(%5[q, {x}]) : R[q, {x}]
+%3 = Einops(%6[q, {x}], %2[{x}, v]) : R[q, v]
 ```
 
 The braces are [[Weaves and Degree|the weave/target split]], printed directly, and the
-datatype before them is the one the array carries.
+datatype before them is the one carried by the array. A quantised datatype prints its
+format, as `BF16[q, x]`, and names the datatype wrapped by it in brackets where that
+datatype is not the reals.
 
-A `ParaWrap` ([[Para Wrap]]) prints as its body with the tape where it touches it: a
-grabbed operand is `<s1>[d, {v}]` in the operand's place, a dropped result `<s0>` among
-the outputs, so `%3, <s0> = rewire(%0)` is a copy with one copy saved.
+A `ParaWrap` ([[Para Wrap]]) prints as its body with the tape where it touches it. A
+grabbed operand is `<s1>[d, {v}]` in the operand's place, and a dropped result is `<s0>`
+among the outputs, so `%3, <s0> = rewire(%0)` is a copy with one copy saved. The tokens
+of a pass appended to a cache print with a `+` after the name of the slot, as `<c+>`,
+per [[Caching Between Passes]]. An operand or a result that stays on its wire and is
+also dropped prints as its wire followed by the slot receiving the drop, as `%0<s1>`, or
+`%0<c+>` for the tokens appended to a cache.
 
 ## Where it lives
 
 `agent_display/morphism_ir.py`. The package `__init__` carries the reasons for the shape.
-`ordered_subgraphs` is what makes the output deterministic.
+`ordered_subgraphs` makes the output deterministic.
 
 ## See also
 

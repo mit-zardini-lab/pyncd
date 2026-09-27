@@ -55,7 +55,7 @@ FREQUENCY_SYMBOL = '\\theta'
 YARN_FREQUENCY_SYMBOL = "\\theta'"
 RAMP_SYMBOL = 'r'
 TABLE_SYMBOL = 'F'
-TRANSPOSE_NAME = 'tr'
+TRANSPOSE_NAME = '\\mathrm{Transpose}'
 
 TURN_FACTOR_LATEX = 'e^{\\mathrm{i} x}'
 

@@ -9,8 +9,8 @@ Written by Claude Opus 5 (1M context), effort high.
 
 ## What it is
 
-One expression passes through several forms on its way to a diagram, a training pair or a
-quantised model, and each pass reads one form and writes the next. The notes listed below
+One expression passes through several forms on its way to a diagram, a training pair, a
+quantised model or a cached pass, and each pass reads one form and writes the next. The notes listed below
 each carry a Mermaid graph whose boxes are the forms and whose edges are the passes. This
 note indexes those graphs and draws how the pipelines feed one another.
 
@@ -26,7 +26,10 @@ flowchart TD
     Q -->|"strip_quantisations"| M
     M -->|"grab_parameters and forward_backward"| T["Taped forward and backward passes"]
     T -->|"dedup_and_collapse"| TC["Collapsed Taped"]
-    TC -->|"recompute_elementwise_slots"| TR["Taped with recomputed slots"]
+    TC -->|"recompute_elementwise_slots, or recompute_contraction_slots then store_operands_of_views"| TR["Taped with recomputed slots"]
+    M -->|"slide_causal_reads_backwards"| S["CausalSlide<br>each causal read at the copy it masks"]
+    M -->|"derive_cached_pass"| C["Cached pass<br>the model over the new tokens, with a Caching wherever a causal read reaches an earlier token"]
+    C -->|"with_linear_maps_absorbed"| CA["Cached pass with the maps over its caches absorbed into the queries"]
 ```
 
 | pipeline | the note holding its graph |
@@ -40,6 +43,7 @@ flowchart TD
 | a quantised model, and the model under it | [[Quantization]], [[Stripping Quantisations]] |
 | training, from a morphism to a checked pair | [[Training]] |
 | the collapse of a backward pass | [[Pathway Collapse]] |
+| the CausalSlide, a cached pass, its placements and the absorbed order | [[Deriving Caches by Dragging the New Tokens]] |
 
 ## The expansions
 
@@ -63,6 +67,7 @@ flowchart LR
     T -->|"to_para_wrap, for display"| W
     I -->|"BlockOperator.expand"| O["Box opened<br>the block's body lifted over the box's degree"]
     I -->|"expand_concatenations"| J["Concatenation written out<br>each consumer of the concatenated positions rewritten into the consumers of the parts"]
+    I -->|"load_the_past_and_append_this_pass"| K["Cache written out, in Para<br>a CacheGrab of the earlier tokens, a concatenation and a CacheDrop of the new ones"]
 ```
 
 | expansion | what it writes out | module |
@@ -75,6 +80,7 @@ flowchart LR
 | a selection, onto a wire | the same index as a wire | `deepseek/sparse_expansion.py`, per [[Sparse Expansion]] |
 | a box | the block's body over the box's degree | `data_structure/Operators.py` |
 | a concatenation of two axes | the consumers of the parts | `advanced_axis_dynamics/algebra/concatenation_expansion.py`, per [[Advanced Axis Dynamics]] |
+| a `Caching` | the load of the earlier tokens, the concatenation of the new ones after them, and the append of the new ones | `caching/registries/standard_expansions.py`, per [[Caching Between Passes]] |
 
 ## See also
 

@@ -1,0 +1,61 @@
+{
+  "name": "Current",
+  "wordings": {
+    "MODEL_TITLE": "\\text{Mixtral-8x7B}",
+    "MODEL_DESCRIPTION": "A decoder transformer of 32 layers released by Mistral AI in December 2023 with open weights. Each layer is an attention sublayer followed by a sparse mixture-of-experts sublayer. The attention sublayer adds to each token a sum of the earlier tokens weighted by attention scores, and the mixture of experts transforms each token on its own through two of its eight experts. The model returns, at every position, the probability of every token of the vocabulary being the next one.",
+
+    "EMBEDDING_TITLE": "\\text{Input Embedding}",
+    "EMBEDDING_DESCRIPTION": "The input of the model is a string, which a tokenizer cuts into tokens, each an entry of a vocabulary of 32000 common character sequences. The expression starts from the token identifiers the tokenizer returns, one per position. The embedding E holds one learned vector of m = 4096 values for every token of the vocabulary and returns the vector of the token at each position. A learned weight is drawn in bold.",
+
+    "LAYER_TITLE": "\\text{Decoder Layer}",
+    "LAYER_DESCRIPTION": "One of the N = 32 layers, each with weights of its own. The layer normalises the hidden state, applies the attention sublayer and adds the result to the hidden state, then normalises again, applies the sparse mixture of experts and adds that result as well.",
+
+    "ATTENTION_RESIDUAL_TITLE": "\\text{Residual Connection}",
+    "MIXTURE_RESIDUAL_TITLE": "\\text{Residual Connection}",
+    "RESIDUAL_DESCRIPTION": "The RMSNorm of the hidden state is passed through the sublayer, and the output of the sublayer is added to the hidden state as it arrived. The sublayer therefore learns a change to the hidden state, which passes through the layer unchanged where the change is zero.",
+
+    "ATTENTION_TITLE": "\\text{Mixtral Attention}",
+    "ATTENTION_DESCRIPTION": "Grouped-query attention with 32 query heads and h' = 8 key-value heads of d = 128 channels. Each token is projected into its queries, keys and values, the queries and the keys are turned by the rotary embedding, and each of the h' groups of g = 4 query heads attends with one key-value head. The heads are then mapped back to the model width by W^O.",
+
+    "CORE_TITLE": "\\text{Multi-Head Scaled Dot-Product Attention}",
+    "CORE_DESCRIPTION": "Each query takes the dot product with the key of every earlier token and of its own token, the scores are divided by the square root of d, and a softmax over the slots turns them into weights. Each query returns the sum of the values under those weights. The keys and the values carry no query-head axis, so every query head of a group reads the same key-value head.",
+
+    "ROTARY_TITLE": "\\text{Rotary Embedding}",
+    "ROTARY_DESCRIPTION": "A rotary embedding lets the score of a query against a key depend on the distance between their tokens. Each pair of adjacent channels is read as one complex number and multiplied by e^(i p theta_j), where p is the position of the token and theta_j = beta^(-j / t) is the angular velocity of pair j, with beta = 1000000 and t = d / 2 = 64 pairs. The angular velocity is fastest for pair 0 and falls with each later pair. A query at position p and a key at position q are both turned, and the product of the one with the conjugate of the other carries the angle of p - q.",
+
+    "MIXTURE_TITLE": "\\text{Sparse Mixture of Experts}",
+    "MIXTURE_DESCRIPTION": "The router scores each of the n = 8 experts for a token, keeps the k = 2 highest scores, and turns the two into weights with a softmax. The token passes through the two chosen experts, and the output is the sum of the outputs of the two experts under their weights. Each token reads 2 of the 8 sets of expert weights, so a layer holds 8 feed-forward networks and computes 2 for each token.",
+    "ROUTER_TITLE": "\\text{Router}",
+    "ROUTER_DESCRIPTION": "The gate projection W^g gives each token one score per expert. The top k = 2 scores are kept, and the softmax of the two kept scores gives the weight of each chosen expert. The weights read by the experts are those of the chosen experts alone.",
+    "EXPERTS_TITLE": "\\text{Top 2 Experts}",
+    "EXPERTS_DESCRIPTION": "Each chosen expert is a SwiGLU feed-forward network with an inner width of f = 14336. W_1 and W_3 project the token to f values each, the sigmoid linear unit is applied to the first, the two are multiplied, and W_2 maps the product back to m. Each projection holds the weights of all eight experts and reads those of the expert each slot chose, and the view named Diagonal keeps the output of that expert.",
+
+    "OUTPUT_TITLE": "\\text{Output Projection}",
+    "OUTPUT_DESCRIPTION": "The final RMSNorm is applied to the m-deep vector of every position, and a linear map projects it to a score for each of the V = 32000 tokens of the vocabulary. The softmax of the scores is the probability of each token filling the next position. The released forward pass returns the scores, and the softmax is applied when a token is sampled.",
+
+    "EMBEDDING_OPERATOR_DESCRIPTION": "A table lookup. The embedding holds one learned vector of m values for every token of the vocabulary, and it returns the vector of the token each position holds.",
+    "PAIRS_AS_COMPLEX_DESCRIPTION": "Every two adjacent channels read as one complex number, the first as the real part, as torch.view_as_complex reads them. PyTorch holds complex numbers natively, so the rotation of a pair is one complex product. A wire carrying complex numbers is labelled with the complex datatype.",
+    "DECOMPLEX_DESCRIPTION": "Each complex number written back as two adjacent real channels, the real part first, as torch.view_as_real writes them.",
+    "TOP_K_DESCRIPTION": "The two highest scores of the eight experts of each token are kept, on the axis k/n, whose live positions are the two chosen experts. The score of every other expert is the unit, which the softmax that follows ignores.",
+    "SILU_ROLE": "The sigmoid linear unit, x sigma(x), applied to every value of the first projection on its own. Its product with the second projection is the gating of the SwiGLU.",
+    "SCORE_SCALE_ROLE": "Every score divided by the square root of the head width d.",
+
+    "QUERY_ROLE": "The query projection, which maps the m values of a token to h' = 8 groups of g = 4 queries of d values, one group per key-value head. The released code projects onto 32 heads and reshapes them, and query head g i + j of the released code is query j of group i.",
+    "KEY_ROLE": "The key projection, which maps the m values of a token to h' = 8 keys of d values, one per key-value head.",
+    "VALUE_ROLE": "The value projection, which maps the m values of a token to h' = 8 values of d values, one per key-value head.",
+    "OUTPUT_ROLE": "The output projection, which maps the h' = 8 groups of g = 4 heads of d values back to the m values of the model width.",
+    "GATE_ROLE": "The gate projection, which gives every token one score per expert.",
+    "FIRST_EXPERT_ROLE": "The first projection of every expert, from m to f values. The sigmoid linear unit is applied to its output.",
+    "THIRD_EXPERT_ROLE": "The third projection of every expert, from m to f values, which multiplies the output of the first.",
+    "SECOND_EXPERT_ROLE": "The second projection of every expert, from f values back to m.",
+    "HEAD_ROLE": "The output projection onto the vocabulary, which gives every position one score per token.",
+    "RMS_NORM_ROLE": "The root-mean-square normalisation keeps the values of the hidden state at one scale. It divides the m values of a token by their root mean square and multiplies each by a learned weight.",
+    "ROTARY_TABLE_ROLE": "The table of the rotary embedding, holding e^(i p theta_j) for every position p and pair j, with beta = 1000000.",
+
+    "MASK_VIEW_DESCRIPTION": "Slot w of token x reads the key or the value of token x - w, so slot 0 is the token itself and slot w is the token w before it. A slot before the first token names a negative position, and a read outside an axis holds the unit, which the softmax and the weighted sum ignore. The slot axis has the length of the sequence, so each token reads itself and every token before it and never a later one. The causal mask of the released code restricts each token to the same set, by adding minus infinity to the score of every later token. The slot axis leaves the view as w|x. The hand-drawn diagram draws a window of 4096 slots, the sliding window of Mistral 7B, and the same view with a slot axis of 4096 positions states it.",
+    "DIAGONAL_VIEW_DESCRIPTION": "The output W_2 gives for every expert at every slot, read where the expert is the one the slot chose. The projection holds the weights of all eight experts, and the diagonal keeps the output of the chosen one.",
+
+    "WEIGHT_QUANTISATION_SENTENCE": "The released checkpoint holds this weight in {quantisation}, and the reference implementation reads it in that format.",
+    "EMBEDDING_TABLE_ROLE": "The table of the token embedding, which holds one row of m = 4096 values for every token of the vocabulary."
+  }
+}

@@ -211,14 +211,90 @@ figure and glows every name of it, and the wires and names answer no pointer. Un
 `everywhere`, resting it on a wire, or on the name of the axis in a gap or on a tape, lights
 the same and shades the legend row. Under `off`, no halo is drawn and nothing answers. The
 axis is identified by its uid, so two axes that happen to share a name do not light
-together. `DiagramSettings.axis_hover` carries the choice from a notebook as a
-`wst.AxisHover`.
+together. A halo is a glow in the theme's highlight colour, a blue in each theme,
+whatever the colour of the wire or the name surrounded by it, and [[Diagram Themes]]
+gives the two colours. `DiagramSettings.axis_hover` carries the choice from a notebook
+as a `wst.AxisHover`.
 
 `axisLabelFontSize` (default `0.8`) is the size, in em, of the label an axis carries on
 its wire. The layout measures a label at the size it draws it, so a larger label is given
 the room it needs. The label was drawn at 0.65 em until 2026-09-16, when the user asked
 for it to be about a quarter larger and for the size to be a setting.
 `DiagramSettings.axis_label_font_size` carries it from a notebook.
+
+`form` (default `all-broadcasted`) says which of three forms the figure is drawn in.
+Under `all-broadcasted` every array is drawn as one wire for each of its axes, and every
+operator is drawn with its glyph, its contraction cups, its reindexing node and the wires
+of its broadcast axes routed around the glyph, as every figure was drawn before the
+setting existed. Under `arrows-and-broadcasted` each array passing from one operator to
+another is drawn as one wire. The wire is an arrow stroked heavier than an axis wire,
+with a triangle on it pointing from the operator that writes the array to the operator
+that reads it, and it is labelled in two lines. The shape of the array stands above the
+arrow, its axes in square brackets separated by commas, in the order of the axis wires
+from top to bottom. The datatype stands below the arrow. It is the array's quantisation
+where the array carries one and `\mathbb{R}` otherwise, so every arrow states the format
+of its array. A matrix of reals over `q` and `d` reads `[q, d]` above its arrow and
+`\mathbb{R}` below it, and a scalar of reals writes no shape and `\mathbb{R}` below its
+arrow. An array of naturals along `x` bounded by `\bar{v}` reads `[x]` over `\bar{v}`,
+because a wire of that datatype is labelled with its bound. An array held in FP32 reads
+`\mathtt{FP32}` below its arrow. The user asked for the commas and for the datatype below
+the arrow on 2026-09-26. The client writes the datatype carried by the array and infers
+no quantisation from a neighbouring cast.
+
+Every operator is drawn under `arrows-and-broadcasted` as it is under `all-broadcasted`,
+and it stands on a plate, a rounded rectangle with a drop shadow drawn under it in the
+theme's surface tint. Resting the pointer anywhere on the plate opens the operator's
+inspection box, as resting it on the box of the boxed form does. A conversion drawn
+thin, which is a `TypeConvert` carrying no name, stands on an empty plate. The datatype
+below the arrow of its result is written in the thin cast's blue and opens the same box.
+At the left edge of the plate the arrow of each operand opens into one wire for each of
+its axes, and at the right edge the wires of each result close into the result's arrow.
+Each axis wire is named where it enters and where it leaves the plate, as it is named in
+a gap under `all-broadcasted`. The plate carries a name in small type above the glyph.
+The name says what the operator does where the operator's class registers one. It is
+`Linear` for a `Linear`, `Cache` for a cache, and for an `Einops` the name read off its
+signature, as the boxed form below names its box. Every other plate carries its
+operator's own name. A name already written by the glyph is left off. An elementwise map
+with one operand and one result gets no plate. Its arrow runs straight through, and its
+name stands over the arrow between two small heads. A `BlockOperator`, whose glyph is a
+titled box already, gets no plate.
+
+Under `arrows-and-boxes` the arrays are the same arrows, and every operator is a box with
+one arrow entering per operand and one leaving per result. The face of the box shows
+what the operator is. Most operators, and an elementwise map, show their name in the
+middle of the box. An `Einops` shows a name read off its signature, which is `Matmul`
+for two operands with a contracted group, `Sum` for one operand with a contracted group,
+`Product` for two or more operands with none and `Contraction` otherwise. A softmax and
+the normalisations show their glyph drawn small inside a labelled box, a `Linear` shows
+its named rectangle, a `View` shows the name of its reindexing, and a `BlockOperator`
+shows its titled box. Each box carries above it the name carried by the plate of
+`arrows-and-broadcasted`, in the same small type, and leaves the name off where the face
+already shows it. A `Linear` therefore reads `Linear` above the rectangle naming its
+weight, and a cache reads `Cache` above the box naming the cache. `Matmul` is written
+once, inside its box. Nothing of the broadcasting is drawn in this form.
+
+In both arrow forms an operator carrying a grab or a drop keeps the taped array in its
+column. The tape comes down from its free end, turns a corner and runs level into the
+array's arrow, or leaves the arrow level and turns down.
+A `Contravariant` is drawn as its body mirrored, and the data of the backward pass it holds travels from right to left. In the backward pass every triangle on an arrow or on a datatype wire, the two heads of an elementwise map in every form and the head a dangling natural wire ends in point left. A grab's tape in the backward pass comes down from above and turns left into its arrow, and a drop's tape leaves its arrow to the left and turns down, with the slot name right of the arrowhead. The user asked for the arrows and the tapes of a reversed category to be drawn so on 2026-09-27.
+The arrow's label stands on that
+level stretch as it stands on any other arrow, so no label runs down a tape. The tape of
+a bare grab carries no label, because the gap after the grab labels the arrow continuing
+the tape. Only the wires between operators and the marks at each operator differ between
+the three forms. A reader meets the boxed form first. The all-broadcasted form is the
+full form, which shows what each operator does with each axis. The client draws the
+all-broadcasted form for a message with no `form` key, so a figure sent without the key
+is drawn as it was before the setting existed. `DiagramSettings.form` carries the choice
+from a notebook as a `wst.DiagramForm`.
+
+`controls` (default `hidden`) says whether the page draws one row of controls under its
+heading and outside the diagram container. The row holds the selector of variants on a
+page carrying several, and then the buttons that switch the form and the theme of the
+figure.
+[A page that switches its form and its theme](#a-page-that-switches-its-form-and-its-theme)
+describes the buttons. Under `hidden` the whole row is hidden, the selector with it. A
+notebook sends `shown` unless `DiagramSettings.controls` says `HIDDEN`, and a captured
+image holds no button either way.
 
 `legend` (default `false`) draws a table of the term's axes beside the figure.
 Each row carries the axis, the integer its size comes to and the code name the
@@ -295,14 +371,25 @@ one with `DiagramMode.HTML`, under `DiagramSettings.page_directory`, named by th
 the call. `websocket_transfer/validate_standalone_page.py` checks the assembly without a
 browser. The user asked for the file on 2026-09-16.
 
-The page is painted in the canvas colour of the dark theme by its own stylesheet, before
+The page is painted in the canvas colour of its theme by its own stylesheet, before
 the bundle runs, and shows a turning ring in the element `page-loading` until its figure
 is drawn. Once the message is read, and before its term is built, tsncd's
 `src/display/loadingScreen.ts` repaints the page in the theme of the message, so a light
 figure arrives on a light page and no white page stands where a dark figure is about to.
 The first draw removes the ring, and a page whose figure cannot be drawn writes the reason
 where the ring stood. A page with no message of its own shows the ring while it fetches
-the figure it boots with. The page background initially uses the dark theme until the message is read.
+its boot figure.
+
+A script at the top of the head of the page chooses the theme painted before the bundle
+runs, by the rule followed by the bundle. The query parameter `darkMode` decides first,
+then the theme requested by the system through `prefers-color-scheme`, and the page is
+dark where the browser supports no such media query. `standalone_page.py` still writes
+the element `<meta name="tsncd-dark-mode">` at the start of the head of a page whose
+message sets `darkMode`, with `true` or `false` as its content. Since the user's ruling
+of 2026-09-27 neither the script nor the bundle reads that element, or
+`tsncd-dark-mode` in `localStorage`. A light page is marked `data-tsncd-theme="light"`
+on its root and painted light from its first frame, so no dark frame shows before the
+message is read. The user reported the dark frame on 2026-09-26.
 
 ### A page that carries its localisations
 
@@ -371,6 +458,332 @@ and a second file changing four entries, two of them of the display package, cha
 a file, `websocket_transfer/validate_localise_descriptions.py` checks the reading back
 and the writing, `validate_standalone_page.py` checks the element, and tsncd's
 `test/advanced_display.test.ts` checks the writing onto the object graph.
+
+### A page that carries several variants
+
+A page may carry several variants of one model in place of one message. The variants
+may be the model at the quantisations of its released checkpoint beside the same model
+in the reals, or the model decoding a token with no cache beside the model decoding it
+from a cache. Such a page holds one `script` element of type `application/json` with the
+id `tsncd-variants`, and no `tsncd-embedded-message` element. Its text is an
+`EmbeddedVariants`:
+
+```json
+{
+  "version": 1,
+  "settings": {"form": "all-broadcasted", "darkMode": false, "width": 900},
+  "initial": "decode-quantised",
+  "groups": [{"id": "decode", "title": "Decode"}, {"id": "cached", "title": "Cached"}],
+  "variants": [
+    {"id": "decode-quantised", "group": "decode", "title": "Quantised",
+     "detail": "FP8 weights and BF16 activations, as the released checkpoint runs",
+     "message": 17},
+    {"id": "decode-unquantised", "group": "decode", "title": "Unquantised",
+     "detail": "The same model in the reals",
+     "derivedFrom": "decode-quantised", "functor": "dequantise"},
+    {"id": "cached-unquantised", "group": "cached", "title": "Unquantised",
+     "detail": "The model reading its keys and values from a cache", "message": 23}
+  ],
+  "value_repository": [[0, "msgType"], [0, "dataUpdate"]]
+}
+```
+
+`value_repository` is one repository in the form stated under
+[COMPRESSED exports share JSON values by content](#compressed-exports-share-json-values-by-content).
+A variant drawn from a term of its own names by `message` the root of its `dataUpdate`
+in that repository. The root decodes to `{msgType, data, settings, auxiliary}`. Its
+`data` is the term in the `uid_references` form written as a JSON object, where a
+relayed message writes it as text. Every message of the page is compressed into the one
+repository, so a record held by two variants, such as an axis, a weight or a box whose
+body is drawn by both, is written once. The page decodes only the records reached by the
+variant on display, and keeps them, so a second variant reuses the records shared with
+the first. The `expansion` of an operator's record may likewise be the term document
+itself rather than its text.
+
+A variant derived in the browser names by `derivedFrom` a variant carrying a message,
+and by `functor` the functor applied by tsncd to the term of that variant. Its
+`settings`, where present, are merged over the settings of that variant. Its
+`auxiliary`, where present, is a root replacing the auxiliary information derived by the
+functor. `groups` lists the groups in the order of the selector, each variant names its
+group by `group`, and `detail` is the line written under the title of a variant in the
+selector. The query parameter `displayMode` applies to the settings of every variant, as
+it applies to a page's own message. An element holding no variant is read as no
+element. An element whose facts do not hold, such as a derivation from a variant
+carrying no message, is refused, and the reason is written where the ring stood.
+
+`settings` repeats the settings of the initial variant uncompressed, with `form` and
+`darkMode` written first and stated even where they take tsncd's defaults. The build
+plugin of the lab website, `_plugins/diagrams.rb`, parses the element as JSON. It reads
+the groups, the variants and the initial variant, and it reads from `settings` the form
+and the theme of the initial variant. It builds a page of the site for every variant, so
+a link naming a variant absent from the page has no page. Before 2026-09-27 the plugin
+read the two keys from the text of the file with regular expressions.
+`standalone_page.py` therefore still writes `form` and `darkMode` first, with a space
+after each colon and comma, and writes the repository with none. Every `<` of the
+element is written as `\u003c`. The head states the theme of the initial
+variant as it states the theme of a page with one message, in an element no longer read
+by tsncd. The page opens in the form and the theme named by its address, and in the
+all-broadcasted form and the system's theme where the address names none, so the lab
+website names both in the address of its frame.
+
+One functor is defined, `dequantise`, in three steps set out by the user on 2026-09-27.
+The first step replaces every `Quantified` datatype, on every wire and every weight, by
+the datatype wrapped inside it, so the `BlockScale` carried by the wrapper goes with it.
+The second step turns into the identity on its operand every `TypeConvert` that then
+reads and writes one datatype, inside the body of every box and of every `ParaWrap` as
+well. A conversion that still converts stays. The third step removes the identities from
+the leaves upwards. A composition drops each identity and becomes the identity when every
+member is one, a product of identities is the identity, and a block or a box whose body
+is the identity is the identity, whatever its tag, repetition, title or colour. A figure
+drawn with inspection boxes wraps every cast in a `BlockOperator` whose block is drawn
+`BODY_IN_PLACE`, and that box goes with its cast by the last rule. A `ParaWrap` that
+grabs or drops acts on the tape. A figure drawing the tape on the ports of an operation
+holds a cast as the body of a `ParaWrap` where the operand of the cast is grabbed or its
+result is dropped, and the functor leaves that wrap holding the identity. The identities
+are those of the category of arrays, so a reindexing, which is a morphism of the
+category of axes, is left as it stands. tsncd's
+`src/quantization/algebra/strip_quantisations.ts` states the functor in tsncd, and
+`quantization/algebra/strip_quantisations.py` states it in Python, with the removal of
+identities in `algebra/remove_identities.py`. [[Stripping Quantisations]] states its
+rules.
+
+The quantisation pass gives a box a tag of its own for every quantised body inside it,
+so the blocks made equal again by the functor carry several tags. tsncd keys a block's
+highlight, its inspection box and its sub-diagram by its tag. After the functor, tsncd's
+`src/data_structure_processing/share_block_tags.ts` walks the fields depth first and
+gives every block the tag of the first block met before it with an equal body,
+repetition, aesthetics and display order, so each body is drawn once. The quantised
+DeepSeek-V4.1-Flash carries 1209 tags, and its dequantised form carries 211. A derived
+variant's operations keep the importer numbers of its source's operations, so an
+`auxiliary` given for a derived variant is keyed by the numbering of the source's
+message. tsncd carries an `auxiliary` given for a derived variant across the functor as
+it carries the source's. The records of the operations removed by the functor are
+dropped, and every expansion is marked with the functor. The settings of a derived
+variant may therefore change the text of its inspection boxes as well as its display
+settings.
+
+`notebook_diagrams.show_page_variants` writes an `auxiliary` for a derived variant whose
+settings differ from those of its source in the roles of the operators, the
+explanations of the operators or of the reindexings, the references of the operators,
+the base of the code links or the parameters drawn by an expansion. The `auxiliary` is
+written for the morphism exported by the source's message. Every block explaining an
+operator or a reindexing keeps its tag and takes the text given by the tables of the
+derived variant. A derived variant whose settings differ in none of these carries none.
+The auxiliary of the unquantised variant of GLM-5.3, whose weights take roles naming no
+quantisation, adds 52 records to the repository. The auxiliary information derived by
+the functor keeps the legend and the records of the blocks and the operations still held
+by the derived term, and drops the rest, so a removed cast takes its record with it.
+Each operator record kept is marked with the functor. tsncd applies the functor to the
+term of an expansion and to its auxiliary information before drawing it in an inspection
+box, so an operator opened in the derived figure shows its expansion in the reals.
+tsncd's `src/advanced_display/derivedFigures.ts` applies the functor to a figure.
+
+tsncd draws the initial variant, and draws a selector listing every group with its
+variants as the first group of the row of controls under the heading. The buttons of
+the form and the theme follow the selector in the row. The row wraps where the window is
+narrower than the row, and the row is hidden, the selector with it, where `controls` is
+`hidden`. The lab website embeds a page with `controls=hidden` and draws a toolbar of its
+own, whose selector of variants is filled from the page's `tsncd-state` messages. Before
+2026-09-27 the selector stood above the row and was drawn whatever `controls` said. A
+page carrying one variant draws it and no selector, and offers no variant for choice.
+
+The selector follows the lab website's `diagram-viewer.html`. Its summary names the
+group in small capitals and the title of the variant on display, beside a triangle that
+turns while the panel is open. The panel lists each group under a small uppercase label
+and every variant as its title with its `detail` beneath. The variant on display is
+marked with the accent colour and a bar on its left edge. The selector is drawn in the
+theme of each draw. It closes on the escape key, which returns the focus to its summary,
+on a click outside it, and when the window loses the focus. A click inside it stops
+there, so it closes no inspection box. Each option is a link to the page's address
+naming its variant and the form and the theme on display, written again after every
+draw, so a click with a modifier opens the variant in a page of its own in the form and
+the theme seen by the reader.
+
+A variant is chosen from the selector, from the query parameter `variant` of the page's
+address, from a `{type: 'tsncd-display', variant}` message posted to the window, or by
+`window.tsncd.variant(id)`. The call resolves once the variant is drawn and rejects an
+id absent from the page's variants. The address and the message are checked strictly,
+per
+[A page that reads its address strictly and reports its state to a host](#a-page-that-reads-its-address-strictly-and-reports-its-state-to-a-host).
+`window.tsncd.variants()` lists the variants as `{id, group, title}`,
+`window.tsncd.currentVariant()` names the variant drawn, and
+`window.tsncd.variantTimings()` lists the time taken by each step of building a variant,
+in milliseconds, as `{variant, step, milliseconds}` with the step `decode`, `import` or
+`functor`. A variant is drawn in the form and the theme of the figure on display, so a
+reader's choice of either holds from one variant to the next. A request naming a form or
+a theme with the variant has the variant drawn in them, in one draw. A variant asked for
+while another is being prepared replaces it, and the variant asked for last is drawn. A
+form or a theme named with a replaced request is kept for that draw. A variant is built
+the first time it is asked for and kept, so a return to it draws the kept term.
+
+The element `page-loading` stands over the page, in its canvas colour, while a variant
+is prepared, with a line of text under the ring. The line reads
+`Loading <group>, <title>…` while the records of a variant are decoded and its term
+imported, `Applying Dequantization Functor...` while the functor runs, and
+`Drawing <group>, <title>…` before the variant is drawn. The element is removed once the
+variant is drawn. Each line is painted before the work named by it starts. In a headless
+Chromium the functor took 76 to 80 milliseconds on GLM-5.3 and 335 to 374 milliseconds
+on DeepSeek-V4.1-Flash, and drawing a kept variant again took 0.4 and 3.0 seconds.
+tsncd's `src/data_transfer/embedded_variants.ts` reads the element,
+`src/advanced_display/variantFigures.ts` builds each variant, and
+`src/advanced_display/variantSelector.ts` draws the selector and holds the switch.
+
+`websocket_transfer/standalone_page.py` writes the page with `save_page_with_variants`,
+and a notebook writes it with `notebook_diagrams.show_page_variants` under
+`DiagramMode.HTML`, as [[Diagram Display]] states. The notebook writes it through
+`save_page_folder_with_variants`, as `index.html` in a folder named by the page, with a
+redirect beside the folder that keeps the query naming the variant. A page with variants
+carries no localisations, and `show_page_variants` refuses variants carrying them with
+`LocalisedPageVariants`. tsncd's `test/variant_pages.test.ts` and
+`test/strip_quantisations.test.ts` check the reader, the switch and the functor. The user
+asked for the variants on 2026-09-27, for the model pages of the lab website, and
+[[Website Notebooks]] lists the pages.
+
+### A page that switches its form and its theme
+
+A page holds one term and draws it in any of the three forms and either theme without
+loading anything again. A switch redraws the term held in memory by the page through the
+same `termPass`, with the one setting changed. It repaints the page in the theme's
+canvas colour, keeps the heading and the localisation selector, and drops the pooled
+inspection content of the previous draw. The legend and the inspection boxes are drawn
+again from the same auxiliary information, because a block is keyed by its tag and an
+operator by its number, and no form changes either key. The switch reaches the page
+three ways.
+
+- The row of controls under the heading, drawn where the message says
+  `controls: shown`. The row holds the selector of variants on a page carrying several,
+  one group naming the three forms and one naming the two themes, with the current
+  choice marked.
+- The address of the page. The query parameters `form`, `darkMode` (`true` or `false`)
+  and `controls` (`shown` or `hidden`) set the form, the theme and the controls of the
+  page's own figure, as `displayMode` sets its mode, so a host page holding the figure
+  in an iframe sets the form and the theme in the iframe's address. The page refuses an
+  address with any other value and draws nothing.
+- A driving script. `window.tsncd.display({variant, form, darkMode})` switches any of
+  the three and returns a promise settled once the figure is drawn. The promise rejects,
+  with nothing changed, for a refused choice. A host page posts
+  `{type: 'tsncd-display', variant, form, darkMode}` to the iframe's window with
+  `postMessage`. The page answers by the same switch and then with a `tsncd-state`
+  message, or with a `tsncd-refused` message.
+
+The address alone decides the form and the theme of the page's own figure when the page
+opens, as the user ruled on 2026-09-27. Where the address names no `form`, the figure
+opens in the all-broadcasted form. Where it names no `darkMode`, the figure opens in the
+theme requested by the system through `prefers-color-scheme`, whatever the form and the
+theme of the message. The rule holds for a page with variants, a page with one message
+and the boot figure of the relay page. While no theme is picked, the page draws its
+figure again in the system's theme each time that theme changes, through a `change`
+listener on the media query. An address naming `darkMode`, a click on a button of the
+theme, and a host's message or a call to `window.tsncd.display` naming `darkMode` each
+pick a theme. A figure drawn by the relay or by `window.tsncd.render` with settings of
+its own ends the following as well. Nothing is kept in `localStorage`. Before the ruling
+the page remembered the chosen form and theme under `tsncd-form` and `tsncd-dark-mode`,
+and a remembered choice, then the settings of the message, applied where the address
+named none.
+
+After every switch of the variant, the form or the theme, the page writes the three on
+display into its address, so an address copied from the page names all three. A page
+left unswitched keeps its opening address, so it follows the system's theme again when
+it is opened again. A message from the relay is drawn with its own settings, and the
+switch then applies to it as to any held figure. A switch asked for before the page
+holds a figure, as a host posting on the load of its iframe asks for one, is stored and
+applied to the page's own message above the query parameters. The relay page switches
+the last term received the same way, and a page inside an inspection box draws no
+controls. `src/advanced_display/displaySelector.ts` draws the row, holds the switch and
+follows the system's theme. The user asked for the switch on 2026-09-26.
+
+### A page that reads its address strictly and reports its state to a host
+
+A page reads five query parameters of its address and no others.
+
+| parameter | the values it takes |
+|---|---|
+| `variant` | the id of a variant offered by the page, and none on a page holding one figure |
+| `form` | `arrows-and-boxes`, `arrows-and-broadcasted`, `all-broadcasted` |
+| `darkMode` | `true`, `false` |
+| `controls` | `shown`, `hidden` |
+| `displayMode` | `slow`, `fast` |
+
+A page offers its variants for choice where it carries two or more. A page holding one
+message, a page carrying one variant and the relay page offer none. The page checks its
+address once its variants are read, before anything is drawn and before a socket is
+opened. The page refuses an address that names another parameter, sets a parameter
+twice, or sets a parameter to a value outside its row, whatever the rest of the address
+says. A value is compared as it is written, so `darkMode=True` and `displayMode=FAST`
+are refused. For a refused address the page draws no figure, opens no socket, builds no
+controls and sets no `window.tsncd`. It writes, where the ring stood, that its address
+was refused, and a sentence naming the parameter, the value and the values accepted,
+such as
+`The parameter "form" is set to "bad". It takes "arrows-and-boxes", "arrows-and-broadcasted" or "all-broadcasted".`
+Before 2026-09-27 a value outside its setting was dropped and the page drew its figure
+with the rest of the address. A link carrying a parameter added by another site for its
+own counting, such as `utm_source` or `fbclid`, is refused too. Where the address names
+no form or theme, the page opens in the all-broadcasted form and the system's theme,
+per [A page that switches its form and its theme](#a-page-that-switches-its-form-and-its-theme).
+
+After every switch of the variant, the form or the theme, the page writes the three on
+display into its own address with `history.replaceState`, so no entry is added to the
+history. The query then reads `variant`, where the page offers variants, `form` and
+`darkMode`, followed by the `controls` and the `displayMode` already carried by the
+address, and the hash is kept. An address copied from the page after a switch therefore
+opens the same figure for any reader, whatever the theme of that reader's system. A page
+left unswitched keeps its opening address. While the page follows the system's theme, an
+address written by the page is written again when that theme changes. The links of the
+selector's options are written after every draw, each naming its variant with the form
+and the theme on display. A frame whose origin is opaque may throw on `replaceState`, and
+the page then keeps its opening address. Headless Chromium rewrites the address of a
+page opened from `file://` and of a page served over HTTP in a frame sandboxed without
+`allow-same-origin`.
+
+A page held in a frame of another page posts messages to the parent frame with
+`postMessage` and the target origin `*`. A page in a sandboxed frame does not know the
+origin of its host, and the messages carry nothing private. A page opened on its own
+posts nothing. The state message reads:
+
+```jsonc
+{"type": "tsncd-state", "variant": "cached-quantised", "form": "arrows-and-boxes",
+ "darkMode": false,
+ "variants": [{"id": "decode-quantised", "group": "decode", "title": "Quantised",
+               "detail": "The whole model with BF16 weights and activations…"}, …],
+ "groups": [{"id": "decode", "title": "Decode"}, {"id": "cached", "title": "Cached"}]}
+```
+
+`variant` is `null`, and `variants` and `groups` are empty, on a page that offers no
+variants. `detail` is the empty string for a variant that carries none, and a group
+holding no variant is left out. The page posts the state after every draw, including a
+draw that follows the system's theme. It posts one before its first draw where it
+carries its own message or variants, naming the variant about to be drawn, so a host can
+build its selector while the first variant is prepared. It also posts one in answer to
+every accepted `tsncd-display` message, once the switch has settled, so a switch that
+draws is answered twice with the same state.
+
+A host switches the page by posting `{type: 'tsncd-display', variant, form, darkMode}`
+to the frame's window, with any of the three fields. The fields are checked as the
+address is, with typed values: `variant` a string naming a variant offered by the page,
+`form` one of the three forms, and `darkMode` the boolean `true` or `false`. A field
+holding `undefined` is left out, and a message holding no field changes nothing and is
+answered with the state. A message naming a variant with a form or a theme has the
+variant drawn in them, in one draw, and a message naming `darkMode` ends the following
+of the system's theme. A message holding another field, or a field holding another
+value, changes nothing, and the page answers:
+
+```json
+{"type": "tsncd-refused", "parameter": "form", "value": "bad",
+ "accepted": ["arrows-and-boxes", "arrows-and-broadcasted", "all-broadcasted"]}
+```
+
+For a parameter the page does not read, `accepted` lists the parameters read by the
+page, and for a `variant` on a page offering none it is empty. A page whose address is
+refused posts the same message once, naming the parameter of the address.
+`window.tsncd.display` takes the same fields and rejects with the sentence written by the
+page for a refused address.
+
+tsncd's `src/advanced_display/pageChoices.ts` checks the address and the choices and
+writes the address, and `src/advanced_display/hostMessages.ts` posts and answers the
+messages. tsncd's `test/page_choices.test.ts` and `test/host_messages.test.ts` hold the
+tests. The user asked on 2026-09-27 for links that follow the reader and for an invalid
+link to draw nothing, so that the lab website can hold the page in a frame and supply
+its own toolbar.
 
 ### The figure a page boots with
 
@@ -806,10 +1219,12 @@ FAST measures diagram positions together before drawing and prepares inspection
 diagrams when opened, retaining their content for reuse. The setting propagates
 to inspection diagrams and capture targets.
 
-An exported HTML page accepts `?displayMode=slow` or `?displayMode=fast` in its
-address. A valid override takes precedence over its embedded setting, while an
-absent or invalid value leaves that setting unchanged. The override applies only
-to standalone pages and does not change the relay's held settings.
+An exported HTML page accepts `?displayMode=slow` or `?displayMode=fast` in
+its address, and the value takes precedence over its embedded setting. The page
+refuses an address with any other value, per
+[A page that reads its address strictly and reports its state to a host](#a-page-that-reads-its-address-strictly-and-reports-its-state-to-a-host).
+The override applies to the page's own message and to the boot figure of the page,
+and does not change the settings of a message from the relay.
 
 ## COMPRESSED exports share JSON values by content
 

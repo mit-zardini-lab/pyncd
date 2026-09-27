@@ -15,7 +15,7 @@ needs no more than that, and a functor that counts, trains or shards the paramet
 see them at all.
 
 `grab_parameters` writes each one out. The parametric seed gains one input weave per
-parameter, holding the full weight array, and a `Grab` of a fresh [[Para Category|TapeSlot]]
+parameter, holding the full weight array, and a `Grab` of a fresh `Para.OuterTapeSlot`
 feeds it:
 
     Linear<Q> : R[q, m] -> R[q, d]   becomes   (Grab<W_Q> * id) ; Linear<Q>
@@ -23,6 +23,12 @@ feeds it:
 with the `Linear` now reading `R[m, d]` as its FIRST operand. A `Grab` is
 composition-neutral, so the domain and codomain of the whole expression are unchanged. The
 result is the same morphism in `Para` form, with its parameters named.
+
+The slot is a `Para.OuterTapeSlot`, added 2026-09-26, because a weight is one array
+however many axes the expression reading it is broadcast over. A grabbed model lifted over
+a further axis therefore still reads one weight. Grabbing the parameters of a lifted
+operator and lifting the grabbed operator give one morphism, once the repeat written by
+the lift is absorbed. [[Outer and Inner Tape Slots]] states both kinds of slot.
 
 **The parameters occupy the first operand slots**, ahead of the operands the seed already
 had, in the order `parameter_arrays` returns them. A `Linear` with a bias reads `(W, b, x)`
@@ -43,7 +49,7 @@ lookalikes:
 |---|---|
 | `Linear` | `W` runs over every input and then the out target, through `weight_axes`. `b` is the out target, when `bias` is set |
 | `Linear` with no operands | the out target, under the operator's own name |
-| `Normalize` | `γ` is the target itself |
+| `Normalize` and `LayerNorm` | `γ` where the `gain` field is set and `b` where the `bias` field is set, each the target itself, the gain first |
 | `Embedding` | absent, per *Gaps* below |
 
 `weight_axes` reads one input at a time, and the datatype of its target says what that input
@@ -54,8 +60,7 @@ and the operand's own target is empty. [[Operators]] states both readings.
 The axis a selection contributes is minted by `selected_axis` from the datatype's size,
 because a `Natural` carries a count and not an axis. The size symbol is what ties it to the
 axis the selection was made over. The expert `Linear` of a mixture of experts is the case:
-`(Nat(n), R[m]) -> R[f]` grabs `R[n, m, f]`, holding every expert, and
-
+`(Nat(n), R[m]) -> R[f]` grabs `R[n, m, f]`, holding every expert.
 
 A `Linear` with no operands is a learned array, which is how the sink logit of
 DeepSeek-V4.1-Flash is written, per [[Representing Models]]. The sum over its inputs is
@@ -94,7 +99,14 @@ graph, grabs one slot read twice, which is weight tying. Two layers built alike 
 have different axes, so they are different terms, so they get slots of their own.
 
 The slot's name is the parameter's, as `W_Q`, `b_Q` or `γ`, rather than a tape position. The
-`s0` counter is for residuals, and [[Backpropagation]] writes those.
+`s0` counter is for residuals, and [[Backpropagation]] writes those. A projection whose
+name is already written with the letter of its weight, as `W^{Q}` or `W_{1}` is, gives the
+weight that name through `parameter_name`, so the slot reads `W^{Q}` and the slot of its
+gradient reads `dW^{Q}`. Before 2026-09-27 the slot read `W_{W^{Q}}`.
+`check_every_matrix_is_grabbed_from_a_slot_named_after_it` and
+`check_the_weight_gradients_sum_over_the_tokens` in
+`notebooks/website/tutorial/validate_attention_with_weights_and_residual.py` check both
+names for the four projections of the tutorial's attention.
 
 ## How it prints and draws
 
@@ -122,7 +134,7 @@ box is the weight array of [[Linear Expansion]], a `Linear` with no data, with i
 written out as an operand the way `ShowGrabbedParameters` writes the weight of every
 other `Linear`. `to_para_wrap` absorbs the grab onto it, so a diagram draws a box labelled
 with the weight and a tape running down onto it. `box_grabbed_weights(target)` puts the
-box after every grab of a term.
+box after every grab of a parameter in a term.
 
 The user ruled on 2026-09-17 that the inspection box over a weight draws this form, per
 [[Advanced Display]]: a map `W : a -> b` becomes `[ParaWrap(grab(ab), W) : 1 -> ab] *
@@ -140,12 +152,18 @@ written for a diagram alone, after every pass that reads a `Linear` has run.
 `weight_array_in_place_of(grab)` writes a `Linear` with no operands, named after the slot
 of the grab, whose one result is the array the grab reads, `W : 1 -> [a, b]`. The box is
 the weight array of [[Linear Expansion]], which holds its weight inside the operator and
-reads no tape. `write_grabs_as_weight_arrays(target)` puts it where every grab of a term
-stood, so the result is a morphism of **Br** again. The user asked on 2026-09-17 for the
+reads no tape. `write_grabs_as_weight_arrays(target)` puts it where every grab of a
+parameter stood, so the result reads no parameter from the tape. The user asked on 2026-09-17 for the
 inspection box over a weight to be drawn with no `ParaWrap`, and
 `expand_with_parameters.expanded_with_weight_arrays` draws this form, per
 [[Advanced Display]]. A `Linear` with no operands is unambiguous, where the weight box of
 the section above is told apart from a map by the grab that feeds it.
+
+Since 2026-09-26 both rewrites replace the grab of a `Para.OuterTapeSlot` alone, through
+`is_grab_of_a_parameter`. A grab of an inner slot holds no parameter, so the load of a
+cache in an inspection box stays on the tape. `expand_with_parameters` also writes the
+operator out at one index of the axes it is lifted over, per
+[[Outer and Inner Tape Slots]].
 
 ## Backpropagating the parametrised form
 
@@ -207,4 +225,5 @@ has the detail.
 
 - [[Notebooks]] — what each notebook of the repository demonstrates
 - [[Para Category]] — `Grab`, `Drop`, and why they are composition-neutral
+- [[Outer and Inner Tape Slots]] — the outer slot of a parameter and the inner slot of a residual
 - [[Para Wrap]] — the layering rule and the four-sided box this extends

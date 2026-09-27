@@ -43,6 +43,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 import advanced_axis_dynamics.data_structure.Operators as aops
+import caching.data_structure.Caching as Caching
 import data_structure.Category as cat
 import data_structure.Numeric as nm
 import data_structure.Operators as ops
@@ -72,9 +73,18 @@ class ContractionQuantisation(Enum):
     '''The quantisation returned by a contraction inside a box. `PROMOTED` is an eager
     einsum, which returns the quantisation of its operands, and is the default.
     `ACCUMULATED` is a fused kernel, whose contractions read their operands at one
-    quantisation and keep their accumulators at the scalar quantisation.'''
+    quantisation and keep their accumulators at the scalar quantisation. `SCALAR` is
+    eager code reading every operand into the scalar quantisation before the product,
+    as the GLM-5.3 indexer writes `torch.matmul(q.float(), k.float())`. `FEWEST_BITS`
+    is eager code reading every operand into the quantisation with the fewest bits
+    among them and returning that quantisation, as the FP8 experts of `transformers`
+    write `proj_out * sample_weights.to(proj_out.dtype)` before summing the experts.
+    Added by Claude Opus 5.5 (1M context), effort 40, on 2026-09-26, for the
+    quantised GLM-5.3.'''
     PROMOTED = 'PROMOTED'
     ACCUMULATED = 'ACCUMULATED'
+    SCALAR = 'SCALAR'
+    FEWEST_BITS = 'FEWEST_BITS'
 
 
 fd.register_enum(ArithmeticQuantisation)
@@ -116,7 +126,8 @@ class OperatorQuantisation:
 class QuantisationQuestion:
     '''One operation asked about its quantisations: the operation itself, the policy,
     the quantisation carried by each of its operands, and the name of the box holding
-    the operation in its body, which is `None` at the top level of a model.'''
+    the operation in its body, or the title of the innermost block holding it that the
+    policy names among its boxes, which is `None` at the top level of a model.'''
     morphism: cat.Broadcasted
     policy: QuantizationPolicy
     operand_quantisations: fd.Prod[Quantisation | None]
@@ -329,6 +340,11 @@ def contracted(question: QuantisationQuestion) -> OperatorQuantisation:
     attention kernel casts the probabilities down to the quantisation of the values
     before the second matrix multiply and keeps both accumulators in FP32. A broadcast
     product inside such a kernel still promotes, because it is elementwise arithmetic.
+
+    Inside a box named by the policy as reading its operands at the scalar quantisation,
+    every einsum reads and returns the scalar quantisation. Inside a box named as
+    reading its operands at the fewest bits, every einsum reads its operands at the
+    quantisation with the fewest bits among them and returns it.
     '''
     policy = question.policy
     operator = question.morphism.operator
@@ -340,8 +356,17 @@ def contracted(question: QuantisationQuestion) -> OperatorQuantisation:
         return OperatorQuantisation(
             results=question.results_of(policy.scalars, policy.integers),
             operands=question.accepts_any_operand())
-    fused = (question.box_policy().contractions
-             is ContractionQuantisation.ACCUMULATED)
+    mode = question.box_policy().contractions
+    if mode is ContractionQuantisation.SCALAR:
+        return OperatorQuantisation(
+            results=question.results_of(policy.scalars, policy.integers),
+            operands=question.real_operands(policy.scalars))
+    if mode is ContractionQuantisation.FEWEST_BITS:
+        fewest = with_the_fewest_bits(known)
+        return OperatorQuantisation(
+            results=question.results_of(fewest, policy.integers),
+            operands=question.real_operands(fewest))
+    fused = mode is ContractionQuantisation.ACCUMULATED
     if fused and has_a_contraction(operator):
         return OperatorQuantisation(
             results=question.results_of(policy.scalars, policy.integers),
@@ -353,14 +378,15 @@ def contracted(question: QuantisationQuestion) -> OperatorQuantisation:
 
 
 @register(ops.Elementwise, ops.Arithmetic, ops.SoftMax, ops.L1Norm, ops.L2Norm,
-          ops.Maximum, ops.ConstantOp, ops.FixedArray, ops.GenericOperator,
-          dst.Rotary, dst.YarnRotary)
+          ops.Maximum, ops.Product, ops.ConstantOp, ops.FixedArray,
+          ops.GenericOperator, dst.Rotary, dst.YarnRotary)
 def computed_at_the_scalar_quantisation(
     question: QuantisationQuestion,
 ) -> OperatorQuantisation:
-    '''An elementwise map, a softmax, a maximum and a table of constants compute at
-    the scalar quantisation and read their operands at it, because a released module
-    upcasts on entry and a kernel computes at its compute quantisation.
+    '''An elementwise map, a softmax, a maximum, a product and a table of constants
+    compute at the scalar quantisation and read their operands at it, because a
+    released module upcasts on entry and a kernel computes at its compute
+    quantisation.
 
     Inside a box named by the policy as computing at the carried quantisation, which
     is eager code never upcasting, the operation returns the quantisation of its
@@ -381,16 +407,18 @@ def computed_at_the_scalar_quantisation(
 
 
 @register(ops.Normalize)
+@register(ops.LayerNorm)
 def normalised(question: QuantisationQuestion) -> OperatorQuantisation:
-    '''A normalisation with a learned gain is the released RMSNorm module, which reads
-    a tensor at the activation quantisation, computes in FP32 and returns the
-    quantisation given to it. One without a gain is arithmetic written inline in a
-    module already upcast, so it reads and returns the scalar quantisation.'''
+    '''A normalisation with a learned gain is the released RMSNorm or LayerNorm
+    module, which reads a tensor at the activation quantisation, computes in FP32 and
+    returns the quantisation given to it. One without a gain is arithmetic written
+    inline in a module already upcast, so it reads and returns the scalar
+    quantisation.'''
     policy = question.policy
     operator = question.morphism.operator
-    if not isinstance(operator, ops.Normalize):
+    if not isinstance(operator, (ops.Normalize, ops.LayerNorm)):
         raise QuantisationRuleMismatch(
-            f'{type(operator).__qualname__} is not a Normalize')
+            f'{type(operator).__qualname__} is neither a Normalize nor a LayerNorm')
     quantisation = policy.activations if operator.gain else policy.scalars
     return OperatorQuantisation(
         results=question.real_results(quantisation),
@@ -416,11 +444,14 @@ def added(question: QuantisationQuestion) -> OperatorQuantisation:
 
 
 @register(ops.View, aops.CovariantView, aops.ConcatenateAxes, aops.DeconcatenateAxes,
-          dst.MergedPositions, dst.PairsAsComplex, dst.Decomplex)
+          dst.MergedPositions, dst.PairsAsComplex, dst.Decomplex, Caching.Caching)
 def moved(question: QuantisationQuestion) -> OperatorQuantisation:
     '''An operation reindexing, concatenating or pairing values performs no
     arithmetic on them, so it returns the quantisation of the values and requires
-    every real operand at that one quantisation.
+    every real operand at that one quantisation. A cache appends the values of one
+    pass to the values it holds and returns the whole, so it holds its values at the
+    quantisation they arrive with, and a cache stored in another format is a cast in
+    front of the cache.
 
     Where the operands carry two quantisations, which a concatenation can, the result
     takes the one with the fewest bits, because the released rotary embedding writes

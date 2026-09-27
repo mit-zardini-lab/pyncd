@@ -42,6 +42,34 @@ processor's partial to the processors that read it in the round, and
 exchanged rather than a place it is kept. The partial itself is carried round the
 loop on its wire, and which partner a round reads is stated by the loop's repetition.
 
+A model that generates text runs one pass per step, and a cache keeps arrays from
+one pass for the passes after it. Two further subclasses read and write such a slot.
+`CacheGrab<s>` reads the entries the slot holds for the tokens of the earlier
+passes, and `CacheDrop<s>` appends the entries of the tokens of this pass. The grab
+reads only the earlier tokens and the drop writes only the new ones, so the pair
+states the memory traffic of a cache: `|K|` entries loaded and `|n|` stored in a pass
+over `n` new tokens, where `K` is every earlier token or the last `|K|` of them that a
+sliding window keeps. A later grab reads the last `|K|` entries alone, so a drop may
+append only the last `|K|` entries of its pass. The state of a scan and the running
+sums of linear attention are caches kept over one token, and their drop appends one
+entry per pass. The loop over passes is outside the
+expression, which is why the stream seeds cannot state a cache, and
+`caching.registries.standard_expansions` writes `caching.data_structure.Caching` out
+with these two.
+
+A slot is outer or inner, according to whether the Para construction is applied
+outside the lifting of an expression over a product of axes or inside it. An
+`OuterTapeSlot` holds a value the expression reads from outside, such as the weight
+of a learned linear map. Broadcasting the expression over an axis does not change
+the array such a slot holds, so a grab of it lifted over `x` is the grab followed by
+a repeat along `x`, and a drop of it lifted over `x` is a sum over `x` followed by
+the drop. A plain `TapeSlot` is inner. It holds a value one index of the broadcast
+reads or writes on its own, such as the uniform sample a dropout compares against,
+a residual taped for the reverse pass, or the entries of a cache, and a seed of it
+lifted over `x` reads or writes an array carrying `x`. Every seed class above reads
+and writes a slot of either kind, and `para.registries.object_lift` states the two
+lifts.
+
 Both seeds are composition-neutral. Their domain or codomain is the empty
 product, so a taped morphism has the same domain and codomain as the untaped one
 and a tape threads through a `Block` without changing its type.
@@ -51,7 +79,8 @@ drops, and adds no mathematical value. It exists so that a tape arriving beside
 an operator and a tape arriving at a box of its own are drawn differently.
 
 `obsidian/07-para/Para Category.md` gives the construction and its reference,
-and `obsidian/07-para/Training.md` says what the four writers of a slot are.
+`obsidian/07-para/Outer and Inner Tape Slots.md` the two kinds of slot, and
+`obsidian/07-para/Training.md` says what the four writers of a slot are.
 '''
 from __future__ import annotations
 from typing import Self, Iterable, Any
@@ -63,7 +92,24 @@ import data_structure.Term as fd
 import data_structure.Category as cat
 
 @dataclass(frozen=True)
-class TapeSlot(fd.UTerm): ...
+class TapeSlot(fd.UTerm):
+    '''A slot of the tape. A slot of this class and of no subclass is an inner tape
+    slot, which holds one array for every index of every axis an expression reading
+    it is broadcast over.'''
+
+
+@dataclass(frozen=True)
+class OuterTapeSlot(TapeSlot):
+    '''An outer tape slot, which holds one array however many axes an expression
+    reading it is broadcast over. The weight of a learned linear map and the gain of
+    a normalisation are held in outer slots, and so is the cotangent the reverse pass
+    writes for either.'''
+
+
+def new_slot_like(slot: TapeSlot) -> TapeSlot:
+    '''A new unnamed slot, outer where `slot` is outer and inner where it is
+    inner.'''
+    return OuterTapeSlot() if isinstance(slot, OuterTapeSlot) else TapeSlot()
 
 
 # Slot names are `s0, s1, ...` in creation order. A UID is random per process,
@@ -78,6 +124,8 @@ def reset_slots() -> None:
 
 
 def new_slot() -> TapeSlot:
+    '''An inner slot named `s<n>`, which is the name a residual taped for the
+    reverse pass carries.'''
     return slot_named(next(_slots)).capture(TapeSlot())
 
 
@@ -160,6 +208,32 @@ class ReductionDrop[L](Drop[L]):
 
 
 @dataclass(frozen=True)
+class CacheGrab[L](Grab[L]):
+    '''A grab of the entries a cache holds for the tokens of the earlier passes, which
+    the `CacheDrop` of the same slot appended in those passes. Its array holds an axis
+    `K` in place of the tokens, and it loads the last `|K|` entries appended, with the
+    universal unit at a position before the first append. `K` is every earlier token
+    for a cache of the whole past, and a fixed count for a cache kept for a sliding
+    window.'''
+
+
+@dataclass(frozen=True)
+class CacheDrop[L](Drop[L]):
+    '''A drop appending the entries of the tokens of this pass to a cache, which the
+    `CacheGrab` of the same slot reads in every later pass. The grab reads the last
+    `|K|` entries appended, so a drop may append the last `|K|` entries of the pass
+    alone, as the drop of a state kept over one token appends one entry.'''
+
+
+@dataclass(frozen=True)
+class CacheTapeSlot(fd.Term):
+    '''A tape slot kept between the passes of generation, which is the entry a
+    `ParaWrap` holds for a `CacheGrab` on its grab side and for a `CacheDrop` on its
+    drop side.'''
+    slot: TapeSlot
+
+
+@dataclass(frozen=True)
 class ReductionSlot(fd.Term):
     '''A tape slot naming a value exchanged between processors, which is the entry
     a `ParaWrap` holds for a `ReductionGrab` on its grab side and for a
@@ -183,12 +257,51 @@ class LoopSlot(fd.Term):
     index: nm.Numeric
 
 
-type SlotEntry = None | TapeSlot | StreamSlot | LoopSlot | ReductionSlot
-type NamedEntry = TapeSlot | StreamSlot | LoopSlot | ReductionSlot
+type NamedEntry = TapeSlot | StreamSlot | LoopSlot | ReductionSlot | CacheTapeSlot
+
+
+@dataclass(frozen=True)
+class KeptAndDropped(fd.Term):
+    '''An entry of a `ParaWrap` for an operand or a result that stays on its wire
+    and is also written onto the slot `dropped` names. It stands where a value is
+    both passed on and saved: the tokens of a pass, which a concatenation reads
+    and a cache appends, or a residual that the next operation reads and the
+    reverse pass loads. `dropped` is the entry of the drop, so a
+    `Para.CacheTapeSlot` stands for a `CacheDrop`.'''
+    dropped: NamedEntry
+
+
+type SlotEntry = (None | TapeSlot | StreamSlot | LoopSlot | ReductionSlot
+                  | CacheTapeSlot | KeptAndDropped)
 
 
 def slot_of(entry: NamedEntry) -> TapeSlot:
     return entry if isinstance(entry, TapeSlot) else entry.slot
+
+
+def is_kept(entry: SlotEntry) -> bool:
+    '''Whether the operand or result an entry of a `ParaWrap` stands for stays on
+    its wire, which it does where the entry is `None` or a `KeptAndDropped`.'''
+    return entry is None or isinstance(entry, KeptAndDropped)
+
+
+def grabbed_entry(entry: SlotEntry) -> NamedEntry | None:
+    '''The entry of the slot an operand comes off, and `None` for an operand
+    that arrives on its wire.'''
+    return None if is_kept(entry) else entry
+
+
+def operand_dropped_entry(entry: SlotEntry) -> NamedEntry | None:
+    '''The entry of the slot an operand is also written to, which a
+    `KeptAndDropped` names, and `None` for every other operand.'''
+    return entry.dropped if isinstance(entry, KeptAndDropped) else None
+
+
+def result_dropped_entry(entry: SlotEntry) -> NamedEntry | None:
+    '''The entry of the slot a result is written to: the entry a `KeptAndDropped`
+    names, the entry itself where the result goes onto the tape alone, and `None`
+    where the result leaves on its wire alone.'''
+    return entry.dropped if isinstance(entry, KeptAndDropped) else entry
 
 
 def index_of(entry: NamedEntry) -> nm.Numeric | None:
@@ -211,6 +324,8 @@ def entry_of(operation: ParaMorphism) -> NamedEntry:
         return LoopSlot(operation.tape, operation.index)
     if isinstance(operation, (ReductionGrab, ReductionDrop)):
         return ReductionSlot(operation.tape)
+    if isinstance(operation, (CacheGrab, CacheDrop)):
+        return CacheTapeSlot(operation.tape)
     return operation.tape
 
 
@@ -221,6 +336,8 @@ def grab_of(entry: NamedEntry, size: L) -> Grab[L]:
         return LoopGrab(tape=entry.slot, size=size, index=entry.index)
     if isinstance(entry, ReductionSlot):
         return ReductionGrab(tape=entry.slot, size=size)
+    if isinstance(entry, CacheTapeSlot):
+        return CacheGrab(tape=entry.slot, size=size)
     return Grab(tape=entry, size=size)
 
 
@@ -231,6 +348,8 @@ def drop_of(entry: NamedEntry, size: L) -> Drop[L]:
         return LoopDrop(tape=entry.slot, size=size, index=entry.index)
     if isinstance(entry, ReductionSlot):
         return ReductionDrop(tape=entry.slot, size=size)
+    if isinstance(entry, CacheTapeSlot):
+        return CacheDrop(tape=entry.slot, size=size)
     return Drop(tape=entry, size=size)
 
 

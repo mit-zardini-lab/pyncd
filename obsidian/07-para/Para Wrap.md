@@ -15,9 +15,13 @@ result `j` goes back onto. An entry that is a `Para.StreamSlot` stands for a `St
 seeds back. The listing prints a loop drop as `<Ssx2'>` and the diagram labels it `Ssx2'`.
 An entry that is a `Para.LoopSlot` stands for a `LoopGrab` or a `LoopDrop`, the seeds of a
 slot indexed by the iteration of a repeated block, and carries the index beside the slot,
-which the listing prints as `<e[3 - i]>` and the diagram draws as `e_{3-i}`. Its own
-`dom()` and `cod()` are the operands and results that
-are not on the tape. `to_base()` writes it back out as `grabs ; body ; drops`, so it adds
+which the listing prints as `<e[3 - i]>` and the diagram draws as `e_{3-i}`. An entry
+that is a `Para.CacheTapeSlot` stands for a `CacheGrab` or a `CacheDrop`, the seeds of a
+cache kept between passes, per [[Caching Between Passes]]. An entry that is a
+`Para.KeptAndDropped`, on either side, stands for an operand or a result that stays on its
+wire and is also dropped onto the slot named by its `dropped` field. Its own `dom()` and
+`cod()` are the operands and results that stay on their wires, whose entry is `None` or a
+`Para.KeptAndDropped`. `to_base()` writes it back out as `grabs ; body ; drops`, so it adds
 nothing mathematically, because [[Para Category]] needs only `Grab` and `Drop`. It exists
 for the picture: a tape that arrives beside an operator, and one that arrives at a box of
 its own a rearrangement away, are two different things to read.
@@ -67,6 +71,7 @@ scopes first, to a fixed point.
 | `Grab` read by several siblings | **split**: one `Grab` of the same slot per reader, each on a fresh node, the reader redirected onto it. The slot is what says they are one parameter | backward: a residual two contractions need loads beside each |
 | `Grab ; seed`, the wire read once | the seed as a `ParaWrap` with that operand grabbed — or an existing wrap gaining the grab | backward: a taped residual enters its `Einops` |
 | `seed ; Drop`, the wire read by the drop alone | the seed as a `ParaWrap` with that result dropped, writing the slot where it would write a wire | backward: a weight gradient nothing reads. Forward: the index a `TopK` emits beside its values |
+| `Drop` on a wire that enters the scope and is read by one seed besides the drop | the seed as a `ParaWrap` whose entry for that operand is a `Para.KeptAndDropped`. The operand stays on its wire and is also dropped onto the slot, so the copy, the drop and the seed are one glyph. A block, a tape seed, a boxed block, a reader through a reindexing beyond a rearrangement and a reader of the wire at two ports take no such entry. `_merge_drop_into_reader` is the rewrite, added 2026-09-26 at the user's request | forward: the tokens of a pass, read by the concatenation in the expansion of a cache and appended by the cache. A residual that enters a block and is read there once |
 | `Drop` on a wire also read elsewhere | `ParaWrap` over the copy `(0,0)`, second output dropped, attached to the wire's producer: the producer is renamed to write a fresh wire, the wrap reads it and writes the wire the readers name, so a wire leaving a block is copied inside the block and the morphism reads one `copy ; (id * drop)` per wire rather than one rearrangement `[0,0,1,1]` before a row of identities and drops. A wire arriving on the outermost domain is copied by redirecting its readers instead, and so is a wire arriving on a block's domain that the block's codomain does not carry, so the copy stands inside the block, added 2026-09-13 for the partial a reduction's loop carries in, sends and folds | forward: a value passed on and saved; a loop variable that also leaves the loop; the partial each round of an explicit reduction sends |
 | anything left bare | `ParaWrap` over an identity | the old `Grab`/`Drop` box |
 
@@ -101,7 +106,21 @@ is what lets the codomain keep its wire.
   mathematical content, so the choice is the display's.
 - **[[Agent Display]]**: a wrap prints as its body with the tape in place —
   `%1 = Einops(%0[q, {v}], <s1>[d, {v}]) : R[q, d]`, `%3, <s0> = rewire(%0)`,
-  `<dW1> = Einops(<s0>[{q}, m], %4[{q}, f]) : R[m, f]`.
+  `<dW1> = Einops(<s0>[{q}, m], %4[{q}, f]) : R[m, f]`. An operand or a result that is kept
+  and dropped prints as its wire followed by the slot, so the expansion of a cache reads
+  `%1 = ConcatenateAxes<\Vert>(<lat>[{P}, c], %0<lat+>[{x}, c]) : R[{P + x}, c]`.
+- `tsncd` draws a kept-and-dropped entry since 2026-09-26. Its tape starts at the port
+  anchor of the wrap, turns into the box along the wire, to the right for an operand and to
+  the left for a result, and runs down past the bottom edge as the drop of a copy does. The
+  tape is labelled as a drop, so the append of a cache reads `lat+`. The anchor carries no
+  dot, and the wrap widens on that side so the tape crosses none of the wires of the inner
+  box. A wrap over a `ConcatenateAxes` or a `DeconcatenateAxes` gives the rows of the
+  junction no anchors, and the circle of the junction moves to the corner at the meeting
+  of the wire of the grabbed part and the line of the junction, so the load of a cache runs
+  straight down into the circle. The expansion of a cache in an inspection box is then one glyph.
+  The load enters the circle from above, the tokens of the pass enter from the left, the
+  cached axis leaves on the right, and the append leaves the ports of the tokens downward.
+  A grabbed axis of the broadcast, such as `c`, still meets its wire at a dot.
 - **[[Diagram Display]]** (`tsncd`): `ParaWrapBox` has the domain on the left and the
   codomain on the right, and is exactly as tall as the morphism it wraps, because a wrap
   reserves no height for its tapes. The tapes are drawn past the box, to an arrowhead
@@ -129,8 +148,8 @@ is what lets the codomain keep its wire.
   operator box is built with every operand in its left column: link first and the first
   kept operand is paired against a grabbed one, and its wire is then drawn turning up onto
   the row that operand has since moved to. Every parametric operator hits it, since
-  `grab_parameters` prepends the weight. Target links to target straight down
-  , because the two rows are padded to the same slots so that they sit anchor under anchor, and the
+  `grab_parameters` prepends the weight. Target links to target straight down,
+  because the two rows are padded to the same slots so that they sit anchor under anchor, and the
   glyph's row is displaced to the core's edge, through `raise_operator_rows`, so that there is no hop. The
   degree axes route round the glyph to the right column, and **which way they route is the
   row's own display type**. `BroadcastDisplayType` describes the degree wires, a wrapped box
@@ -156,11 +175,11 @@ is what lets the codomain keep its wire.
   and `InjectBox`'s each sit on a rectangle with one corner bitten off.
   See [[Show Grabbed Parameters]]. Every box with rows is laid out
   by one `four_sided` helper, `Horizontal(left, Vertical(top, core, bottom), right)`,
-  with a row wider than the core widening it. **An anchor records which way it faces**, in `Anchor
-  .horizontal`, set by `RowMeridian`), and `wire_curve` draws the wire between a row
+  with a row wider than the core widening it. **An anchor records which way it faces**, in
+  `Anchor.horizontal`, set by `RowMeridian`, and `wire_curve` draws the wire between a row
   anchor and a column anchor as a quarter **circle** of `turn_radius` with straight legs
   to each anchor, shrunk only where the anchors are closer than the radius. It is
-    one rule, and it covers the `Einops` cup
+  one rule, and it covers the `Einops` cup
   to a grabbed axis, a grabbed degree axis reaching the right column, and a row feeding
   a `View`'s node. **A cup between two anchors on one row is ordered right to left.** The
   two anchors are the two grabbed operands of one contraction, and the arc between them
@@ -223,6 +242,32 @@ alone. `extended_tape_terminal` had drawn the tape on by at most twelve pixels o
 that room, and the pool's tapes into the Reindex layer's `TopK` stopped above the
 diamond. It now draws the tape on to the operation rectangle's edge, at both ends of
 the box, so a drop's tape begins at the glyph's bottom edge by the same rule.
+
+**In the two arrow forms, a tape bends into the arrow of its array.** `DiagramSettings.form`
+names one of three forms of a figure, per [[Diagram Display]]. The two arrow forms,
+`DiagramForm.ARROWS_AND_BROADCASTED` and `DiagramForm.ARROWS_AND_BOXES`, draw each array
+passing between two operators as one arrow, with its shape written above the arrow and its
+datatype below. The user asked on 2026-09-26 about the empty space above and below the
+grabs and drops of the arrow forms, and suggested "a vertical line that curves into a
+labeled, horizontal line". Before that day the taped arrays stood on rows above and below
+the box of the operator. The label of each array was too wide for the room beside its
+tape, so it was turned a quarter turn to run down the tape, and every tape was as tall as
+its label was wide. `ArrowParaCategoryRenderer` now builds the box of the operator with
+every operand and every result in its columns, and `ParaWrapBox.build_inner` finds no row
+for the taped arrays on that box. A grab's tape comes down from its free end, turns a
+corner of `turn_radius` and runs level into the arrow of the grabbed operand at the left
+edge of the box. A drop's tape leaves the arrow of the dropped result at the right edge in
+the same way and turns down. The label of the array stands on the level stretch, placed by
+`arrowLabels.rest_arrow_label_on_wire` in the way a composed gap places a label, with the
+shape above the wire and the datatype below. Each stretch is as long as its own label and
+the corner need. Where several arrays are taped on one side, `fanned_leg_distances` stands
+each vertical run outside the corner of the tape inside it by the width of a slot name, and
+no further than its own label needs. The columns of the wrap move to the heights of the
+arrows reached by them, so the wire of a kept array runs level past the stretches. The
+stretches take width where the turned labels took height, and on the 2000 px page of
+DeepSeek-V4.1-Flash the added width moves the row breaks. A bare grab's
+tape carries no label in these forms. The label of its array stands on the arrow in the gap
+after the wrap, as `ParaRendererSettings.grab_tape_names_its_wire` states.
 
 ## Gaps
 

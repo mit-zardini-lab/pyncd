@@ -1,6 +1,6 @@
 ---
 tags: [layer/practice, reference]
-code: notebooks/, example_notebooks/
+code: notebooks/, example_notebooks/, notebooks/website/
 status: evolving
 ---
 
@@ -14,7 +14,8 @@ test, so everything it claims is asserted in text and holds with the diagrams tu
 
 There are two folders. `example_notebooks/` holds the short introductions a new reader
 starts with. `notebooks/` holds the long ones, one folder per feature, each opening with
-a title cell naming the feature it introduces.
+a title cell naming the feature it introduces, and `notebooks/website/` holds the
+notebooks of the lab website, whose claims stand in a validator beside each notebook.
 
 ## `example_notebooks/`
 
@@ -50,10 +51,32 @@ one part of the model and explaining it against the released code, and every fig
 quantised model or a part of it, so each wire carries the quantisation the released code
 holds its array in. One cell near the end takes every quantisation back off and draws the
 model again. Its model lives in the package beside it, `DeepSeekV41Flash/`, and its claims
-live in `quantization/validate_quantization.py` and in the three `validate_*.py` scripts
+live in `quantization/validate_quantization.py` and in the `validate_*.py` scripts
 of that package rather than in the notebook, which is the exception [[Validation]]
 describes. [[SOTA Model Notebooks]] states how the package is laid out and what each
 validator asserts.
+
+`notebooks/sota/GLM53/` is the package of GLM-5.3, read from the `glm_moe_dsa` model of
+`transformers` at one pinned commit, with `validate_glm53.py` and
+`validate_quantised_glm53.py` beside its modules. No notebook under `notebooks/sota/`
+draws it. The public notebook of the model is `notebooks/website/modern/GLM53.ipynb`.
+
+## `notebooks/website/`
+
+The nine notebooks of the diagrams page of the lab website, one per model, in three
+folders: `tutorial/` for four forms of attention, `classic/` for the transformer of
+*Attention Is All You Need*, Mixtral-8x7B and DeepSeek-V3, and `modern/` for GLM-5.3
+and DeepSeek-V4.1-Flash. Each notebook holds prose and figures and no checks, and a
+validator beside it holds one `check_` function per claim, in the order of the notebook.
+The last cell of each writes one interactive page carrying every variant of its model
+into `notebooks/website/output/`. [[Website Notebooks]] lists every notebook with its
+validator, its page and its variants.
+
+The models of the classic pages are built in `notebooks/classic/`, one module per model
+beside a module that quantises it, a module that derives its cached pass, a module that
+holds its page variants and a wording file of its block titles and descriptions. The
+cached pass of GLM-5.3 is in `notebooks/caching/CachedGLM53/`, per
+[[Caching Between Passes]].
 
 ## Running them
 
@@ -103,7 +126,7 @@ drawn.
 
 | module | what it does |
 |---|---|
-| `notebook_diagrams.py` | `DiagramSettings`, `DiagramMode` and `show_diagram`, which is the one route to a figure |
+| `notebook_diagrams.py` | `DiagramSettings`, `DiagramMode` and `show_diagram`, which is the one route to a figure, and `show_page_variants`, which writes several variants of a model into one page, per [[Diagram Display]] |
 | `notebook_listings.py` | the listing a figure is replaced by under `DiagramMode.LISTING` |
 | `remember_drawn_blocks.py` | which bodies a figure draws, given what the figures before it drew |
 | `block_recycling.py` | whether a block's body is recycled through a hypergraph before it is drawn |
@@ -113,15 +136,20 @@ drawn.
 | `cast_presentation.py` | whether a cast is drawn as a chevron or as no glyph at all |
 | `axis_sizes.py` | where the size of a sized axis is written |
 | `advanced_display.py`, `explain_operators.py`, `explain_reindexings.py` | the legend and the inspection boxes of an interactive figure, per [[Advanced Display]] |
+| `explain_cached_reads.py` | the inspection boxes over the reads `New` and `Cached` a derived cached pass writes, per [[Deriving Caches by Dragging the New Tokens]] |
 | `expand_with_parameters.py` | what stands for a weight in the expansion an inspection box draws |
 | `attention_figures.py`, `sota_figures.py` | the figures a model notebook repeats |
 | `display_wording.py`, `display_wording.json` | the sentences the display writes, held once |
 
 `notebooks/execute_notebook.py` runs a notebook with its kernel at the repository root, and
 `notebooks/fix_notebook_dir.py` does the same for a kernel started elsewhere.
+`notebooks/website/rewrite_website_pages.py` runs every website notebook with each cell
+under its declared mode, which writes its page again after a tsncd build and leaves
+the notebook file as it is, per [[Website Notebooks]].
 
 ## See also
 
 - [[Repository Map]] — what is live and what is dead
 - [[Validation]] — the checks a notebook is one of
 - [[SOTA Model Notebooks]] — the one whole-model notebook and its packages
+- [[Website Notebooks]] — the notebooks of the lab website, their validators and their pages

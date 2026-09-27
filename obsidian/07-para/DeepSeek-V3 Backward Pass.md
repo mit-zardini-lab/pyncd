@@ -78,39 +78,42 @@ with no tangent, because a rule emits no cotangent for an index. `replace_roots`
 roots of a graph through its blocks, so the two tape passes reach a grab inside a block, and
 `dedup_slots` canonicalises a duplicate grab onto its twin only inside one scope, pointing
 it at the kept slot across scopes, because a wire cannot be moved between blocks by
-renaming it. `pathway_collapse.dedup_roots`, run as the notebook's last stage, merges the
-grabs of one slot across blocks. It keeps one grab in the innermost block enclosing every
+renaming it. `pathway_collapse.dedup_roots`, run after the derivation, merges the grabs
+of one slot across blocks. It keeps one grab in the innermost block enclosing every
 reader and recomputes the domain of each block on the way, so the index is grabbed once in
 each pass, per [[Functors]]. A loop block is a boundary for the merge, and the layer has
 none.
 
 ## What the backward pass reads as
 
-The listing holds 108 assignments: 61 `Einops`, 15 `Arithmetic`, 13 `AdditionOp`, 13
+The listing holds 107 assignments: 60 `Einops`, 15 `Arithmetic`, 13 `AdditionOp`, 13
 `Transpose`, 4 `Inject`, one `ReindexTranspose` and one `View`. Read against the model, the sparse axis
 ends at `%9 = Inject(<idx_{k/e}>[x, {k}], %8[x, {k}]) : R[x, {e}]`, and every line after it
 in the router runs over all `e` experts, so $\mathrm{d}W^{R}$ covers $R[m, e]$ with the
 unselected rows the zeroes the injection wrote. The router's injection, the three expert
 transposes and the three weight-gradient injections each grab the index, and the router,
-the experts and the shared expert grab the normalised tokens five times between them. The
-notebook's last stage runs `dedup_roots` on the pair, after which the backward pass holds one
-grab of each, placed in `R[Mixture of Experts]` and read by the three blocks, and the
+the experts and the shared expert grab the normalised tokens five times between them. A
+stage after the derivation runs `dedup_roots` on the pair, after which the backward pass holds one grab of
+each, placed in `R[Mixture of Experts]` and read by the three blocks, and the
 forward pass one grab of the index inside `Experts`. The stage removes two roots from the
 forward pass and seven from the backward pass, and the operation counts, the slots, the
-domain and the codomain are unchanged. The notebook's `DiagramSettings` sets
-`tape=ABSORBED`, so every listing and diagram passes through `to_para_wrap` just before it
-is shown and the algebra runs on the `Para` underneath, per [[Diagram Display]]. The wrap
+domain and the codomain are unchanged. Under `DiagramSettings(tape=ABSORBED)` every
+listing and diagram passes through `to_para_wrap` just before it is shown, and the algebra
+runs on the `Para` underneath, per [[Diagram Display]]. The wrap
 splits a grab read by several siblings into one grab per reader, so the absorbed forms of
 the merged passes coincide with the absorbed forms before the merge, and the merge stage is
 carried by its assertions, which read the graph. Neither stage ties a drop to the grabs of
 its slot.
 
-The notebook's last stage runs `pathway_collapse.collapse` on the merged pair, followed by
+A further stage runs `pathway_collapse.collapse` on the merged pair, followed by
 `dedup_roots`. Every rewrite in [[Pathway Collapse|pathway collapse]] now reaches through
 the blocks, so the softmax three blocks deep collapses as a bare one does. The backward
-pass goes from 61 einsums and 15 arithmetics to 60 and 14, and the tape from 45 residual
-slots to 39. The softmax's four residuals go, the scores, the exponential, the sum and its
-reciprocal, and `R[SoftMax]` holds a negation and one einsum, reading the probabilities $P$
+pass goes from 60 einsums and 15 arithmetics to 59 and 14, and the tape from 44 residual
+slots to 38. Before 2026-09-27 the counts were one higher at both ends, because the rule
+for an `Arithmetic` taped the scores for the scale $\lvert d \rvert^{-1/2}$ and multiplied
+the cotangent by its derivative in an einsum, per [[Backpropagation]]. The softmax's four
+residuals go, the scores, the exponential, the sum and its reciprocal, and `R[SoftMax]`
+holds a negation, one einsum and the addition of the two terms, reading the probabilities $P$
 already saved for the value contraction and the row statistic
 $D = \langle \mathrm{d}O, O \rangle$, computed one block out from the attention output $O$
 already saved for $W^{O}$. The cotangent of the scores is $P \odot \mathrm{d}P - P \odot D$,
@@ -126,8 +129,7 @@ two paths of the division, holding `e^{x}` for the numerator and `-x^{-2}` for t
 
 The forward pass performs the model's operations and no others, and the backward pass
 grabs the weights, the gains, the index and the residuals the forward pass wrote, and drops
-one gradient per weight and per gain. The notebook asserts each of these with the diagrams
-off.
+one gradient per weight and per gain.
 
 ## The rules
 
@@ -137,12 +139,12 @@ off.
   while its formula read `|c|`. `algebra.einops_simplification.einsum` over the axis objects
   is the construction, per [[Invariants]] under *Axis identity*.
 - **Keep the key axis a second axis.** Composition aligns axes by position, so
-  self-attention written with one token axis scores a diagonal `R[h, x, x]`.
-  `diffusion_unet.relabel_axis` reads the tokens under the key name, and its transpose is a
-  `ReindexTranspose`.
+  self-attention written with one token axis scores a diagonal `R[h, x, x]`. A `View`
+  whose `StrideMorphism`, named `=`, sends the key axis to the token axis with stride one
+  reads the tokens under the key name, and its transpose is a `ReindexTranspose`.
 - **Write a pointwise map as a formula.** An `ops.Elementwise` carries a name the algebra
   cannot read, and a published name is not unique. `x \sigma(x)` is the SiLU and also the
-  swish, and the swish is also written with a learned scale. `deepseek_v3` builds every
+  swish, and the swish is also written with a learned scale. The layer builds every
   pointwise map from `ops.Arithmetic` and lets the box print the formula, except the
   sigmoid, whose `\sigma` is shorter than its formula and names one function.
 - **The softmax is written out.** `ops.SoftMax` reverses through the rule in

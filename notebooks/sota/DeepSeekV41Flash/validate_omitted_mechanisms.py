@@ -500,7 +500,7 @@ def check_the_written_out_hash() -> None:
     assert offsets.output_weaves[0].datatype == row
     pairs = [node for node in nodes_with_operator(ops.View, hashing)
              if node.operator.name is not None
-             and node.operator.name.to_bodies() == 'pair']
+             and node.operator.name.to_bodies() == omitted_mechanisms.PAIR_VIEW_NAME]
     assert sorted(node.output_weaves[0].datatype.max_value.to_latex()
                   for node in pairs) == ['T_1', '\\bar{p}']
     prefix = omitted_mechanisms.L_prefix
@@ -654,7 +654,7 @@ def converts_over(term: cat.Morphism, degree: tuple[cat.Axis, ...]) -> set[
 
 def check_the_fp4_cache() -> None:
     '''Each of the three round trips reads a latent and returns its own shape, cuts
-    the channels into the groups that share one scale with the view named qgrp and
+    the channels into the groups that share one scale with the view named ScaleGroup and
     merges them back with the covariant view of the same reindexing, and converts every
     grouped channel into the form it stores and back to the reals. The entry trip
     stores four bits and converts the scale of a group into the eight-bit form, which

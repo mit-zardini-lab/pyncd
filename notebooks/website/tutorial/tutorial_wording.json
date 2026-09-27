@@ -1,0 +1,36 @@
+{
+  "name": "Current",
+  "wordings": {
+    "CORE_TITLE": "\\text{Scaled Dot-Product Attention}",
+    "CORE_DESCRIPTION": "Each query takes the dot product with every key it reads, summed over the channels of the key. The scores are divided by the square root of the number of those channels. A softmax over the keys turns the scores of each query into weights that sum to one, and the result for each query is the sum of the values under its weights.",
+
+    "SELF_ATTENTION_TITLE": "\\text{Causal Self-Attention}",
+    "SELF_ATTENTION_DESCRIPTION": "Three learned matrices project the state of every token into a query, a key and a value of d channels. Each token attends to itself and to every earlier token, and W^O projects the result back to the width m of the state.",
+
+    "RESIDUAL_TITLE": "\\text{Residual Connection}",
+    "RESIDUAL_DESCRIPTION": "Adds the output of the attention to the state the attention read, so the block computes z + Attention(z). Where the attention adds nothing, the state passes through unchanged. The gradient of the loss reaches the state along the addition as well as through the attention.",
+
+    "MULTI_HEAD_TITLE": "\\text{Multi-Head Attention}",
+    "MULTI_HEAD_DESCRIPTION": "Projects the state of every token into h heads, each holding a query, a key and a value of d channels. Scaled dot-product attention runs once for each head, with the weights of that head, over the token and the tokens before it. W^O reads every channel of every head and returns one vector of width m for each token.",
+
+    "GROUPED_QUERY_TITLE": "\\text{Grouped-Query Attention}",
+    "GROUPED_QUERY_DESCRIPTION": "Projects the state of every token into h' groups of g query heads, and into one key head and one value head for each group. Every query head of a group scores against the key head of its group and sums the value head of its group. The model therefore computes and stores g times fewer keys and values than multi-head attention with the same number of query heads.",
+
+    "SCORE_SCALE_ROLE": "Divides every score by the square root of the number of channels the dot product sums over. Without the division the spread of the scores grows with the number of channels, and the softmax then gives almost all of the weight to one key, where its gradients are small.",
+
+    "MASK_VIEW_DESCRIPTION": "Reads the state of token i_x - i_w at slot i_w of token i_x, so slot 0 holds the token itself and slot 1 the token before it. A slot before the first token holds no value, and the softmax and the weighted sum skip it, so each token attends to itself and to the tokens before it.",
+
+    "QUERY_ROLE": "Projects the state of each token into the query that scores the keys.",
+    "KEY_ROLE": "Projects the state of each token into the key that the queries score against.",
+    "VALUE_ROLE": "Projects the state of each token into the value that the weights of the queries sum.",
+    "OUTPUT_ROLE": "Projects the result of the attention back to the width of the state.",
+    "HEAD_QUERY_ROLE": "Projects the state of each token into one query of d channels for each of the h heads.",
+    "HEAD_KEY_ROLE": "Projects the state of each token into one key of d channels for each of the h heads.",
+    "HEAD_VALUE_ROLE": "Projects the state of each token into one value of d channels for each of the h heads.",
+    "HEAD_OUTPUT_ROLE": "Reads every channel of every head and projects the result back to the width of the state.",
+    "GROUPED_QUERY_ROLE": "Projects the state of each token into h' groups of g query heads. The query head that the released code of Mixtral numbers g i_{h'} + i_g is head i_g of group i_{h'}.",
+    "GROUPED_KEY_ROLE": "Projects the state of each token into one key head for each of the h' groups.",
+    "GROUPED_VALUE_ROLE": "Projects the state of each token into one value head for each of the h' groups.",
+    "GROUPED_OUTPUT_ROLE": "Reads every channel of every query head of every group and projects the result back to the width of the state."
+  }
+}

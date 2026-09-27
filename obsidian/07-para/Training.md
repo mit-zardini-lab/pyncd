@@ -8,7 +8,8 @@ status: speculative
 
 ## What it is
 
-Everything else in this vault derives something from a model: a diagram, a kernel, a cost.
+Everything else in this vault derives something from a model: a diagram, PyTorch code, an
+operation count.
 Training is the first thing that derives a second morphism, the reverse pass, and then has
 to couple it back to the first. [[Para Category]] is where the coupling lives, as a slotted
 tape written by one pass and read by the other, with no wire crossing between them.
@@ -53,7 +54,7 @@ flowchart TD
     T -->|"collapse_grabbed_residuals, parametrised only"| TG["Taped<br>the backward pass grabs the parameter slots"]
     TG -->|"merge_reindexings_and_einops on each pass"| TS["Simplified Taped<br>nodes absorbed, contractions merged"]
     TS -->|"dedup_and_collapse"| TC["Collapsed Taped<br>one slot per value, chains read from the forward pass"]
-    TC -->|"recompute_elementwise_slots"| TR["Recomputing Taped<br>chosen slots rebuilt in the backward pass"]
+    TC -->|"recompute_elementwise_slots, or recompute_contraction_slots then store_operands_of_views"| TR["Recomputing Taped<br>chosen slots rebuilt in the backward pass"]
     TR -->|"detape, then torch_compile"| V["Two pure functions<br>checked against torch.autograd"]
     TC -->|"to_para_wrap, for display"| W["ParaWrap form<br>tapes drawn on the operations"]
 ```
@@ -107,6 +108,12 @@ DeepSeek-V4 does that with `atomicAdd`, then replaces it with per-SM buffers and
 deterministic global sum, because floating-point addition is not associative, per arXiv
 2606.19348 section 3.3. In this algebra the accumulation is one operation of the
 expression, and where it is performed is a separate question.
+
+A parameter slot is outer, per [[Outer and Inner Tape Slots]]. A model lifted over a batch
+axis reads one weight at every index of the batch, so the grab is followed by a repeat, and
+the reverse of the repeat sums the cotangents of the batch before the drop onto $dW$. The
+accumulation of a gradient over the batch is therefore the same identity as the
+accumulation of the gradient of a tied weight, with the copy made by the lift.
 
 **Not every object has a dual.** $R$ is defined on datatypes rather than on shapes alone. A
 `Reals` wire dualises to a `Reals` wire. A `Natural(n)` wire, which is an index, per
@@ -199,7 +206,7 @@ V4 inherits. Three consequences follow, and the algebra has to be able to state 
 - [[Training Mixture of Experts Gates]] — the literature the four writers were classified against
 - [[Para Category]] — the construction, and the probabilistic lifts
 - [[Derivatives]] — the method: node expansion, the tangent functor, the residual
-- [[Backpropagation]] — the transform that performs it, and the notebook that shows it
+- [[Backpropagation]] — the transform that performs it
 - [[Selection and the Reverse Pass]] — what top-k does to $R$
 - [[Sparse Axes]] and [[Sparse Expansion]] — the two presentations of a selection
 - [[Operators]] — what $R$ would have to be defined on

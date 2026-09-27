@@ -232,7 +232,10 @@ that lays the block-and-offset pairs out along a dense candidate axis, so `Nat(P
 becomes `Nat(B)[x, C]` and no sparse axis is involved. A consumer reads a payload at those
 positions with an `IndexSelect`, and a selection made among them takes the positions as a
 second operand, `TopK.template(positions_of=B)`, so that it hands out `s/B` over the
-parent. [[Sparse Expansion]] expands that selection by composing the positions it chose
+parent. `deepseek.data_structure.selects_over_positions` recognises such a selection by a
+second operand holding a `Natural` under whatever wrappers it carries. The selection of a
+quantised model holds its positions in INT32, and it is recognised as well since
+2026-09-26. [[Sparse Expansion]] expands that selection by composing the chosen positions
 with the operand, as it composes a selection over a selection with the inner index. The
 candidate pool of `notebooks/sota/DeepSeekV41Flash.ipynb` is written this way since
 2026-09-11. Its block scores are never

@@ -13,6 +13,7 @@ self-describing:
 
 from __future__ import annotations
 from dataclasses import dataclass, field
+from collections.abc import Iterator
 from typing import Callable
 
 import data_structure.Category as cat
@@ -302,17 +303,33 @@ def numbered(graph: hg.Hypergraph) -> tuple[Values, list[str]]:
 def slot_text(entry: Para.NamedEntry, written: bool) -> str:
     '''`<s0>` for a slot, `<s0'>` for a loop variable on the side that writes it
     for the next iteration or for a value sent to other processors, `<s0*>`
-    for a value received from a partner processor, and `<s0[i]>` for the member
-    of a slot that the iteration `i` of a repeated block holds.'''
+    for a value received from a partner processor, `<s0+>` for the entries of
+    this pass appended to a cache, and `<s0[i]>` for the member of a slot that the
+    iteration `i` of a repeated block holds.'''
     name = Para.slot_of(entry).uid._name.to_bodies()
     index = Para.index_of(entry)
     if index is not None:
         name = f'{name}[{numeric_name(index)}]'
     if isinstance(entry, Para.ReductionSlot):
         mark = "'" if written else '*'
+    elif isinstance(entry, Para.CacheTapeSlot):
+        mark = '+' if written else ''
     else:
         mark = "'" if written and isinstance(entry, Para.StreamSlot) else ''
     return f'<{name}{mark}>'
+
+
+def wrapped_port_text(
+    entry: Para.SlotEntry, wires: Iterator[str], written: bool,
+) -> str:
+    '''The text of one operand or result of a `ParaWrap`: the next wire where the
+    entry keeps it, the slot where the entry tapes it, and both where the entry is a
+    `Para.KeptAndDropped`, whose slot is always written.'''
+    if entry is None:
+        return next(wires)
+    if isinstance(entry, Para.KeptAndDropped):
+        return next(wires) + slot_text(entry.dropped, written=True)
+    return slot_text(entry, written)
 
 
 def para_wrap_line(
@@ -324,17 +341,15 @@ def para_wrap_line(
     and a dropped result is `<s1>` among the outputs. So the line reads as the
     operation it wraps, and the tape is visible exactly where it touches it -
     which is what the wrap is for. A loop variable written for the next
-    iteration prints as `<s1'>`.
+    iteration prints as `<s1'>`. An operand or a result that stays on its wire and
+    is also dropped prints as its wire followed by the slot it is dropped onto, as
+    `%0<s1>` or `%0<c+>` for the tokens a cache appends.
     '''
     body = morphism.body
     inputs = iter(values.of(node) for node in root.dom)
     outputs = iter(values.of(node) for node in root.cod)
-    operands = tuple(
-        slot_text(slot, written=False) if slot is not None else next(inputs)
-        for slot in morphism.grabs)
-    results = tuple(
-        slot_text(slot, written=True) if slot is not None else next(outputs)
-        for slot in morphism.drops)
+    operands = tuple(wrapped_port_text(entry, inputs, False) for entry in morphism.grabs)
+    results = tuple(wrapped_port_text(entry, outputs, True) for entry in morphism.drops)
     if not isinstance(body, cat.Broadcasted):
         kind = ('rewire' if isinstance(body, cat.Rearrangement)
                 else morphism_name(body))

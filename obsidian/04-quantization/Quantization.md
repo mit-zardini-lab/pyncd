@@ -1,6 +1,6 @@
 ---
 tags: [layer/quantization, concept, algorithm]
-code: quantization/data_structure/Quantization.py, quantization/processing/conversion_insertion.py, quantization/processing/quantise_model.py, quantization/registries/operator_quantisations.py, quantization/validate_quantization.py
+code: quantization/data_structure/Quantization.py, quantization/processing/conversion_insertion.py, quantization/processing/quantise_model.py, quantization/algebra/strip_quantisations.py, quantization/registries/operator_quantisations.py, quantization/validate_quantization.py
 status: evolving
 written: Claude Opus 5 (1M context), effort high. Rewritten by Claude Fable 5.1, effort 80, on 2026-09-20.
 ---
@@ -29,8 +29,7 @@ scale. An index carries an integer quantisation, `INT64` or `INT32`, over its ow
 `cat.Natural` bound, and `quantisation_of` returns the quantisation of a wire with
 the bound replaced by a fixed one, so two index wires compare equal. The user asked
 for the block scale, the integer formats and the packing in front of every label on
-2026-09-20. A
-`TypeConvert` reads a value of one datatype into another, and between two
+2026-09-20. A `TypeConvert` reads a value of one datatype into another, and between two
 quantisations it is a cast, which rounds where the target holds fewer numbers and
 changes nothing where it holds more.
 
@@ -42,8 +41,11 @@ changes nothing where it holds more.
 | `quantization/processing/conversion_insertion.py` | reading a hypergraph wire by wire with `leaves_in_dataflow_order`, `producers`, `consumers`, `containers`, `wire_array` and `all_wires`, writing a datatype onto one operation with `with_datatypes` and onto every wire with `rewrite_datatypes`, and the two placements `insert_conversions_beside_the_producer` and `insert_conversions_beside_the_consumer` |
 | `quantization/processing/quantise_model.py` | `QuantizationPolicy`, `BoxPolicy`, `QuantisedModel` and `quantise_model`, with `operations_of`, `cast_counts`, `casts_of`, `unquantised_weaves` and `leaves_without_a_rule` for reading a quantised model |
 | `quantization/registries/operator_quantisations.py` | `OperatorQuantisation`, `QuantisationQuestion`, `ArithmeticQuantisation`, `ContractionQuantisation`, `BoxPolicy`, the `register` decorator and one rule per operator class |
+| `quantization/algebra/strip_quantisations.py` | the functor taking every quantisation back off a model, stated by [[Stripping Quantisations]] |
 | `quantization/validate_quantization.py` | the checks, one `check_*` per claim |
 | `notebooks/sota/DeepSeekV41Flash/quantised_text_only_model.py` | `RELEASED_POLICY`, the quantised text-only DeepSeek-V4.1-Flash, and the tables taken by its figures |
+| `notebooks/sota/GLM53/quantised_whole_model.py` | the quantised GLM-5.3, with `FP8_BLOCK_WEIGHT` and `FP8_ROUNDED_OPERAND` |
+| `notebooks/classic/quantised_attention_is_all_you_need.py`, `notebooks/classic/quantised_mixtral_8x7b.py` and `notebooks/classic/quantised_deepseek_v3.py` | the three classic models at the quantisations of their released code |
 
 `Encoding`, `Quantified` and `TypeConvert` are mirrored in tsncd, per
 [[Terms Mirrored in tsncd]]. The registry was named `operator_precisions.py` until 2026-09-20, when the reviewer
@@ -64,13 +66,12 @@ code and the few places departing from them.
 | `slots` | the quantisation held by a slot of the tape, by the text of the slot's name, for a slot dropped inside one box and grabbed inside another, which the pass cannot follow through the ports; the value dropped is cast to it in front of the drop |
 | `results` | the quantisation required of the model's own results, and `None` requires nothing of them |
 | `weights` and `weights_by_default` | the read quantisation of a weight, by the text of the name carried by the operator holding it |
-| `boxes` | a `BoxPolicy` by box name: the quantisation returned by the box for a real number and for an index, the quantisation required of every index read by the box, whether its arithmetic computes at the scalar quantisation or at the quantisation carried by its operands, and whether its contractions promote or accumulate |
+| `boxes` | a `BoxPolicy` by box name: the quantisation returned by the box for a real number and for an index, the quantisation required of every index read by the box, whether its arithmetic computes at the scalar quantisation or at the quantisation carried by its operands, and whether its contractions promote, accumulate, read their operands into the scalar quantisation, or read them at the quantisation with the fewest bits. A titled `cat.Block` whose title is a key of the mapping computes its operations under that policy as the body of a box does, and the innermost such block or box holding an operation decides. `notebooks/classic/quantised_mixtral_8x7b.py` states the attention kernel and the experts of Mixtral-8x7B as two such blocks |
 | `block_results` | the quantisation returned by a block at each position of its codomain, by its title, with `None` at a position returned as computed |
 
 The released DeepSeek-V4.1-Flash is eager PyTorch around a few kernels, and its
 quantisations follow four facts, established line by line from the released code. A
-tensor passed
-from one module or kernel to the next is held in BF16. Arithmetic inside a module
+tensor passed from one module or kernel to the next is held in BF16. Arithmetic inside a module
 upcasting on entry, and inside every kernel, runs in FP32. An activation is rounded to
 E4M3 in one place, in front of a projection whose weight is FP8 or FP4, by the rounding
 kernel called by that projection. Everything else computes at the quantisation carried
@@ -98,11 +99,11 @@ parent unless it declares one.
 | rule | operators | what it says |
 |---|---|---|
 | `projected` | `ops.Linear` | a weight with fewer bits than an activation: the operand at the activation quantisation and then at the quantisation for rounded operands, which an operand already carrying it, a row of a block-scaled table, needs no cast for, and the result at the activation quantisation; any other weight: the operand and the result at the quantisation of the weight |
-| `contracted` | `ops.Einops` | the operands and the result at the operand quantisation with the most bits; inside a box whose contractions accumulate, a contraction reads its operands at the operand quantisation with the fewest bits and returns the scalar quantisation, and a broadcast product still promotes; a product of indices returns the integer quantisation |
-| `computed_at_the_scalar_quantisation` | `ops.Elementwise`, `ops.Arithmetic`, `ops.SoftMax`, `ops.L1Norm`, `ops.L2Norm`, `ops.Maximum`, `ops.ConstantOp`, `ops.FixedArray`, `ops.GenericOperator`, `dst.Rotary`, `dst.YarnRotary` | the operands and the result at the scalar quantisation; inside a box whose arithmetic is carried, the result at the quantisation of the operand, and a constant at the activation quantisation |
-| `normalised` | `ops.Normalize` | with a gain, the operand and the result at the activation quantisation, because that is the RMSNorm module; without one, at the scalar quantisation, because that is arithmetic written inline |
+| `contracted` | `ops.Einops` | the operands and the result at the operand quantisation with the most bits; inside a box whose contractions accumulate, a contraction reads its operands at the operand quantisation with the fewest bits and returns the scalar quantisation, and a broadcast product still promotes; inside a box whose contractions are `SCALAR`, every einsum reads and returns the scalar quantisation, and inside one whose contractions are `FEWEST_BITS`, every einsum reads and returns the operand quantisation with the fewest bits; a product of indices returns the integer quantisation |
+| `computed_at_the_scalar_quantisation` | `ops.Elementwise`, `ops.Arithmetic`, `ops.SoftMax`, `ops.L1Norm`, `ops.L2Norm`, `ops.Maximum`, `ops.Product`, `ops.ConstantOp`, `ops.FixedArray`, `ops.GenericOperator`, `dst.Rotary`, `dst.YarnRotary` | the operands and the result at the scalar quantisation; inside a box whose arithmetic is carried, the result at the quantisation of the operand, and a constant at the activation quantisation |
+| `normalised` | `ops.Normalize`, `ops.LayerNorm` | with a gain, the operand and the result at the activation quantisation, because that is the RMSNorm or LayerNorm module; without one, at the scalar quantisation, because that is arithmetic written inline |
 | `added` | `ops.AdditionOp` | the operands and the result at the operand quantisation with the most bits |
-| `moved` | `ops.View`, `aops.CovariantView`, `aops.ConcatenateAxes`, `aops.DeconcatenateAxes`, `dst.MergedPositions`, `dst.PairsAsComplex`, `dst.Decomplex` | every operand and the result at the operand quantisation with the fewest bits, and the scalar quantisation for a constant; indices pass through at the index quantisation with the fewest bits among them, and every index operand is required at it |
+| `moved` | `ops.View`, `aops.CovariantView`, `aops.ConcatenateAxes`, `aops.DeconcatenateAxes`, `dst.MergedPositions`, `dst.PairsAsComplex`, `dst.Decomplex`, `Caching.Caching` | every operand and the result at the operand quantisation with the fewest bits, and the scalar quantisation for a constant; indices pass through at the index quantisation with the fewest bits among them, and every index operand is required at it. Since 2026-09-27 a cache, per [[Caching Between Passes]], holds each value at the quantisation carried by the value on arrival, and a cache held in another format is written as a cast in front of the cache |
 | `ranked` | `dst.TopK` | the values at the quantisation of the values, and the positions at the integer quantisation of the policy, whatever the candidate positions carry, because `torch.topk` returns `int64` |
 | `selected` | `dst.Select`, `dst.IndexSelect` | the quantisation of the payload, which is the last real operand |
 | `embedded` | `ops.Embedding` | the quantisation the policy names for the table, so a row of an MXFP8 table is MXFP8 and reaches a rounded projection with no cast, and the integer quantisation for a table of integers |
@@ -197,6 +198,11 @@ on the result of the candidate pool and on the positions picked by each indexer.
 Every row of the policy table cites its released lines, pinned to one commit by
 `reference_links.py`. `notebooks/sota/DeepSeekV41Flash.ipynb` draws the
 model and its parts, and [[SOTA Model Notebooks]] lists it.
+`notebooks/website/modern/DeepSeekV41Flash.ipynb` writes the page of the model for the
+lab website, and [[Website Notebooks]] lists the page. The page is drawn with
+`clean_quantisation_labels=False`, because the default display pass takes the
+quantisation off every wire whose quantisation is that of every operand of the operation
+writing it, per [[Diagram Display]].
 
 A cast is drawn as no glyph, on a box of no size, and the rounding is read from the
 quantisation labelled on each wire. The format written by the cast is blue, and the gap
@@ -207,6 +213,126 @@ quantisation the cast reads and the one it writes, which the user asked for on
 2026-09-20, because a cast drawn as no glyph is two pixels wide and the label is the
 mark a reader sees. [[Diagram Display]] states the pass, added on 2026-09-20 and made
 the default by the user the same day.
+
+## The quantised GLM-5.3
+
+`notebooks/sota/GLM53/quantised_whole_model.py` applies to `whole_model.glm53` the
+quantisations of the FP8 checkpoint `zai-org/GLM-5.3` as `transformers` runs it. Z.ai
+also publishes `zai-org/GLM-5.3-BF16`, whose configuration differs only by the absence of
+`quantization_config`. The FP8 checkpoint holds its projections in E4M3 with one FP32
+scale per block of 128 rows by 128 channels. `FP8_BLOCK_WEIGHT` names that format, which
+is `Quantization.block_scaled(E4M3, FP32, channels=128, rows=128)`. The fine-grained FP8
+integration of `transformers` replaces every `nn.Linear` and every block of routed
+experts outside the unconverted modules. It rounds the operand of each FP8 projection to
+E4M3 with one FP32 scale per 128 channels of a token, `FP8_ROUNDED_OPERAND`, in DeepGEMM
+or in the Triton kernel of `kernels-community/finegrained-fp8`. The scale is the largest
+magnitude of the group divided by 448 and is not rounded to a power of two. The rounded
+operand of GLM-5.3 therefore carries an FP32 scale, where the rounded operand of
+DeepSeek-V4.1-Flash carries UE8M0. The package needed no new format for either, because a
+`BlockScale` already names the encoding of its scale.
+
+The policy names BF16 for the activations and the results, FP32 for the scalars,
+INT64 for indices, BF16 for the embedding, the output head and the indexer head
+weights, and FP32 for the router weight and the correction bias. Eight boxes depart
+from the default rules. `Rot` carries its arithmetic, because the reference casts the
+table of turns to BF16 and turns in BF16. `Sco` reads the operands of its contractions
+into FP32 and returns FP32, and `Idx` returns FP32, because the indexer writes
+`torch.matmul(q.float(), k.float())` and hands FP32 scores to its top-k. `Core` is the
+memory-efficient kernel of `scaled_dot_product_attention` in PyTorch 2.10.0 built for
+CUDA 12.8, whose contractions accumulate. The same release built for CUDA 13.0 runs
+cuDNN attention on a Hopper GPU, whose source is closed. The kernel rounds the
+exponentials of the scores to BF16 and divides by their FP32 sum after the product with
+the values. The expression writes the softmax as one operation and casts the
+probabilities instead. `Gth` reads its positions in INT64 through `.long()`. `MLP` and
+`MoE` carry their arithmetic, and the contractions of `MoE` read their operands at the
+quantisation with the fewest bits, because the `grouped_mm` experts cast the FP32 gates
+to BF16 before the sum. `Gate` returns FP32. The slot `sel` holds INT32.
+
+The model holds 44 cast operations, counted once per written operation. Thirty-three
+round BF16 in front of an FP8 projection, four read BF16 into FP32, three round FP32 to
+BF16, and four convert the selection between INT64 and INT32, two in each direction.
+`notebooks/sota/GLM53/validate_quantised_glm53.py` asserts each fact.
+`notebooks/website/modern/GLM53.ipynb` draws the quantised model on the page of the lab
+website with `clean_quantisation_labels=False`. The page derives the model in the reals
+from the quantised model by the functor stated under *Taking the quantisations back
+off*.
+
+## The quantised classic models
+
+`notebooks/classic/quantised_attention_is_all_you_need.py` holds the transformer of
+*Attention Is All You Need* at the quantisations of tensor2tensor, the code linked by
+the paper. Every real value and every weight is FP32, and every index is INT32. No
+operation requires a value at another quantisation, so the pass writes no cast. A cache
+of the cached pass holds the FP32 keys and values appended to it, as tensor2tensor
+concatenates FP32 tensors onto its cache.
+
+`notebooks/classic/quantised_mixtral_8x7b.py` holds Mixtral-8x7B in BF16, as
+`mistral-inference` runs the released weights. Four places compute in FP32. The RMSNorm
+divides by the root mean square in FP32 and rounds back to BF16 before the gain. The
+rotary embedding reads the queries and the keys into FP32, multiplies them by a table of
+FP32 complex numbers and rounds the result to BF16. The attention core is one call of
+FlashAttention-2 through `xformers`, whose contractions accumulate in FP32. The router
+takes the softmax of its two kept scores in FP32 and rounds the weights to BF16. The
+experts are eager code that never upcasts. The titled blocks of the attention core and
+of the experts carry their policies through `boxes`, and the logits are returned in
+FP32.
+
+`notebooks/classic/quantised_deepseek_v3.py` applies to the released DeepSeek-V3 of
+`config_671B.json` the quantisations of its own inference code, `deepseek-ai/DeepSeek-V3`
+at `9b4e978`, and applies the same policy to the pass derived from the model by
+`notebooks/classic/cached_deepseek_v3.py`. The checkpoint holds its projections in
+`FP8_BLOCK_WEIGHT`, the format of GLM-5.3. The released `linear` has two paths for an
+FP8 weight. The default `gemm_impl = "bf16"`, which `generate.py` never changes,
+dequantises the weight to BF16 with `weight_dequant` and calls `F.linear`, so no
+activation is rounded. The policy states that path by naming BF16 as its
+`rounded_operands`. `At`, `MLP`, `MoE` and `Gate` carry their arithmetic, because the
+released modules compute on BF16 tensors, and the softmax returns BF16 through
+`.type_as(x)`. The correction bias is FP32, so the addition of the bias promotes to FP32
+the copy of the scores that chooses the groups and the experts, and the gates are read
+from the BF16 copy. The RMSNorm of PyTorch 2.4.1, which `requirements.txt` pins, is a
+chain of BF16 tensor operations. The two caches of the cached pass hold BF16, which
+`Caching.Caching` carries through the `moved` rule. Each pass holds casts between BF16
+and FP32 alone, in the rotary embedding and the gate.
+
+`notebooks/website/classic/validate_attention_is_all_you_need.py`,
+`notebooks/website/classic/validate_mixtral_8x7b.py` and
+`notebooks/website/classic/validate_deepseek_v3.py` assert these facts. Each page of a
+classic model draws the model and its cached pass at these quantisations and in the
+reals, and [[Website Notebooks]] lists the pages.
+
+## Taking the quantisations back off
+
+`quantization/algebra/strip_quantisations.py` is the functor running the other way. It
+works in three steps, set out by the user on 2026-09-27. It takes every `Quantified`
+wrapper off every datatype. It turns into the identity on its operand every
+`TypeConvert` that then reads and writes one datatype. Every cast between two
+quantisations of one value is such a conversion, and a conversion between two different
+values, such as a quantised index read into a real number, is not. It then removes the
+identities from the leaves upwards with `algebra/remove_identities.py`. A composition
+drops each identity and becomes the identity when every member is one, a product of
+identities is the identity, and a block or a box whose body is the identity is the
+identity, whatever its tag, repetition, title or colour. A `ParaWrap` that grabs or
+drops acts on the tape and keeps the identity as its body. The arithmetic under the
+formats is left on its own, and every categorical equality of the model holds of it.
+The stripped quantised text-only model has the listing of
+`text_only_model.v41_flash_text_only` after the same recycling, so the pass adds and
+removes the same thing. [[Stripping Quantisations]] states the functor, what it leaves
+in place and why the three cache round trips come back as their scaling alone.
+
+The same functor draws the unquantised form of a model on a page with variants. tsncd
+applies it in the browser, as `dequantise`, to the term of the quantised form.
+`strip_quantisations` is its Python statement, and `notebook_diagrams.show_page_variants`
+prints a derived variant through it under `DiagramMode.LISTING`. On 2026-09-27, with the
+functor in three steps, the stripped GLM-5.3 matched `whole_model.glm53` in its listing,
+in every box body and in the operations counted by type. The stripped text-only
+DeepSeek-V4.1-Flash matched `text_only_model.v41_flash_text_only` in its listing and in
+every box body except the three cache round trips, whose casts are written by the source
+model itself. A page presents a model with every cast in a box explaining it and with
+the tape on the ports of each operation. Stripping either model in that form left no
+conversion, and left no identity written as anything other than the identity
+rearrangement. The functor turns the casts of the three round trips into identities as
+well, so the page of DeepSeek-V4.1-Flash embeds the model in the reals as a variant of
+its own. [[Diagram Wire Format]] states the page.
 
 ## Gaps
 

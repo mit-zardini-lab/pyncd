@@ -9,6 +9,10 @@ consequence on the array read: position `j` of the axis, at positions `i` of its
 extent`, and the unit elsewhere. The form is the row of the stride morphism whose read
 produced the axis, and `sparse_axis_for_row` builds the axis from that row.
 
+`axis_pinned_at` is the axis live at one index alone, which is the form
+`0 <= j - index < 1`. `drag_index_backwards` writes it onto every position an index
+reaches, and `is_pinned_axis` and `pinned_index` read it back.
+
 The rest of the module is the reach of an affine row over a domain box.
 `reads_before_start` and `reads_past_end` evaluate the row at the corner most
 favourable to leaving the axis, treating every size symbol as a positive integer, and
@@ -45,6 +49,11 @@ class GuardReadsNoAxis(Exception):
 class NotAPrefix(Exception):
     '''An `AffineSparseAxis` whose live positions are not a run from its first
     position, asked for the axis a selection over it fills.'''
+
+
+class NotPinnedAtOneIndex(Exception):
+    '''An axis asked for the one index it is live at, which is live at more than
+    one position, or is guided by another axis, or carries no form at all.'''
 
 
 @dataclass(frozen=True)
@@ -170,10 +179,12 @@ def axis_body(axis: sc.Axis) -> str:
 
 def sparse_axis_named[S: AffineSparseAxis](
     label: str | fd.DynamicName, guides: fd.Prod[sc.Axis], axis: S) -> S:
-    '''`axis` named after `label` and its guides as `label|guide,guide`.'''
-    body = fd.DynamicName.from_str(label).to_bodies()
+    '''`axis` named after `label` and its guides as `label|guide,guide`, with the code
+    form of `label`, so the legend names the slots `w|x` by the code form of `w`.'''
+    name = fd.DynamicName.from_str(label)
     guide_bodies = ','.join(axis_body(guide) for guide in guides)
-    return fd.DynamicName.from_str(f'{body}|{guide_bodies}').capture(axis)
+    return fd.DynamicName.from_str(f'{name.to_bodies()}|{guide_bodies}').with_code_form(
+        name.code_form).capture(axis)
 
 
 def last_position(axis: sc.Axis) -> nm.Numeric:
@@ -268,4 +279,39 @@ def sparse_axis_for_row(strides: fd.Prod[nm.Numeric], shift: nm.Numeric,
         stride=strides[position],
         shift=shift,
         extent=extent)
-    return position, sparse_axis_named(axis_body(marked), axis.guides, axis)
+    marked_name = getattr(marked.uid, '_name', None)
+    return position, sparse_axis_named(
+        marked_name if marked_name is not None else axis_body(marked), axis.guides, axis)
+
+
+def axis_pinned_at(axis: sc.Axis, index: nm.Numeric) -> AffineSparseAxis:
+    '''`axis` live at the one position `index`, and holding the unit elsewhere.
+
+    The form is `0 <= j - index < 1`, which holds at `j = index` alone, so the axis
+    has no guide, unit stride, the negative of the index as its shift and an extent of
+    one. It keeps the size of `axis`. It is named by the letter of `axis` and the
+    index in brackets, `x[i_t]`, as one body, so that an underscore in the index is
+    not read as a lineage.
+    '''
+    pinned = AffineSparseAxis(
+        _size=axis.local_size(),
+        stride=nm.Integer(1),
+        shift=nm.Multiplication.template(nm.Integer(-1), index),
+        extent=nm.Integer(1))
+    return fd.DynamicName.from_str(
+        f'{axis_body(axis)}[{index.to_latex()}]', lineage=False).capture(pinned)
+
+
+def is_pinned_axis(axis: sc.Axis) -> bool:
+    '''Whether `axis` is live at one index of its own: an `AffineSparseAxis` with no
+    guide, unit stride and an extent of one.'''
+    return (isinstance(axis, AffineSparseAxis) and not axis.guides
+            and axis.stride == nm.Integer(1) and axis.extent == nm.Integer(1))
+
+
+def pinned_index(axis: sc.Axis) -> nm.Numeric:
+    '''The one index a pinned axis is live at, which is the negative of its shift.'''
+    if not is_pinned_axis(axis):
+        raise NotPinnedAtOneIndex(f'{axis} is not live at one index of its own')
+    return nm.collect_like_terms(
+        nm.Multiplication.template(nm.Integer(-1), axis.shift))

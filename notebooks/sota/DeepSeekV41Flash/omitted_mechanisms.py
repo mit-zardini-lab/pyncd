@@ -73,14 +73,15 @@ from notebooks.sota.DeepSeekV41Flash.released_constants import (
     ENGRAM_GATE_FLOOR, NORM_EPSILON)
 from notebooks.sota.DeepSeekV41Flash.block_titles_and_descriptions import TEXT as text
 
-t = cat.RawAxis.named('t')
-z = fd.DynamicName('z').capture(cat.RawAxis(_size=nm.Integer(2) * t.local_size()))
-zbar = fd.DynamicName('\\bar{z}').capture(
+t = cat.RawAxis.named('t', code_form='rotary_pairs')
+z = fd.DynamicName('z', code_form='rotated_width').capture(
+    cat.RawAxis(_size=nm.Integer(2) * t.local_size()))
+zbar = fd.DynamicName('\\bar{z}', code_form='unrotated_latent_width').capture(
     cat.RawAxis(_size=c.local_size() - z.local_size()))
-L = cat.RawAxis.named('L')
-G = cat.RawAxis.named('G')
-K = cat.RawAxis.named('K')
-D = cat.RawAxis.named('D')
+L = cat.RawAxis.named('L', code_form='lookback_tokens')
+G = cat.RawAxis.named('G', code_form='ngram_orders')
+K = cat.RawAxis.named('K', code_form='hash_heads')
+D = cat.RawAxis.named('D', code_form='engram_row_width')
 S = cat.RawAxis.named('S')
 Z = cat.RawAxis.named('Z')
 U = cat.RawAxis.named('U')
@@ -91,7 +92,7 @@ Hp = cat.RawAxis.named('H\'')
 Wp = cat.RawAxis.named('W\'')
 H = fd.DynamicName('H').capture(cat.RawAxis(_size=U.local_size() * Hp.local_size()))
 W = fd.DynamicName('W').capture(cat.RawAxis(_size=V.local_size() * Wp.local_size()))
-E = cat.RawAxis.named('E')
+E = cat.RawAxis.named('E', code_form='entry_scale_groups')
 
 COMPLEX = dst.Complex(R)
 TOKEN_IDS = whole_model.v41_flash.dom()[0]
@@ -135,12 +136,17 @@ def maximum_over_offsets() -> cat.BroadcastedCategory:
 
 # Engram
 
+LOOKBACK_VIEW_NAME = '\\mathrm{Lookback}'
+PREFIX_VIEW_NAME = '\\mathrm{Prefix}'
+BEFORE_VIEW_NAME = '\\mathrm{Before}'
+PAIR_VIEW_NAME = '\\mathrm{Pair}'
+
 LOOKBACK = sc.StrideMorphism(
     _dom=(x, L),
     _cod_stride_shift=((x, (nm.Integer(1), nm.Integer(-1)), nm.Integer(0)),),
-    name=fd.DynamicName('ngram'))
+    name=fd.DynamicName(LOOKBACK_VIEW_NAME))
 LOOKBACK_VIEW = mark_sparse_domains.guarded_view(
-    reindexing=(LOOKBACK,), base=COMPRESSED_IDS, name='ngram')
+    reindexing=(LOOKBACK,), base=COMPRESSED_IDS, name=LOOKBACK_VIEW_NAME)
 L_reach = LOOKBACK_VIEW.cod()[0].shape()[1]
 NGRAM_FEATURES = cat.Array(R, (x, G, K, D))
 KEY = cat.Array(R, (x, n, m))
@@ -216,30 +222,33 @@ PRODUCT = cat.Natural(
     nm.cancel_reciprocal_factors(COMPRESSED_IDS.max_value * MULTIPLIER.max_value))
 PRIME_BOUND = nm.FreeNumeric.named('\\bar{p}')
 PRIME = cat.Natural(PRIME_BOUND)
-Lp = fd.DynamicName("L'").capture(cat.RawAxis(_size=L.local_size()))
+Lp = fd.DynamicName("L'", code_form='prefix_tokens').capture(
+    cat.RawAxis(_size=L.local_size()))
 PREFIX = sc.StrideMorphism(
     _dom=(G, Lp),
     _cod_stride_shift=((L, (nm.Integer(1), nm.Integer(1)),
                         nm.Integer(1) - G.local_size()),),
-    name=fd.DynamicName('prefix'))
+    name=fd.DynamicName(PREFIX_VIEW_NAME))
 PREFIX_VIEW = mark_sparse_domains.guarded_view(
-    reindexing=(hold(x) * PREFIX,), base=INT64, name='prefix')
+    reindexing=(hold(x) * PREFIX,), base=INT64, name=PREFIX_VIEW_NAME)
 L_prefix = PREFIX_VIEW.cod()[0].shape()[2]
-GK = fd.DynamicName('GK').capture(cat.RawAxis(_size=G.local_size() * K.local_size()))
-GKp = fd.DynamicName("GK'").capture(cat.RawAxis(_size=GK.local_size()))
+GK = fd.DynamicName('GK', code_form='hash_ranges').capture(
+    cat.RawAxis(_size=G.local_size() * K.local_size()))
+GKp = fd.DynamicName("GK'", code_form='earlier_hash_ranges').capture(
+    cat.RawAxis(_size=GK.local_size()))
 PRIMES = cat.Array(PRIME, (GK,))
 BEFORE = sc.StrideMorphism(
     _dom=(GK, GKp),
     _cod_stride_shift=((GK, (nm.Integer(1), nm.Integer(1)),
                         nm.Integer(-1) * GK.local_size()),),
-    name=fd.DynamicName('before'))
+    name=fd.DynamicName(BEFORE_VIEW_NAME))
 BEFORE_VIEW = mark_sparse_domains.guarded_view(
-    reindexing=(BEFORE,), base=PRIME, name='before')
+    reindexing=(BEFORE,), base=PRIME, name=BEFORE_VIEW_NAME)
 GK_before = BEFORE_VIEW.cod()[0].shape()[1]
 PAIR = sc.StrideMorphism(
     _dom=(G, K),
     _cod_stride_shift=((GK, (K.local_size(), nm.Integer(1)), nm.Integer(0)),),
-    name=fd.DynamicName('pair'))
+    name=fd.DynamicName(PAIR_VIEW_NAME))
 HASH_COLOUR = '#F5E6D9'
 HASH_BOX = 'Hash'
 
@@ -291,7 +300,7 @@ def sum_primes_before(layer: int) -> cat.BroadcastedCategory:
 def read_pairs_as_orders_and_heads(datatype: cat.Datatype) -> cat.BroadcastedCategory:
     '''An array over the `|G| |K|` pairs read as an array over the orders and the
     heads, the pair `|K| i_G + i_K` standing at the order `i_G` and the head `i_K`.'''
-    return ops.View.template(base=datatype, reindexing=(PAIR,), name='pair')
+    return ops.View.template(base=datatype, reindexing=(PAIR,), name=PAIR_VIEW_NAME)
 
 
 def primes_and_offsets(layer: int) -> cat.BroadcastedCategory:
@@ -568,16 +577,16 @@ ENGRAM_WEIGHT_ROLES: dict[str, OperatorRole] = {
     key: row for layer in ENGRAM_LAYERS for key, row in weight_roles(layer).items()}
 
 ENGRAM_REINDEXING_EXPLANATIONS: dict[str, ReindexingExplanation] = {
-    'ngram': ReindexingExplanation(
+    LOOKBACK_VIEW_NAME: ReindexingExplanation(
         description=text.LOOKBACK_VIEW_DESCRIPTION,
         references=(engram_lines(171, 172),)),
-    'prefix': ReindexingExplanation(
+    PREFIX_VIEW_NAME: ReindexingExplanation(
         description=text.PREFIX_VIEW_DESCRIPTION,
         references=(engram_lines(179, 184),)),
-    'before': ReindexingExplanation(
+    BEFORE_VIEW_NAME: ReindexingExplanation(
         description=text.PRIMES_BEFORE_VIEW_DESCRIPTION,
         references=(engram_lines(108, 118),)),
-    'pair': ReindexingExplanation(
+    PAIR_VIEW_NAME: ReindexingExplanation(
         description=text.PAIR_VIEW_DESCRIPTION,
         references=(engram_lines(108, 118),)),
 }

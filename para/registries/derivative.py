@@ -51,7 +51,9 @@ domain:
     Arithmetic                  its input. The derivative map is the formula's
                                 derivative, written by
                                 `solver.algebra.differentiate_numeric`
-    Maximum                     nothing. It is the shift of a softmax, and a
+    Arithmetic, c x             nothing, because multiplying by a constant is
+                                linear, and the reverse is the same map
+    Maximum                    nothing. It is the shift of a softmax, and a
                                 softmax is invariant to a shift, so the
                                 cotangent it passes back is the zero map
 '''
@@ -630,11 +632,36 @@ def arithmetic(target: cat.Broadcasted) -> tuple[Residual, cat.BroadcastedCatego
     `solver.algebra.differentiate_numeric`. The reverse of `e^{x}` multiplies
     by `e^{x}`, and the reverse of `x^{-1}` by `-x^{-2}`, an `Arithmetic` again,
     which `torch_compile` evaluates with no table of names. Residual: the
-    input.
+    input, except for a formula that multiplies by a constant, which is linear
+    and is reversed by `scaling`.
     '''
     operator = target.operator
     assert isinstance(operator, ops.Arithmetic)
+    if multiplies_by_a_constant(operator.formula):
+        return scaling(target)
     return _pointwise_reverse(target, operator.derivative())
+
+
+def multiplies_by_a_constant(formula: nm.Numeric) -> bool:
+    '''Whether `formula` is `c x` for a `c` that reads no input, as the scale of the
+    attention scores, `|d|^{-1/2} x`, is.'''
+    match formula:
+        case nm.Multiplication(content=factors):
+            constants = tuple(factor for factor in factors if factor != nm.FreeInput())
+            return (len(constants) == len(factors) - 1
+                    and not any(True for factor in constants
+                                for _ in tutil.type_search(nm.FreeInput, factor)))
+    return False
+
+
+def scaling(target: cat.Broadcasted) -> tuple[Residual, cat.BroadcastedCategory]:
+    '''dx = c dy for y = c x, with no residual. Multiplying by a constant is linear,
+    so the reverse is the same operator applied to the cotangent, as it is for a
+    `Linear`, and the tape holds nothing for it.'''
+    inputs, output, _ = einops_simplification.index_shapes(target)
+    datatype = tuple(target.dom())[0].datatype
+    return Residual(), pcon.contract(
+        (output,), inputs[0], datatype=datatype, operator=target.operator)
 
 
 def _box(target: cat.Broadcasted, residual: Residual) -> cat.BroadcastedCategory:

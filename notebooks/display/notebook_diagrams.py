@@ -35,6 +35,21 @@ There are six modes:
     OFF      Skip the diagram. Captions still print, so a notebook run without
              a browser is still a complete run.
 
+`show_page_variants` draws several variants of one model as one page, such as
+the model at its released quantisations and the same model in the reals, and
+the page draws a selector between them. Each `PageVariant` names its
+`PageVariantGroup`, and a variant either carries a term or is derived in the
+browser from another by a `PageFunctor`. Under HTML the page holds every
+variant and is written as `index.html` in the folder `<page_directory>/<slug>/`,
+so its address ends in the name of the folder. `<page_directory>/<slug>.html`
+redirects to the folder with the query and the hash kept. A figure written by
+`show_diagram` stays one file. Under LISTING each variant's listing is printed
+under its group and title, a derived one through the Python statement of its
+functor. Under DUMP each variant is written to a file of its own. INLINE and
+BROWSER draw the initial variant alone, and OFF prints the caption alone. The
+variants were added by Claude Opus 5.5 (1M context), effort 40, on 2026-09-27,
+and the folder on the same day.
+
 `block_recycling` says whether a box's body is normalised before the figure
 is drawn. The transport recycles what it is handed, which reaches the level it
 was handed and not the body of any box. `RECYCLED` recycles the body of every
@@ -85,6 +100,27 @@ which the gap the operand came from carries. `DRAWN` draws each of them
 as the chevron tsncd gives it, whose two halves are as tall as the widths it reads
 and writes, which is what a notebook about inserting the conversions asks for.
 `cast_presentation.py` holds the enum and the pass.
+
+`form` says which of three forms a figure is drawn in.
+`DiagramForm.ALL_BROADCASTED`, the default, draws every array as one wire per
+axis and every operator with its glyph, its cups and the wires of the axes it is
+broadcast over, as every figure was drawn before the setting existed.
+`ARROWS_AND_BROADCASTED` draws each array between two operators as one arrow
+labelled with its datatype and its shape, and every operator keeps its glyph on
+a plate whose edges name its axes. `ARROWS_AND_BOXES` draws every operator as a
+box named by what it does, a contraction of two operands as `Matmul`, and nothing
+of the broadcasting. The setting is sent to tsncd as `form` in the display
+settings of the message. It changes nothing in the term, so a LISTING or DUMP run
+is the same under every value. `websocket_transfer/websockets_transfer.py` holds
+the enum, and `obsidian/05-backends/Diagram Wire Format.md` states what each form
+draws.
+
+`controls` says whether a page draws, under its heading, the buttons that switch
+its form and its theme. `PageControls.SHOWN`, the default, draws them on the open
+page and in a file HTML writes, outside the diagram container, so an INLINE
+capture holds none of them. `HIDDEN` leaves them out, for a page that a host
+drives through the address of its iframe or a message it posts. A switch redraws
+the term the page holds, so a page written once carries every form.
 
 `axis_sizes` says where the size of an axis a configuration has sized is
 drawn. `WIRE_LABEL`, the default, leaves every name as the expression wrote it,
@@ -183,10 +219,13 @@ import os
 import pathlib
 import sys
 import threading
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Literal
 
 import data_structure.Category as cat
+import data_transfer.term_json as term_json
+import quantization.algebra.strip_quantisations as strip_quantisations
+import term_utilities.term_utilities as tutil
 import websocket_transfer.auxiliary_information as auxiliary_information
 import websocket_transfer.capture as capture
 import websocket_transfer.headless as headless
@@ -303,6 +342,8 @@ class DiagramSettings:
     clean_quantisation_labels: bool = True
     casts: cast_presentation.CastPresentation = (
         cast_presentation.CastPresentation.THIN)
+    form: wst.DiagramForm = wst.DiagramForm.ALL_BROADCASTED
+    controls: wst.PageControls = wst.PageControls.SHOWN
     tape_naming: tape_naming.TapeNaming = tape_naming.TapeNaming.NAMED
     axis_sizes: axis_sizes.AxisSizes = axis_sizes.AxisSizes.WIRE_LABEL
     assigned_sizes: Mapping[str, int] | None = None
@@ -355,6 +396,8 @@ SETTINGS = DiagramSettings()
 SubBlocks = remember_drawn_blocks.SubBlocks
 CastPresentation = cast_presentation.CastPresentation
 AdvancedDisplay = advanced_display.AdvancedDisplay
+DiagramForm = wst.DiagramForm
+PageControls = wst.PageControls
 AxisHover = wst.AxisHover
 PageHeading = wst.PageHeading
 forget_drawn_blocks = remember_drawn_blocks.forget_drawn_blocks
@@ -453,6 +496,7 @@ async def _capture_headless(
                 settings.advanced_display),
             axisHover=settings.axis_hover,
             axisLabelFontSize=settings.axis_label_font_size,
+            form=settings.form, controls=settings.controls,
             displayMode=settings.display_mode,
             auxiliary=auxiliary)
 
@@ -544,6 +588,12 @@ async def show_diagram(term, caption: str | None = None, *,
     changes a width as no glyph on a box of no width, so the rounding is read from
     the format each wire is labelled with, and `casts=CastPresentation.DRAWN` draws
     each of them as a chevron.
+    `form=DiagramForm.ARROWS_AND_BROADCASTED` draws each array that passes from
+    one operator to another as one arrow labelled with its datatype and its
+    shape, with every operator's glyph on a plate, and `ARROWS_AND_BOXES` draws
+    every operator as a named box. The default, `ALL_BROADCASTED`, draws one wire
+    for each axis of every array. `controls=PageControls.HIDDEN` leaves the
+    buttons that switch the form and the theme off the page.
     `tape_naming=TapeNaming.INDEXED` writes the index of every loop that
     selects a member of the tape after each slot's label, so a weight grabbed
     inside a repeated layer reads `W_{G}[l]`, and `TapeNaming.CODE_FORM` writes
@@ -654,23 +704,69 @@ def package_auxiliary(
     term.'''
     if settings.advanced_display is advanced_display.AdvancedDisplay.OFF:
         return term, settings, None
-    morphism = sending.to_morphism(term, recycle=settings.recycle)
-    if settings.advanced_display is advanced_display.AdvancedDisplay.INTERACTIVE:
-        morphism = explain_operators.present(
-            morphism,
-            cast_presentation.with_cast_explained(settings.operator_explanations))
+    packaged = packaged_figure(term, settings)
+    return packaged.morphism, packaged.settings, packaged.auxiliary
+
+
+@dataclasses.dataclass(frozen=True)
+class SentFigure:
+    '''A term as the transport sends it: the morphism exported, the morphism the
+    expansions of its auxiliary information were written from, which lacks only the
+    blocks explaining its reindexings, the settings it is sent with, and its
+    auxiliary information. The explaining blocks of a morphism are given fresh tags
+    each time a term is presented, so the auxiliary information of a variant derived
+    from this figure is written for this morphism and no other.'''
+    morphism: object
+    morphism_expanded: object
+    settings: DiagramSettings
+    auxiliary: wst.DiagramAuxiliary | None
+
+    def message(self) -> wst.DataUpdate:
+        '''The `dataUpdate` drawing the figure. `data` is the exported term as a JSON
+        object rather than as text, so the parts it shares with the term of another
+        variant are compressed into the same records.'''
+        return wst.with_auxiliary({
+            'msgType': 'dataUpdate',
+            'data': term_json.TermJSONConverter.export_document(self.morphism),
+            'settings': page_settings(self.settings),
+        }, self.auxiliary)  # type: ignore[typeddict-item]
+
+
+def packaged_figure(term, settings: DiagramSettings) -> SentFigure:
+    '''`term` packaged as `package_auxiliary` states, for a setting of
+    `advanced_display` other than `OFF`.'''
+    morphism = morphism_with_operators_explained(term, settings)
     auxiliary = advanced_display.auxiliary_for(
-        morphism, settings.advanced_display,
-        None if settings.assigned_sizes is None else dict(settings.assigned_sizes),
+        morphism, settings.advanced_display, assigned_sizes_of(settings),
         settings.code_link_base, settings.tape, settings.expanded_parameters,
         settings.operator_references, settings.operator_roles)
+    exported = morphism
     if (settings.advanced_display is advanced_display.AdvancedDisplay.INTERACTIVE
             and settings.reindexing_explanations):
-        morphism = explain_reindexings.present(
+        exported = explain_reindexings.present(
             morphism, settings.reindexing_explanations)
         auxiliary['blocks'] = auxiliary_information.block_information(
-            morphism, settings.code_link_base)
-    return morphism, dataclasses.replace(settings, recycle=False), auxiliary
+            exported, settings.code_link_base)
+    return SentFigure(
+        morphism=exported, morphism_expanded=morphism,
+        settings=dataclasses.replace(settings, recycle=False), auxiliary=auxiliary)
+
+
+def morphism_with_operators_explained(term, settings: DiagramSettings) -> object:
+    '''`term` converted as the transport converts it and, under
+    `AdvancedDisplay.INTERACTIVE`, with every operator the settings explain wrapped
+    in a block drawn as the operator alone, which is the morphism the legend, the
+    blocks and the expansions of `package_auxiliary` are read off.'''
+    morphism = sending.to_morphism(term, recycle=settings.recycle)
+    if settings.advanced_display is advanced_display.AdvancedDisplay.INTERACTIVE:
+        return explain_operators.present(
+            morphism,
+            cast_presentation.with_cast_explained(settings.operator_explanations))
+    return morphism
+
+
+def assigned_sizes_of(settings: DiagramSettings) -> dict[str, int] | None:
+    return None if settings.assigned_sizes is None else dict(settings.assigned_sizes)
 
 
 def record_bodies_drawn(term, settings: DiagramSettings) -> None:
@@ -740,6 +836,7 @@ async def _send_to_open_page(
             axisHover=settings.axis_hover,
             axisLabelFontSize=settings.axis_label_font_size,
             displayMode=settings.display_mode,
+            form=settings.form, controls=settings.controls,
             title=settings.title,
             heading=settings.heading,
             auxiliary=auxiliary)
@@ -760,6 +857,7 @@ def page_settings(settings: DiagramSettings) -> wst.RenderHandlerSettings:
             settings.advanced_display),
         axisHover=settings.axis_hover,
         axisLabelFontSize=settings.axis_label_font_size,
+        form=settings.form, controls=settings.controls,
         title=settings.title,
         heading=settings.heading,
         displayMode=settings.display_mode)
@@ -826,3 +924,342 @@ async def _capture_from_open_page(
     except (OSError, wst.CaptureError):
         _page_answers = False
         return None
+
+
+class PageFunctor(enum.Enum):
+    '''A functor tsncd applies in the browser to the term of one variant of a page
+    to draw another. `DEQUANTISE` takes every quantisation off the term and deletes
+    every cast between two quantisations of one value, and
+    `quantization.algebra.strip_quantisations` states it in Python.'''
+    DEQUANTISE = 'dequantise'
+
+
+PYTHON_STATEMENT_OF_PAGE_FUNCTOR: dict[
+        PageFunctor, Callable[[cat.Morphism], cat.Morphism]] = {
+    PageFunctor.DEQUANTISE: strip_quantisations.strip_quantisations}
+
+
+class LocalisedPageVariants(ValueError):
+    '''A page with variants was asked to carry localisations, which it does not.'''
+
+
+@dataclasses.dataclass(frozen=True)
+class PageVariantGroup:
+    '''A group of the selector drawn by a page with variants, such as `Decode`.'''
+    identifier: str
+    title: str
+
+
+@dataclasses.dataclass(frozen=True)
+class PageVariant:
+    '''One variant of a page. A variant carrying a `term` is drawn from it under
+    `settings`, or under the settings of the page where `settings` is `None`. A
+    variant carrying no term is derived in the browser by applying `functor` to the
+    term of the variant named by `derived_from`. The browser receives that term as
+    it was presented, so the `settings` of a derived variant reach the page as
+    display settings merged over those of its source, such as the theme or the
+    width, and do not change how the term is presented. Settings differing from the
+    source's in a field of `INSPECTION_TEXT_FIELDS`, such as the roles of the
+    operators, also change what the inspection boxes of the derived variant say.'''
+    identifier: str
+    group: PageVariantGroup
+    title: str
+    detail: str
+    term: object | None = None
+    settings: DiagramSettings | None = None
+    derived_from: str | None = None
+    functor: PageFunctor | None = None
+
+
+def check_page_variants(variants: Sequence[PageVariant], initial: str) -> None:
+    '''Raise `standalone_page.InconsistentVariants` unless the identifiers of
+    `variants` are distinct, `initial` is one of them, and every variant carries a
+    term or is derived, by a functor, from a variant carrying one.'''
+    standalone_page.check_variant_outlines([
+        standalone_page.VariantOutline(
+            identifier=variant.identifier, derived_from=variant.derived_from,
+            functor=None if variant.functor is None else variant.functor.value,
+            carries_its_own_figure=variant.term is not None)
+        for variant in variants], initial)
+
+
+def apply_page_functor(functor: PageFunctor, term: object) -> object:
+    '''`term` taken through the Python statement of `functor`, one side at a time
+    for a `cat.DefinedExpression`. A hypergraph is converted to a morphism first.'''
+    morphism = sending.to_morphism(term)
+    statement = PYTHON_STATEMENT_OF_PAGE_FUNCTOR[functor]
+    if isinstance(morphism, cat.DefinedExpression):
+        return cat.DefinedExpression(
+            left_hand_side=statement(morphism.left_hand_side),
+            right_hand_side=statement(morphism.right_hand_side))
+    return statement(morphism)
+
+
+def term_of_page_variant(
+    variant: PageVariant, by_identifier: Mapping[str, PageVariant],
+) -> object:
+    '''The term of `variant`, or, for a derived variant, the Python statement of its
+    functor applied to the term of the variant it is derived from.'''
+    if variant.term is not None:
+        return variant.term
+    source = by_identifier[variant.derived_from]  # type: ignore[index]
+    return apply_page_functor(variant.functor, source.term)  # type: ignore[arg-type]
+
+
+def settings_of_page_variant(
+    variant: PageVariant, by_identifier: Mapping[str, PageVariant],
+    settings: DiagramSettings,
+) -> DiagramSettings:
+    '''The settings `variant` is drawn under in Python: its own, those of the
+    variant it is derived from where it is derived and states none, and `settings`,
+    the settings of the page, otherwise.'''
+    if variant.settings is not None:
+        return variant.settings
+    if variant.derived_from is not None:
+        return settings_of_page_variant(
+            by_identifier[variant.derived_from], by_identifier, settings)
+    return settings
+
+
+def sent_figure(term: object, settings: DiagramSettings) -> SentFigure:
+    '''`term` presented and packaged under `settings` as `show_diagram` presents and
+    packages a figure, and converted as the transport converts it.'''
+    term = present_each_side(term, settings)
+    if settings.advanced_display is not advanced_display.AdvancedDisplay.OFF:
+        return packaged_figure(term, settings)
+    morphism = sending.to_morphism(term, recycle=settings.recycle)
+    return SentFigure(morphism=morphism, morphism_expanded=morphism,
+                      settings=settings, auxiliary=None)
+
+
+INSPECTION_TEXT_FIELDS = (
+    'operator_roles', 'operator_explanations', 'reindexing_explanations',
+    'operator_references', 'code_link_base', 'expanded_parameters')
+'''The fields of `DiagramSettings` that change what an inspection box says and
+change nothing in the figure outside the explaining blocks.'''
+
+
+def changes_the_inspection_text(
+    settings: DiagramSettings, source_settings: DiagramSettings,
+) -> bool:
+    return any(getattr(settings, field) != getattr(source_settings, field)
+               for field in INSPECTION_TEXT_FIELDS)
+
+
+def explaining_block_records(
+    morphism: object, settings: DiagramSettings,
+) -> dict[str, wst.BlockInformation]:
+    '''The record of every block of `morphism` drawn as its body alone that explains
+    one operator or one named reindexing for which the tables of `settings` hold an
+    explanation, written from that explanation and keyed by the tag the block
+    already carries. A block of `morphism` whose operator or reindexing the tables
+    do not explain is left out, and keeps the record it had.'''
+    explanations = cast_presentation.with_cast_explained(settings.operator_explanations)
+    records: dict[str, wst.BlockInformation] = {}
+    for block in tutil.type_search(cat.Block, morphism):
+        aesthetics = block.block_tag.aesthetics
+        if (aesthetics is None
+                or aesthetics.drawing is not cat.BlockDrawing.BODY_IN_PLACE):
+            continue
+        explained = block_explaining_body(block.body, explanations, settings)
+        if explained is None:
+            continue
+        written = auxiliary_information.block_information(
+            explained, settings.code_link_base)
+        records[str(block.block_tag.uid._id)] = next(iter(written.values()))
+    return records
+
+
+def block_explaining_body(
+    body: object, explanations: explain_operators.OperatorExplanations,
+    settings: DiagramSettings,
+) -> cat.Block | None:
+    '''The block the explanation tables would wrap `body` in, where they explain it.'''
+    if isinstance(body, cat.Broadcasted):
+        explanation = explain_operators.explanation_for(body, explanations)
+        return (None if explanation is None
+                else explain_operators.drawn_in_place(body, explanation).operator.block)
+    if (isinstance(body, cat.StrideMorphism) and body.name is not None
+            and settings.reindexing_explanations):
+        explanation = settings.reindexing_explanations.get(body.name.to_bodies())
+        return (None if explanation is None
+                else explain_reindexings.drawn_in_place(body, explanation))
+    return None
+
+
+def auxiliary_of_derived_variant(
+    source: SentFigure, settings: DiagramSettings,
+) -> wst.DiagramAuxiliary | None:
+    '''The auxiliary information of a variant derived from `source` whose settings
+    change the text of its inspection boxes, written for the morphism `source`
+    exports so that it is keyed by the numbering of the source's message, as tsncd
+    requires. The legend and the expansions are written under `settings` from the
+    morphism the source's expansions were written from, the records of the blocks
+    are read off the morphism exported, and the record of every explaining block
+    takes the explanation the tables of `settings` give it. tsncd carries it across
+    the functor as it carries the source's.'''
+    auxiliary = advanced_display.auxiliary_for(
+        source.morphism_expanded, settings.advanced_display,
+        assigned_sizes_of(settings), settings.code_link_base, settings.tape,
+        settings.expanded_parameters, settings.operator_references,
+        settings.operator_roles)
+    if auxiliary is None:
+        return None
+    blocks = {
+        **auxiliary_information.block_information(
+            source.morphism, settings.code_link_base),
+        **explaining_block_records(source.morphism, settings)}
+    return {**auxiliary, **({'blocks': blocks} if blocks else {})}
+
+
+def variant_messages(
+    variants: Sequence[PageVariant], settings: DiagramSettings,
+) -> tuple[standalone_page.VariantMessage, ...]:
+    '''`variants` as the page writer receives them. A variant carrying a term is
+    presented, packaged and exported under its own settings or `settings`, the
+    settings of the page. A derived variant whose settings change the text of its
+    inspection boxes carries an auxiliary of its own, written for the morphism its
+    source exports.'''
+    by_identifier = {variant.identifier: variant for variant in variants}
+    sent = {variant.identifier: sent_figure(
+                variant.term, settings_of_page_variant(variant, by_identifier, settings))
+            for variant in variants if variant.term is not None}
+    return tuple(variant_message(variant, sent, by_identifier, settings)
+                 for variant in variants)
+
+
+def variant_message(
+    variant: PageVariant, sent: Mapping[str, SentFigure],
+    by_identifier: Mapping[str, PageVariant], settings: DiagramSettings,
+) -> standalone_page.VariantMessage:
+    group: wst.VariantGroupRecord = {
+        'id': variant.group.identifier, 'title': variant.group.title}
+    if variant.term is not None:
+        return standalone_page.VariantMessage(
+            identifier=variant.identifier, group=group, title=variant.title,
+            detail=variant.detail, message=sent[variant.identifier].message())
+    source = sent[variant.derived_from]  # type: ignore[index]
+    source_settings = settings_of_page_variant(
+        by_identifier[variant.derived_from], by_identifier, settings)  # type: ignore[index]
+    auxiliary = (
+        auxiliary_of_derived_variant(source, variant.settings)
+        if variant.settings is not None
+        and changes_the_inspection_text(variant.settings, source_settings) else None)
+    return standalone_page.VariantMessage(
+        identifier=variant.identifier, group=group, title=variant.title,
+        detail=variant.detail, derived_from=variant.derived_from,
+        functor=None if variant.functor is None else variant.functor.value,
+        settings=None if variant.settings is None else page_settings(variant.settings),
+        auxiliary=auxiliary)
+
+
+def check_no_localisations(
+    variants: Sequence[PageVariant], settings: DiagramSettings,
+) -> None:
+    localised = [variant.identifier for variant in variants
+                 if (variant.settings or settings).localisations]
+    if localised:
+        raise LocalisedPageVariants(
+            f'the variants {localised} carry localisations, and a page with '
+            'variants carries none')
+
+
+def save_page_folder_with_variants(
+    variants: Sequence[PageVariant], slug: str, settings: DiagramSettings,
+    initial: str,
+) -> standalone_page.PageFolder:
+    '''Write `variants` to `<page_directory>/<slug>/index.html` as one HTML file that
+    opens with no server and no network and draws a selector between them, write a
+    redirect to that folder as `<page_directory>/<slug>.html`, and return the paths
+    written.'''
+    check_no_localisations(variants, settings)
+    return standalone_page.save_page_folder_with_variants(
+        variant_messages(variants, settings), settings.page_directory, slug, initial,
+        dist=tsncd_dist())
+
+
+def first_variant(variants: Sequence[PageVariant]) -> str:
+    if not variants:
+        raise standalone_page.InconsistentVariants('a page with no variants')
+    return variants[0].identifier
+
+
+async def show_page_variants(
+    variants: Sequence[PageVariant], caption: str | None = None, *,
+    settings: DiagramSettings, slug: str, initial: str | None = None,
+) -> None:
+    '''Draw several variants of one model as one page that switches between them.
+
+    `initial` names the variant the page opens on, the first where it is `None`.
+    HTML writes every variant into `<page_directory>/<slug>/index.html`, writes
+    `<page_directory>/<slug>.html` to redirect to that folder with the query and the
+    hash of its address kept, and prints the path of the folder. LISTING prints
+    the listing of every variant under its group and title, the listing of a
+    derived variant being that of the Python statement of its functor applied to
+    the term of its source. DUMP writes each variant as LISTING reads it to
+    `<dump_directory>/<slug>-<identifier>.json`. INLINE and BROWSER draw the initial
+    variant as `show_diagram` would. OFF prints the caption alone. The mode is read
+    from `settings`, and `PYNCD_DIAGRAMS` replaces it as it does in `show_diagram`.
+    '''
+    initial = initial if initial is not None else first_variant(variants)
+    check_page_variants(variants, initial)
+    mode = mode_override() or settings.mode
+    if caption:
+        print(caption)
+    if mode is DiagramMode.OFF:
+        return
+    by_identifier = {variant.identifier: variant for variant in variants}
+
+    if mode is DiagramMode.HTML:
+        written = save_page_folder_with_variants(variants, slug, settings, initial)
+        print(f'(written to {written.folder.as_posix()}/)')
+        return
+
+    if mode in (DiagramMode.INLINE, DiagramMode.BROWSER):
+        shown = by_identifier[initial]
+        await show_diagram(
+            term_of_page_variant(shown, by_identifier),
+            settings=dataclasses.replace(
+                settings_of_page_variant(shown, by_identifier, settings), mode=mode),
+            slug=slug)
+        return
+
+    for variant in variants:
+        variant_settings = settings_of_page_variant(variant, by_identifier, settings)
+        term = present_each_side(
+            term_of_page_variant(variant, by_identifier), variant_settings)
+        term, variant_settings, _ = package_auxiliary(term, variant_settings)
+        if mode is DiagramMode.DUMP:
+            variant_settings = dataclasses.replace(
+                variant_settings, dump_directory=settings.dump_directory)
+            print(f'(dumped to '
+                  f'{dump_term(term, f"{slug}-{variant.identifier}", variant_settings)})')
+            continue
+        print(f'{variant.group.title} / {variant.title}')
+        print_listing(term, variant_settings)
+
+
+def page_variant_legends(
+    variants: Sequence[PageVariant], settings: DiagramSettings,
+) -> Mapping[str, list[wst.AxisLegendRow]]:
+    '''The legend rows of each variant, by identifier, as the page carries them: read
+    off the term of the variant presented by `present_each_side` and converted as
+    `package_auxiliary` converts it, under the settings the variant is drawn with,
+    where `settings` are the settings of the page. The term of a derived variant is
+    `apply_page_functor` of the term of its source. A variant drawn under
+    `AdvancedDisplay.OFF` carries no legend and has no rows. The expansions of the
+    inspection boxes are not computed, because the legend is read before them.'''
+    check_page_variants(variants, first_variant(variants))
+    by_identifier = {variant.identifier: variant for variant in variants}
+    legends: dict[str, list[wst.AxisLegendRow]] = {}
+    for variant in variants:
+        variant_settings = settings_of_page_variant(variant, by_identifier, settings)
+        if variant_settings.advanced_display is advanced_display.AdvancedDisplay.OFF:
+            legends[variant.identifier] = []
+            continue
+        term = present_each_side(
+            term_of_page_variant(variant, by_identifier), variant_settings)
+        legends[variant.identifier] = auxiliary_information.legend_rows(
+            morphism_with_operators_explained(term, variant_settings),
+            assigned_sizes_of(variant_settings))
+    return legends

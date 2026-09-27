@@ -22,6 +22,8 @@ from notebooks.sota.DeepSeekV41Flash.reference_links import model_lines
 from notebooks.sota.DeepSeekV41Flash.block_titles_and_descriptions import TEXT as text
 
 COMPRESSOR_COLOUR = '#B8D8CE'
+GROUP_VIEW_NAME = '\\mathrm{Group}'
+POSITION_VIEW_NAME = '\\mathrm{Position}'
 
 
 def pool_tokens_into_entries[A: cat.Axis](entry_axis: A) -> cat.Block:
@@ -32,9 +34,9 @@ def pool_tokens_into_entries[A: cat.Axis](entry_axis: A) -> cat.Block:
         reindexing=(sc.StrideMorphism(
             _dom=(entry_axis, a),
             _cod_stride_shift=((x, (a.local_size(), nm.Integer(1)), nm.Integer(0)),),
-            name=fd.DynamicName('grp')),
+            name=fd.DynamicName(GROUP_VIEW_NAME)),
             cat.ProdObject((m,)).identity()),
-        name='grp')
+        name=GROUP_VIEW_NAME)
     values = (over((entry_axis, a), ops.Linear.template((m,), (c,), 'W^{C}'))
               @ ops.Einops.template(f'{entry} a c -> {entry} c a'))
     gates = (over((entry_axis, a), ops.Linear.template((m,), (c,), 'W^{Z}'))
@@ -56,9 +58,9 @@ def project_tokens_into_entries[A: cat.Axis](entry_axis: A) -> cat.Block:
         reindexing=(sc.StrideMorphism(
             _dom=(entry_axis,),
             _cod_stride_shift=((x, (nm.Integer(1),), nm.Integer(0)),),
-            name=fd.DynamicName('pos')),
+            name=fd.DynamicName(POSITION_VIEW_NAME)),
             cat.ProdObject((m,)).identity()),
-        name='pos')
+        name=POSITION_VIEW_NAME)
     return cat.Block.template(
         rename @ over((entry_axis,), ops.Linear.template((m,), (c,), 'W^{C}'))
         @ over((entry_axis,), ops.Normalize.template((c,))),

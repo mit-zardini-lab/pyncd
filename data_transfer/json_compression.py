@@ -7,6 +7,7 @@ still creates each non-UID occurrence separately. The format is documented in
 `obsidian/05-backends/Diagram Wire Format.md`.
 '''
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 import enum
 import hashlib
@@ -108,6 +109,20 @@ def compress_json(value: JSONValue) -> CompressedJSON:
     }
 
 
+@dataclass(frozen=True)
+class SharedValueRepository:
+    '''Several JSON values held in one repository. `roots[i]` is the reference of
+    the `i`th value, and a sub-value held by two of the values is one record.'''
+    value_repository: list[list[JSONValue]]
+    roots: tuple[int, ...]
+
+
+def compress_json_values(values: Sequence[JSONValue]) -> SharedValueRepository:
+    compressor = JSONCompressor()
+    roots = tuple(compressor.reference(value) for value in values)
+    return SharedValueRepository(value_repository=compressor.records, roots=roots)
+
+
 def referenced_value(reference: object, values: list[JSONValue]) -> JSONValue:
     if (not isinstance(reference, int) or isinstance(reference, bool)
             or reference < 0 or reference >= len(values)):
@@ -154,7 +169,14 @@ document as read-only, just as they treat the compressed repository.
             or document.get('version') != 1
             or not isinstance(document.get('value_repository'), list)):
         raise ValueError('Invalid compressed JSON envelope or unsupported version')
+    return referenced_value(
+        document.get('data'), decoded_repository(document['value_repository']))
+
+
+def decoded_repository(value_repository: list[object]) -> list[JSONValue]:
+    '''Every record of `value_repository` decoded, in order. A record refers only
+    to the records before it, so one pass decodes them all.'''
     values: list[JSONValue] = []
-    for record in document['value_repository']:
+    for record in value_repository:
         values.append(decode_record(record, values))
-    return referenced_value(document.get('data'), values)
+    return values

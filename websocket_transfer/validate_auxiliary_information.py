@@ -117,17 +117,20 @@ def importer_walk_operator_names(exported: str) -> list[str]:
     return names
 
 
-def check_the_registry_writes_out_five_operators() -> None:
+def check_the_registry_writes_out_six_operators() -> None:
     registered = standard_expansions.registered_operators()
     if set(registered) != {
-            ops.SoftMax, ops.L1Norm, ops.L2Norm, ops.Normalize, ops.Linear}:
+            ops.SoftMax, ops.L1Norm, ops.L2Norm, ops.Normalize, ops.LayerNorm,
+            ops.Linear}:
         raise AssertionError(f'registered {registered}')
     m = cat.RawAxis.named('m')
     for template, expected in (
             (ops.SoftMax.template(), {'Arithmetic', 'Einops', 'Rearrangement'}),
             (ops.L1Norm.template(), {'Arithmetic', 'Einops', 'Rearrangement'}),
             (ops.L2Norm.template((m,)), {'Arithmetic', 'Einops', 'Rearrangement'}),
-            (ops.Normalize.template((m,)), {'Arithmetic', 'Einops', 'Rearrangement'})):
+            (ops.Normalize.template((m,)), {'Arithmetic', 'Einops', 'Rearrangement'}),
+            (ops.LayerNorm.template((m,)),
+             {'AdditionOp', 'Arithmetic', 'Einops', 'Rearrangement'})):
         if not standard_expansions.has_standard_expansion(template):
             raise AssertionError(f'{type(template.operator).__name__} has no expansion')
         expanded = standard_expansions.expand_standard(template)
@@ -296,7 +299,8 @@ def check_an_operator_is_written_out_with_weight_arrays() -> None:
             (ops.Linear.template((m,), (d,), bias=True), {'W', 'b'},
              {ops.Einops, ops.AdditionOp}),
             (learned_array, {'sink'}, set())):
-        written = expand_with_parameters.expanded_with_weight_arrays(template)
+        written = expand_with_parameters.expanded_with_weight_arrays(
+            template, tape_presentation.TapePresentation.ABSORBED)
         if tape_presentation.holds_tape_operations(written):
             raise AssertionError(
                 f'{type(template.operator).__name__} written out with weight arrays '
@@ -592,6 +596,12 @@ def check_the_messages_carry_the_field_only_when_given() -> None:
         raise AssertionError('the axis hover setting is sent as its value')
     if send_morphism.display_settings(axisLabelFontSize=0.9) != {'axisLabelFontSize': 0.9}:
         raise AssertionError('the axis label font size is sent as it is given')
+    if send_morphism.display_settings(form=wst.DiagramForm.ARROWS_AND_BOXES) != {
+            'form': 'arrows-and-boxes'}:
+        raise AssertionError('the form is sent as its value')
+    if send_morphism.display_settings(controls=wst.PageControls.HIDDEN) != {
+            'controls': 'hidden'}:
+        raise AssertionError('the page controls are sent as their value')
     message = {'msgType': 'dataUpdate', 'data': '{}', 'settings': {}}
     if wst.with_auxiliary(message, None) is not message:
         raise AssertionError('no auxiliary leaves the message as it stands')
@@ -641,7 +651,7 @@ def check_the_notebook_setting_converts_once() -> None:
 
 
 CHECKS: tuple[Callable[[], None], ...] = (
-    check_the_registry_writes_out_five_operators,
+    check_the_registry_writes_out_six_operators,
     check_the_numbering_reproduces_the_importer_walk,
     check_the_auxiliary_information_is_packaged,
     check_an_operator_is_written_out_with_its_parameters_on_the_tape,

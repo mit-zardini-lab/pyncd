@@ -47,21 +47,25 @@ n = cat.RawAxis.named('n', code_form='streams')
 N = cat.RawAxis.named('N', code_form='combined_streams')
 
 
-def selection_count(letter: str) -> nm.FreeNumeric:
+def selection_count(letter: str, code_form: str) -> nm.FreeNumeric:
     '''How many entries a selection keeps, named the way `cat.Axis.named` names
     a size: the letter between absolute bars. The count is the size of the dense
     axis the selection hands its values out on, so it is drawn as a size is, and
-    `dst.dense_selected_axis` drops the bars to name that axis.'''
+    `dst.dense_selected_axis` drops the bars to name that axis. That axis keeps the
+    code form of the count, so the legend names the axis and its size alike.'''
     return nm.FreeNumeric.named(
-        fd.DynamicName(letter, settings=fd.DynamicNameSettings(absolute=True)))
+        fd.DynamicName(letter, settings=fd.DynamicNameSettings(absolute=True),
+                       code_form=code_form))
 
 
-nsel = selection_count('s')
-kexp = selection_count('k')
-npool = selection_count('p')
+nsel = selection_count('s', 'selected_entries')
+kexp = selection_count('k', 'chosen_experts')
+npool = selection_count('p', 'kept_blocks')
 s = dst.dense_selected_axis(nsel)
+CHOSEN_EXPERTS = fd.DynamicName('k/e', code_form='chosen_experts')
 
-vocab = fd.DynamicName('v', settings=fd.DynamicNameSettings(overline=True))
+vocab = fd.DynamicName('v', settings=fd.DynamicNameSettings(overline=True),
+                       code_form='vocabulary')
 
 state = cat.Array(R, (x, m))
 X = cat.Array(R, (x, n, m))

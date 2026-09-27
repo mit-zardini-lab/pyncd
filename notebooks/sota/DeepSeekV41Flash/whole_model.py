@@ -37,6 +37,7 @@ from notebooks.sota.DeepSeekV41Flash.reference_links import model_lines
 from notebooks.sota.DeepSeekV41Flash.block_titles_and_descriptions import TEXT as text
 
 INITIAL_COLLAPSE_NAME = 'A^{0}'
+REPEAT_VIEW_NAME = '\\mathrm{Repeat}'
 
 
 def embed() -> cat.Block:
@@ -49,7 +50,7 @@ def embed() -> cat.Block:
 def expand_into_streams() -> cat.Broadcasted:
     '''One hidden state copied into the four residual streams.'''
     return ops.View.template(reindexing=cat.Rearrangement((0, 2), (x, n, m)),
-                             name='rep')
+                             name=REPEAT_VIEW_NAME)
 
 
 def initial_collapse() -> cat.Broadcasted:

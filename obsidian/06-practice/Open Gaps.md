@@ -9,7 +9,8 @@ Written by Claude Opus 5 (1M context), effort high.
 
 The ranked worklist. Each item records what is unfinished, why it is hard, and, where the
 question has been attempted, what was learned. When an item is closed, move it to *Closed*
-with a link to the log that closed it, so that the list is also a history.
+with the date it closed and the change that closed it, so that the list is also a
+history.
 
 ## The ranked list
 
@@ -175,6 +176,172 @@ contraction opens no box. A `ConcatenatedAxis` is left out of the legend because
 carries no name, where `agent_display` labels it by its parts.
 
 *Touches: [[Advanced Display]].*
+
+### A cached pass is not checked by value, and a state carried between passes is not derived
+
+`caching.algebra.derive_cached_pass` places a cache wherever a causal read demands an
+earlier token, per [[Deriving Caches by Dragging the New Tokens]], and keeps the last
+`|w| - 1` earlier tokens for a sliding window of `|w|` slots. Five things it could state
+are not written.
+
+- No derived pass is compared by value with its model. `torch_compile` compiles every
+  `ops.View` as the identity and has no rule for a `Caching` or an
+  `aops.ConcatenateAxes`, so `caching/validate_caching.py` and the validators of
+  [[Website Notebooks]] check the cached passes by their structure and by the stripped
+  quantised pass. Rules for the
+  concatenation, for a view that reads zero outside its operand, and for carrying a cache
+  slot between passes would check every derived pass against its model.
+- A state carried from one token to the next, as the running sums of linear attention and
+  the state of a scan carry one, is not derived. Each is a wire over the tokens that its
+  own recurrence reads one token back, so each would be cached on a kept axis of one token
+  with the existing `CacheGrab` and `CacheDrop`. The derivation stops at a block repeated
+  over the token axis with `ReadsTheTokenAxisWhole`, because the view at the loop counter
+  holds no token axis.
+- `cost_cache_placements.cost_of_a_pass` counts the `Caching` operators of a pass alone,
+  so a `CacheGrab` and a `CacheDrop` written outside one cost nothing, and
+  `cache_contents.caches_in_the_order_they_run` raises `RepetitionIsNotAnInteger` at a
+  loop over the new tokens.
+- The attention core over the cached axis splits into an attention over the earlier
+  tokens and one over the new tokens, merged by their maxima and sums, which
+  `concatenation_expansion` states. The derivation does not split it.
+- `absorb_linear_maps` chooses an order from bound sizes and does not solve for the
+  region of sizes where each order is cheaper. The absorbed pass reads the cached latent
+  through two equal views, which nothing merges.
+
+`notebooks/sota/DeepSeekV41Flash.ipynb` draws its model as built, where the user ruled on
+2026-09-26 that the CausalSlide is the standard form of a displayed expression. The
+notebooks under `notebooks/website/` draw every model in the CausalSlide.
+
+*Touches: [[Deriving Caches by Dragging the New Tokens]], [[Caching Between Passes]],
+[[Torch Compile]], [[Yoneda and Cartesian Tricks]], [[Advanced Axis Dynamics]].*
+
+### The gather before the expansion of a cached latent is not written as an expression
+
+The cached GLM-5.3 of [[Caching Between Passes]] follows the reference and expands the
+latent of every cached token by `W^{Kb}` and `W^{Vb}` in every pass. A decode pass at a
+context of 1,048,576 tokens then spends 2.4 PFLOP on the expansion, more than a hundred
+times the rest of the attention, and expanding only the 2,048 latents each query selects
+would take 4.69 TFLOP. That order, with the gather before the expansion, is counted from
+the expression and not written as one. The gather is an `IndexSelect` at a position held
+as data, so `move_reads_backwards`, which moves an affine read, does not move it past the
+expansion.
+
+The order that multiplies every query by the key up-projection and applies the value
+up-projection after the core is derived since 2026-09-26.
+`advanced_axis_dynamics.algebra.absorb_linear_maps` chooses it on a derived pass by its
+operation count, per [[Deriving Caches by Dragging the New Tokens]], and on
+DeepSeek-V3's attention it gives the absorb mode of the released code. It has not been
+applied to GLM-5.3, whose gathers stand between the latent and the core.
+
+A `Caching` states the dynamic cache alone. The static cache of `transformers` writes
+each pass into a buffer of the longest sequence in place.
+
+*Touches: [[Caching Between Passes]], [[Advanced Axis Dynamics]], [[Einops Rearrangement]].*
+
+### A value computed once per sequence is recomputed in every pass
+
+`caching.algebra.derive_cached_pass` carries the read of the new tokens of one token
+axis, and it leaves every operation that reads no token of that axis as the model writes
+it. The encoder of the transformer of *Attention Is All You Need* reads the source
+sentence and no target token. The pass derived from the whole model therefore runs the
+encoder over the whole source sentence in every step, and the pass derived from the
+decoder projects the encoded input `A` into the keys and the values of every
+cross-attention in every step. tensor2tensor runs the encoder once per sentence, and
+computes those keys and values once per sentence in `_init_transformer_cache`
+(lines 967 to 988 of the `transformer.py` of tensor2tensor at `bafdc1b`, read on
+2026-09-27).
+
+Stating the reference needs a value computed in the first pass of a sequence and loaded
+by every later pass, and no operator states that, because a `Caching` appends the tokens
+of each pass to what it holds. The keys and the values of the cross-attention are
+computed inside the repeated decoder block, one pair per layer, so writing them to the
+tape beside `A` also needs one slot per layer, which a repeated block cannot name.
+`notebooks/website/classic/AttentionIsAllYouNeed.ipynb` draws the pass of the decoder,
+whose cross-attentions project `A` in every step, and says so.
+
+*Touches: [[Deriving Caches by Dragging the New Tokens]], [[Caching Between Passes]],
+[[Para Category]].*
+
+### An index dragged backwards stops at a window, a loop and a hypergraph
+
+`advanced_axis_dynamics/algebra/drag_index_backwards.py` carries one index of one axis of a result back to the inputs, and three things stop it short of where the rule $[F; x](z)[i_t] = F(z[i_t])$ reaches. `move_reads_backwards.py` carries the read itself, which closes the window for it: the mask composes into the read, so the keys of the causal attention are read at $t_x - j_w$. The loop and the hypergraph stand for both crawls, and the guide below stands for both in different forms.
+
+A row that reads a pinned axis and a free axis together leaves its codomain axis free. The causal read $i_x - i_w$ at a pinned $i_x$ reads the positions $i_t - i_w$ for every $i_w$, which is a window, and a window is an `AffineSparseAxis` with an extent rather than a pin. `row_pin` returns `None` for such a row, so a drag through the causal attention of `notebooks/classic/` frees the keys where the window would be right. The image of a pinned index under a row with unit stride on one free axis is such an axis, and stating it is the first move.
+
+A repeated block asserts that the pins leaving it equal the pins entering it, so a loop
+whose body drops the pin raises. The pins a loop's input carries are a fixed point, the
+pins its body carries back agreed with the pins asked of its output, and nothing
+computes it.
+
+The crawl runs on the morphism form. `ReverseCrawler.propagate_multigraph` merges the
+readers of a wire by identity through the same `merge_guides`, but the view a stop
+needs would have to be spliced into the graph with
+`graphs/processing/leaf_splicing.py`, and that is not written.
+
+A guide is pinned only where it is the pinned axis. `drag_index_backwards.pin_guards` substitutes the index into a guard whose guide is the pinned axis, so the causal attention's slot axis becomes `w|x[t_x]`, and the two concerns under *A pinned guide* in [[Advanced Axis Dynamics]] remain for the rest: a guide that is not the pinned axis, because $x$ was batched before the read, and a form the substitution does not simplify. A `deepseek.SparseAxis`, as the selection of GLM-5.3 hands out, carries no form to pin. The read crawl leaves the slot axis it moves in front of the projections guided by the $x$ it has read away, and there the composed mask's own row states the guard, so `mark_sparse_domains.mark_sparse_domain` on the composite is the candidate rule.
+
+Two reads that state one map over two axes are written twice. The two gathers of
+GLM-5.3 each mark a distance axis of their own, so the latent is read through two reads
+whose rows agree and whose domain axes differ, and `same_read` compares the axes. A
+comparison up to a renaming of axes of one size and one form would write the read once
+and copy it, and is not written.
+
+*Touches: [[Advanced Axis Dynamics]], [[Crawlers]], [[Padding and Masks as Sparse Axes]].*
+
+### The arrow forms leave details of their arrows open
+
+- A tape reaching an arrow lights with its slot alone, because
+  `ParaWrapDisplay.axis_highlight_tokens` recognises `scr.AxisAnchor` and no arrow
+  anchor.
+- A result whose array has a datatype anchor, as the `Natural` identifiers of an
+  embedding do, carries a small triangle on the branch of the fan that anchor paints,
+  because `bb.DatatypeAnchor.update` puts one on every wire it paints. Removing it needs
+  a hook in `BroadcastedCategoryRenderer.ts`.
+- The second render of the boot figure in one headless session is 21 px wider than the
+  first, under the arrow form and under the axes form alike, so the difference predates
+  the form.
+- A `Quantization.TypeConvert` has no name, so under `ARROWS_AND_BOXES` it is a box
+  labelled `TypeConvert`, and a quantised page holds many of them. A face registered for
+  the class in `operatorFaces.ts`, naming the format written, would replace the label. A
+  few numbers of `additionalOperationBoxes.ts` are copied into `operatorFaces.ts` and the
+  box settings, and exporting them would remove the copies.
+- `DiagramSettings.clean_quantisation_labels`, true by default, takes the quantisation
+  off every top-level wire written at the quantisation of every operand of the operation
+  writing it, so an arrow form labels such a wire with its bare datatype. The pages of
+  [[Website Notebooks]] set the field false. The user has not ruled on whether the
+  default should keep the quantisation.
+
+*Touches: [[Diagram Display]].*
+
+### A clean cut of a figure depends on a narrow window of widths
+
+- `Multiline.ts` in tsncd places the first members of the next block whenever they fit in
+  the room left in a row, so a width that leaves every block whole lies in a window a few
+  tens of pixels wide, per the paragraph on `width` in [[Diagram Display]]. The window of
+  a figure moves with any change to one of its blocks. A block setting that keeps the
+  body of a block on one row would make the cut hold at every width.
+- tsncd draws the name of an `ops.Arithmetic` above the top wire of its operand, and when
+  that wire is the top wire of a block the name overlaps the title of the block. The
+  classic models avoid it by writing the branch without the name first.
+- `broadcast_between_positions_and_channels` has three copies, in
+  `notebooks/sota/GLM53/rotary_embedding.py`,
+  `notebooks/sota/DeepSeekV41Flash/rotary_embedding.py` and
+  `notebooks/classic/shared_mechanisms.py`. It belongs in `construction_idioms.py`.
+- `SubBlocks.BODIES_NOT_YET_DRAWN` drew the body of the box `PE` over `x` beside the whole
+  transformer after the figure of the input embedding had drawn it.
+
+*Touches: [[Diagram Display]], [[Website Notebooks]].*
+
+### Two gaps the outer and inner tape slots opened
+
+- A `ParaBlockOperator` broadcast over a degree that drops onto an outer slot is refused
+  with `OuterDropInBroadcastBox`, because nothing sums over the degree between the box's
+  result and the drop of the wrap.
+- `ops.Dropout` holds its randomness inside the operator. No expression in the package
+  grabs a uniform sample from an inner slot, so the inner slot of a random variable is
+  stated and not yet used.
+
+*Touches: [[Outer and Inner Tape Slots]], [[Para Block Operator]].*
 
 ### The rest
 

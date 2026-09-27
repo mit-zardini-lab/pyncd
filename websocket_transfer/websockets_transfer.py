@@ -85,6 +85,30 @@ class PageHeading(enum.Enum):
     TITLE = 'title'
 
 
+class DiagramForm(enum.Enum):
+    '''Each member names a form in which tsncd draws a figure. Under
+    `ALL_BROADCASTED`, the client's default, every array is drawn as one wire per
+    axis and every operator with its glyph, its cups and the wires of the axes it
+    is broadcast over. Under `ARROWS_AND_BROADCASTED` each array between two
+    operators is one arrow labelled with its datatype and its shape, and every
+    operator keeps its glyph on a plate whose edges name its axes. Under
+    `ARROWS_AND_BOXES` each operator is a box named by what it does, and nothing
+    of the broadcasting is drawn. A page switches between the three without
+    loading its term again.'''
+    ARROWS_AND_BOXES = 'arrows-and-boxes'
+    ARROWS_AND_BROADCASTED = 'arrows-and-broadcasted'
+    ALL_BROADCASTED = 'all-broadcasted'
+
+
+class PageControls(enum.Enum):
+    '''Whether a page draws the buttons that switch its form and its theme under
+    its heading. `HIDDEN` is the client's default. A notebook sends `SHOWN`
+    unless it says otherwise, and a host page that drives the figure through the
+    address of its iframe or a message it posts may send `HIDDEN`.'''
+    SHOWN = 'shown'
+    HIDDEN = 'hidden'
+
+
 class RenderHandlerSettings(TypedDict, total=False):
     '''
     Display options forwarded verbatim to the TypeScript client. It mirrors
@@ -143,6 +167,15 @@ class RenderHandlerSettings(TypedDict, total=False):
     # The size, in em, of the label an axis carries on its wire. The client's
     # default is 0.8, and the layout measures the label at the size it is drawn.
     axisLabelFontSize: float
+    # The form the figure is drawn in: `all-broadcasted`, the client's default,
+    # with one wire per axis and every operator's glyph, `arrows-and-broadcasted`
+    # with one arrow per array between operators and every operator's glyph on a
+    # plate, or `arrows-and-boxes` with every operator a named box. The value of
+    # a `DiagramForm`.
+    form: Literal['arrows-and-boxes', 'arrows-and-broadcasted', 'all-broadcasted']
+    # Whether the page draws the buttons that switch its form and its theme:
+    # `shown`, or `hidden`, the client's default. The value of a `PageControls`.
+    controls: Literal['shown', 'hidden']
 
 
 class AxisLegendRow(TypedDict):
@@ -235,6 +268,43 @@ class DataUpdate(TypedDict):
     data: dtj.JSONDataStructure
     settings: NotRequired[RenderHandlerSettings]
     auxiliary: NotRequired[DiagramAuxiliary]
+
+class VariantGroupRecord(TypedDict):
+    '''One group of the selector drawn by a page with variants, such as `Decode`,
+    under which the variants naming it are listed.'''
+    id: str
+    title: str
+
+class PageVariantRecord(TypedDict):
+    '''One variant of a page with variants. A variant drawn from its own term
+    carries `message`, the root of its `dataUpdate` in the page's value repository.
+    A variant derived in the browser carries `derivedFrom`, the variant whose term
+    it is derived from, and `functor`, the name of the functor tsncd applies to
+    that term, with `settings` merged over the settings of that variant.
+    `auxiliary` is a root replacing the auxiliary information the functor
+    derives.'''
+    id: str
+    group: str
+    title: str
+    detail: str
+    message: NotRequired[int]
+    derivedFrom: NotRequired[str]
+    functor: NotRequired[str]
+    settings: NotRequired[RenderHandlerSettings]
+    auxiliary: NotRequired[int]
+
+class EmbeddedVariants(TypedDict):
+    '''What a page with variants carries in its `tsncd-variants` element. Every
+    message is compressed into the one `value_repository`, so a value held by two
+    variants is stored once. `settings` repeats the settings of the `initial`
+    variant uncompressed, for a reader of the file that does not decode the
+    repository. `obsidian/05-backends/Diagram Wire Format.md` states the form.'''
+    version: Literal[1]
+    settings: RenderHandlerSettings
+    initial: str
+    groups: list[VariantGroupRecord]
+    variants: list[PageVariantRecord]
+    value_repository: list[list[Any]]
 
 class DataRequest(TypedDict):
     msgType: Literal['dataRequest']

@@ -23,8 +23,8 @@ Weave(Reals, (TILED, d, TILED, x))
 - The remaining positions are the target, which is the array the underlying operation
   receives. `weave.target()` extracts it.
 
-The listing in [[Agent Display]] prints the split directly. `%4[qTλ, {dRλ}]` states that the
-operation is broadcast over `qTλ` and consumes `dRλ`, with the braces marking the target.
+The listing in [[Agent Display]] prints the split directly. `%0[q, {d}]` states that the
+operation is broadcast over `q` and consumes `d`, with the braces marking the target.
 
 ## The operations on a weave
 

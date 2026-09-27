@@ -3,7 +3,7 @@
 # bottom-up (ReverseCrawler).
 
 from __future__ import annotations
-from typing import Callable, Sequence, overload
+from typing import Callable, Iterable, Sequence, overload
 from dataclasses import dataclass
 import data_structure.Numeric as nm
 import data_structure.Term as fd
@@ -19,15 +19,31 @@ def realign_guide[G](
     guide: Sequence[G],
     wires: Sequence[hg.HypergraphObject],
     new_wires: Sequence[hg.HypergraphObject],
+    merge: Callable[[Iterable[G]], G] = util.iallequals,
 ) -> fd.Prod[G]:
     """`guide`, one entry per entry of `wires`, re-read against `new_wires`.
     The two sequences name the same wires but need not agree on order or on
     how many times a wire is listed, because a HypergraphBlock deduplicates its
     dom by wire and its body does not. A guide crossing between them is keyed by
-    wire, and a wire listed twice must have been given the same guide both
-    times."""
+    wire, and the guides a wire listed twice was given are merged by `merge`,
+    which by default requires them to be equal."""
     by_wire = util.Multidict(zip(wires, guide))
-    return tuple(util.iallequals(by_wire[wire]) for wire in new_wires)
+    return tuple(merge(by_wire[wire]) for wire in new_wires)
+
+
+class RepeatedBlockChangesTheGuide(Exception):
+    """A block repeated more than once whose body carries the guide it receives to a
+    different guide, so one iteration would hand the next a guide it did not receive."""
+
+
+def require_the_guide_kept_by_a_loop[G](
+    block_tag: cat.BlockTag, guide: Sequence[G], new_guide: Sequence[G],
+) -> None:
+    if block_tag.repetition != nm.Integer(1) and tuple(guide) != tuple(new_guide):
+        raise RepeatedBlockChangesTheGuide(
+            f"a block repeated {block_tag.repetition.to_latex()} times carries a guide "
+            f"over {len(tuple(guide))} wires to a different guide over "
+            f"{len(tuple(new_guide))} wires")
 
 
 ## CRAWLERS
@@ -52,6 +68,12 @@ class Crawler[L, M: cat.Morphism, G](ABC):
 
     def generate_guide_for_zeros(self, target: L) -> G:
         raise NotImplementedError("This method should be implemented in subclasses.")
+
+    def merge_guides(self, guides: Iterable[G]) -> G:
+        """The one guide a wire read by several consumers carries. By default
+        every consumer must have given the wire the same guide, and a crawler
+        whose guides can disagree overrides this with the guide they agree on."""
+        return util.iallequals(guides)
 
     # The side a guide arrives at and the one it leaves from: dom then cod
     # for the forward direction, cod then dom for the reverse.
@@ -87,14 +109,16 @@ class Crawler[L, M: cat.Morphism, G](ABC):
                 # block's dom and two, which must agree, at the body's.
                 new_body, new_guide = self.propagate_graph(
                     body,
-                    realign_guide(guide, self.entry_nodes(target), self.entry_nodes(body)))
+                    realign_guide(guide, self.entry_nodes(target), self.entry_nodes(body),
+                                  merge=self.merge_guides))
                 new_graph = hg.HypergraphBlock.template(
                     body=new_body,
                     block_tag=block_tag
                 )
                 new_guide = realign_guide(
-                    new_guide, self.exit_nodes(new_body), self.exit_nodes(new_graph))
-                assert (block_tag.repetition == nm.Integer(1)) or guide == new_guide
+                    new_guide, self.exit_nodes(new_body), self.exit_nodes(new_graph),
+                    merge=self.merge_guides)
+                require_the_guide_kept_by_a_loop(block_tag, guide, new_guide)
                 return new_graph, new_guide
             case hg.Multigraph():
                 return self.propagate_multigraph(target, guide)
@@ -145,7 +169,7 @@ class ForwardCrawler[L, M: cat.Morphism, G](Crawler[L, M, G]):
                 )
             case cat.Block():
                 new_body, new_guide = self.propagate_category(target.body, guide)
-                assert (target.block_tag.repetition == nm.Integer(1)) or guide == new_guide
+                require_the_guide_kept_by_a_loop(target.block_tag, guide, new_guide)
                 return cat.Block(body=new_body, block_tag=target.block_tag), new_guide
             case _:
                 return self.root_processor(target, guide)
@@ -276,7 +300,7 @@ class ReverseCrawler[L, M: cat.Morphism, G](Crawler[L, M, G]):
             case cat.Rearrangement(mapping=mapping, _dom=dom):
                 dom_to_cod = util.Multidict(target.pairwise())
                 guides = tuple(
-                    util.iallequals(guide[j] for j in dom_to_cod[i])
+                    self.merge_guides(guide[j] for j in dom_to_cod[i])
                     if dom_to_cod[i]
                     else self.generate_guide_for_zeros(dom[i])
                     for i, _ in enumerate(dom)
@@ -290,7 +314,7 @@ class ReverseCrawler[L, M: cat.Morphism, G](Crawler[L, M, G]):
                 )
             case cat.Block():
                 new_body, new_guide = self.propagate_category(target.body, guide)
-                assert (target.block_tag.repetition == nm.Integer(1)) or guide == new_guide
+                require_the_guide_kept_by_a_loop(target.block_tag, guide, new_guide)
                 return cat.Block(body=new_body, block_tag=target.block_tag), new_guide
             case _:
                 return self.root_processor(target, guide)
@@ -311,7 +335,7 @@ class ReverseCrawler[L, M: cat.Morphism, G](Crawler[L, M, G]):
                 for dom in target.dom
             )
             new_dom_guides = tuple(
-                util.iallequals(dc) if dc
+                self.merge_guides(dc) if dc
                 else self.object_processor(dom.obj, self.generate_guide_for_zeros(dom.obj))
                 for dom, dc in zip(target.dom, dom_connections)
             )
@@ -348,7 +372,7 @@ class ReverseCrawler[L, M: cat.Morphism, G](Crawler[L, M, G]):
             for subgraph in processable_subgraphs:
                 unprocessed_subgraphs.remove(subgraph)
                 subgraph_guide = tuple(
-                    util.iallequals(node_guide[hypergraph_obj])
+                    self.merge_guides(node_guide[hypergraph_obj])
                     if node_guide[hypergraph_obj]
                     else self.generate_guide_for_zeros(hypergraph_obj.obj)
                     for hypergraph_obj in subgraph.cod
@@ -374,7 +398,7 @@ class ReverseCrawler[L, M: cat.Morphism, G](Crawler[L, M, G]):
                         object_guide[original_object] = final_object.obj
 
         new_guide = tuple(
-            util.iallequals(node_guide[dom])
+            self.merge_guides(node_guide[dom])
             if node_guide[dom]
             else self.generate_guide_for_zeros(dom.obj)
             for dom in target.dom

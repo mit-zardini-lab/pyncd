@@ -10,7 +10,10 @@ status: evolving
 
 Turns an algebraic expression into a runnable `torch.nn.Module`. The module is the package's
 **executable semantics**: whatever a morphism means in the algebra, the module is what it means
-numerically.
+numerically, for the operators registered below. An `ops.Elementwise` is the exception,
+because it is registered as `torch.relu` whatever its name, at
+`torch_compile/torch_compile.py:334`, so a scale written as an `Elementwise` compiles to a
+rectifier. Write a scale as an `ops.Arithmetic` when the module is to be run.
 
 Requires PyTorch and [`einops`](https://einops.rocks/).
 
@@ -29,7 +32,19 @@ Requires PyTorch and [`einops`](https://einops.rocks/).
 | `Linear` | `ConstructedLinear` |
 | `Embedding` | `ConstructedEmbedding` |
 | `Normalize` | `ConstructedNorm` |
-| an elementwise function | `Lambda` |
+| `LayerNorm` | `ConstructedLayerNorm`, a subclass of `ConstructedNorm` |
+| `L1Norm` | `ConstructedL1Norm` |
+| `Arithmetic` | `ConstructedArithmetic`, evaluating the formula through `numeric_torch` |
+| `Transpose` | `ConstructedTranspose` |
+| `SoftMax`, `L2Norm`, `Maximum`, `Product`, `AdditionOp`, `View`, `ReLU`, `Elementwise`, `WeightedTriangularLower` | `Lambda`, through `add_function` |
+
+`ConstantOp`, `TypeConvert`, a `GenericOperator`, the `Caching` operator of
+[[Caching Between Passes]] and the tape seeds of [[Para Category]] have no rule.
+`construct` prints the term and raises `NotImplementedError` for any morphism outside the
+five constructs matched by it. A loop block runs its body `repetition` times only when the
+repetition is an integer, and once otherwise. A normalisation normalises over the last
+dimensions of the tensor handed to it, one for each axis of the target of its data
+operand.
 
 `generate_einops_signature` turns a [[Operators|signature]] plus its weaves back into an
 `einops` string, which is the inverse of the parsing in [[Construction Helpers]].
@@ -59,7 +74,8 @@ So the same `Broadcasted` runs as a cheap view when its reindexing is simple and
 ## Rules and gaps
 
 - `Multilinear.forward` contracts with `tensordot` over the trailing axes. The explicit
-  per-axis version was left commented out and **unverified** (`PublicCodeTODOs.md`).
+  per-axis version was left commented out in `torch_compile/torch_utilities.py` and is
+  **unverified**.
 - This layer lowers an expression as it is written. It runs each operation in turn
   through the PyTorch function registered for it, so what it checks is the algebra rather
   than any schedule.

@@ -639,7 +639,48 @@ class Normalize(cat.Operator):
             None,
             datatype
         )
-    
+
+
+@dataclass(frozen=True)
+class LayerNorm(cat.Operator):
+    '''`y = gamma * (x - mean(x)) * (mean((x - mean(x))^2) + epsilon)^{-1/2} + beta`,
+    over the axes the operator consumes.
+
+    The mean is subtracted from every value before the division, so the result has a
+    mean of zero and a variance of one over the normalised axes. A `Normalize`
+    subtracts nothing and divides by the root mean square of the values themselves.
+    The two are separate classes rather than a class and its subclass, because every
+    rule that reads a `Normalize` would otherwise read a `LayerNorm` as one.
+
+    `gain` and `bias` say whether the learned `gamma` multiplies the result and the
+    learned `beta` is added after it. Each is one learned number per position of the
+    normalised axes, and both are present in the layer normalisation of Ba, Kiros and
+    Hinton (2016) that the 2017 transformer uses. The grabbed arrays reach the
+    operator as its leading operands, the gain first, as they reach a `Normalize`.
+    `epsilon` is the number added to the variance under the root.
+    `algebra.operator_expansion.expand_layer_norm` writes the operator out.
+    '''
+    name: fd.DynamicName | None = fd.DynamicName('LayerNorm')
+    gain: bool = True
+    bias: bool = True
+    epsilon: nm.Numeric = SYMBOLIC_EPSILON
+    @classmethod
+    def template[B: cat.Datatype = cat.Reals](
+        cls,
+        input_size: int | chp.ProductObjectTarget[cat.RawAxis, str] = 1,
+        datatype: B = cat.Reals(),
+        gain: bool = True,
+        bias: bool = True,
+        epsilon: nm.Numeric = SYMBOLIC_EPSILON,
+    ):
+        return sized(
+            cls(gain=gain, bias=bias, epsilon=epsilon),
+            input_size,
+            None,
+            datatype
+        )
+
+
 @dataclass(frozen=True)
 class WeightedTriangularLower(cat.Operator):
     name: fd.DynamicName | None = fd.DynamicName('wtril')
@@ -663,11 +704,49 @@ class ReLU(Elementwise):
 
 @dataclass(frozen=True)
 class Dropout(Elementwise):
+    '''The dropout of each element, with its randomness inside the operator.
+
+    A stochastic morphism here is a sample beside an identity followed by a
+    deterministic function, so a dropout is the grab of a uniform sample `u` from
+    an inner tape slot followed by `x -> x [u > p] / (1 - p)`. The slot is inner
+    because every element draws its own sample, and a lift over a batch axis
+    grabs one sample for every index of it, per
+    `obsidian/07-para/Outer and Inner Tape Slots.md`. No rule writes the operator
+    out in that form yet.
+    '''
     name: fd.DynamicName | None = fd.DynamicName('\\lightning')
 
 @dataclass(frozen=True)
 class Maximum(cat.Operator):
     name: fd.DynamicName | None = fd.DynamicName('\\max')
+
+
+@dataclass(frozen=True)
+class Product(cat.Operator):
+    '''The product of every entry along the axes the operator consumes, which is a
+    reduction whose unit is one. A sum along an axis is an `Einops` and the largest
+    entry is a `Maximum`, and neither states a product. A read before the first
+    position of a guarded axis holds the unit, so a product over the slots read back
+    from each position multiplies the entries at and before that position alone.
+
+    Added by Claude Opus 5.5 (1M context), effort high, on 2026-09-25, for the prefix
+    products of speculative decoding.
+    '''
+    name: fd.DynamicName | None = fd.DynamicName('\\prod')
+
+    @classmethod
+    def template(
+        cls,
+        axis: chp.ProductObjectTarget[cat.RawAxis, str | fd.DynamicName],
+        datatype: cat.Datatype = cat.Reals(),
+    ) -> cat.Broadcasted[cat.Datatype, cat.RawAxis, Product]:
+        '''The product of the entries along `axis`, which is one number.'''
+        reduced = tuple(linear_size_to_shape(axis))
+        return cat.Broadcasted(
+            operator=cls(),
+            input_weaves=(cat.Weave(datatype, reduced),),
+            output_weaves=(cat.Weave(datatype, ()),),
+            reindexings=(cat.ProdObject().identity(),))
 
 
 class NotAPowerOfTwo(ValueError):

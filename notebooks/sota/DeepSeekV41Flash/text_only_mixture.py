@@ -36,7 +36,7 @@ from notebooks.sota.DeepSeekV41Flash.construction_idioms import (
     boxed, hold, over, route)
 from notebooks.sota.DeepSeekV41Flash.custom_operations import (
     indicator, sqrt_softplus, weights)
-from notebooks.sota.DeepSeekV41Flash.declared_axes import e, kexp, m, x
+from notebooks.sota.DeepSeekV41Flash.declared_axes import CHOSEN_EXPERTS, e, kexp, m, x
 from notebooks.sota.DeepSeekV41Flash.mixture_of_experts import (
     GATE_BOX, GATE_COLOUR, MIXTURE_BOX, ROUTER_BIAS_NAME, TOKEN_STATE, combine)
 from notebooks.sota.DeepSeekV41Flash.reference_links import model_lines
@@ -57,7 +57,7 @@ def router() -> tuple[cat.BroadcastedCategory, cat.Axis]:
     '''One token's gates from its hidden state, and this layer's sparse expert axis.
     The logits are divided by the temperature before the score function, the biased
     copy of the scores chooses the six experts and the unbiased copy weights them.'''
-    sel = dst.TopK.template(k=kexp, axis=e, name='k/e')
+    sel = dst.TopK.template(k=kexp, axis=e, name=CHOSEN_EXPERTS)
     ke = sel.cod()[0].shape()[0]
     scores = (ops.Linear.template((m,), (e,), 'W^{R}') @ temper_scores()
               @ sqrt_softplus())

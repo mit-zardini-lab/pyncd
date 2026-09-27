@@ -113,12 +113,15 @@ def evaluated_local_size(axis: cat.Axis) -> int | None:
 
 def evaluated_size_under(size: nm.Numeric, assigned: Mapping[str, int]) -> int | None:
     '''The integer `size` comes to with every symbol `assigned` names bound to its
-    integer, or `None` where a symbol of the size is unbound or the size holds
-    something other than integers, symbols, sums and products.'''
+    integer, or `None` where a symbol of the size is unbound, the size holds
+    something other than integers, symbols, sums, products and integer powers, or
+    the size comes to a fraction. The rotary pairs of a head of `|d|` channels are
+    sized `|d| / 2`, which comes to 64 where `|d|` is 128.'''
     try:
-        return nm.evaluate_integer(size, _symbols_bound_by_name(size, assigned))
-    except (KeyError, nm.NotAnAffineForm):
+        value = nm.evaluate_rational(size, _symbols_bound_by_name(size, assigned))
+    except (KeyError, nm.NotAnAffineForm, ZeroDivisionError):
         return None
+    return value.numerator if value.denominator == 1 else None
 
 
 def _symbols_bound_by_name(

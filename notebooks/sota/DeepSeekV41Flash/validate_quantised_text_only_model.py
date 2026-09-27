@@ -17,9 +17,10 @@ The checks stand in the order the notebook makes the claims. The first five are 
 claims of the setup cell, which are the ends of the model, the forty layers, the seven
 tape slots and the counts of casts and of quantised weights. Then comes one check per
 figure, stating the released size of every axis the figure is drawn at and the number of
-sites the mechanism of the figure is composed at. The last thirteen are the quantisation
-claims: every wire carrying a quantisation, every conversion changing one, the casts
-counted by the pair of formats each reads and writes, and the model with every
+sites the mechanism of the figure is composed at. The last fourteen are the quantisation
+claims: every wire carrying a quantisation, in the model and on the page written from it
+by `notebooks/website/modern/DeepSeekV41Flash.ipynb`, every conversion changing one, the
+casts counted by the pair of formats each reads and writes, and the model with every
 quantisation taken back off it.
 
 Six of the claims are checked by `quantization/validate_quantization.py` as well, and
@@ -46,6 +47,8 @@ import quantization.processing.quantise_model as quantise_model  # noqa: E402
 from para.data_structure.ParaBlockOperator import (  # noqa: E402
     slots_dropped, slots_grabbed)
 
+import notebooks.display.notebook_diagrams as notebook_diagrams  # noqa: E402
+import notebooks.display.sota_figures as figures  # noqa: E402
 import notebooks.sota.DeepSeekV41Flash.divided_layer_stack as divided_layer_stack  # noqa: E402
 import notebooks.sota.DeepSeekV41Flash.integrated_explanations as integrated_explanations  # noqa: E402
 import notebooks.sota.DeepSeekV41Flash.quantised_text_only_model as quantised_text_only_model  # noqa: E402
@@ -353,6 +356,36 @@ def check_every_wire_of_the_model_carries_a_quantisation() -> None:
     require(not weaves, f'{len(weaves)} wires of the model carry no quantisation')
 
 
+PAGE_SETTINGS: figures.DiagramSettings = (
+    quantised_text_only_model.with_quantised_explanation_tables(
+        figures.DiagramSettings(
+            mode=figures.DiagramMode.OFF,
+            tape=figures.TapePresentation.ABSORBED,
+            axis_sizes=figures.AxisSizes.SUBSCRIPT,
+            assigned_sizes=ASSIGNED_SIZES,
+            block_recycling=figures.BlockRecycling.RECYCLED,
+            sub_blocks=figures.SubBlocks.NO_BODIES,
+            advanced_display=figures.AdvancedDisplay.INTERACTIVE,
+            expanded_parameters=figures.ExpandedParameters.WEIGHT_ARRAYS,
+            clean_quantisation_labels=False)))
+'''The display fields under which `notebooks/website/modern/DeepSeekV41Flash.ipynb`
+writes the quantised page.'''
+
+
+def check_every_wire_of_the_page_carries_a_quantisation() -> None:
+    '''Every wire of the quantised model still carries a quantisation once the display
+    passes of the page have run, in the term embedded in the page. The setup cell of
+    `notebooks/website/modern/DeepSeekV41Flash.ipynb` declares
+    `clean_quantisation_labels=False`, because
+    `clean_quantisation_labels.strip_unchanged_quantisations` takes the quantisation
+    off every wire written at the quantisation of every operand of the operation
+    writing it, and no other display pass removes one.'''
+    presented = notebook_diagrams.present_each_side(MODEL, PAGE_SETTINGS)
+    sent, _, _ = notebook_diagrams.package_auxiliary(presented, PAGE_SETTINGS)
+    weaves = quantise_model.unquantised_weaves(sent)
+    require(not weaves, f'{len(weaves)} wires of the page carry no quantisation')
+
+
 def check_every_conversion_reads_one_quantisation_into_another() -> None:
     '''Every conversion of the quantised model reads one quantisation into another.'''
     require(quantise_model.conversions_between_two_quantisations(MODEL),
@@ -486,6 +519,7 @@ CHECKS: tuple[Callable[[], None], ...] = (
     check_the_model_returns_one_probability_per_entry,
     check_the_size_of_the_vocabulary,
     check_every_wire_of_the_model_carries_a_quantisation,
+    check_every_wire_of_the_page_carries_a_quantisation,
     check_every_conversion_reads_one_quantisation_into_another,
     check_every_conversion_changes_the_quantisation_of_its_operand,
     check_the_casts_counted_by_the_formats_they_read_and_write,

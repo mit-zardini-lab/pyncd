@@ -83,14 +83,18 @@ have to move its wire across that block, so `expose_tape_as_ports` raises
 Broadcasting the box over a degree $\vec{h}$ is the second half of what the user asked
 for. `expand` lifts the body over the degree through `lift.morphism_object_lift`, per
 [[Discovering Broadcasts]], which prepends the degree axes to every array inside the body.
-A grabbed array therefore arrives as `R[h, x, d]` where the unlifted one was `R[x, d]`,
-and the slot is unchanged, because the slot names the value and the degree names which
-member of it one index of the broadcast reads. The whole broadcast reads one array
-carrying the degree, which is what a kernel would load. A grabbed operand is read at every
-position of the degree for that reason, so
-`broadcast_para_block_over_axes` gives it the whole degree as its reading and takes one
-reading per apparent operand from the caller, as
-`discovering_broadcasts.broadcast_block_over_axes` does.
+An array grabbed from an inner slot therefore arrives as `R[h, x, d]` where the unlifted
+one was `R[x, d]`, and the slot is unchanged, because the slot names the value and the
+degree names which member of it one index of the broadcast reads. The whole broadcast
+reads one array carrying the degree. An operand grabbed from an inner slot is read at every
+position of the degree for that reason, so `broadcast_para_block_over_axes` gives it the
+whole degree as its reading and takes one reading per apparent operand from the caller, as
+`discovering_broadcasts.broadcast_block_over_axes` does. An operand grabbed from a
+`Para.OuterTapeSlot` holds one array for the whole broadcast, per
+[[Outer and Inner Tape Slots]], so its reading is empty and the expansion repeats it along
+the degree with a `View`. A block that drops onto an outer slot is refused with
+`OuterDropInBroadcastBox`, because the result at its port carries the degree and nothing
+sums over the degree before the drop.
 
 `broadcast_grabs(parent)` and `broadcast_drops(parent)` report the seeds at the arrays the
 ports carry, reading either the wrapped box or the box.
@@ -125,9 +129,10 @@ from whatever next read the term.
 `lift.OBJECT_LIFTS` is now a registry of one rule per class that carries its objects in a
 field of its own, `lift.register_object_lift` declares one, and `morphism_object_lift`
 raises `lift.MorphismNotLiftable` for a class that has none rather than returning `None`.
-`para/registries/object_lift.py` registers `Para.Grab` and `Para.Drop`, and the rule is one
-line: the seed with `lift.object_object_lift` applied to its `size`. The lookup walks the
-MRO, so the stream, loop and reduction seeds take the rule of the seed they subclass. The
+`para/registries/object_lift.py` registers `Para.Grab` and `Para.Drop`. For a seed of an
+inner slot the rule is the seed with `lift.object_object_lift` applied to its `size`, and
+for a seed of an outer slot it is the seed followed by a repeat or preceded by a sum, per
+[[Outer and Inner Tape Slots]]. The lookup walks the MRO, so the stream, loop and reduction seeds take the rule of the seed they subclass. The
 rule is no longer on the path a boxed block takes, since the body it lifts holds no seed,
 and it is what lifts a seed standing beside one.
 
@@ -136,9 +141,9 @@ and it is what lifts a seed standing beside one.
 | | |
 |---|---|
 | `para/data_structure/ParaBlockOperator.py` | `ParaBlockOperator` and its `template(block, name)`, `bare_box`, `bare_box_of` and `wrap_box`; `expose_tape_as_ports` and the `TapeAsPorts` it returns; `tape_seeds_of`; `broadcast_para_block_over_axes`, which is `discovering_broadcasts.broadcast_block_over_axes` with the tape at the ports; `broadcast_grabs`, `broadcast_drops`, `slots_grabbed` and `slots_dropped`; and the types `ParaBBlock`, a `cat.Block` over `Para.Para[cat.Array, cat.BroadcastedCategory]`, and `WrappedBox` |
-| `para/registries/object_lift.py` | `lift_tape_seed_over_axes`, registered for `Para.Grab` and `Para.Drop` |
+| `para/registries/object_lift.py` | `lift_tape_seed_over_axes`, registered for `Para.Grab` and `Para.Drop`, which reads the kind of the slot of the seed |
 | `construction_helpers/lift.py` | `OBJECT_LIFTS`, `register_object_lift`, `object_lift_for` and `MorphismNotLiftable` |
-| `para/validate_para_block_operator.py` | a body that grabs a gain, adds it to a per-head operand and a shared one, and drops the total, boxed, broadcast over a head axis and expanded |
+| `para/validate_para_block_operator.py` | a body that grabs an array from an inner slot, adds it to a per-head operand and a shared one, and drops the total, boxed, broadcast over a head axis and expanded |
 
 The fields are declared in this order, which is the order a term is constructed in and the
 order `tsncd` reads: `name`, `block`, `grabs`, `drops`. The first two are inherited from
@@ -154,6 +159,8 @@ The box draws with the slot ports a wrapped operation draws with, and nothing in
 knows about the class beyond the mirror. `ParaWrapBroadcastedBox` puts each grabbed array
 on a row along the top edge of the box and each dropped array on a row along the bottom,
 and runs a tape from each row to a free end with the slot's label, per [[Para Wrap]].
+The two arrow forms keep every taped array in a column of the box, and each tape bends
+into the arrow of its array along a level stretch that carries the label of the arrow.
 
 The body drawn beside the figure is the block as the model wrote it, so it shows its own
 grabs and drops, under whatever presentation the rest of the figure is drawn in.
@@ -165,7 +172,7 @@ rewrite, so `remember_drawn_blocks` still recognises a body it has delivered.
 
 A reader of the figure therefore meets each slot twice, at the ports of the box and inside
 the body, and that is what the user asked for: "The ParaBlockOperator (eg FullAttention)
-you should still show the drops internally.
+you should still show the drops internally."
 
 `tsncd` mirrors the classes of every `data_structure` folder, folder for folder, and a
 class with no mirror stops the whole diagram from transporting wherever in the term it is

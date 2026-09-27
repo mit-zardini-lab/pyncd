@@ -148,8 +148,8 @@ absolute entries, was written and then rejected on the same day, because the Top
 reads the slots as they are.
 
 The relative read was on the queries as well as on the keys until later that day. The
-`grp` views read the query low rank and the hidden state at
-$i_x = |a|\, i_{b_0} - i_a + 2|a| - 2$, the `back` view read the keys $r$ entries back
+Group views read the query low rank and the hidden state at
+$i_x = |a|\, i_{b_0} - i_a + 2|a| - 2$, the Back view read the keys $r$ entries back
 from the group's newest reachable entry, the heads were contracted at $(b_0, a, r)$ and
 the merge wrote the scores back to the queries. The offsets of the last group read past
 the end of the query axis, which sized the query axis $|a|\,|b|$ and marked the offset
@@ -307,7 +307,7 @@ remains.
   Since 2026-09-14 the kept blocks are `p|x`, and the candidate axis `C` stays dense
   because the empty candidates' count is not an affine form of a candidate's position.
 - ~~The causal staircase of a compressed cache is not drawn~~. Closed 2026-09-14. It was
-  the `reach` view until 2026-09-15 and is the indexer's relative read and `pos` merge
+  the `reach` view until 2026-09-15 and is the indexer's relative read and Position merge
   since. The reference implementation of DeepSeek-V4.1-Flash, read on
   2026-09-14 at commit `dba1be0a40aa`, fills the score of an entry the query cannot reach
   with `-inf`

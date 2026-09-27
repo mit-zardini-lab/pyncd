@@ -245,7 +245,9 @@ def gradient_slot(slot: para.TapeSlot) -> para.TapeSlot:
     per derivation, so the same parameter grabbed twice, which is a tied
     weight, drops its gradient to one slot, whose two writes accumulate. A
     slot's write is `+=` because copying is a comonoid
-    (`obsidian/07-para/Training.md`).
+    (`obsidian/07-para/Training.md`). The gradient slot of an outer slot is
+    outer, because the cotangent of a parameter has the parameter's shape
+    whatever the forward pass is broadcast over.
     '''
     if slot not in _gradient_slots:
         name = slot.uid._name
@@ -255,7 +257,7 @@ def gradient_slot(slot: para.TapeSlot) -> para.TapeSlot:
                            code_form=fd.join_code_forms('grad', name.code_form)
                            if name.code_form is not None else None)
             if name is not None else fd.DynamicName('d?'))
-        _gradient_slots[slot] = gradient_name.capture(para.TapeSlot())
+        _gradient_slots[slot] = gradient_name.capture(para.new_slot_like(slot))
     return _gradient_slots[slot]
 
 

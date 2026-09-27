@@ -59,6 +59,7 @@ from notebooks.sota.DeepSeekV41Flash.reference_links import model_lines
 from notebooks.sota.DeepSeekV41Flash.block_titles_and_descriptions import TEXT as text
 
 COMPRESSOR_BOX = 'Comp'
+TRANSPOSE_VIEW_NAME = '\\mathrm{Transpose}'
 
 DECODER_SCORES = cat.Array(R, (x, reach_d))
 
@@ -67,14 +68,14 @@ def move_heads_ahead_of_queries() -> cat.Broadcasted:
     '''The query with its head axis brought to the front, for the core, which is computed
     once per head.'''
     return ops.View.template(reindexing=cat.Rearrangement((1, 0, 2), (h, x, c)),
-                             name='tr')
+                             name=TRANSPOSE_VIEW_NAME)
 
 
 def move_queries_ahead_of_heads() -> cat.Broadcasted:
     '''What the core returned with the query axis brought to the front, for the output
     projection, which is computed once per query.'''
     return ops.View.template(reindexing=cat.Rearrangement((1, 0, 2), (x, h, c)),
-                             name='tr')
+                             name=TRANSPOSE_VIEW_NAME)
 
 
 def query_path() -> cat.BroadcastedCategory:

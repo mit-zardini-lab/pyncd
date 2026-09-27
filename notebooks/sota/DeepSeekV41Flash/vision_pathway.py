@@ -60,13 +60,13 @@ from notebooks.sota.DeepSeekV41Flash.omitted_mechanisms import (
     Wp, generic_operator)
 from notebooks.sota.DeepSeekV41Flash.reference_links import (
     image_processor_lines, inference_config_lines, model_lines, vision_lines)
+from notebooks.sota.DeepSeekV41Flash.token_compressors import GROUP_VIEW_NAME
 from notebooks.sota.DeepSeekV41Flash.write_at_token_positions import write_at_positions
 from notebooks.sota.DeepSeekV41Flash.block_titles_and_descriptions import TEXT as text
 
 VISION_ENCODER_NAME = '\\mathrm{ViT}'
 GENERIC_OPERATOR_NAMES: tuple[str, ...] = (VISION_ENCODER_NAME,)
 CELL_VIEW_NAME = '\\mathrm{cell}'
-GROUP_VIEW_NAME = 'grp'
 GELU_NAME = '\\mathrm{GELU}'
 FIRST_PROJECTOR_WEIGHT = 'W^{A1}'
 SECOND_PROJECTOR_WEIGHT = 'W^{A2}'

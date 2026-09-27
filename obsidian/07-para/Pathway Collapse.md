@@ -434,10 +434,12 @@ nothing, and a chain inside one is not rewritten.
 for that reader and copies each summand into the einsum beside it, and `factor_additions`
 cannot fold the copies back while the original stands. On the DeepSeek-V3 layer the
 cotangent entering each RMSNorm is a sum the gain gradient reads as well, and distributing
-it left 89 einsums where there had been 61. With the guard the layer collapses to 60
+it left 89 einsums where there had been 61. With the guard the layer collapsed to 60
 einsums and 14 arithmetics from 61 and 15, and its tape from 45 residual slots to 39: the
 softmax's four and the gate normalisation's two, per [[DeepSeek-V3 Backward Pass]]. The
-same guard takes bare expanded attention from 7 einsums and two additions after the
+scale of the scores has reversed with no residual since 2026-09-27, per
+[[Backpropagation]], and the layer now collapses to 59 einsums from 60 and its tape from
+44 residual slots to 38. The same guard takes bare expanded attention from 7 einsums and two additions after the
 collapse to 6 and one.
 
 The derivative of an inverse root is opaque. An RMSNorm writes its normaliser as
@@ -452,7 +454,9 @@ and writing the one as $r^{3}$ is power algebra that substitution does not do.
 
 Recomputing from statistics is a different rule. FlashAttention also avoids taping P by
 rebuilding it from the row statistics, which is a rematerialisation policy on the tape.
-[[Recomputing the Exponent in the Backward Pass]] states the trade-off.
+`para.algebra.recompute_contraction_slots` carries it out on the slots its caller names,
+or on every slot it can rebuild, and the training step of the tutorial pages applies it
+to every one. [[Recomputing the Exponent in the Backward Pass]] states the trade-off.
 
 Only einsum links are handled. A reindexing in the middle of a chain stops it, and
 absorbing the reindexing first, described in [[Expression Simplification]], is the current

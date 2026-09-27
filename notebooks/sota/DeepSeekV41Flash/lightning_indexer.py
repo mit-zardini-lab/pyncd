@@ -5,7 +5,7 @@ Written by Claude Opus 5 (1M context), reasoning effort high.
 The indexer scores every compressed entry a query has reached, with 32 heads of width
 128, and a Top-512 keeps the best of them. Causality is written on the keys alone. The
 `back` view reads the shared keys `r` entries back from each entry, so a slot past the
-first entry is a negative index and reads the universal unit, and the `pos` merge writes
+first entry is a negative index and reads the universal unit, and the Position merge writes
 each entry's slots onto every query whose newest reachable entry that entry is, turning
 `[b, r|b, d]` into `[x, r|x, d]`. The query low rank and the hidden state are read
 as they arrive, and the scoring is one box computed once per query.
@@ -33,12 +33,14 @@ from notebooks.sota.DeepSeekV41Flash.construction_idioms import boxed, hold, ove
 from notebooks.sota.DeepSeekV41Flash.declared_axes import (
     QR, R, B, a, b, c, d, i, m, nsel, q, state, x)
 from notebooks.sota.DeepSeekV41Flash.reference_links import kernel_lines, model_lines
+from notebooks.sota.DeepSeekV41Flash.token_compressors import POSITION_VIEW_NAME
 from notebooks.sota.DeepSeekV41Flash.block_titles_and_descriptions import TEXT as text
 
 INDEXER_COLOUR = '#D9E7F5'
 INDEXER_BOX = 'Idx'
 SCORE_BOX = 'Sco'
 GATHER_BOX = 'Gth'
+BACK_VIEW_NAME = '\\mathrm{Back}'
 
 
 def index_keys[A: cat.Axis](entry_axis: A) -> cat.BroadcastedCategory:
@@ -49,7 +51,8 @@ def index_keys[A: cat.Axis](entry_axis: A) -> cat.BroadcastedCategory:
 
 def entries_back_axis[A: cat.Axis](entry_axis: A) -> cat.RawAxis:
     '''The axis counting entries back from a query's newest reachable entry.'''
-    return fd.DynamicName('r').capture(cat.RawAxis(_size=entry_axis.local_size()))
+    return fd.DynamicName('r', code_form='entry_distances').capture(
+        cat.RawAxis(_size=entry_axis.local_size()))
 
 
 def rectify() -> cat.Broadcasted:
@@ -104,9 +107,9 @@ def read_back_from_each_entry[A: cat.Axis](
             _dom=(entry_axis, back_axis),
             _cod_stride_shift=((entry_axis, (nm.Integer(1), nm.Integer(-1)),
                                 nm.Integer(0)),),
-            name=fd.DynamicName('back')),
+            name=fd.DynamicName(BACK_VIEW_NAME)),
             cat.ProdObject(rest).identity()),
-        name='back')
+        name=BACK_VIEW_NAME)
 
 
 def write_to_every_query_of_the_group[A: cat.Axis](
@@ -114,7 +117,7 @@ def write_to_every_query_of_the_group[A: cat.Axis](
     offset_axes: tuple[A, ...],
     degree: tuple[A, ...],
 ) -> cat.Broadcasted:
-    '''The `pos` merge writing each entry's `degree` to every query whose newest
+    '''The Position merge writing each entry's `degree` to every query whose newest
     reachable entry that entry is.
 
     The input carries the entries and not the offsets, so the merge broadcasts it over
@@ -123,7 +126,7 @@ def write_to_every_query_of_the_group[A: cat.Axis](
     queries, so `r|b` becomes `r|x`, live where `i_x - ratio * i_r - (ratio - 1) >= 0`.
     '''
     return aops.CovariantView.broadcast_over_absent_axes_and_merge(
-        query_of_group_and_offset(entry_axis, offset_axes, 'pos'),
+        query_of_group_and_offset(entry_axis, offset_axes, POSITION_VIEW_NAME),
         input_axes=(entry_axis,),
         degree=tuple(degree))
 

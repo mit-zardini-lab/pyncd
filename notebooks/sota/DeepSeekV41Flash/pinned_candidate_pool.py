@@ -48,7 +48,7 @@ from notebooks.sota.DeepSeekV41Flash.declared_axes import R, x
 from notebooks.sota.DeepSeekV41Flash.reference_links import model_lines
 from notebooks.sota.DeepSeekV41Flash.block_titles_and_descriptions import TEXT as text
 
-PIN = 'pin'
+PIN = '\\mathrm{Pin}'
 PIN_COLOUR = '#FBF3D5'
 POSITIVE_INFINITY = nm.Constant(nm.ConstantSymbol.INFINITY)
 BLOCK_SCORES_OF_ONE_TOKEN = cat.Array(R, (candidate_pool.P_reach,))

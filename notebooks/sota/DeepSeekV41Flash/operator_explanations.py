@@ -34,12 +34,18 @@ what a linear map is, under a formula `para.processing.write_linear_formula` wri
 the weight's own axes. The declarations were read from `inference/model.py` at the pinned
 commit on 2026-09-17.
 
-`REINDEXING_EXPLANATIONS` explains each named reindexing of a view, by the text of its
-name. The three slices of the mixing coefficients were among them until 2026-09-17, when
-the projection `H` of the hyper-connections became the three maps `H_0`, `H_1` and `H_2`
-and the slices went. `notebooks/display/explain_reindexings.py` wraps each in a block drawn as the
+`REINDEXING_EXPLANATIONS` explains each named view, by the text of its name, which each
+module that builds the view declares as a constant. The names are capitalised English
+words set upright, per the ruling of 2026-09-26 in
+`obsidian/06-practice/Representing Models.md`. The three slices of the mixing
+coefficients were among them until 2026-09-17, when the projection `H` of the
+hyper-connections became the three maps `H_0`, `H_1` and `H_2` and the slices went.
+`notebooks/display/explain_reindexings.py` wraps each in a block drawn as the
 reindexing alone and writes the formula from the reindexing's own rows, so the table
-holds the sentences and the released lines.
+holds the sentences and the released lines. The lines of the repeat, the diagonal, the
+back view and the position view were read from `inference/model.py` at the pinned
+commit on 2026-09-26. The released code transposes no axis where the model's transpose
+stands, so that row cites no line.
 
 Every link is pinned to the commit `reference_links.py` names. The lines of the router,
 the indexer and the compressor are the ones the blocks already cite. The lines of
@@ -71,6 +77,9 @@ from notebooks.sota.DeepSeekV41Flash import (
     clamped_mixture_of_experts, dspark_draft_chain, gumbel_max_sampler, mhc_with_epsilons,
     quantised_caches, rotary_embedding, rotated_indexer, scaled_attention_core,
     vision_pathway, write_at_token_positions)
+from notebooks.sota.DeepSeekV41Flash import (
+    attention_core, attention_modes, candidate_pool, lightning_indexer,
+    mixture_of_experts, token_compressors, whole_model)
 from notebooks.sota.DeepSeekV41Flash.block_titles_and_descriptions import TEXT as text
 
 
@@ -456,19 +465,29 @@ OPERATOR_ROLES: dict[str, OperatorRole] = {
 
 
 REINDEXING_EXPLANATIONS: dict[str, ReindexingExplanation] = {
-    'win': ReindexingExplanation(
+    attention_core.WINDOW_VIEW_NAME: ReindexingExplanation(
         description=text.WINDOW_VIEW_DESCRIPTION,
         references=(model_lines(410, 424),)),
-    'grp': ReindexingExplanation(
+    token_compressors.GROUP_VIEW_NAME: ReindexingExplanation(
         description=text.GROUP_VIEW_DESCRIPTION,
         references=(model_lines(473, 474), model_lines(787))),
-    'back': ReindexingExplanation(
-        description=text.BACK_VIEW_DESCRIPTION),
-    'pos': ReindexingExplanation(
-        description=text.POSITION_VIEW_DESCRIPTION),
-    'blk': ReindexingExplanation(
+    lightning_indexer.BACK_VIEW_NAME: ReindexingExplanation(
+        description=text.BACK_VIEW_DESCRIPTION,
+        references=(model_lines(561, 565),)),
+    token_compressors.POSITION_VIEW_NAME: ReindexingExplanation(
+        description=text.POSITION_VIEW_DESCRIPTION,
+        references=(model_lines(461, 462),)),
+    candidate_pool.BLOCK_VIEW_NAME: ReindexingExplanation(
         description=text.BLOCK_VIEW_DESCRIPTION,
         references=(model_lines(599),)),
+    whole_model.REPEAT_VIEW_NAME: ReindexingExplanation(
+        description=text.REPEAT_VIEW_DESCRIPTION,
+        references=(model_lines(1257, 1258),)),
+    mixture_of_experts.DIAGONAL_VIEW_NAME: ReindexingExplanation(
+        description=text.DIAGONAL_VIEW_DESCRIPTION,
+        references=(model_lines(783, 787), model_lines(899, 900))),
+    attention_modes.TRANSPOSE_VIEW_NAME: ReindexingExplanation(
+        description=text.TRANSPOSE_VIEW_DESCRIPTION),
 }
 
 

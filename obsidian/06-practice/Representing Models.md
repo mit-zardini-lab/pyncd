@@ -10,15 +10,15 @@ agent: Claude (Opus 5, high effort, 2026-09-10)
 
 This note holds every ruling the author has given on how a deep learning architecture is
 written as a morphism in [[Broadcasted Category|Br]]. It was consolidated on 2026-09-10
-from the logs under `obsidian/00-meta/logs/`, from the notes those logs corrected, and
-from `notebooks/base_features/BuildingAModel.ipynb`. Each ruling states the rule, gives
-the form that was rejected beside the form that replaced it where the source gives both,
-and names the log the ruling was recorded in. A reader who finds an old form in a log can
-check the *Reversed rulings* section below for the date it was superseded.
+from the development logs, which are not published, from the notes those logs corrected,
+and from `notebooks/base_features/BuildingAModel.ipynb`. Each ruling states the rule and
+gives the form that was rejected beside the form that replaced it where the source gives
+both. A reader who finds an old form in the code can check the *Reversed rulings* section
+below for the date it was superseded.
 
 A new correction on how a model is expressed is added to this note, in the section it
-belongs to, with the rejected form beside its replacement and a link to the log that
-carries it. `notebooks/base_features/BuildingAModel.ipynb` holds the asserted code for
+belongs to, with the rejected form beside its replacement.
+`notebooks/base_features/BuildingAModel.ipynb` holds the asserted code for
 every rule that has a code form, so a rule with code is added there in the same session,
 in the section it belongs to. A rule about presentation or about a modelling choice with
 no code form lives in this note alone.
@@ -26,7 +26,7 @@ no code form lives in this note alone.
 ## The rules in short
 
 The rules a reader needs before writing a model, in the order a construction meets them.
-Each has a subsection under *The rulings* with the log and the rejected form.
+Each has an entry under *The rulings* with the rejected form.
 
 1. **Declare the axes explicitly.** Predeclare every structural `RawAxis` and pass the
    axis objects rather than strings. Composition aligns by position and never by name, so
@@ -184,6 +184,23 @@ Each has a subsection under *The rulings* with the log and the rejected form.
 35. **A clamp between two bounds is an `nm.Clamp`.** The clamp to the unit interval is
     the default and prints between corner brackets, and it expands to `nm.IsPositive`
     terms.
+36. **Write a grouping of the axes produced by a linear map into the linear map.** A
+    `Linear` holds its weight, so a linear map followed by a view that reads one of its
+    axes as several is the linear map whose weight rows are grouped in the same way.
+    Mixtral's query projection is `Linear((m,), (h', g, d))`, and no view groups its
+    heads.
+37. **Display an expression in the CausalSlide form.**
+    `slide_causal_reads_backwards.slide_causal_reads_backwards` moves every causal read
+    back to the copy whose other branches read its operand unmasked. It rebuilds each
+    operator between the old and the new position of the read over the tokens and the
+    slots. The function is unchanged, and the mask stands directly after the copy. The
+    position of the read is the placement of a cache, per
+    [[Deriving Caches by Dragging the New Tokens]].
+38. **Grab a parameter from an outer tape slot, and grab a random sample, a residual or
+    a cache from an inner one.** A `Para.OuterTapeSlot` holds one array however many axes
+    the expression is lifted over, so a lift over `x` repeats its grab along `x`. A plain
+    `Para.TapeSlot` holds one array per index, so a lift over `x` enlarges the array read
+    by its grab, per [[Outer and Inner Tape Slots]].
 
 ## The rulings
 
@@ -403,7 +420,7 @@ Each has a subsection under *The rulings* with the log and the rejected form.
 - A fixed one-hot vector is the covariant reading of the row that selects one index, with
   no operands. Every reindexing is a linear map. A row with an empty domain and the shift
   `i_x` sends the one index of the empty product to position `i_x`, so an `ops.View` of it,
-  which reads a reindexing contravariantly, selects position `i_x` of the array it reads.
+  which reads a reindexing contravariantly, selects position `i_x` of its operand.
   Read covariantly the same row writes its operand at `i_x` and leaves every other
   position holding the universal unit, which is the one-hot vector at that position. The
   collapse coefficients V4.1's first sublayer starts from are that vector on the first
@@ -662,6 +679,29 @@ Each has a subsection under *The rulings* with the log and the rejected form.
   `ops.Linear.template((n, m), (n, N), 'H_2', bias=True)`, each reading a copy of the
   normalised streams.
 
+- A grouping of the axes produced by a linear map is written into the linear map. A
+  grouping is a view that reads one axis as two or more, and it moves every value to
+  exactly one position. Result `i` of a linear map reads row `i` of the weight and
+  nothing else, so a linear map followed by a grouping of its results is the linear map
+  whose weight rows are grouped in the same way. A `Linear` holds its weight inside the
+  operator, so the grouped form needs no view. An operator broadcast over the grouped
+  axis that stands between the two is computed over the groups. The released
+  Mixtral-8x7B projects the queries of a token onto 32 heads and groups them by the
+  key-value head shared by each group. The rule is the counterpart for a grouping of the
+  ruling above on a linear map cut into parts. The same holds where a linear map
+  consumes every axis of a grouping, and Mixtral's output projection reads `h'`, `g` and
+  `d` for that reason. A grouping stays a view where its read cannot be carried back to
+  a linear map. A grouping of the tokens of a projection is such a case, because the
+  projection is broadcast over the tokens and the tokens are not an axis of its weight.
+  No other model in the repository writes a grouping after a linear map. The groupings
+  of DeepSeek-V4.1-Flash read the output of the attention core, the hidden state and the
+  output of the vision encoder, and keep their views. The user ruled on this on
+  2026-09-26, and `notebooks/classic/mixtral_8x7b.py` writes the grouped projections.
+  Rejected: `ops.Linear.template((m,), (h, d), 'W^{Q}')`, the rotary embedding over
+  `h`, and a view named `grp` reading `h` as `h'` groups of `g` heads.
+  Replacement: `ops.Linear.template((m,), (h', g, d), 'W^{Q}')` and the rotary
+  embedding over `h'` and `g`.
+
 - A row read from a table held in a block-scaled format carries the quantisation of the
   table and reaches the projection reading it with no cast. The released Engram table
   is E4M3 with one UE8M0 scale per 32 channels, the lookup multiplies a row by its
@@ -868,6 +908,17 @@ Each has a subsection under *The rulings* with the log and the rejected form.
   Rejected: an opaque operator, and a reindexing rebuilt over every axis.
   Replacement: `View.template(reindexing=(stride, id_c))`.
 
+- The rule above holds for a row that carries a shift. The reviewer applied it again on
+  2026-09-26 to the read of the rotary table at the positions of one pass, where each row
+  reads one axis alone, so the map is a product. Written as a product, the figure draws
+  the pentagon on the token wire, carrying the stride and the shift, and the pairs pass
+  it straight. Written as one morphism, it drew one opaque node over both axes.
+  `notebooks/caching/CachedGLM53/rotation_at_this_pass.py` writes the product.
+  Rejected: `sc.StrideMorphism(_dom=(x, t), _cod_stride_shift=((P + x, (1, 0), |P|),
+  (t, (0, 1), 0)))`.
+  Replacement: `sc.StrideMorphism(_dom=(x,), _cod_stride_shift=((P + x, (1,), |P|),))
+  * cat.ProdObject((t,)).identity()`.
+
 - A reindexing that cuts two axes is the product of one group view per axis and the
   identity on the rest, with a rearrangement before it that brings the grid indices to
   the front. One row over a domain of five positions says the same thing and says it as
@@ -1071,6 +1122,44 @@ Each has a subsection under *The rulings* with the log and the rejected form.
   read that no operator states.
   Replacement: `aops.DeconcatenateAxes.template(((h, x, zbar), (h, x, z)),
   concatenated=c)`, with `zbar` declared at the size `|c| - |z|`.
+
+- An expression is displayed in the CausalSlide form, in which every causal read stands
+  as far back as it can move. The user ruled on 2026-09-26 that the CausalSlide is the
+  standard form of a displayed expression, because it gives the clearest statement of
+  the dynamics without changing them. A causal read reads token `i_x - i_w` for every
+  slot `i_w`, and an operator broadcast over the tokens computes the same function at
+  every token, so the read can stand before any such operator. In the CausalSlide the
+  mask reads the state at the copy that feeds the queries, the key and value projections
+  are written over the tokens and the slots, and the key and value branches share one
+  read. A model is still built with the mask where the reference applies it. The slide
+  is applied for the figure, as the Yoneda trick of [[Yoneda and Cartesian Tricks]] is.
+  The cache of a derived pass stands on the operand of the causal read, so the form
+  shows where a cache can go. `derive_cached_pass` on the CausalSlide caches the input
+  of the sublayer, and every other placement is the read slid forward past the operators
+  computed once per token, per [[Deriving Caches by Dragging the New Tokens]].
+  Rejected: a figure of attention with the mask drawn after the key and value
+  projections, where `read_back_from_every_position` is applied in the construction.
+  Replacement: `slide_causal_reads_backwards.slide_causal_reads_backwards(model)`, drawn.
+
+- A named view is named by the full English word for what it does, capitalised and set
+  upright through `\mathrm`, and the module that builds the view declares the name as a
+  constant. The user ruled on 2026-09-26 that "rep" should be called "Repeat", which is
+  the proper name. A lower-case abbreviation is set in math italic, with the spacing of a
+  product of letters, and the reader has to expand it before reading the figure. The
+  model's table of explanations is keyed by the constant. A row there gives every view of
+  that name its description and its pinned reference, as `MASK_NAME` does for the causal
+  mask of the classic models in `notebooks/classic/`. A view written with a
+  `cat.Rearrangement` carries its name on the `ops.View` alone, because a rearrangement
+  has no name field. `explain_reindexings.present` draws such a view under that name, as
+  a pentagon where the map has one row and as its own wires otherwise.
+  Rejected: `ops.View.template(reindexing=cat.Rearrangement((0, 2), (x, n, m)),
+  name='rep')`, and the view names `win`, `grp`, `blk`, `pos`, `diag`, `tr`, `qgrp`,
+  `cand` and `ngram`.
+  Replacement: `REPEAT_VIEW_NAME = '\\mathrm{Repeat}'` in
+  `notebooks/sota/DeepSeekV41Flash/whole_model.py`, passed as `name=REPEAT_VIEW_NAME`,
+  and `\mathrm{Window}`, `\mathrm{Group}`, `\mathrm{Block}`, `\mathrm{Position}`,
+  `\mathrm{Diagonal}`, `\mathrm{Transpose}`, `\mathrm{ScaleGroup}`, `\mathrm{Candidate}`
+  and `\mathrm{Lookback}`.
 
 ### Blocks, repetitions and presentation
 
@@ -1374,6 +1463,12 @@ Each has a subsection under *The rulings* with the log and the rejected form.
   with itself.
   Replacement: `diffusion_unet.relabel_axis`, reading the feature map under a second name as
   the affine identity, with each projection lifted over the shape it will be read under.
+  Overruled on 2026-09-25: the reviewer ruled that the second name is not critical. A
+  copied input composed onto the contraction by position carries the one axis at both
+  positions of the scores, which the package reads as two indices, and the transformer
+  of `notebooks/classic/attention_is_all_you_need.py` reads its keys at the query axis
+  with no view. Section 8 of `notebooks/base_features/BuildingAModel.ipynb` asserts that
+  the scores carry the one token axis at both positions.
 
 - Put the operand a composition supplies first in a signature, so the surplus wire is the
   one the composition does not carry.
@@ -1556,6 +1651,20 @@ Each has a subsection under *The rulings* with the log and the rejected form.
 
 - A parameter is shared across the batch by a deletion reindexing rather than by convention,
   so a parameter is a weave with no tiled entry.
+
+- The category is $\mathbf{Para}[\mathbf{BorelStoch}; A]$, and the Para construction appears at two places in it.
+  A tape slot is outer where its grabs and drops belong to the Para applied outside the arrays and the lift, and inner where they belong to a Para inside $\mathbf{BorelStoch}$.
+  The weight of a learned linear map and the gain of a normalisation are held in a
+  `Para.OuterTapeSlot`, which a lift over a batch axis does not enlarge, so the lift of
+  its grab over `x` is the grab followed by a repeat along `x`. A uniform sample read by
+  a dropout, the entries of a cache and a residual taped for the reverse pass are held in
+  a plain `Para.TapeSlot`, which a lift enlarges, per [[Outer and Inner Tape Slots]]. The
+  user ruled on this on 2026-09-26.
+  Rejected: a gain grabbed by hand from `Para.TapeSlot()`, which a lift over the tokens
+  turns into one gain per token.
+  Replacement: the gain's name captured onto `Para.OuterTapeSlot()`, as
+  `para/processing/show_grabbed_parameters.py` captures the name of every grabbed
+  parameter.
 
 - Weight tying falls out of term sharing. The same seed used twice stays one term through
   `@` and `*`, so memoising the slot per seed makes a tied layer grab one slot, and two
@@ -1800,7 +1909,8 @@ Each has a subsection under *The rulings* with the log and the rejected form.
   every sublayer the wire passed carry it, and the reference passes nothing between its
   layers but the residual and the collapse vector. GLM-5.2's shared selection still uses
   the passenger form, and Kimi K3's `AttnRes` is a second residual stream, which is a wire
-  in its own right. Ruled 2026-09-10 and
+  in its own right. GLM-5.3, in `notebooks/sota/GLM53/`, carries the selection shared by
+  an IndexShare group on a tape slot named `\mathrm{sel}`. Ruled 2026-09-10 and
   superseded 2026-09-11.
 
 - A selection in the `ONLY_SELECTION` form is read by `ds.Select.at_positions`, with the

@@ -74,6 +74,7 @@ SLOT_SCORES = cat.Array(R, (h, x, w))
 SELECTED_SCORES = cat.Array(R, (h, x, s))
 DENOMINATOR = cat.Array(R, (h, x))
 SELECTED_KV = cat.Array(R, (x, s, c))
+WINDOW_VIEW_NAME = '\\mathrm{Window}'
 
 
 def window_view() -> cat.Broadcasted:
@@ -82,9 +83,9 @@ def window_view() -> cat.Broadcasted:
     win_map = sc.StrideMorphism(
         _dom=(x, w),
         _cod_stride_shift=((x, (nm.Integer(1), nm.Integer(-1)), nm.Integer(0)),),
-        name=fd.DynamicName('win'))
+        name=fd.DynamicName(WINDOW_VIEW_NAME))
     return mark_sparse_domains.guarded_view(
-        reindexing=(win_map, cat.ProdObject((c,)).identity()), name='win')
+        reindexing=(win_map, cat.ProdObject((c,)).identity()), name=WINDOW_VIEW_NAME)
 
 
 def project_window_latents() -> cat.BroadcastedCategory:

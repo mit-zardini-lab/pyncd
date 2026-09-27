@@ -34,9 +34,9 @@ holding casts carries it, and a model that writes its own row for
 `Quantization.TypeConvert` keeps that row, as the quantised text-only
 DeepSeek-V4.1-Flash does for a cast into a stored form of a cache.
 
-A `TypeConvert` between two forms of a machine datatype, which is a load, a store or a
-relayout, keeps its name and its glyph. `Quantization.is_cast` is the condition, and it
-holds where the two sides carry different quantisations.
+A `TypeConvert` whose two sides carry the same quantisation keeps its name and its
+glyph. `Quantization.is_cast` is the condition, and it holds where the two sides carry
+different quantisations.
 '''
 from __future__ import annotations
 
@@ -133,7 +133,7 @@ def cast_explanation(
     the one it writes. A reader opens the box from the coloured format the cast wrote,
     which is the whole of a thin cast in the figure, so the box is where the two
     quantisations are named together. `None` for an operator that is not a cast,
-    which leaves a load, a store and a relayout to the table of the figure.'''
+    which leaves a conversion that keeps its quantisation to the table of the figure.'''
     operator = target.operator
     if not isinstance(operator, Quantization.TypeConvert):
         return None

@@ -7,6 +7,10 @@ status: evolving
 # Para Category
 The para- category involves equipping morphisms with composition-neutral load and save operations that generates a tape. This tape can then be extracted via an additional function.
 
+## A slot is outer or inner
+
+The user stated the category on 2026-09-26 as $\mathbf{Para}[\mathbf{BorelStoch}; A]$. The Para construction is applied outside the arrays and the lift, and it is also present inside $\mathbf{BorelStoch}$, where a stochastic morphism is written as a seed of randomness beside a deterministic function. A `Para.OuterTapeSlot` belongs to the construction outside. It holds one array however many axes the expression reading it is lifted over, as a weight does. A plain `Para.TapeSlot` belongs to the construction inside. It holds one array for every index of those axes, as a random sample, a residual and the entries of a cache do. Every seed class below reads and writes a slot of either kind. [[Outer and Inner Tape Slots]] states the two kinds, the lift of each, and the write-out of an inspection box at one index of a broadcast.
+
 ## A value a stream loop carries has its own two seeds
 
 A repeated `cat.Block` overwrites some of its values on every iteration. `Para.StreamGrab`
@@ -59,6 +63,16 @@ value exchanged rather than a place it is kept, and the partial itself is carrie
 the loop on its wire. A `ParaWrap` holds a `Para.ReductionSlot` for either, drawn `Rdx0*`
 on the operand received and `Rdx0'` on the copy sent, and `tie_tapes` refuses both,
 because no wire on one processor carries what a partner sent.
+
+A cache kept between the passes of generation has two further seeds, added 2026-09-26.
+`Para.CacheGrab` loads the entries held by a slot for the tokens of the earlier passes,
+and `Para.CacheDrop` appends the entries of the tokens of this pass. In a pass over `n`
+new tokens the grab loads `|K|` entries and the drop stores `|n|`, where `K` is every
+earlier token or the last `|K|` of them kept by a sliding window. A `ParaWrap` holds a
+`Para.CacheTapeSlot` for either, drawn `s0` on the load and `s0+` on the append. The loop
+over passes stands outside the expression, so no wire in one pass carries the append to
+the passes that read it, and the stream seeds cannot state a cache.
+[[Caching Between Passes]] writes the `Caching` operator out with the two seeds.
 
 ## A reverse derivative category axiomatises $R$ on expressions
 
@@ -174,6 +188,7 @@ $f()
 
 ## See also
 
+- [[Outer and Inner Tape Slots]] — the two kinds of slot and the lift of each
 - [[Derivatives]] — the presentation of $R$, one rule per generator, and the function
   class the rules assume
 - [[Training]] — the tape in place of the lens residual, and the four writers of a
