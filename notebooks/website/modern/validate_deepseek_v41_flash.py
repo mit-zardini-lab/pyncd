@@ -664,7 +664,7 @@ def check_the_attention_core_is_computed_once_per_head() -> None:
                 f'a core is broadcast over {box.degree()}')
     core = first_body('Core')
     arithmetic = names_of(ops.Arithmetic, core)
-    require('\\lvert c \\rvert^{-1/2} x' in arithmetic and 'e^{x}' in arithmetic,
+    require('x / \\sqrt{\\lvert c \\rvert}' in arithmetic and 'e^{x}' in arithmetic,
             f'the core applies {arithmetic}')
     sink, _, _ = core.dom()
     require(not tuple(sink.shape()), 'the sink is not one number per head')
@@ -986,7 +986,7 @@ def check_the_indexer_scores() -> None:
     scores = first_body('Sco')
     arithmetic = names_of(ops.Arithmetic, scores)
     for formula in ('x \\mathbbm{1}_{x > 0}',
-                    '(\\lvert d \\rvert \\lvert i \\rvert)^{-1/2} x'):
+                    'x / \\sqrt{\\lvert d \\rvert \\lvert i \\rvert}'):
         require(formula in arithmetic, f'the scoring applies {arithmetic}')
     weight = linear_named('w^{I}', scores)
     require(axes(weight) == ([['m']], [['i']]), f'the head weight is {axes(weight)}')

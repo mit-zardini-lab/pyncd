@@ -381,7 +381,8 @@ def list_names_missing_a_row(
         embeddings_without_a_row=sorted_difference(
             names_of_operators(broadcasts, ops.Embedding), EMBEDDING_EXPLANATIONS),
         hidden_arithmetics_without_a_role=sorted_difference(hidden, ARITHMETIC_ROLES),
-        unused_arithmetic_roles=tuple(sorted(set(ARITHMETIC_ROLES) - hidden)),
+        unused_arithmetic_roles=tuple(sorted(
+            set(ARITHMETIC_ROLES) - names_of_operators(broadcasts, ops.Arithmetic))),
         reindexings_without_a_row=sorted_difference(
             names_of_reindexings(broadcasts), REINDEXING_EXPLANATIONS))
 

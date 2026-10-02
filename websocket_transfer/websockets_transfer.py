@@ -109,6 +109,16 @@ class PageControls(enum.Enum):
     HIDDEN = 'hidden'
 
 
+class MultilineSizing(enum.Enum):
+    '''How tsncd divides a wrapped figure into rows. Under `DYNAMIC`, the
+    client's default, the rows are planned so that whole blocks stand on one
+    row, and a row may run over the width by a set fraction to keep a block
+    whole. Under `FIXED` each row is filled until the width runs out, and the
+    block open at that point is cut. A member is sent as the boolean `dynamicMultilineSizing`.'''
+    FIXED = 'fixed'
+    DYNAMIC = 'dynamic'
+
+
 class RenderHandlerSettings(TypedDict, total=False):
     '''
     Display options forwarded verbatim to the TypeScript client. It mirrors
@@ -126,6 +136,11 @@ class RenderHandlerSettings(TypedDict, total=False):
     # Wrap width in px, and so the diagram's aspect ratio: narrower means more
     # rows and a taller figure, wider means fewer rows and a flatter one.
     width: int
+    # Whether the rows of a wrapped figure are planned so that whole blocks stand
+    # on one row, with `width` as the target of the rows. Off by default, and
+    # each row is then filled until `width` runs out. Sent for a
+    # `MultilineSizing`.
+    dynamicMultilineSizing: bool
     # Whether `BlockOperator` bodies are drawn as sub-diagrams beside the main
     # figure (the client's default). Off, the figure is the high-level view
     # alone, so that each body can be rendered as its own figure.
@@ -191,6 +206,34 @@ class AxisLegendRow(TypedDict):
     sizeCodeName: str | None
     uids: list[int]
 
+class NaturalLegendRow(TypedDict):
+    '''One row of the second table of the legend: a `cat.Natural` that is the
+    datatype of an array of the term, as the latex of the bound its values stay
+    below, the integer the bound comes to in decimal digits or `None`, and the bound
+    written in the code names of its symbols. The size is a string because the bound
+    of a 64-bit integer, `2^{63}`, is larger than the largest integer a JavaScript
+    number holds exactly. `key` is the structure of the bound as
+    `auxiliary_information.natural_key` writes it, which tsncd writes the same way
+    for the `Natural` of every wire, so resting the pointer on the row halos the
+    wires that carry it.'''
+    latex: str
+    size: str | None
+    codeName: str | None
+    key: str
+
+class FormulaIndexRecord(TypedDict):
+    '''An index a formula holds for every position of its axis, as the formula
+    writes the index, `j_{d}`, and as it writes the axis, `d`. tsncd draws the
+    indices of a formula on a line under it, `\\forall j_{d} \\in d`. The index of a
+    guarded axis also carries the condition under which its position holds a value,
+    `j_{w|x} \\le i_{x}`, which the hover over the index shows, and, where the stride
+    of the axis is 1 or -1, the interval of those positions, `[0, i_{x}]`, which the
+    line writes in place of the axis.'''
+    index: str
+    axis: str
+    range: NotRequired[str]
+    condition: NotRequired[str]
+
 class CodeReferenceRecord(TypedDict):
     '''A `cat.CodeReference` on the wire, with its url resolved. `icon` names the
     icon tsncd draws before the link, `huggingface` for a link into a repository
@@ -206,18 +249,21 @@ class BlockInformation(TypedDict):
     '''What an inspection box shows for a block, beside the block's body. `formula`
     is LaTeX drawn under the title. A block whose aesthetics say
     `cat.BlockDrawing.BODY_IN_PLACE` is drawn in the figure as its body alone, and
-    its box shows these fields and no body.'''
+    its box shows these fields and no body. `indices` are the indices `formula`
+    holds for every position of their axes.'''
     title: str | None
     formula: str | None
     description: str | None
     references: list[CodeReferenceRecord]
+    indices: list[FormulaIndexRecord]
 
 class OperatorExpansion(TypedDict):
     '''What an inspection box shows for an operator with a standard expansion.
     `expansion` is the expanded morphism as its own exported term, and
     `auxiliary` is the auxiliary information of that morphism, so an operator
     inside the expansion can be opened in turn. `references` are the places in a
-    codebase the operator stands for, listed under the description.'''
+    codebase the operator stands for, listed under the description. `indices`
+    are the indices `formula` holds for every position of their axes.'''
     operator: str
     latex: str | None
     formula: str
@@ -225,6 +271,7 @@ class OperatorExpansion(TypedDict):
     expansion: str
     auxiliary: 'DiagramAuxiliary'
     references: list[CodeReferenceRecord]
+    indices: list[FormulaIndexRecord]
 
 class DiagramAuxiliary(TypedDict, total=False):
     '''
@@ -233,10 +280,12 @@ class DiagramAuxiliary(TypedDict, total=False):
     optional, and a message with no `auxiliary` field draws as it did before the
     field existed. `blocks` is keyed by the uid of each block's tag and
     `expansions` by the number tsncd's importer gives each `Broadcasted`, both
-    as strings, which is how JSON keys an object.
+    as strings, which is how JSON keys an object. `naturals` is the second table
+    of the legend, drawn under the axes.
     `websocket_transfer/auxiliary_information.py` assembles it.
     '''
     legend: list[AxisLegendRow]
+    naturals: list[NaturalLegendRow]
     blocks: dict[str, BlockInformation]
     expansions: dict[str, OperatorExpansion]
 

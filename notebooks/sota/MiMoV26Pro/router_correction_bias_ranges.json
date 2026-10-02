@@ -1,0 +1,488 @@
+{
+ "source": "e_score_correction_bias of every mixture of experts, read from the header and the data of model_pp0_ep0_shard0.safetensors of XiaomiMiMo/MiMo-V2.6-Pro-MOPD at the commit adea8e2c5373181e5a973fa1ecb343cb31af214b on 2026-09-28",
+ "layers": [
+  {
+   "layer": 1,
+   "smallest": 0.306379,
+   "largest": 0.312157,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 2,
+   "smallest": 0.386245,
+   "largest": 0.38683,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 3,
+   "smallest": 0.312064,
+   "largest": 0.313788,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 4,
+   "smallest": 0.265244,
+   "largest": 0.266446,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 5,
+   "smallest": 0.255524,
+   "largest": 0.349358,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 6,
+   "smallest": 0.313471,
+   "largest": 0.321898,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 7,
+   "smallest": 0.430259,
+   "largest": 0.430571,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 8,
+   "smallest": 0.479206,
+   "largest": 0.480023,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 9,
+   "smallest": 0.411331,
+   "largest": 0.411691,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 10,
+   "smallest": 0.506781,
+   "largest": 0.510274,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 11,
+   "smallest": 0.282583,
+   "largest": 0.303642,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 12,
+   "smallest": 0.199261,
+   "largest": 0.213471,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 13,
+   "smallest": 0.337023,
+   "largest": 0.809529,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 14,
+   "smallest": 0.244124,
+   "largest": 0.286362,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 15,
+   "smallest": 0.170897,
+   "largest": 0.197669,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 16,
+   "smallest": 0.083372,
+   "largest": 0.092217,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 17,
+   "smallest": 0.220569,
+   "largest": 0.69054,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 18,
+   "smallest": -0.178284,
+   "largest": 0.590911,
+   "positive": 383,
+   "experts": 384
+  },
+  {
+   "layer": 19,
+   "smallest": -0.227335,
+   "largest": 0.120254,
+   "positive": 365,
+   "experts": 384
+  },
+  {
+   "layer": 20,
+   "smallest": -0.254711,
+   "largest": 0.096941,
+   "positive": 362,
+   "experts": 384
+  },
+  {
+   "layer": 21,
+   "smallest": -0.322664,
+   "largest": 0.075958,
+   "positive": 363,
+   "experts": 384
+  },
+  {
+   "layer": 22,
+   "smallest": -0.260288,
+   "largest": 0.084691,
+   "positive": 366,
+   "experts": 384
+  },
+  {
+   "layer": 23,
+   "smallest": -0.201706,
+   "largest": 0.101131,
+   "positive": 373,
+   "experts": 384
+  },
+  {
+   "layer": 24,
+   "smallest": -0.131723,
+   "largest": 0.117189,
+   "positive": 378,
+   "experts": 384
+  },
+  {
+   "layer": 25,
+   "smallest": -0.106709,
+   "largest": 0.117699,
+   "positive": 383,
+   "experts": 384
+  },
+  {
+   "layer": 26,
+   "smallest": -0.033848,
+   "largest": 0.110031,
+   "positive": 382,
+   "experts": 384
+  },
+  {
+   "layer": 27,
+   "smallest": 0.022744,
+   "largest": 0.108398,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 28,
+   "smallest": 0.007593,
+   "largest": 0.114479,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 29,
+   "smallest": 0.000258,
+   "largest": 0.113435,
+   "positive": 384,
+   "experts": 384
+  },
+  {
+   "layer": 30,
+   "smallest": -0.143181,
+   "largest": 0.157485,
+   "positive": 369,
+   "experts": 384
+  },
+  {
+   "layer": 31,
+   "smallest": -0.117656,
+   "largest": 0.132274,
+   "positive": 381,
+   "experts": 384
+  },
+  {
+   "layer": 32,
+   "smallest": -0.047384,
+   "largest": 0.139774,
+   "positive": 382,
+   "experts": 384
+  },
+  {
+   "layer": 33,
+   "smallest": -0.004459,
+   "largest": 0.14162,
+   "positive": 383,
+   "experts": 384
+  },
+  {
+   "layer": 34,
+   "smallest": -0.035963,
+   "largest": 0.149194,
+   "positive": 382,
+   "experts": 384
+  },
+  {
+   "layer": 35,
+   "smallest": -0.017075,
+   "largest": 0.159464,
+   "positive": 379,
+   "experts": 384
+  },
+  {
+   "layer": 36,
+   "smallest": -0.043297,
+   "largest": 0.168353,
+   "positive": 379,
+   "experts": 384
+  },
+  {
+   "layer": 37,
+   "smallest": -0.088298,
+   "largest": 0.146956,
+   "positive": 377,
+   "experts": 384
+  },
+  {
+   "layer": 38,
+   "smallest": -0.160778,
+   "largest": 0.178459,
+   "positive": 365,
+   "experts": 384
+  },
+  {
+   "layer": 39,
+   "smallest": -0.141998,
+   "largest": 0.156904,
+   "positive": 367,
+   "experts": 384
+  },
+  {
+   "layer": 40,
+   "smallest": -0.071274,
+   "largest": 0.169386,
+   "positive": 374,
+   "experts": 384
+  },
+  {
+   "layer": 41,
+   "smallest": -0.26403,
+   "largest": 0.149173,
+   "positive": 366,
+   "experts": 384
+  },
+  {
+   "layer": 42,
+   "smallest": -0.158078,
+   "largest": 0.185461,
+   "positive": 359,
+   "experts": 384
+  },
+  {
+   "layer": 43,
+   "smallest": -0.148652,
+   "largest": 0.172819,
+   "positive": 353,
+   "experts": 384
+  },
+  {
+   "layer": 44,
+   "smallest": -0.218588,
+   "largest": 0.157909,
+   "positive": 363,
+   "experts": 384
+  },
+  {
+   "layer": 45,
+   "smallest": -0.166238,
+   "largest": 0.177285,
+   "positive": 348,
+   "experts": 384
+  },
+  {
+   "layer": 46,
+   "smallest": -0.269896,
+   "largest": 0.175987,
+   "positive": 344,
+   "experts": 384
+  },
+  {
+   "layer": 47,
+   "smallest": -0.273755,
+   "largest": 0.17771,
+   "positive": 358,
+   "experts": 384
+  },
+  {
+   "layer": 48,
+   "smallest": -0.274015,
+   "largest": 0.163093,
+   "positive": 362,
+   "experts": 384
+  },
+  {
+   "layer": 49,
+   "smallest": -0.262568,
+   "largest": 0.15435,
+   "positive": 367,
+   "experts": 384
+  },
+  {
+   "layer": 50,
+   "smallest": -0.27098,
+   "largest": 0.147387,
+   "positive": 366,
+   "experts": 384
+  },
+  {
+   "layer": 51,
+   "smallest": -0.267655,
+   "largest": 0.129664,
+   "positive": 368,
+   "experts": 384
+  },
+  {
+   "layer": 52,
+   "smallest": -0.162247,
+   "largest": 0.14239,
+   "positive": 361,
+   "experts": 384
+  },
+  {
+   "layer": 53,
+   "smallest": -0.260643,
+   "largest": 0.170065,
+   "positive": 368,
+   "experts": 384
+  },
+  {
+   "layer": 54,
+   "smallest": -0.349012,
+   "largest": 0.150264,
+   "positive": 353,
+   "experts": 384
+  },
+  {
+   "layer": 55,
+   "smallest": -0.183289,
+   "largest": 0.15541,
+   "positive": 366,
+   "experts": 384
+  },
+  {
+   "layer": 56,
+   "smallest": -0.301557,
+   "largest": 0.100934,
+   "positive": 369,
+   "experts": 384
+  },
+  {
+   "layer": 57,
+   "smallest": -0.125427,
+   "largest": 0.104799,
+   "positive": 372,
+   "experts": 384
+  },
+  {
+   "layer": 58,
+   "smallest": -0.24507,
+   "largest": 0.142452,
+   "positive": 377,
+   "experts": 384
+  },
+  {
+   "layer": 59,
+   "smallest": -0.172721,
+   "largest": 0.110717,
+   "positive": 370,
+   "experts": 384
+  },
+  {
+   "layer": 60,
+   "smallest": -0.302961,
+   "largest": 0.115607,
+   "positive": 373,
+   "experts": 384
+  },
+  {
+   "layer": 61,
+   "smallest": -0.234936,
+   "largest": 0.132892,
+   "positive": 370,
+   "experts": 384
+  },
+  {
+   "layer": 62,
+   "smallest": -0.207721,
+   "largest": 0.099229,
+   "positive": 378,
+   "experts": 384
+  },
+  {
+   "layer": 63,
+   "smallest": -0.117224,
+   "largest": 0.087235,
+   "positive": 373,
+   "experts": 384
+  },
+  {
+   "layer": 64,
+   "smallest": -0.193328,
+   "largest": 0.083523,
+   "positive": 381,
+   "experts": 384
+  },
+  {
+   "layer": 65,
+   "smallest": -0.168809,
+   "largest": 0.084014,
+   "positive": 379,
+   "experts": 384
+  },
+  {
+   "layer": 66,
+   "smallest": -0.203509,
+   "largest": 0.092618,
+   "positive": 378,
+   "experts": 384
+  },
+  {
+   "layer": 67,
+   "smallest": -0.157325,
+   "largest": 0.109774,
+   "positive": 376,
+   "experts": 384
+  },
+  {
+   "layer": 68,
+   "smallest": -0.166088,
+   "largest": 0.129702,
+   "positive": 367,
+   "experts": 384
+  },
+  {
+   "layer": 69,
+   "smallest": -0.192108,
+   "largest": 0.136657,
+   "positive": 371,
+   "experts": 384
+  }
+ ]
+}

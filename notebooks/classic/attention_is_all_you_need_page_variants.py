@@ -26,16 +26,18 @@ import notebooks.display.sota_figures as figures
 
 SLUG = 'AttentionIsAllYouNeed'
 INITIAL_VARIANT = 'decode-quantised'
-DECODE_WIDTH = 2440
-UNQUANTISED_DECODE_WIDTH = 2270
-CACHED_WIDTH = 2825
-UNQUANTISED_CACHED_WIDTH = 2650
-'''The wrap widths of the four variants. The labels of the quantisations widen a
-figure, so each unquantised variant takes a width of its own. At each width every row
-ends between two blocks, except that the Decode form breaks after the encoder and its
-second row ends inside the Add & Norm of the cross-attention, whose dropout, addition
-and layer normalisation start the third row. No width keeps every block of that form
-whole.'''
+DECODE_WIDTH = 1800
+UNQUANTISED_DECODE_WIDTH = 1700
+CACHED_WIDTH = 2100
+UNQUANTISED_CACHED_WIDTH = 2000
+'''The target widths of the rows of the four variants, which are planned to keep every
+block whole. The labels of the quantisations widen a figure, so each unquantised variant
+takes a width of its own. The widths were chosen on 2026-10-02. In both Decode variants
+the encoder layer stands whole on one row, the output embedding and the masked
+self-attention take the next row, and the cross-attention, the feed-forward layer and
+the output probabilities take the last. The input embedding stands beside the encoder
+layer in the reals and takes a row of its own in the quantised variant. Both Cached
+variants take two rows, the second starting at the cross-attention.'''
 DECODE_GROUP = notebook_diagrams.PageVariantGroup('decode', 'Decode')
 CACHED_GROUP = notebook_diagrams.PageVariantGroup('cached', 'Cached')
 

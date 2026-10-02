@@ -29,7 +29,11 @@ Four groups of checks, all on fixtures built here, so none of them needs a noteb
     expansion rewrites as it rewrites the consumers of a `ConcatenatedAxis`;
 
   * the reverse derivative of a merge and of a concatenation, whose domain and
-    codomain are the codomain and the domain of the operator they reverse.
+    codomain are the codomain and the domain of the operator they reverse;
+
+  * the positions of a guarded axis that hold a value, per `write_guard_ranges`: an
+    interval for a window and for a causal read, and a condition for a strided read
+    and for a read that reaches both ends of its axis.
 
 Structural assertions rather than a listing diff, except for the expansion, where the
 two forms are built in one process and the listings are therefore comparable.
@@ -59,6 +63,7 @@ import term_utilities.term_utilities as tutil
 import advanced_axis_dynamics.algebra.concatenation_expansion as concatenation_expansion
 import advanced_axis_dynamics.algebra.mark_sparse_codomains as mark_sparse_codomains
 import advanced_axis_dynamics.algebra.mark_sparse_domains as mark_sparse_domains
+import advanced_axis_dynamics.algebra.write_guard_ranges as write_guard_ranges
 import advanced_axis_dynamics.data_structure.AffineGuards as AffineGuards
 import advanced_axis_dynamics.data_structure.AxisConcatenation as AxisConcatenation
 import advanced_axis_dynamics.data_structure.Operators as aops
@@ -667,8 +672,31 @@ def check_reverse_rules() -> None:
     assert tuple(reverse.cod()) == tuple(merge.dom())
 
 
+def check_writing_the_positions_that_hold_a_value() -> None:
+    '''The positions of a guarded axis that hold a value, per `write_guard_ranges`: an
+    interval where the stride is 1 or -1, with a bound of the axis kept only where the
+    form does not imply it, and the condition for every stride.'''
+    r = guarded_reads()
+    guarded = {axis.uid._name.to_latex(): axis
+               for key in ('window_view', 'indexer')
+               for axis in tutil.type_search(AffineGuards.AffineSparseAxis, r[key])
+               if axis.guides}
+    window, back, strided, reach = (
+        guarded[name] for name in ('w|x', 'r|b0', 'r|x', 'a|b0'))
+    window_interval = write_guard_ranges.guarded_interval(window, ('i_{x}',))
+    assert window_interval == '[0, \\min(i_{x}, |w| - 1)]', window_interval
+    assert write_guard_ranges.guarded_condition(window, 'j', ('i_{x}',)) == 'j \\le i_{x}'
+    assert write_guard_ranges.guarded_interval(back, ('i_{b_0}',)) == '[0, i_{b_0}]'
+    assert write_guard_ranges.guarded_interval(strided, ('i_{x}',)) is None
+    assert write_guard_ranges.guarded_condition(strided, 'j', ('i_{x}',)) == (
+        '|a|\\, j \\le i_{x} + 1 - |a|')
+    assert write_guard_ranges.guarded_condition(reach, 'j', ('i_{b_0}',)).count(
+        '\\le') == 2, 'a form that reaches both ends bounds the index on both sides'
+
+
 CHECKS = (
     check_guarded_reads,
+    check_writing_the_positions_that_hold_a_value,
     check_concatenation_expansion,
     check_concatenation_expansion_through_a_block,
     check_the_box_states_the_core_over_every_head,

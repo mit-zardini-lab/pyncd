@@ -11,12 +11,14 @@ from its quantised variant by applying the functor
 cast between two quantisations of one value, so the file carries two terms.
 
 The quantised forms label every wire with its quantisation, so they are wider than the
-unquantised forms, and each variant carries a wrap width of its own. Each width stands
-in the middle of the window of widths at which every block of the variant is drawn in
-one row, found on 2026-09-27 by writing the page at every 50 pixels from 1350 to 2050
-and counting the regions of every block fill of every variant. The decoder layer is
-drawn over two rows at every one of the four widths, the second row starting at the
-residual connection around the mixture of experts.
+unquantised forms, and each variant carries a wrap width of its own. Each width is the
+target of rows planned to keep every block whole, and was chosen on 2026-10-02 by
+drawing the variant at several widths. In each of the four variants the input embedding
+takes the first row, the residual connection around the attention takes the second, and
+the residual connection around the mixture of experts and the output projection take the
+third. A narrower target leaves the addition of the attention residual alone at the start
+of the third row. The planner then estimates that a row holding the attention and its
+addition runs more than 15% over the target, which is the most a row may run over it.
 
 `notebooks/website/classic/Mixtral8x7B.ipynb` writes the page with
 `page_variants`, and its validator reads the legend of every variant through the same
@@ -35,14 +37,13 @@ import notebooks.display.sota_figures as figures
 
 SLUG = 'Mixtral8x7B'
 INITIAL_VARIANT = 'decode-quantised'
-DECODE_QUANTISED_WIDTH = 1775
-'''The middle of the window from 1700 to 1850.'''
-DECODE_UNQUANTISED_WIDTH = 1475
-'''The middle of the window from 1400 to 1550.'''
-CACHED_QUANTISED_WIDTH = 1900
-'''The middle of the window from 1800 to 2000.'''
-CACHED_UNQUANTISED_WIDTH = 1625
-'''The middle of the window from 1550 to 1700.'''
+DECODE_QUANTISED_WIDTH = 1300
+'''The narrowest of 1200, 1250 and 1300 at which the attention keeps its addition.'''
+DECODE_UNQUANTISED_WIDTH = 1000
+CACHED_QUANTISED_WIDTH = 1400
+'''The narrowest of 1300, 1350 and 1400 at which the attention keeps its addition.'''
+CACHED_UNQUANTISED_WIDTH = 1150
+'''The narrowest of 1100 and 1150 at which the attention keeps its addition.'''
 DECODE_GROUP = notebook_diagrams.PageVariantGroup('decode', 'Decode')
 CACHED_GROUP = notebook_diagrams.PageVariantGroup('cached', 'Cached')
 

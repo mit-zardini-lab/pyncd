@@ -76,6 +76,7 @@ def display_settings(
     title: str | None = None,
     heading: wst.PageHeading | None = None,
     displayMode: wst.DisplayMode | None = None,
+    multilineSizing: wst.MultilineSizing | None = None,
 ) -> wst.RenderHandlerSettings:
     '''
     Collect the display options into the partial dict the client expects.
@@ -88,7 +89,9 @@ def display_settings(
     boolean on the wire. A boolean remains accepted by the public functions.
 
     `width` is the px at which a morphism wraps onto another line, and so
-    controls the figure's proportions rather than its scale.
+    controls the figure's proportions rather than its scale. `multilineSizing`
+    says how the rows are divided, and is sent as the boolean
+    `dynamicMultilineSizing`, true for `MultilineSizing.DYNAMIC`.
 
     `drawnBlockTags` names the `BlockTag`s, each by its `uid._id`, whose bodies
     the client is to leave out because an earlier send already drew them. The
@@ -152,6 +155,9 @@ def display_settings(
         settings['heading'] = heading.value
     if displayMode is not None:
         settings['displayMode'] = displayMode.value
+    if multilineSizing is not None:
+        settings['dynamicMultilineSizing'] = (
+            multilineSizing is wst.MultilineSizing.DYNAMIC)
     return settings
 
 
@@ -176,6 +182,7 @@ async def send_morphism(
     heading: wst.PageHeading | None = None,
     auxiliary: wst.DiagramAuxiliary | None = None,
     displayMode: wst.DisplayMode | None = None,
+    multilineSizing: wst.MultilineSizing | None = None,
 ) -> None:
     '''
     Display `target`, converting it to a morphism first if it is a hypergraph.
@@ -201,5 +208,5 @@ async def send_morphism(
             darkMode, debugBorders, coreDebug, width, subBlocks,
             drawnBlockTags, tapeLabels, legend, inspectionBoxes,
             axisHover, axisLabelFontSize, form, controls, title, heading,
-            displayMode),
+            displayMode, multilineSizing),
         auxiliary=auxiliary)

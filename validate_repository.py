@@ -16,6 +16,14 @@ a rename breaks one.
 
     python validate_repository.py            # all five
     python validate_repository.py imports    # one of them
+    python validate_repository.py imports calls --reaching algebra/x.py
+                                             # only the files that reach algebra/x.py
+
+With `--reaching`, `imports` imports only the modules whose dependencies in the import
+graph of `validations/module_import_graph.py` include one of the given files.
+`notebooks` and `calls` read only the notebooks whose dependencies include one of
+them, and `validators` runs only the validators whose dependencies include one. `vault` reads every note
+whatever is given, because a moved file can break a note anywhere.
 
 `validations/` holds the registry of every validation in the repository and the
 runner that executes several at once. The `validators` check here is that runner
@@ -27,14 +35,20 @@ checks, the validator scripts and the notebooks in one run.
 
 from __future__ import annotations
 
+import argparse
+import ast
 import importlib
+import importlib.util
+import inspect
 import io
+import json
 import os
 import pathlib
 import re
 import sys
 import traceback
 
+import validations.module_import_graph as module_import_graph
 import validations.run_validation_targets as run_validation_targets
 import validations.validation_targets as validation_targets
 
@@ -76,14 +90,20 @@ def module_names_under(root: pathlib.Path) -> list[str]:
     return names
 
 
+def module_path_of(dotted_name: str) -> str:
+    return f'{dotted_name.replace(".", "/")}.py'
+
+
 @validation_targets.repository_check(
     name='imports', dependency_rule=validation_targets.DependencyRule.EVERY_MODULE,
-    cost=validation_targets.CostClass.SECONDS)
-def check_imports() -> list[str]:
-    '''Import every module and collect the ones that raise.'''
+    cost=validation_targets.CostClass.MINUTES)
+def check_imports(is_checked: validation_targets.FileFilter) -> list[str]:
+    '''Import every module the filter accepts and collect the ones that raise.'''
     sys.path.insert(0, str(REPOSITORY_ROOT))
     failures = []
     for name in module_names_under(REPOSITORY_ROOT):
+        if not is_checked(module_path_of(name)):
+            continue
         try:
             importlib.import_module(name)
         except BaseException:
@@ -92,8 +112,9 @@ def check_imports() -> list[str]:
     return failures
 
 
-def check_validators() -> list[str]:
-    '''Run every discovered `validate_*.py` script at once and collect the failures.
+def check_validators(is_checked: validation_targets.FileFilter) -> list[str]:
+    '''Run every discovered `validate_*.py` script the filter accepts at once and
+    collect the failures.
 
     The scripts come from `validations.validation_targets.validator_targets`, which
     finds them by their name at a feature root, so a new feature's validator runs
@@ -102,7 +123,8 @@ def check_validators() -> list[str]:
     take.
     '''
     results = run_validation_targets.run_targets(
-        validation_targets.validator_targets(REPOSITORY_ROOT), REPOSITORY_ROOT)
+        tuple(target for target in validation_targets.validator_targets(REPOSITORY_ROOT)
+              if is_checked(target.name)), REPOSITORY_ROOT)
     return list(run_validation_targets.failures_of(results))
 
 
@@ -138,9 +160,12 @@ def is_log(text: str) -> bool:
 @validation_targets.repository_check(
     name='vault',
     dependency_rule=validation_targets.DependencyRule.EVERY_INDEXED_FILE,
-    cost=validation_targets.CostClass.SECONDS)
-def check_vault() -> list[str]:
+    cost=validation_targets.CostClass.SECONDS, can_check_a_subset=False)
+def check_vault(is_checked: validation_targets.FileFilter) -> list[str]:
     '''Every wiki link, `code:` path and file mention in the vault resolves.
+
+    Every note is read whatever the filter accepts, because a file that moved can
+    break a note anywhere in the vault.
 
     Three exemptions. A link written inside backticks is being quoted rather
     than followed. A path named in a log may be one that has since moved,
@@ -209,8 +234,8 @@ def local_package_names() -> set[str]:
 @validation_targets.repository_check(
     name='notebooks',
     dependency_rule=validation_targets.DependencyRule.EVERY_MODULE_AND_NOTEBOOK,
-    cost=validation_targets.CostClass.SECONDS)
-def check_notebook_imports() -> list[str]:
+    cost=validation_targets.CostClass.TENS_OF_SECONDS)
+def check_notebook_imports(is_checked: validation_targets.FileFilter) -> list[str]:
     '''Every repository module a notebook imports still exists.
 
     `check_imports` does not reach these, because a notebook is not imported. A
@@ -218,14 +243,13 @@ def check_notebook_imports() -> list[str]:
     is how `from data_transfer import json` survived that module being renamed.
     Third-party and standard-library imports are not this check's business.
     '''
-    import importlib.util
-    import json
-
     sys.path.insert(0, str(REPOSITORY_ROOT))
     sys.path.insert(0, str(REPOSITORY_ROOT / 'notebooks'))
     local = local_package_names()
     failures = []
     for relative in validation_targets.notebook_paths():
+        if not is_checked(relative):
+            continue
         path = REPOSITORY_ROOT / relative
         notebook = json.loads(io.open(path, encoding='utf-8').read())
         source = flatten_parenthesised_imports('\n'.join(
@@ -251,7 +275,6 @@ def check_notebook_imports() -> list[str]:
 
 def resolves(name: str) -> bool:
     '''Whether `name` imports as a module.'''
-    import importlib.util
     try:
         return importlib.util.find_spec(name) is not None
     except (ImportError, ModuleNotFoundError, ValueError, AttributeError):
@@ -285,8 +308,8 @@ NOTEBOOK_ALIAS = re.compile(
 @validation_targets.repository_check(
     name='calls',
     dependency_rule=validation_targets.DependencyRule.EVERY_MODULE_AND_NOTEBOOK,
-    cost=validation_targets.CostClass.SECONDS)
-def check_notebook_calls() -> list[str]:
+    cost=validation_targets.CostClass.MINUTES)
+def check_notebook_calls(is_checked: validation_targets.FileFilter) -> list[str]:
     '''Every module-qualified call in a notebook matches the function it names.
 
     A notebook is never imported, so nothing else notices when a function it calls
@@ -295,15 +318,12 @@ def check_notebook_calls() -> list[str]:
     arguments against the signature. It found `sk._rescope(..., top=True)` after
     that parameter was renamed to `is_outermost`.
     '''
-    import ast
-    import inspect
-    import importlib
-    import json
-
     sys.path.insert(0, str(REPOSITORY_ROOT))
     local = local_package_names()
     failures = []
     for relative in validation_targets.notebook_paths():
+        if not is_checked(relative):
+            continue
         path = REPOSITORY_ROOT / relative
         notebook = json.loads(io.open(path, encoding='utf-8').read())
         source = '\n'.join(
@@ -367,11 +387,46 @@ CHECKS = {
 }
 
 
-def main(selected: list[str]) -> int:
-    names = selected or list(CHECKS)
+class UnknownCheck(Exception):
+    '''A check was named that is not a key of `CHECKS`.'''
+
+
+def command_line_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description='Run the repository-wide checks.')
+    parser.add_argument(
+        'checks', metavar='CHECK', nargs='*',
+        help=f'a check to run, one of {", ".join(CHECKS)}; every check when none is '
+             'named')
+    parser.add_argument(
+        validation_targets.MODIFIED_FILES_OPTION, dest='reaching', metavar='PATH',
+        nargs='+', default=[],
+        help='check only the files whose dependencies include one of these paths')
+    return parser
+
+
+def accept_every_file(path: str) -> bool:
+    return True
+
+
+def files_reaching(modified: list[str]) -> validation_targets.FileFilter:
+    '''A filter accepting the files whose dependencies include one of `modified`.'''
+    graph = module_import_graph.build_import_graph(REPOSITORY_ROOT)
+    wanted = frozenset(modified)
+    return lambda path: bool(graph.paths_depended_on(path) & wanted)
+
+
+def main(argv: list[str]) -> int:
+    arguments = command_line_parser().parse_args(argv)
+    unknown = [name for name in arguments.checks if name not in CHECKS]
+    if unknown:
+        raise UnknownCheck(f'{", ".join(unknown)} named, and the checks are '
+                           f'{", ".join(CHECKS)}')
+    names = arguments.checks or list(CHECKS)
+    is_checked = (files_reaching(arguments.reaching) if arguments.reaching
+                  else accept_every_file)
     total = 0
     for name in names:
-        failures = CHECKS[name]()
+        failures = CHECKS[name](is_checked)
         total += len(failures)
         print(f'{name}: {"ok" if not failures else f"{len(failures)} failures"}')
         for failure in failures:

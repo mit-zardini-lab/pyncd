@@ -1,6 +1,7 @@
 '''Running validation targets concurrently, each as its own subprocess.
 
-Written by Claude Opus 5 (1M context), effort high.
+Written by Claude Opus 5 (1M context), effort high. The ordering by recorded duration
+was added by Claude Opus 5.5 (1M context), effort 40.
 
 Every target is already a process: a validator is a script and a notebook runs under
 a Jupyter kernel that `notebooks/execute_notebook.py` starts. A thread per target is
@@ -10,6 +11,12 @@ than running Python, and the interpreter lock it holds while it waits is release
 
 `DEFAULT_JOBS` is eight rather than the core count, so that a target starting worker
 processes of its own does not oversubscribe the machine.
+
+The targets start longest first, in the order returned by
+`order_targets_by_duration.longest_first`. Once every target has finished, the
+duration of each target that passed is recorded for the next run, under the key
+returned by `ValidationTarget.duration_key`. A target that failed may have stopped
+early, and recording that time would start the target late once it passes again.
 
 A timeout kills the subprocess. On Windows it does not kill the Jupyter kernel that
 `execute_notebook.py` started under it, so a timed-out notebook can leave a kernel
@@ -28,6 +35,7 @@ import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
+import validations.order_targets_by_duration as order_targets_by_duration
 import validations.validation_targets as validation_targets
 
 REPOSITORY_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -83,7 +91,7 @@ def run_one_target(
 ) -> TargetResult:
     '''Run one target from the repository root and collect its exit code, its wall
     time and its combined output.'''
-    command = [sys.executable, *target.command]
+    command = [sys.executable, *target.arguments()]
     started = time.perf_counter()
     try:
         finished = subprocess.run(
@@ -107,7 +115,8 @@ def run_targets(
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
     report: Callable[[str], None] = print,
 ) -> tuple[TargetResult, ...]:
-    '''Run every target with at most `jobs` at once, reporting each as it finishes.
+    '''Run every target with at most `jobs` at once, longest first, reporting each as
+    it finishes.
 
     The results come back in the order the targets were given, whatever order they
     finished in, so that two runs print the same summary.
@@ -115,17 +124,22 @@ def run_targets(
     ordered = tuple(targets)
     if not ordered:
         return ()
+    started_in_order = order_targets_by_duration.longest_first(
+        ordered, order_targets_by_duration.recorded_durations(root))
     reporting = threading.Lock()
     results: dict[str, TargetResult] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:
         running = {
             pool.submit(run_one_target, target, root, timeout): target
-            for target in ordered}
+            for target in started_in_order}
         for future in concurrent.futures.as_completed(running):
             result = future.result()
             results[result.target.name] = result
             with reporting:
                 report(result.finished_line())
+    order_targets_by_duration.record_durations(
+        {result.target.duration_key(): result.seconds
+         for result in results.values() if result.passed}, root)
     return tuple(results[target.name] for target in ordered)
 
 

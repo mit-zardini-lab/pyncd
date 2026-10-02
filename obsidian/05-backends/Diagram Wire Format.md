@@ -164,6 +164,20 @@ Measured on the transformer, the effect is sharp:
 The default suits a screen. A figure spanning a paper's text block usually needs 1000 to
 1400.
 
+`dynamicMultilineSizing` (default `true` since 2026-10-01) says how a figure
+wider than `width` is divided into rows. Under `false` each row is filled until the width
+runs out, and the block open at that point is cut at whatever depth it has.
+Under `true` the rows are planned by dynamic programming over the leaves of the
+figure's blocks, with `width` as the target of each row, and a row may run over
+the width by 15% to keep a block whole. A break between two whole blocks costs
+nothing, a break inside a block costs more the deeper and the more repeated the
+block, a break inside a block that fits on a row of its own costs most, a piece
+of a cut block narrower than a third of it costs a great deal, and every row
+pays for the square of its shortfall from the width, so the rows come out of
+similar width. `src/display/Framework/dynamicMultilineSizing.ts` states the
+costs. A notebook sends the setting for `DiagramSettings.multiline_sizing`,
+`false` for `MultilineSizing.FIXED` and `true` for `DYNAMIC`.
+
 `subBlocks`, which defaults to `true`, settles whether the body of a `BlockOperator` is drawn
 as a sub-diagram beside the main figure. A figure export needing the high-level view
 alone, with each box's body as its own figure, sends `false`.
@@ -289,8 +303,8 @@ from a notebook as a `wst.DiagramForm`.
 
 `controls` (default `hidden`) says whether the page draws one row of controls under its
 heading and outside the diagram container. The row holds the selector of variants on a
-page carrying several, and then the buttons that switch the form and the theme of the
-figure.
+page carrying several, then the buttons that switch the form and the theme of the
+figure, then a box holding the wrap width and the buttons of the sizing.
 [A page that switches its form and its theme](#a-page-that-switches-its-form-and-its-theme)
 describes the buttons. Under `hidden` the whole row is hidden, the selector with it. A
 notebook sends `shown` unless `DiagramSettings.controls` says `HIDDEN`, and a captured
@@ -653,7 +667,8 @@ three ways.
 - The row of controls under the heading, drawn where the message says
   `controls: shown`. The row holds the selector of variants on a page carrying several,
   one group naming the three forms and one naming the two themes, with the current
-  choice marked.
+  choice marked, a box holding the wrap width the figure was drawn at, and the
+  buttons Fixed and Dynamic of the sizing.
 - The address of the page. The query parameters `form`, `darkMode` (`true` or `false`)
   and `controls` (`shown` or `hidden`) set the form, the theme and the controls of the
   page's own figure, as `displayMode` sets its mode, so a host page holding the figure
@@ -691,6 +706,24 @@ applied to the page's own message above the query parameters. The relay page swi
 the last term received the same way, and a page inside an inspection box draws no
 controls. `src/advanced_display/displaySelector.ts` draws the row, holds the switch and
 follows the system's theme. The user asked for the switch on 2026-09-26.
+
+The box of the width holds the `width` setting in pixels. A width typed into it
+is applied when the reader presses the enter key or leaves the box, and the
+switch then draws the held term again at that width, so the figure is placed
+again from the start with its rows wrapped at the new width. A width under 200
+pixels, or text that is not a number, is refused, and the box shows the width
+on display again. Each variant of a page carries a width of its own, and a
+variant is drawn at its own width until the reader types one, after which every
+variant is drawn at the width typed. The width is not written into the address,
+and the address, a host's message and `window.tsncd.display` do not set it. The
+user asked for the box on 2026-09-29.
+
+The buttons of the sizing, Fixed and Dynamic, stand after the box of the width
+and set `dynamicMultilineSizing` through the same switch. A variant is drawn
+with its own sizing until the reader presses one, after which every variant is
+drawn with the sizing pressed. The address, a host's message and
+`window.tsncd.display` do not set it. The user asked for the setting on
+2026-09-29.
 
 ### A page that reads its address strictly and reports its state to a host
 
@@ -831,6 +864,10 @@ optional in turn.
      "codeName": "hidden", "sizeCodeName": "hidden_size",
      "uids": [1670598927]}
   ],
+  "naturals": [
+    {"latex": "|v|_{32000}", "size": "32000", "codeName": "vocabulary_size",
+     "key": "#1495078367"}
+  ],
   "blocks": {
     "10175062": {
       "title": "\\text{Norm block}",
@@ -840,15 +877,17 @@ optional in turn.
         {"label": "inference/model.py L281-L293", "url": "https://huggingface.co/…",
          "path": "inference/model.py", "line": 281, "endLine": 293,
          "icon": "huggingface"}
-      ]
+      ],
+      "indices": []
     }
   },
   "expansions": {
     "2": {
-      "operator": "Normalize",
-      "latex": "RMSNorm",
-      "formula": "\\mathrm{RMSNorm}_{m}(x) = …",
-      "description": "Each value scaled by the inverse square root of …",
+      "operator": "Caching",
+      "latex": "K",
+      "formula": "y[i_{P}] = \\mathrm{cache}[i_{P}], \\qquad y[\\lvert P \\rvert + j_{x}] = v[j_{x}], …",
+      "description": "The entries the cache holds for the tokens P of the earlier passes …",
+      "indices": [{"index": "i_{P}", "axis": "P"}, {"index": "j_{x}", "axis": "x"}],
       "expansion": "{\"uid_repository\": …, \"data\": …}",
       "auxiliary": { … },
       "references": [ … ]
@@ -866,6 +905,16 @@ on the axis's `uid`, and is what links the row to the wires of the figure. A
 sender from before the field existed leaves it out, and the row then answers no
 pointer.
 
+`naturals` is the second table of the legend, one row per `cat.Natural` that is the
+datatype of an array of the term, sorted by `latex`, which is the bound the values of the
+natural stay below. `size` is the integer the bound comes to, written as a string of
+decimal digits because the bound of a 64-bit integer is larger than the largest integer
+a JavaScript number holds exactly, or null. `codeName` is the bound written in the code
+names of its symbols, or null where a symbol of it has none. `key` is the structure of
+the bound as `auxiliary_information.natural_key` writes it, and tsncd's
+`src/data_structure_processing/find_naturals_by_key.ts` writes the same key for the natural of every wire, which links the row
+to those wires. [[Advanced Display]] states the key. The field was added on 2026-09-27.
+
 `blocks` is keyed by the uid of each block's tag, written as a decimal string,
 which is the integer the JSON carries on the tag's `uid`. A box is opened from
 the operator glyph of a `BlockOperator`, and the block it opens is the one that
@@ -875,7 +924,15 @@ The sender writes `huggingface` for a link whose host is `huggingface.co`, from 
 table `auxiliary_information.REFERENCE_ICONS`, and `null` for every other link, and
 tsncd holds the drawing of each icon under the same name and tests no url itself.
 `formula` is LaTeX drawn under the title, and is what a block drawn in place explains
-its operator with.
+its operator with. Its indices arrive lettered, i, j, k in the order the formula names
+them. `indices` lists the indices the formula holds for every position of their axes,
+each as the formula writes the index and as it writes the axis, and tsncd draws them on a
+line under the formula, $\forall i_{P} \in P,\; j_{x} \in x$. An expansion carries the
+same two fields. The index of a guarded axis carries `condition`, the LaTeX of the
+condition under which a position of the axis holds a value, and, where the stride of the
+axis is 1 or -1, `range`, the interval of those positions, which the line writes in place
+of the axis. Both were added on 2026-09-28. [[Indices of Inspection Box Formulas]]
+states how the letters, the list and the ranges are written.
 
 `expansions` is keyed by the number the client gives each `Broadcasted` as it
 builds the term. `TermJSONConverter.to_term` walks the document depth first, in

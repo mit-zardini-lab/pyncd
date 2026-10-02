@@ -20,7 +20,12 @@ import notebooks.display.notebook_diagrams as notebook_diagrams
 
 SLUG = 'DeepSeekV3'
 INITIAL_VARIANT = 'decode-quantised'
-PAGE_WIDTH = 960
+PAGE_WIDTH = 700
+'''The target width of the rows of all four forms, which are planned to keep every block
+whole. The dense layer takes a row and the MoE layer takes the next, and the output
+projection takes the last. The embedding stands beside the dense layer in the forms in
+the reals, and takes a row of its own in the quantised forms, whose labels are wider.
+The width was chosen on 2026-10-02.'''
 
 DECODE_GROUP = notebook_diagrams.PageVariantGroup('decode', 'Decode')
 CACHED_GROUP = notebook_diagrams.PageVariantGroup('cached', 'Cached')

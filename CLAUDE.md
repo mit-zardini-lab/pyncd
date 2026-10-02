@@ -1003,15 +1003,15 @@ this way.
 
 # Running the checks
 
-`validations/` finds every validation in the repository and runs the selected ones at
-once as subprocesses. A validator is any `validate_*.py` at a feature root, found by
-that name rather than read from a list, so a new feature's validator runs as soon as
-the file exists. A notebook is a validation too, because it asserts what it claims with
-the diagrams off. The checks of `validate_repository.py` are the third kind.
+Validate a change by passing the modified files to the runner.
+`validations/run_validations.py` works out which validations depend on those files and
+runs them at once, each in its own process, with the longest started first.
 
 ```bash
-# the targets that import a file git reports as modified, and every target when the
-# working tree is clean
+python validations/run_validations.py algebra/x.py caching/  # what these paths reach
+python validations/run_validations.py --plan algebra/x.py    # the selection and its
+                                                             # expected time, not run
+# what git reports as modified, and every target when the working tree is clean
 python validations/run_validations.py
 python validations/run_validations.py --all              # every target
 python validations/run_validations.py --kind validator   # the validate_*.py scripts
@@ -1019,36 +1019,65 @@ python validations/run_validations.py --name Attention   # by name, matched loos
 python validations/run_validations.py --since main       # what changed since a ref
 python validations/run_validations.py --list             # targets and dependencies
 python validations/run_validations.py --dependencies-of BuildingAModel
+python validations/run_validations.py --reach-by-folder  # how far a change reaches
 
 # every module imports, every notebook's imports and calls resolve, the
 # validators pass, and every link and path in the vault resolves
 python validate_repository.py
 python validate_repository.py imports        # or one check at a time
+python validate_repository.py imports --reaching algebra/x.py
 ```
 
-There are fifty-six targets: four repository checks, thirty-three validators and
-nineteen notebooks. Only code that depends on a modified feature needs validating, which is the
-reason the features are kept in separate folders, and the default run selects exactly
-that. `--include-excluded` runs any target carrying a reason to be left out, and
+A path may be relative to the repository root or absolute, with either kind of slash,
+and a folder stands for every file in it. Paths given as arguments replace what git
+reports, so that an agent working beside other sessions validates its own change alone.
+
+There are three kinds of validation, and each is a target of the runner. A validator is
+any `validate_*.py` under a feature, found by that name rather than read from a list, so
+a new feature's validator runs as soon as the file exists. A notebook is a validation
+too, because it asserts what it claims with the diagrams off. The checks of
+`validate_repository.py` are the third kind. On 2026-10-01 there were sixty-one targets:
+four repository checks, thirty-six validators and twenty-one notebooks.
+
+A target is selected when one of the modified files is among its dependencies. The
+dependencies of a validator or a notebook are the files imported by it at any depth,
+read from the import statements with `ast`, the data files named in its string literals,
+and the modules imported by it that no longer exist. A deleted or renamed module
+therefore selects every file still importing it. The parse of each file is stored in
+`.cache/validations/`, which git ignores, and a run parses again only the files changed
+since the last run, so the selection takes under a second.
+
+A repository check reads every module or every notebook. When a run is selected by
+modified files, the `imports`, `notebooks` and `calls` checks check only the modules and
+notebooks whose dependencies include a modified file. The runner lists each modified file
+reached by no validator or notebook. Only the repository checks cover such a file, and
+they test that it imports. Add the assertion that covers it to the validator or the
+notebook of its feature.
+
+Every target runs beside up to seven others. Write the temporary files of a validator
+into a directory made by `tempfile`, because a file written into the repository is seen
+by every other target and by git. Bind port 0, so that the system chooses a free port.
+Read nothing written by another target, because the order in which targets finish
+changes from run to run. Name each data file read by a validator in a string literal,
+relative to the validator's folder or to one of its ancestors, so that the graph records
+the read.
+
+The runner records the duration of every target that passed in `.cache/validations/`.
+The next run starts the longest targets first, and `--plan` prints the wall time it
+expects. `--include-excluded` runs any target carrying a reason to be left out, and
 `--list` gives the reason beside each.
 
 Run `validate_repository.py` after moving or renaming anything.
 
-The validators are `data_structure/validate_numeric_signs.py`,
-`data_structure/validate_units_of_measure.py`,
-`algebra/validate_discovering_broadcasts.py`, `algebra/validate_simplification.py`,
-`para/validate_backward.py`, which checks derived gradients against `torch.autograd`,
-`para/validate_loop_seeds.py`, `para/validate_para_block_operator.py`,
-`deepseek/validate_rotary.py`, `deepseek/validate_sparse.py`,
-`advanced_axis_dynamics/validate_advanced_axis_dynamics.py`,
-`advanced_axis_dynamics/validate_covariant_broadcast.py`,
-`quantization/validate_quantization.py`, `caching/validate_caching.py`,
-`utilities/validate_wording_json.py`, the four under `websocket_transfer/`, the six in
-the packages under `notebooks/sota/`, and the nine beside the notebooks under
-`notebooks/website/`, which `python validations/run_validations.py --name website`
-runs with those notebooks.
-`python validations/run_validations.py --list --kind validator` lists every one of them,
-because they are discovered rather than named here.
+`python validations/run_validations.py --list --kind validator` lists every validator,
+because they are discovered rather than named here. Among them,
+`para/validate_backward.py` checks derived gradients against `torch.autograd`, and the
+eleven beside the notebooks under `notebooks/website/` run with those notebooks under
+`python validations/run_validations.py --name website`.
+
+tsncd has a runner of the same shape. `npm run validate` in `../tsncd` runs the tests and
+the typechecks reached by the files git reports as modified, and `npm run validate:all`
+runs every one.
 
 # Reading a morphism
 

@@ -41,6 +41,7 @@ import data_structure.Category as cat  # noqa: E402
 import data_structure.Numeric as nm  # noqa: E402
 import data_structure.Operators as ops  # noqa: E402
 import data_structure.Term as fd  # noqa: E402
+import data_transfer.broadcast_occurrences as broadcast_occurrences  # noqa: E402
 import deepseek.data_structure as dst  # noqa: E402
 import graphs.processing.Hypergraph2Morphism as h2m  # noqa: E402
 import quantization.data_structure.Quantization as Quantization  # noqa: E402
@@ -726,6 +727,40 @@ def check_every_legend_row_carries_a_code_name() -> None:
                         f'the size of {axis.uid._name.to_bodies()} has no code name')
 
 
+def check_every_cache_of_the_page_opens_a_box() -> None:
+    '''Every cache of both cached variants opens an inspection box that writes the cache
+    out, and the formula of the box holds the index of the earlier tokens `x_old` and
+    the index of the new tokens `x_new` for every position of their axes. The second
+    table of the
+    legend of both cached variants lists the token identifiers, whose values stay below
+    the 32000 tokens of the vocabulary.'''
+    by_identifier = {variant.identifier: variant for variant in VARIANTS}
+    source = by_identifier['cached-quantised']
+    derived = by_identifier['cached-unquantised']
+    sent = notebook_diagrams.sent_figure(
+        source.term, notebook_diagrams.settings_of_page_variant(source, by_identifier, PAGE))
+    caches = [str(number) for number, node in enumerate(
+                  broadcast_occurrences.number_broadcasts_in_import_order(sent.morphism))
+              if isinstance(node.operator, Caching.Caching)]
+    require(caches, 'the cached pass holds no cache')
+    for identifier, auxiliary in (
+            (source.identifier, sent.auxiliary),
+            (derived.identifier,
+             notebook_diagrams.auxiliary_of_derived_variant(sent, derived.settings))):
+        expansions = auxiliary['expansions']
+        unopened = [number for number in caches
+                    if expansions.get(number, {}).get('operator') != 'Caching']
+        require(not unopened, f'the caches {unopened} of {identifier} open no box')
+        indices = {tuple(record['index'] for record in expansions[number]['indices'])
+                   for number in caches}
+        require(indices == {('i_{x_{old}}', 'j_{x_{new}}')},
+                f'the boxes over the caches of {identifier} range over {indices}')
+        naturals = [(row['latex'], row['size'], row['codeName'])
+                    for row in auxiliary['naturals']]
+        require(naturals == [('|v|_{32000}', '32000', 'vocabulary_size')],
+                f'the legend of {identifier} lists the naturals {naturals}')
+
+
 def check_every_wire_and_view_of_the_page_opens_as_drawn() -> None:
     '''Every wire of a quantised variant as it is sent to the page carries its
     quantisation, and every named view of every variant opens an inspection box, the
@@ -778,6 +813,7 @@ CHECKS: tuple[Callable[[], None], ...] = (
     check_removing_the_quantisations_returns_the_cached_pass,
     check_the_page_holds_four_variants,
     check_every_legend_row_carries_a_code_name,
+    check_every_cache_of_the_page_opens_a_box,
     check_every_wire_and_view_of_the_page_opens_as_drawn,
 )
 

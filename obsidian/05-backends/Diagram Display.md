@@ -85,7 +85,8 @@ All four take the display settings of the `settings` channel in [[Diagram Wire F
 Beside those, `subBlocks` settles whether the body of an `ops.BlockOperator` is drawn as a
 sub-diagram beside the main figure.
 
-`width` is the wrap width, and `Multiline.ts` in tsncd fills each row greedily. A
+`width` is the wrap width. Under `multiline_sizing=MultilineSizing.FIXED`,
+`Multiline.ts` in tsncd fills each row greedily. A
 sequential composition places as many of its members as fit in the row. When the next
 member is a block, tsncd splits the body of the block and places the first members of the
 body whenever any of them fit, so the row ends inside that block. A row ends between two
@@ -97,6 +98,27 @@ and the one width has to satisfy every row of the figure. The window moves whene
 block of the figure changes width. The widths of the pages of [[Website Notebooks]] were
 found by drawing each figure at a sweep of widths and measuring the fill of every block
 in the captured image.
+
+`MultilineSizing.DYNAMIC` removes the window, and it has been the default since
+2026-10-01, when the user asked for it. It sends `dynamicMultilineSizing`, and tsncd then
+plans the rows of every wrapped figure by dynamic programming over the leaves of its
+blocks, with `width` as the target of each row. A break between two whole blocks costs
+nothing, and a break inside a block costs more the deeper the block is. A break inside a
+block that fits on a row of its own costs most. A row may run over the width by 15% to
+keep a block whole, and each row pays for its shortfall from the width, so the rows come
+out of similar width. A block wider than the width stands on a row of its own, so a
+short block before it can stand alone on the row above. A page carries both sizings,
+and the buttons Fixed and Dynamic in its row of controls switch between them.
+`src/display/Framework/dynamicMultilineSizing.ts` in tsncd states the costs.
+
+The limit of 15% can still leave the end of a block alone at the start of a row. When the
+planner estimates that a block and its last member together run more than 15% over the
+width, no row may hold both, and the last member starts the next row. At a target of 1200
+the quantised decode form of Mixtral-8x7B starts the row of its mixture of experts with
+the addition of the attention residual. The addition rejoins the attention at a target of
+1300. The width of every website page was chosen on 2026-10-02 by drawing each variant at
+a few targets and taking one at which no block leaves a short piece of itself on another
+row.
 
 `subBlocks=False` is how a figure gets the high-level view alone, with each box's body
 rendered as its own figure. A notebook asks for that with
@@ -747,6 +769,18 @@ through `websocket_transfer` directly is not reached by the override.
 > and leaves the order of the rows alone, because `rh.Vertical` does not reverse its
 > children under `mirror`, so a contravariant row starts at the top right and each row
 > below it resumes at the right.
+>
+> A wire that continues on the next row ends its row in a quarter circle that turns down
+> the page, and starts the next row in the same quarter circle turned half a turn. A
+> small arrow stands on the wire where it meets each arc. A contravariant row ends in an
+> arc on its left side and starts in one on its right. The arcs of every wire of one
+> array stand on one plate, of the kind a taped array stands on and drawn by the same
+> function in tsncd, so in the axis form one plate and one padlock cover every axis of
+> the array and its datatype. A pointer resting on either plate of an array fills both
+> and lights every arc on them, and a click locks them lit and closes the padlock beside
+> each plate, as a click on a taped array locks its slot. `RowContinuationCap` in
+> tsncd's `Multiline.ts` draws the arcs, and `Render/lockablePlate.ts` draws the plates.
+> The user asked for the arcs on 2026-09-28 and for one plate per array on 2026-09-29.
 
 > [!warning] `Cannot read properties of undefined (reading 'anchors')` is a weave bug
 > It is thrown from `link_weaves` in `BroadcastedCategoryRenderer`, and it means a

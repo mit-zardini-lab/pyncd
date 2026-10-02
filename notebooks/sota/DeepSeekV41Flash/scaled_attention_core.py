@@ -45,17 +45,16 @@ from notebooks.sota.DeepSeekV41Flash.reference_links import kernel_lines, model_
 from notebooks.sota.DeepSeekV41Flash.block_titles_and_descriptions import TEXT as text
 
 CORE_BOX = 'Core'
-SCORE_SCALE_NAME = '\\lvert c \\rvert^{-1/2} x'
+SCORE_SCALE_NAME = 'x / \\sqrt{\\lvert c \\rvert}'
 SCALED_CORE_REFERENCES = (*attention_core.CORE_REFERENCES, model_lines(651),
                           kernel_lines(365, 367), kernel_lines(382, 383))
 
 
 def scale_scores() -> cat.Broadcasted:
-    '''The factor `|c|^{-1/2}` the released kernel multiplies every attention score
-    by before the softmax.'''
+    '''The factor `1 / \\sqrt{|c|}` the released kernel multiplies every attention
+    score by before the softmax.'''
     return ops.Arithmetic.template(
-        nm.x * nm.Power.template(c.local_size(), nm.Integer(-1) / nm.Integer(2)),
-        name=SCORE_SCALE_NAME)
+        nm.x / nm.SquareRoot(c.local_size()), name=SCORE_SCALE_NAME)
 
 
 def scaled_exponentiated_scores[A: cat.Axis](

@@ -266,6 +266,7 @@ class HeadlessRenderer:
         form: wst.DiagramForm | None = None,
         controls: wst.PageControls | None = None,
         displayMode: wst.DisplayMode | None = None,
+        multilineSizing: wst.MultilineSizing | None = None,
         auxiliary: wst.DiagramAuxiliary | None = None,
     ) -> None:
         '''Draw `target` in the headless page, leaving it there to be captured.
@@ -278,7 +279,7 @@ class HeadlessRenderer:
                 darkMode, debugBorders, coreDebug, width, subBlocks,
                 drawnBlockTags, tapeLabels, legend, inspectionBoxes,
                 axisHover, axisLabelFontSize, form, controls,
-                displayMode=displayMode),
+                displayMode=displayMode, multilineSizing=multilineSizing),
             auxiliary)
 
     async def resolve_capture_background(
@@ -428,6 +429,7 @@ class HeadlessRenderer:
         form: wst.DiagramForm | None = None,
         controls: wst.PageControls | None = None,
         displayMode: wst.DisplayMode | None = None,
+        multilineSizing: wst.MultilineSizing | None = None,
         auxiliary: wst.DiagramAuxiliary | None = None,
     ) -> bytes:
         '''Render `target` and return the image bytes.'''
@@ -439,7 +441,7 @@ class HeadlessRenderer:
             inspectionBoxes=inspectionBoxes, axisHover=axisHover,
             axisLabelFontSize=axisLabelFontSize,
             form=form, controls=controls,
-            displayMode=displayMode,
+            displayMode=displayMode, multilineSizing=multilineSizing,
             auxiliary=auxiliary)
         return await self.capture_rendered(
             format=format, padding=padding, background=background)

@@ -59,7 +59,6 @@ from notebooks.sota.DeepSeekV41Flash.construction_idioms import (
 from notebooks.sota.DeepSeekV41Flash.declared_axes import selection_count
 
 R = cat.Reals()
-MINUS_HALF = nm.Integer(-1) / nm.Integer(2)
 HALF = nm.Integer(1) / nm.Integer(2)
 
 x = cat.RawAxis.named('x', code_form='tokens')
@@ -98,7 +97,7 @@ OUTPUT_COLOUR = '#DBDFEF'
 
 MASK_NAME = '\\mathrm{Mask}'
 DIAGONAL_NAME = '\\mathrm{Diagonal}'
-SCORE_SCALE_NAME = '|d|^{-1/2} x'
+SCORE_SCALE_NAME = 'x / \\sqrt{|d|}'
 OUTPUT_PROJECTION_NAME = 'W^{\\mathrm{out}}'
 FIRST_EXPERT_NAME = 'W_{1}'
 SECOND_EXPERT_NAME = 'W_{2}'
@@ -159,7 +158,7 @@ def scaled_dot_product_attention() -> cat.Block:
     scores = (kv_heads, g, x, w)
     return cat.Block.template(
         ((contract((queries, keys), scores)
-          @ scale_by(d.local_size() ** MINUS_HALF, SCORE_SCALE_NAME)
+          @ scale_by(nm.Integer(1) / nm.SquareRoot(d.local_size()), SCORE_SCALE_NAME)
           @ ops.SoftMax.template())
          * hold(cat.Array(R, keys)))
         @ contract((scores, keys), queries),

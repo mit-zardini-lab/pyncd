@@ -60,6 +60,12 @@ three reads that produce one and the rules the unit's laws give.
 The tests sit beside the axis rather than in `algebra/` because the axis's own
 `crosses_start`, `crosses_end` and `empty_end` are written in them.
 
+`advanced_axis_dynamics/algebra/write_guard_ranges.py` writes the positions of the axis
+that hold a value at given indices of its guides, as an interval where the stride is 1
+or -1 and as a condition for every stride, for the line of indices an inspection box
+draws under a formula. [[Indices of Inspection Box Formulas]] states the rules, which
+the user set on 2026-09-28.
+
 ## Deriving and carrying a form
 
 `advanced_axis_dynamics/algebra/mark_sparse_domains.py` derives the form from a read.
@@ -570,6 +576,22 @@ copy only when they are equal, and each call of `mark_sparse_domains.guarded_vie
 a fresh sparse axis. GLM-5.3 therefore marks its read back once, as
 `lightning_indexer.READ_BACK`, so the key and value branches of a layer ask the latent
 for one read and the read passes the copy of the latent.
+
+A repeated block that receives no read from its results and holds no causal read passes
+the slide whole since 2026-09-28, and no read reaches its operands. The loop of a scan
+over the tokens is the case: each iteration reads its token at the counter, which is no
+causal read, and the loop reads more arrays than it returns, so the crawl had refused it
+with `RepeatedBlockChangesTheGuide`. The whole Mamba layer of
+[[Carrying the State of a Scan Between Passes]] and the 69 delta layers of Kimi K3 now
+slide, per [[SOTA Model Notebooks]].
+
+A read that leaves a box whose degree is empty takes the order of the axes the read
+returns, and the weave of the box is rewritten in that order. When the body reads its
+operand with the axes in another order, the weave and the domain of the body then
+disagree, and nothing raises. Kimi K3 met this with a convolution whose view put the taps
+last. Its convolution reads `[x, w|x, *channels]` with the taps second and weighs them
+with a `Linear` whose weave is written by position, so the read leaves the box with the
+order the body reads, and [[Open Gaps]] records the mismatch.
 
 A body the crawl rebuilds is a different block, and `through_box` gives it a tag derived
 from its old tag and its new body with `with_the_tag_of_its_body`, as the quantisation

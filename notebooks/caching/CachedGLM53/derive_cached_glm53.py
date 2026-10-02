@@ -13,14 +13,14 @@ at the new tokens, the pass computes the wire at the new tokens and a `Caching` 
 loads the earlier tokens and appends the new ones.
 
 The operators a wire read on the cached axis passes through are the placement of the
-caches. `computed_over_the_cache` names the four the reference computes on every cached
-token: the expansions `W^{Kb}` and `W^{Vb}` of the latent, the repeat of the turned key
-over the heads and the join of the key. The read of the cached axis stops at the
-operators before them, so the pass caches the normalised latent and the turned key of
+caches. `computed_over_the_cache` names the three the reference computes on every cached
+token: the expansions `W^{Kb}` and `W^{Vb}` of the latent and the join of the key, which
+reads the one turned key of a token at every head. The read of the cached axis stops at
+the operators before them, so the pass caches the normalised latent and the turned key of
 every layer, and the indexer key of every Full layer, which are the three arrays
 `modeling_glm_moe_dsa.py` hands to its cache. The selection travels on the tape slot
 `sel` within one pass, and the derivation requires the grab of the slot to read the new
-tokens its drop wrote, so it is not cached. Of the 104 placements
+tokens its drop wrote, so it is not cached. Of the 80 placements
 `cost_cache_placements.placements_by_sliding_caches_back` reaches, this one holds the
 fewest values per token, and `notebooks/website/modern/validate_glm53.py` checks both
 facts.
@@ -47,7 +47,6 @@ import data_structure.Term as fd
 import quantization.processing.quantise_model as quantise_model
 import term_utilities.term_utilities as tutil
 
-import notebooks.sota.GLM53.multi_latent_attention as multi_latent_attention
 import notebooks.sota.GLM53.quantised_whole_model as quantised_whole_model
 import notebooks.sota.GLM53.whole_model as whole_model
 from notebooks.sota.GLM53.block_titles_and_descriptions import TEXT as text
@@ -62,15 +61,12 @@ EXPANSION_WEIGHTS = ('W^{Kb}', 'W^{Vb}')
 
 
 def expands_the_cached_keys_or_values(operator: cat.Operator) -> bool:
-    '''Whether `operator`, an operator of the keys and values block, is one of the four
+    '''Whether `operator`, an operator of the keys and values block, is one of the three
     the reference computes on every cached token: a projection of the latent into the
-    keys or the values, the repeat of the turned key over the heads, or the join of the
-    key.'''
+    keys or the values, or the join of the key.'''
     match operator:
         case ops.Linear(name=name) if name is not None:
             return name.to_bodies() in EXPANSION_WEIGHTS
-        case ops.View(name=name) if name is not None:
-            return name.to_bodies() == multi_latent_attention.REPEAT_VIEW_NAME
         case aops.ConcatenateAxes():
             return True
     return False

@@ -27,6 +27,7 @@ import functools
 
 import advanced_axis_dynamics.data_structure.Operators as aops
 import algebra.registries.standard_expansions as standard_expansions
+import algebra.write_index_notation as write_index_notation
 import construction_helpers as ch  # noqa: F401 - the @, * and >> overloads
 import data_structure.Category as cat
 import data_structure.Term as fd
@@ -46,10 +47,32 @@ def slot_of_cache(cache_name: str) -> Para.TapeSlot:
     return fd.DynamicName.from_str(cache_name).capture(Para.TapeSlot())
 
 
+def names_of_the_token_axes(target: cat.Broadcasted) -> fd.Prod[str]:
+    '''The LaTeX of the axis of the earlier tokens and of the axis of the tokens of
+    this pass, as the cache names them, `x_old` and `x_new` in a derived pass.'''
+    return write_index_notation.axis_letters(
+        (Caching.past_tokens_of(target), Caching.tokens_of_this_pass(target)))
+
+
+def caching_formula(target: cat.Broadcasted) -> str:
+    '''The load of the earlier tokens, the result at a token of this pass, and the
+    append of that token, written over the token axes of `target`.'''
+    past, tokens = names_of_the_token_axes(target)
+    loaded = write_index_notation.index_of(past)
+    appended = write_index_notation.index_of(tokens)
+    after_the_past = rf'\lvert {past} \rvert + {appended}'
+    return (rf'y[{loaded}] = \mathrm{{cache}}[{loaded}], \qquad '
+            rf'y[{after_the_past}] = v[{appended}], \qquad '
+            rf'\mathrm{{cache}}[{after_the_past}] \leftarrow v[{appended}]')
+
+
+def caching_description(target: cat.Broadcasted) -> str:
+    past, tokens = names_of_the_token_axes(target)
+    return text.CACHING_EXPANSION_DESCRIPTION.format(past=past, tokens=tokens)
+
+
 @standard_expansions.register(
-    Caching.Caching,
-    formula=text.CACHING_EXPANSION_FORMULA,
-    description=text.CACHING_EXPANSION_DESCRIPTION)
+    Caching.Caching, formula=caching_formula, description=caching_description)
 def load_the_past_and_append_this_pass(
     target: cat.Broadcasted,
 ) -> cat.BroadcastedCategory:

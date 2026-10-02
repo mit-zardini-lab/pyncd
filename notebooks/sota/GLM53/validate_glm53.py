@@ -29,6 +29,7 @@ from collections.abc import Callable
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3]))
 
 import advanced_axis_dynamics.data_structure.Operators as aops  # noqa: E402
+import algebra.reindexing_absorption as reindexing_absorption  # noqa: E402
 import data_structure.Category as cat  # noqa: E402
 import data_structure.Numeric as nm  # noqa: E402
 import data_structure.Operators as ops  # noqa: E402
@@ -296,6 +297,26 @@ def check_the_sizes_of_the_attention() -> None:
             f'p, a and the unturned indexer channels are {widths} wide')
 
 
+def check_the_join_of_the_key_reads_one_turned_key_per_token() -> None:
+    '''The keys and the values hold no view, so no array is copied to every head. The
+    join of the key is the repeat of the turned key over the heads absorbed into a join
+    of two arrays that both carry the heads. Its turned operand is therefore read
+    through a reindexing that deletes the head.'''
+    keys_and_values = whole_model.part_titled(text.KEYS_AND_VALUES_TITLE, MODEL)
+    operations = tuple(tutil.type_search(cat.Broadcasted, keys_and_values))
+    views = [node for node in operations if isinstance(node.operator, ops.View)]
+    require(not views, f'the keys and the values hold {len(views)} views')
+    x, h, n, p, a = (declared_axes.x, declared_axes.h, declared_axes.n, declared_axes.p,
+                     declared_axes.a)
+    repeat_over_heads = ops.View.template(reindexing=cat.Rearrangement((0, 2), (x, h, p)))
+    join_of_heads = aops.ConcatenateAxes.template(((x, h, n), (x, h, p)), concatenated=a)
+    joins = [node for node in operations if isinstance(node.operator, aops.ConcatenateAxes)]
+    require(joins == [reindexing_absorption.absorb(repeat_over_heads, join_of_heads, 1)],
+            f'the keys and the values hold the joins {joins}')
+    require(axes(joins[0]) == ([['x', 'h', 'n'], ['x', 'p']], [['x', 'h', 'a']]),
+            f'the join of the key reads and returns {axes(joins[0])}')
+
+
 def check_the_core_reads_the_selected_keys_and_values() -> None:
     '''The core is computed once per query and head, and reads the query, the keys at
     the selected tokens and the values at the selected tokens.'''
@@ -399,6 +420,7 @@ CHECKS: tuple[Callable[[], None], ...] = (
     check_the_boxes_computed_once_per_index_expand_back,
     check_a_full_layer_runs_one_indexer_and_a_shared_layer_none,
     check_the_sizes_of_the_attention,
+    check_the_join_of_the_key_reads_one_turned_key_per_token,
     check_the_core_reads_the_selected_keys_and_values,
     check_both_modes_read_and_return_the_hidden_state,
     check_three_dense_layers_and_seventy_five_mixtures,

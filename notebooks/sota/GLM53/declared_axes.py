@@ -78,7 +78,7 @@ QUERIES = cat.Array(R, (x, h, a))
 KEYS = cat.Array(R, (x, h, a))
 VALUES = cat.Array(R, (x, h, u))
 UNROTATED_KEYS = cat.Array(R, (x, h, n))
-ROTATED_KEYS = cat.Array(R, (x, h, p))
+ROTATED_KEY_SHARED_BY_THE_HEADS = cat.Array(R, (x, p))
 
 GROUP_COUNTER_NAME = 'l'
 GROUP_COUNTER = nm.FreeNumeric.named(GROUP_COUNTER_NAME)

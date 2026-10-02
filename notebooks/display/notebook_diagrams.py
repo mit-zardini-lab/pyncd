@@ -122,6 +122,14 @@ capture holds none of them. `HIDDEN` leaves them out, for a page that a host
 drives through the address of its iframe or a message it posts. A switch redraws
 the term the page holds, so a page written once carries every form.
 
+`multiline_sizing` says how a figure wider than `width` is divided into rows.
+`MultilineSizing.DYNAMIC`, the default since 2026-10-01, plans the rows so that
+whole blocks stand on one row, with `width` as their target. `FIXED` fills each
+row until the width runs out and cuts the block open at that point. A page
+carries both, and
+its row of controls switches between them. tsncd's
+`src/display/Framework/dynamicMultilineSizing.ts` states the plan.
+
 `axis_sizes` says where the size of an axis a configuration has sized is
 drawn. `WIRE_LABEL`, the default, leaves every name as the expression wrote it,
 and tsncd labels the wire of an axis carrying an integer size with that
@@ -256,6 +264,7 @@ TSNCD_DIST_FALLBACK = '../tsncd/dist'
 
 ColorMode = wst.ColorMode
 DisplayMode = wst.DisplayMode
+MultilineSizing = wst.MultilineSizing
 
 
 class DiagramMode(enum.Enum):
@@ -331,6 +340,7 @@ class DiagramSettings:
     mode: DiagramMode = DiagramMode.INLINE
     display_mode: DisplayMode = DisplayMode.FAST
     width: int | None = None
+    multiline_sizing: MultilineSizing = MultilineSizing.DYNAMIC
     block_recycling: block_recycling.BlockRecycling = (
         block_recycling.BlockRecycling.AS_WRITTEN)
     sub_blocks: remember_drawn_blocks.SubBlocks = (
@@ -498,6 +508,7 @@ async def _capture_headless(
             axisLabelFontSize=settings.axis_label_font_size,
             form=settings.form, controls=settings.controls,
             displayMode=settings.display_mode,
+            multilineSizing=settings.multiline_sizing,
             auxiliary=auxiliary)
 
     try:
@@ -839,6 +850,7 @@ async def _send_to_open_page(
             form=settings.form, controls=settings.controls,
             title=settings.title,
             heading=settings.heading,
+            multilineSizing=settings.multiline_sizing,
             auxiliary=auxiliary)
     return None
 
@@ -860,7 +872,8 @@ def page_settings(settings: DiagramSettings) -> wst.RenderHandlerSettings:
         form=settings.form, controls=settings.controls,
         title=settings.title,
         heading=settings.heading,
-        displayMode=settings.display_mode)
+        displayMode=settings.display_mode,
+        multilineSizing=settings.multiline_sizing)
 
 
 PACKAGE_WORDING_FILES: tuple[pathlib.Path, ...] = (

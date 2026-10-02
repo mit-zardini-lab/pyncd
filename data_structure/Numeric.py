@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 from enum import Enum
 from fractions import Fraction
-from typing import Callable, Mapping
+from typing import Callable, Mapping, TypeGuard
 import math
 import data_structure.Term as fd # for 'foundations'
 
@@ -356,13 +356,31 @@ def product_part_latex(target: Numeric) -> str:
     return (parenthesised_latex(target) if isinstance(target, Addition)
             else target.to_latex())
 
+def is_reciprocal(target: Numeric) -> TypeGuard[Power]:
+    '''Whether `target` is a power of -1, which a product writes after a slash.'''
+    return isinstance(target, Power) and target.exponent == Integer(-1)
+
+def denominator_latex(divisors: list[Numeric]) -> str:
+    '''The divisors of a product written after its slash, bracketed where they are
+    a sum, a product, or more than one factor.'''
+    if len(divisors) == 1 and not isinstance(divisors[0], Associative):
+        return divisors[0].to_latex()
+    return parenthesised_latex(Multiplication.template(*divisors))
+
 def juxtaposed_latex(unsigned: Numeric) -> str:
     '''The factors of `unsigned` side by side, where `unsigned` holds no negative
-    factor. `Multiplication.to_latex` cannot write them itself, because it writes
-    the sign first and would be called again on the product it had unsigned.'''
+    factor, with every factor raised to the power -1 written after a slash, so the
+    scale of attention reads `x / \\sqrt{|d|}` rather than `x \\sqrt{|d|}^{-1}`.
+    `Multiplication.to_latex` cannot write them itself, because it writes the sign
+    first and would be called again on the product it had unsigned.'''
     match unsigned:
         case Multiplication(content=factors):
-            return ' '.join(product_part_latex(factor) for factor in factors)
+            divisors = [factor.base for factor in factors if is_reciprocal(factor)]
+            multiplied = ' '.join(product_part_latex(factor) for factor in factors
+                                  if not is_reciprocal(factor)) or '1'
+            if not divisors:
+                return multiplied
+            return f'{multiplied} / {denominator_latex(divisors)}'
     return product_part_latex(unsigned)
 
 @dataclass(frozen=True)

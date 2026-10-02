@@ -8,10 +8,11 @@ status: stable
 
 Written by Claude Opus 5 (1M context), effort high.
 
-Two packages under `notebooks/sota/` each assemble a frontier architecture as a single
+Four packages under `notebooks/sota/` each assemble a frontier architecture as a single
 morphism in **Br**, drawn at the level a careful reader of the release would recognise.
 DeepSeek-V4.1-Flash is drawn by `notebooks/sota/DeepSeekV41Flash.ipynb` and by its page
-of the lab website, and GLM-5.3 by its page alone, per [[Website Notebooks]].
+of the lab website, and GLM-5.3, Kimi K3 and MiMo-V2.6-Pro by their pages alone, per
+[[Website Notebooks]].
 
 | notebook | model | the mechanism it exists to draw |
 |---|---|---|
@@ -148,6 +149,9 @@ V4.1 package: one module per mechanism, the title and the description of every b
 - Every size is read from the configuration of the checkpoint, so the configuration binds
   every axis but the tokens.
 - The selection of an IndexShare group is the tape slot `sel`, per [[Representing Models]].
+- The keys hold no repeat of the turned key over the 64 heads. The join of the key reads
+  the one turned key of a token at every head through a deletion of the heads in its
+  reindexing, `cat.Rearrangement((0,), (x, h))`, per [[Representing Models]].
   Layer 2 and the first layer of each of the eighteen repeated groups drop it, and the
   three Shared layers after each grab it, the repeated group carrying the counter `l`.
 - The reference cuts the results of `q_b_proj`, `kv_a_proj_with_mqa` and `kv_b_proj` with
@@ -188,6 +192,46 @@ the model by `notebooks/caching/CachedGLM53/derive_cached_glm53.py`, per
 [[Caching Between Passes]], and writes the four variants into
 `notebooks/website/output/modern/GLM53/index.html`. `notebooks/website/modern/validate_glm53.py`
 beside it holds its claims.
+
+## Kimi K3 from its released code
+
+`notebooks/sota/KimiK3/` writes Kimi K3 from `modeling_kimi_linear.py` of the
+checkpoint `moonshotai/Kimi-K3` at the commit `f831ab668142`, and from `fla` at the tag
+`v0.5.2` for the kernels of the delta attention.
+`notebooks/website/modern/KimiK3.ipynb` draws it for the lab website and writes
+`notebooks/website/output/modern/KimiK3/index.html`, one page with the model over every
+token of the prompt, in the CausalSlide and in the reals.
+`notebooks/website/modern/validate_kimi_k3.py` holds every claim. Kimi Delta Attention is
+a loop over the tokens whose state of 128 by 128 numbers per head is a loop variable on
+the tape, as the Mamba scan of [[Carrying the State of a Scan Between Passes]] is, and the
+validator evaluates it on numbers against a PyTorch run built from the reference loop and
+gate of `fla`. The attention residuals are one wire over nine entries, the embedding and
+the sum of each block of twelve layers, and each sublayer reads a softmax-weighted mix of
+the entries and adds its output at the entry of its block. The page carries no pass over
+new tokens, because `derive_cached_pass` has no rule for a loop over the tokens, and no
+quantised form, per [[Open Gaps]].
+
+## MiMo-V2.6-Pro from its reference implementation
+
+`notebooks/sota/MiMoV26Pro/` writes MiMo-V2.6-Pro from `modeling_mimo_v2.py`, the remote
+code of the checkpoint `XiaomiMiMo/MiMo-V2.6-Pro-MOPD` at the commit `adea8e2c5373`, whose
+configuration and modeling files are byte-identical to those of
+`XiaomiMiMo/MiMo-V2.6-Pro-RL` at `73875d00b30a`, and reads the masks and the cache of
+`transformers` 5.3.0 at `aad13b87ed59`. `notebooks/website/modern/MiMoV26Pro.ipynb` draws
+it for the lab website and writes `notebooks/website/output/modern/MiMoV26Pro/index.html`,
+one page with a Decode and a Cached variant, each in the reals.
+`notebooks/website/modern/validate_mimo_v26_pro.py` holds every claim. Sixty layers read a
+window of 128 tokens with a learned sink per query head and ten read every earlier token,
+with grouped-query attention over 8 key-value heads, a dense MLP in layer 0 and 384 routed
+experts with no shared expert. The expression departs from the reference in five places,
+which the notebook states. The two halves of `rotate_half` are an axis of size 2 written
+into the turned projections, one covariant view puts them in the order of the pairs, and
+the pairs are written back in place. The softmax with the sink is written out as
+exponentials and their sum. The largest score is not subtracted before the softmax. The
+kept experts are marked by the sign of their biased scores, which the correction biases
+of the checkpoint make agree with the reference. The vision and audio encoders and the
+drafter are left out. The page carries no quantised form, because `transformers` 5.3.0
+does not run the MXFP4 experts of the checkpoint.
 
 ## The wording of a figure is a file
 
@@ -254,6 +298,13 @@ GLM-5.3 binds all fifteen of `m h q c n t u i d e k f g s v` from the `config.js
 the checkpoint, with `p`, `a`, `\bar{d}` and `r` written as sums and products of them,
 and leaves `x` and the counter `l` of the repeated IndexShare group symbolic.
 
+Kimi K3 binds all nineteen of `m h q c n p u j d z w e k l f t g b v` from the
+`config.json` of the checkpoint, with `a`, `r` and the decay rank `s` written as sums
+and copies of them, and leaves `x`, the counter `o` of the six repeated blocks and the
+counter `i_x` of the scan symbolic. MiMo-V2.6-Pro binds `m h g t n u w e k f d v` from
+the `config.json` of its checkpoint, with `p`, `a` and `r` written as products and sums
+of them, and leaves `x` symbolic beside `c`, which is the number 2.
+
 A number that is not sourced stays a symbol. Guessing one puts an invented figure into a
 diagram whose whole discipline is that its figures are sourced.
 
@@ -276,6 +327,13 @@ the parameter count of the checkpoint reported by the Hugging Face API, and the
 [vLLM recipe](https://recipes.vllm.ai/zai-org/GLM-5.3), which has no commit to pin and
 was updated on 2026-09-18.
 
+Kimi K3 was read on 2026-09-28 from `modeling_kimi_linear.py` and the `config.json` of
+`moonshotai/Kimi-K3` at the commit `f831ab668142`, and from `fla-org/flash-linear-attention`
+at the tag `v0.5.2`, the commit `9c8e42e762fc`. MiMo-V2.6-Pro was read from the remote
+code of `XiaomiMiMo/MiMo-V2.6-Pro-MOPD` at the commit `adea8e2c5373` and from
+`transformers` 5.3.0 at `aad13b87ed59`. `reference_links.py` in each package pins every
+link to those commits.
+
 Corroboration is not confirmation. The notebook's header states which of its numbers are
 disclosed, which are assumptions from the model's lineage, and which stay symbolic.
 
@@ -286,5 +344,7 @@ disclosed, which are assumptions from the model's lineage, and which stay symbol
 - [[Stripping Quantisations]] — the functor that takes them off again
 - [[Advanced Display]] — the legend and the inspection boxes an interactive figure carries
 - [[Notebooks]] — the other notebooks, and how to run one
-- [[Website Notebooks]] — the pages of the lab website that draw both models
+- [[Website Notebooks]] — the pages of the lab website that draw the models
+- [[Carrying the State of a Scan Between Passes]] — the scan followed by the delta
+  attention of Kimi K3
 - [[Caching Between Passes]] — the cached pass of GLM-5.3

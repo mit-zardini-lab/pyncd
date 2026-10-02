@@ -1,4 +1,4 @@
-# Claude Fable 5.1, effort 80.
+# Claude Fable 5.1, effort 80. Revised by Claude Opus 5.5 (1M context), effort 40.
 '''Packaging what an interactive figure shows beside the term it draws.
 
 tsncd does no algebra, so everything an inspection box or a legend shows has to be
@@ -10,7 +10,10 @@ packaged.
 The legend lists every named axis of the term with the integer its size comes to and
 the code form its name carries. The size is read off the axis where a configuration has
 sized the term, and evaluated under `assigned_sizes` where the term is symbolic and the
-assignments are given beside it, as `notebooks.display.axis_sizes` reads them.
+assignments are given beside it, as `notebooks.display.axis_sizes` reads them. A second
+table lists every `cat.Natural` that is the datatype of an array of the term, with the
+integer its bound comes to and the bound written in the code names of its symbols. The
+user asked for the second table on 2026-09-27.
 
 The block information carries, for every block of the term keyed by its tag's uid, the
 title, the formula, the description and the code references its aesthetics hold. A
@@ -18,6 +21,13 @@ reference with no url of its own is linked from its path under `code_link_base`,
 left unlinked where no base is given. A reference whose url is on a host
 `REFERENCE_ICONS` lists carries the name of that host's icon, which tsncd draws before
 the link.
+
+The formula and the description of every block and every operator are written with the
+indices of the formula lettered i, j, k and onwards, and carry the indices the formula
+holds for every position of their axes, per
+`websocket_transfer/letter_formula_indices.py`. The index of a guarded axis of the block
+or the operator also carries the positions of the axis that hold a value, per
+`websocket_transfer/write_formula_index_ranges.py`.
 
 The operator expansions carry, for every `Broadcasted` whose operator
 `algebra.registries.standard_expansions` writes out, the expansion as its own exported
@@ -45,19 +55,22 @@ the row holds a function, so the formula over a weight names that weight's axes.
 display pass has been applied and after a hypergraph has been converted, because the
 numbering and the block tags are read off exactly what is sent.
 
-`algebra.operator_expansion` is imported for its registrations. The registry is filled
-by the decorators that module applies to its rules, so the table is empty until it has
-been imported.
+`algebra.operator_expansion` and `caching.registries.standard_expansions` are imported
+for their registrations. The registry is filled by the decorators those modules apply to
+their rules, so a rule is missing until its module has been imported. The cache of
+Mixtral-8x7B opened no box on 2026-09-27 because nothing its notebook ran imported the
+rule of a cache, and every cache a figure holds now opens one.
 '''
 from __future__ import annotations
 
 import urllib.parse
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 
 import algebra.operator_expansion as operator_expansion  # noqa: F401
 import algebra.registries.standard_expansions as standard_expansions
 import algebra.write_axis_exponents as write_axis_exponents
+import caching.registries.standard_expansions as cache_expansions  # noqa: F401
 import data_structure.Category as cat
 import data_structure.Numeric as nm
 import data_structure.Term as fd
@@ -65,7 +78,9 @@ import data_transfer.broadcast_occurrences as broadcast_occurrences
 import data_transfer.term_json as term_json
 import graphs.processing.Hypergraph2Morphism as h2m
 import term_utilities.term_utilities as tutil
+import websocket_transfer.letter_formula_indices as letter_formula_indices
 import websocket_transfer.websockets_transfer as wst
+import websocket_transfer.write_formula_index_ranges as write_formula_index_ranges
 
 
 VSCODE_SCHEME = 'vscode://'
@@ -99,12 +114,16 @@ def auxiliary_information(
     operator_references: OperatorReferences | None = None,
     operator_roles: OperatorRoles | None = None,
 ) -> wst.DiagramAuxiliary:
-    '''The `auxiliary` field for `term`, holding the legend where `with_legend` asks
-    for it, the information of every block, and the expansion of every operator
-    `write_out` writes out. A part with nothing in it is left out of the field.'''
+    '''The `auxiliary` field for `term`, holding the two tables of the legend where
+    `with_legend` asks for them, the information of every block, and the expansion of
+    every operator `write_out` writes out. A part with nothing in it is left out of the
+    field.'''
     auxiliary: wst.DiagramAuxiliary = {}
     if with_legend:
         auxiliary['legend'] = legend_rows(term, assigned_sizes)
+        naturals = natural_legend_rows(term, assigned_sizes)
+        if naturals:
+            auxiliary['naturals'] = naturals
     blocks = block_information(term, code_link_base)
     if blocks:
         auxiliary['blocks'] = blocks
@@ -169,27 +188,164 @@ def size_code_name(axis: cat.Axis) -> str | None:
     return None
 
 
+def natural_legend_rows(
+    term: fd.GeneralTerm, assigned_sizes: Mapping[str, int] | None,
+) -> list[wst.NaturalLegendRow]:
+    '''One row per `cat.Natural` that is the datatype of an array or a weave of
+    `term`, or that the quantisation of such a datatype holds, sorted by the latex of
+    its bound. Two naturals with one bound make one row.'''
+    rows: dict[tuple[str, str], wst.NaturalLegendRow] = {}
+    for natural in naturals_of_arrays(term):
+        bound = natural.max_value
+        size = natural_size(bound, assigned_sizes)
+        row: wst.NaturalLegendRow = {
+            'latex': letter_formula_indices.with_braced_subscripts(bound.to_latex()),
+            'size': None if size is None else str(size),
+            'codeName': code_expression(bound),
+            'key': natural_key(bound),
+        }
+        rows.setdefault((row['key'], row['latex']), row)
+    return sorted(rows.values(), key=lambda row: row['latex'])
+
+
+def naturals_of_arrays(term: fd.GeneralTerm) -> Iterator[cat.Natural]:
+    carriers = (*tutil.type_search(cat.Array, term), *tutil.type_search(cat.Weave, term))
+    for carrier in carriers:
+        yield from tutil.type_search(cat.Natural, carrier.datatype)
+
+
+def natural_key(bound: nm.Numeric) -> str:
+    '''The structure of `bound`, written as tsncd writes it for the `Natural` of a
+    wire in `src/data_structure_processing/find_naturals_by_key.ts`: a symbol as `#`
+    and its uid, an integer as its digits, a sum, a product and a power as `+`, `*`
+    and `^` followed by the keys of their parts in brackets, and any other numeric as
+    `?`.'''
+    match bound:
+        case nm.FreeNumeric(uid=uid):
+            return f'#{uid._id}'
+        case nm.Integer(_value=value):
+            return str(value)
+        case nm.Addition(content=parts):
+            return f'+({",".join(map(natural_key, parts))})'
+        case nm.Multiplication(content=parts):
+            return f'*({",".join(map(natural_key, parts))})'
+        case nm.Power(base=base, exponent=exponent):
+            return f'^({natural_key(base)},{natural_key(exponent)})'
+    return '?'
+
+
+def natural_size(bound: nm.Numeric, assigned_sizes: Mapping[str, int] | None) -> int | None:
+    '''The integer `bound` comes to under `assigned_sizes`, or with each of its
+    symbols taken at the integer written on its name as an exponent, or `None`.'''
+    size = write_axis_exponents.evaluated_size_under(bound, assigned_sizes or {})
+    if size is not None:
+        return size
+    written = {symbol: int(exponent)
+               for symbol in tutil.type_search(nm.FreeNumeric, bound)
+               if (exponent := exponent_written_on(symbol)) is not None}
+    try:
+        value = nm.evaluate_rational(bound, written)
+    except (KeyError, nm.NotAnAffineForm, ZeroDivisionError):
+        return None
+    return value.numerator if value.denominator == 1 else None
+
+
+def exponent_written_on(symbol: nm.FreeNumeric) -> str | None:
+    name = symbol.uid._name
+    exponent = None if name is None or name.exponent is None else name.exponent.to_bodies()
+    return exponent if exponent is not None and exponent.isdigit() else None
+
+
+def code_expression(bound: nm.Numeric) -> str | None:
+    '''`bound` written as Python in the code names of its symbols, with a sum inside
+    a product or a power bracketed, or `None` where a symbol of it carries no code
+    name.'''
+    match bound:
+        case nm.FreeNumeric(uid=uid):
+            return None if uid._name is None else uid._name.code_form
+        case nm.Integer(_value=value):
+            return str(value)
+        case nm.Addition(content=parts):
+            written = [code_expression(part) for part in parts]
+            return None if None in written else ' + '.join(written)
+        case nm.Multiplication(content=parts):
+            return code_product(parts)
+        case nm.Power(base=base, exponent=exponent):
+            written_base = code_factor(base)
+            written_exponent = code_factor(exponent)
+            if written_base is None or written_exponent is None:
+                return None
+            return f'{written_base} ** {written_exponent}'
+    return None
+
+
+def code_product(factors: fd.Prod[nm.Numeric]) -> str | None:
+    '''The factors multiplied, with a factor raised to the power -1 divided by.'''
+    multiplied = [code_factor(factor) for factor in factors if not nm.is_reciprocal(factor)]
+    divisors = [code_factor(factor.base) for factor in factors if nm.is_reciprocal(factor)]
+    if None in multiplied or None in divisors:
+        return None
+    return ' / '.join([' * '.join(multiplied) or '1', *divisors])
+
+
+def code_factor(factor: nm.Numeric) -> str | None:
+    written = code_expression(factor)
+    if written is None or not isinstance(factor, nm.Associative):
+        return written
+    return f'({written})'
+
+
 def block_information(
     term: fd.GeneralTerm, code_link_base: str | None,
 ) -> dict[str, wst.BlockInformation]:
     '''The title, the formula, the description and the code references of every
     block of `term`, keyed by the uid of the block's tag as a string, which is how
-    JSON keys an object.'''
+    JSON keys an object. The formula and the description are lettered.'''
     information: dict[str, wst.BlockInformation] = {}
     for block in tutil.type_search(cat.Block, term):
         aesthetics = block.block_tag.aesthetics
         key = str(block.block_tag.uid._id)
         if aesthetics is None or key in information:
             continue
+        lettered = lettered_texts(aesthetics.formula, aesthetics.description, block)
         information[key] = {
             'title': aesthetics.title,
-            'formula': aesthetics.formula,
-            'description': aesthetics.description,
+            'formula': lettered.formula,
+            'description': lettered.description,
             'references': [
                 reference_record(reference, code_link_base)
                 for reference in (aesthetics.references or ())],
+            'indices': lettered.indices,
         }
     return information
+
+
+@dataclass(frozen=True)
+class LetteredTexts:
+    '''A formula and a description with the indices of the formula lettered, and
+    the indices the formula holds for every position of their axes, each guarded one
+    with the positions of its axis that hold a value.'''
+    formula: str | None
+    description: str | None
+    indices: list[wst.FormulaIndexRecord]
+
+
+def lettered_texts(
+    formula: str | None, description: str | None, shown_over: fd.GeneralTerm = (),
+) -> LetteredTexts:
+    '''`formula` and `description` lettered, with the indices of the formula matched
+    to the axes of `shown_over`, the operator or the block the formula is shown
+    over.'''
+    if formula is None:
+        return LetteredTexts(formula=None, description=description, indices=[])
+    lettered = letter_formula_indices.lettered_formula(formula)
+    return LetteredTexts(
+        formula=lettered.formula,
+        description=(None if description is None
+                     else letter_formula_indices.lettered_description(
+                         description, lettered)),
+        indices=write_formula_index_ranges.index_records_with_ranges(
+            lettered, tuple(tutil.type_search(cat.Axis, shown_over))))
 
 
 def reference_record(
@@ -263,12 +419,17 @@ def operator_expansions(
         if expanded is None:
             continue
         name = broadcasted.operator.name
+        lettered = lettered_texts(
+            row.formula_of(broadcasted),
+            description_with_role(
+                broadcasted, row.description_of(broadcasted), operator_roles),
+            broadcasted)
         expansions[str(number)] = {
             'operator': type(broadcasted.operator).__name__,
             'latex': None if name is None else name.to_latex(),
-            'formula': row.formula_of(broadcasted),
-            'description': description_with_role(
-                broadcasted, row.description_of(broadcasted), operator_roles),
+            'formula': lettered.formula,
+            'description': lettered.description,
+            'indices': lettered.indices,
             'expansion': term_json.TermJSONConverter.export_to_json(expanded),
             'auxiliary': auxiliary_information(
                 expanded, assigned_sizes=assigned_sizes,

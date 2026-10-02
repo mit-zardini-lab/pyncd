@@ -251,8 +251,7 @@ def check_the_embedding_is_scaled_and_added_to_the_positional_encoding() -> None
                         'Embedding'], f'the embedding block holds {classes}')
     scales = [leaf.wraps.operator for leaf in quantise_model.graph_leaves(embedding)
               if isinstance(leaf.wraps.operator, ops.Arithmetic)]
-    model_width = attention_is_all_you_need.m.local_size()
-    root_of_m = model_width ** attention_is_all_you_need.HALF
+    root_of_m = nm.SquareRoot(attention_is_all_you_need.m.local_size())
     require(len(scales) == 1
             and name_of(scales[0]) == attention_is_all_you_need.EMBEDDING_SCALE_NAME
             and scales[0].formula == nm.x * root_of_m,

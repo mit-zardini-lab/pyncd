@@ -111,14 +111,18 @@ def explain_named_arithmetic(
     '''The row of the table for `ops.Arithmetic`. An elementwise map whose name is not
     its formula, or whose formula holds a function the primitive numerics spell out,
     is explained by the formula, after the sentence `roles` holds for the text of its
-    name. A map the figure shows the whole of is left unexplained. `references` gives
-    the released lines of a map by the same text.'''
+    name. A map `roles` holds a sentence for is explained as well, because the sentence
+    says what the map is for, which the figure does not show. Any other map the figure
+    shows the whole of is left unexplained. `references` gives the released lines of a
+    map by the same text.'''
     def explain(target: cat.Broadcasted) -> OperatorExplanation | None:
         operator = target.operator
-        if not isinstance(operator, ops.Arithmetic) or shows_whole_formula(operator):
+        if not isinstance(operator, ops.Arithmetic):
             return None
         name = operator.name.to_bodies()
         role = roles.get(name)
+        if role is None and shows_whole_formula(operator):
+            return None
         applied = (
             text.ELEMENTWISE_MAP_SENTENCE)
         return OperatorExplanation(

@@ -92,7 +92,7 @@ FULL_LAYER_CACHES = [64, 128, 512]
 SHARED_LAYER_CACHES = [64, 512]
 VALUES_CACHED_PER_TOKEN = 47616
 VALUES_CACHED_ON_THE_OPERANDS_OF_THE_READS = 2558592
-PLACEMENTS = 104
+PLACEMENTS = 80
 PASS_SIZES = ((0, 1), (32768, 1), (4096, 16))
 '''Pairs of earlier and new tokens at which the derived pass and the pass written by
 hand are compared.'''
@@ -347,15 +347,15 @@ def check_the_pass_reads_and_returns_the_new_tokens() -> None:
 
 
 def check_the_expansions_run_over_every_cached_token() -> None:
-    '''The expansions of the latent, the copy of the turned key to every head and the
-    join of the key run over every cached token, and the four operators are the ones
-    `expand_kv` computes.'''
+    '''The expansions of the latent and the join of the key run over every cached token,
+    and the three operators are the ones `expand_kv` computes. The join reads the one
+    turned key of a token at every head, so no copy of the turned key is computed.'''
     for name in derive_cached_glm53.EXPANSION_WEIGHTS:
         read = {shape_of(node.dom()[0])[0] for node in linear_maps_named(name, CACHED)}
         require(read == {CACHED_TOKENS}, f'{name} reads the axes {read}')
     kinds = sorted(type(operator).__name__
                    for operator in derive_cached_glm53.DERIVED.computed_over_the_cache)
-    require(kinds == ['ConcatenateAxes', 'Linear', 'Linear', 'View'],
+    require(kinds == ['ConcatenateAxes', 'Linear', 'Linear'],
             f'the operators computed over the cache are {kinds}')
 
 
@@ -393,7 +393,7 @@ def check_the_selection_is_not_cached() -> None:
 
 
 def check_the_placement_is_the_narrowest_of_the_placements() -> None:
-    '''Moving each cache back past the operator it follows reaches 104 placements, the
+    '''Moving each cache back past the operator it follows reaches 80 placements, the
     placement of the pass holds the fewest values per token, and the placement on the
     operands of the reads back holds 2,558,592.'''
     placements = cost_cache_placements.placements_by_sliding_caches_back(

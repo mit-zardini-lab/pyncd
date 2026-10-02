@@ -60,7 +60,7 @@ from notebooks.sota.DeepSeekV41Flash.block_titles_and_descriptions import TEXT a
 
 INDEXER_QUERIES = cat.Array(R, (x, i, d))
 HEAD_WEIGHTS = cat.Array(R, (x, i))
-HEAD_WEIGHT_SCALE_NAME = '(\\lvert d \\rvert \\lvert i \\rvert)^{-1/2} x'
+HEAD_WEIGHT_SCALE_NAME = 'x / \\sqrt{\\lvert d \\rvert \\lvert i \\rvert}'
 
 
 def rotated_index_keys[A: cat.Axis](
@@ -94,11 +94,10 @@ def rotated_indexer_queries() -> cat.BroadcastedCategory:
 
 
 def scale_head_weights() -> cat.Broadcasted:
-    '''The factor `(|d| |i|)^{-1/2}` the released indexer multiplies its per-head
+    '''The factor `1 / \\sqrt{|d| |i|}` the released indexer multiplies its per-head
     weights by.'''
     return ops.Arithmetic.template(
-        nm.x * nm.Power.template(d.local_size() * i.local_size(),
-                                 nm.Integer(-1) / nm.Integer(2)),
+        nm.x / nm.SquareRoot(d.local_size() * i.local_size()),
         name=HEAD_WEIGHT_SCALE_NAME)
 
 

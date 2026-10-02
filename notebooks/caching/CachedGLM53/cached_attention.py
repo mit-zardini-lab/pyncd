@@ -12,8 +12,8 @@ names `values`, and each slot is concatenated onto separately, at lines 129 to 1
 
 Here each of the two arrays passes through a `Caching` of its own, `lat` and `rot`, and
 everything after the caches stands on the cached tokens `P + x`: the expansion of the
-latent by `W^{Kb}` and `W^{Vb}`, the copy of the turned key to every head, and the join
-of the key onto `a`. The queries stand on the tokens of the pass `x`, and so does
+latent by `W^{Kb}` and `W^{Vb}`, and the join of the unturned channels of every head
+to the one turned key of the token onto `a`. The queries stand on the tokens of the pass `x`, and so does
 everything from the gathers on, because every query of the pass reads its own 2048
 tokens. The gathers read the keys and the values back over the cache, at
 `|P| + i_x - i_r`.
@@ -58,8 +58,8 @@ from notebooks.sota.GLM53.lightning_indexer import scale_by_inverse_square_root
 from notebooks.sota.GLM53.multi_latent_attention import (
     CORE_BOX, CORE_COLOUR, CORE_REFERENCES, GATHER_BOX, GATHER_COLOUR,
     GATHER_REFERENCES, KEY_VALUE_COLOUR, KEY_VALUE_REFERENCES, QUERY_COLOUR,
-    QUERY_REFERENCES, REPEAT_VIEW_NAME, SCORE_SCALE_NAME, low_rank_query,
-    output_projection)
+    QUERY_REFERENCES, SCORE_SCALE_NAME, join_key_channels_at_every_head,
+    low_rank_query, output_projection)
 from notebooks.sota.GLM53.released_constants import LATENT_NORM_EPSILON
 from notebooks.sota.GLM53.rotary_embedding import (
     broadcast_between_positions_and_channels)
@@ -68,7 +68,7 @@ from notebooks.sota.GLM53.block_titles_and_descriptions import TEXT as text
 CACHED_KEYS = cat.Array(R, (CACHED_TOKENS, h, a))
 CACHED_VALUES = cat.Array(R, (CACHED_TOKENS, h, u))
 CACHED_UNROTATED_KEYS = cat.Array(R, (CACHED_TOKENS, h, n))
-CACHED_ROTATED_KEYS = cat.Array(R, (CACHED_TOKENS, h, p))
+CACHED_ROTATED_KEY_SHARED_BY_THE_HEADS = cat.Array(R, (CACHED_TOKENS, p))
 SELECTED_CACHED_KEYS = cat.Array(R, (x, h, cached_selected, a))
 SELECTED_CACHED_VALUES = cat.Array(R, (x, h, cached_selected, u))
 
@@ -106,13 +106,6 @@ LATENT_CACHE_BOX = Caching.Caching.template((x, c), CACHED_TOKENS, LATENT_CACHE)
 TURNED_KEY_CACHE_BOX = Caching.Caching.template((x, p), CACHED_TOKENS, TURNED_KEY_CACHE)
 
 
-def repeat_cached_turned_key_over_heads() -> cat.Broadcasted:
-    '''The one turned key of every cached token copied to every head.'''
-    return ops.View.template(
-        reindexing=cat.Rearrangement((0, 2), (CACHED_TOKENS, h, p)),
-        name=REPEAT_VIEW_NAME)
-
-
 def latent_of_this_pass() -> cat.BroadcastedCategory:
     '''`STATE[x, m] -> R[x, c]`: the normalised latent of every token of the pass.'''
     return ((x >> ops.Linear.template((m,), (c,), 'W^{KVa}'))
@@ -141,13 +134,10 @@ def cached_keys_and_values() -> cat.Block:
     return cat.Block.template(
         route((0, 0), (STATE,))
         @ ((latent_of_this_pass() @ LATENT_CACHE_BOX @ expand_cached_latent())
-           * (turned_key_of_this_pass() @ TURNED_KEY_CACHE_BOX
-              @ repeat_cached_turned_key_over_heads()))
-        @ route((0, 2, 1),
-                (CACHED_UNROTATED_KEYS, CACHED_VALUES, CACHED_ROTATED_KEYS))
-        @ (aops.ConcatenateAxes.template(
-            ((CACHED_TOKENS, h, n), (CACHED_TOKENS, h, p)), concatenated=a)
-           * hold(CACHED_VALUES)),
+           * (turned_key_of_this_pass() @ TURNED_KEY_CACHE_BOX))
+        @ route((0, 2, 1), (CACHED_UNROTATED_KEYS, CACHED_VALUES,
+                            CACHED_ROTATED_KEY_SHARED_BY_THE_HEADS))
+        @ (join_key_channels_at_every_head(CACHED_TOKENS) * hold(CACHED_VALUES)),
         title=text.KEYS_AND_VALUES_TITLE, fill_color=KEY_VALUE_COLOUR,
         description=cached_text.CACHED_KEYS_AND_VALUES_DESCRIPTION,
         references=(*KEY_VALUE_REFERENCES, *LATENT_CACHE_REFERENCES))

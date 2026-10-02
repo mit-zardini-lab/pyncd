@@ -49,6 +49,8 @@ output/
               Mixtral8x7B/index.html                      Mixtral8x7B.html
   modern/     DeepSeekV41Flash/index.html                 DeepSeekV41Flash.html
               GLM53/index.html                            GLM53.html
+              KimiK3/index.html                           KimiK3.html
+              MiMoV26Pro/index.html                       MiMoV26Pro.html
 ```
 
 ## The tutorial models are written with symbolic sizes
@@ -107,6 +109,8 @@ the released code does.
 |---|---|---|---|---|
 | `modern/GLM53.ipynb` | `modern/validate_glm53.py` | `modern/GLM53/` | Decode and Cached, each quantised and unquantised; unquantised derived | `notebooks/sota/GLM53/`, with `slide_causal_reads.py` and `assemble_page_variants.py`, and `notebooks/caching/CachedGLM53/derive_cached_glm53.py` |
 | `modern/DeepSeekV41Flash.ipynb` | `modern/validate_deepseek_v41_flash.py` | `modern/DeepSeekV41Flash/` | Decode, quantised and unquantised; unquantised embedded | `notebooks/sota/DeepSeekV41Flash/` |
+| `modern/KimiK3.ipynb` | `modern/validate_kimi_k3.py` | `modern/KimiK3/` | Decode, in the reals alone, named Unquantised | `notebooks/sota/KimiK3/`, with `slide_causal_reads.py` and `assemble_page_variants.py` |
+| `modern/MiMoV26Pro.ipynb` | `modern/validate_mimo_v26_pro.py` | `modern/MiMoV26Pro/` | Decode and Cached, each in the reals alone, named Unquantised | `notebooks/sota/MiMoV26Pro/`, with `slide_causal_reads.py`, `derive_cached_mimo_v26_pro.py` and `assemble_page_variants.py` |
 
 The unquantised DeepSeek-V4.1-Flash is embedded. The released code rounds its cached
 latents, the entries of its candidate pool, and the keys and queries of its indexer
@@ -116,15 +120,34 @@ and *FP4 Round Trip of an Entry*. The functor would turn every one of those cast
 identity, and the blocks would round nothing. Embedding the model in the reals adds about
 0.5 MB to the page.
 
-GLM-5.3 and DeepSeek-V4.1-Flash are drawn in the CausalSlide form, in which each causal
-read stands at the copy that feeds the keys and the values, as the classic and tutorial
-models are.
+Kimi K3 and MiMo-V2.6-Pro carry no quantised variant, and each variant in the reals is
+named Unquantised so that a quantised variant can join it under the same address. The
+checkpoint of Kimi K3 stores the weights of its routed experts in MXFP4, and the quantised
+form needs the path by which `compressed-tensors` runs them and the precisions inside the
+kernels of `fla`. Kimi K3 carries no pass over new tokens either, because
+`derive_cached_pass` has no rule for the loop over the tokens of its delta attention.
+`transformers` 5.3.0, which wrote the configuration of MiMo-V2.6-Pro, reads its
+`quant_method: fp8` into a `FineGrainedFP8Config` that drops `store_dtype: mxfp4`, and
+replaces the list of routed experts with a fused `FP8Expert` that matches none of the
+packed MXFP4 tensors of the checkpoint, so that library does not run the experts. The
+cached pass of MiMo-V2.6-Pro keeps every earlier token in its ten full attention layers
+and the last 127 in its sixty sliding window layers, which is what
+`DynamicSlidingWindowLayer` keeps.
+
+GLM-5.3, DeepSeek-V4.1-Flash, Kimi K3 and MiMo-V2.6-Pro are drawn in the CausalSlide
+form, in which each causal read stands at the copy that feeds the keys and the values, as
+the classic and tutorial models are.
 
 ## Every axis in a legend carries a code name
 
 Each validator checks, through `notebook_diagrams.page_variant_legends`, that every row of
 the legend of every variant carries the code name of its axis, and the code name of its
 size where the size is one named symbol.
+
+A second table of the legend lists the naturals that are the datatypes of arrays, such
+as the token identifiers, each with its size and its bound written in code names. The
+Mixtral-8x7B validator checks the table of its cached variants in
+`check_every_cache_of_the_page_opens_a_box`.
 
 ## Rewriting a page after a change
 

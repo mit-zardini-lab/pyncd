@@ -285,8 +285,10 @@ def check_the_inspection_box_is_packaged(table: cat.Broadcasted) -> None:
     assert expansion['operator'] == type(table.operator).__name__
     assert expansion['latex'] == table.operator.name.to_latex()
     row = standard_expansions.expansion_for(table.operator)
-    assert expansion['formula'] == row.formula_of(table)
-    assert expansion['description'] == row.description_of(table)
+    lettered = auxiliary_information.lettered_texts(
+        row.formula_of(table), row.description_of(table))
+    assert expansion['formula'] == lettered.formula
+    assert expansion['description'] == lettered.description
     exported = json.loads(expansion['expansion'])
     assert '"Rotary"' not in json.dumps(exported['data'])
     assert not expansion['auxiliary'].get('expansions'), \

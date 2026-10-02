@@ -42,8 +42,8 @@ import deepseek.data_structure as dst
 
 from notebooks.sota.DeepSeekV41Flash.construction_idioms import boxed, hold, over, route
 from notebooks.sota.GLM53.declared_axes import (
-    LATENT, QUERIES, QUERY_LOW_RANK, R, ROTATED_KEYS, STATE, UNROTATED_KEYS, VALUES,
-    a, c, h, m, n, p, q, u, x)
+    LATENT, QUERIES, QUERY_LOW_RANK, R, ROTATED_KEY_SHARED_BY_THE_HEADS, STATE,
+    UNROTATED_KEYS, VALUES, a, c, h, m, n, p, q, u, x)
 from notebooks.sota.GLM53.lightning_indexer import (
     SELECTION, read_back_from_each_token, s, scale_by_inverse_square_root)
 from notebooks.sota.GLM53.reference_links import modeling_lines
@@ -58,8 +58,7 @@ GATHER_COLOUR = '#D9E7F5'
 CORE_COLOUR = '#C5BEDF'
 GATHER_BOX = 'Gth'
 CORE_BOX = 'Core'
-SCORE_SCALE_NAME = '\\lvert a \\rvert^{-1/2} x'
-REPEAT_VIEW_NAME = '\\mathrm{Repeat}'
+SCORE_SCALE_NAME = 'x / \\sqrt{\\lvert a \\rvert}'
 
 QUERY_REFERENCES = (modeling_lines(335, 337), modeling_lines(394, 396),
                     modeling_lines(403, 405), modeling_lines(411))
@@ -110,18 +109,33 @@ def query_without_low_rank() -> cat.Block:
         references=QUERY_REFERENCES)
 
 
-def repeat_over_heads() -> cat.Broadcasted:
-    '''The one turned key of a token copied to every head, which is the `expand` of
-    the reference.'''
-    return ops.View.template(
-        reindexing=cat.Rearrangement((0, 2), (x, h, p)), name=REPEAT_VIEW_NAME)
+def join_key_channels_at_every_head[A: cat.Axis](tokens: A) -> cat.Broadcasted:
+    '''`R[tokens, h, n], R[tokens, p] -> R[tokens, h, a]`: the unturned channels of
+    every key head joined to the one turned key of the token.
+
+    The join is broadcast over the tokens and the heads. It reads the turned key through
+    a reindexing that deletes the head, so every head reads the same turned key. The
+    reference copies the turned key to every head with an `expand` before its
+    `torch.cat`, and that copy is a view whose reindexing has a stride of zero over the
+    head. The view is an identity over the tokens and a deletion of the head, and the
+    deletion is written here in the reindexing of the join.'''
+    T = cat.WeaveMode.TILED
+    degree = (tokens, h)
+    join_of_heads = aops.ConcatenateAxes.template(
+        ((tokens, h, n), (tokens, h, p)), concatenated=a)
+    return cat.Broadcasted(
+        operator=join_of_heads.operator,
+        input_weaves=(cat.Weave(R, (T, T, n)), cat.Weave(R, (T, p))),
+        output_weaves=join_of_heads.output_weaves,
+        reindexings=(cat.ProdObject(degree).identity(),
+                     cat.Rearrangement((0,), degree)))
 
 
 def keys_and_values() -> cat.Block:
     '''`STATE[x, m] -> KEYS[x, h, a], VALUES[x, h, u]`: the latent of every token,
     normalised and expanded into the unturned channels of every key head and into
-    every value head, and the turned key of every token, turned and copied to every
-    head.'''
+    every value head, and the turned key of every token, turned and joined to the
+    unturned channels of every head.'''
     return cat.Block.template(
         route((0, 0), (STATE,))
         @ (((x >> ops.Linear.template((m,), (c,), 'W^{KVa}'))
@@ -130,11 +144,9 @@ def keys_and_values() -> cat.Block:
             @ ((x >> ops.Linear.template((c,), (h, n), 'W^{Kb}'))
                * (x >> ops.Linear.template((c,), (h, u), 'W^{Vb}'))))
            * ((x >> ops.Linear.template((m,), (p,), 'W^{Kr}'))
-              @ ROTATE_QUERY_KEY_CHANNELS
-              @ repeat_over_heads()))
-        @ route((0, 2, 1), (UNROTATED_KEYS, VALUES, ROTATED_KEYS))
-        @ (aops.ConcatenateAxes.template(((x, h, n), (x, h, p)), concatenated=a)
-           * hold(VALUES)),
+              @ ROTATE_QUERY_KEY_CHANNELS))
+        @ route((0, 2, 1), (UNROTATED_KEYS, VALUES, ROTATED_KEY_SHARED_BY_THE_HEADS))
+        @ (join_key_channels_at_every_head(x) * hold(VALUES)),
         title=text.KEYS_AND_VALUES_TITLE, fill_color=KEY_VALUE_COLOUR,
         description=text.KEYS_AND_VALUES_DESCRIPTION, references=KEY_VALUE_REFERENCES)
 
@@ -173,7 +185,7 @@ SELECTED_VALUES = cat.Array(R, (x, h, s, u))
 def attend_over_every_query_and_head() -> cat.Block:
     '''The softmax of every query and head over the selected tokens, written out over
     every query and head: the score of the query against every selected key, the scale
-    `|a|^{-1/2}`, the softmax over the selected slots and the sum of the values under
+    `1 / \\sqrt{|a|}`, the softmax over the selected slots and the sum of the values under
     the softmax.'''
     return cat.Block.template(
         (hold(QUERIES) * hold(SELECTED_KEYS) * hold(SELECTED_VALUES))

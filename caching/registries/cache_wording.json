@@ -1,7 +1,6 @@
 {
   "name": "Current",
   "wordings": {
-    "CACHING_EXPANSION_DESCRIPTION": "The entries the cache holds for the tokens P of the earlier passes are loaded from the tape. The array of this pass, over its tokens x, is appended to the cache for the passes after this one, and laid after the loaded entries along the axis P + x, which is handed on. A token of this pass therefore stands at position |P| + i_x of the result. The load reads |P| tokens and the append writes |x|, and the load returns what the appends of the earlier passes wrote.",
-    "CACHING_EXPANSION_FORMULA": "y[i_{P}] = \\mathrm{cache}[i_{P}], \\qquad y[\\lvert P \\rvert + i_{x}] = v[i_{x}], \\qquad \\mathrm{cache}[\\lvert P \\rvert + i_{x}] \\leftarrow v[i_{x}]"
+    "CACHING_EXPANSION_DESCRIPTION": "The entries the cache holds for the tokens {past} of the earlier passes are loaded from the tape. The array of this pass, over its tokens {tokens}, is appended to the cache for the passes after this one, and laid after the loaded entries along the axis {past} + {tokens}, which is handed on. A token of this pass therefore stands at position |{past}| + i_{tokens} of the result. The load reads |{past}| tokens and the append writes |{tokens}|, and the load returns what the appends of the earlier passes wrote."
   }
 }

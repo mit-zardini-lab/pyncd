@@ -144,10 +144,11 @@ BIAS_SYMBOL = r'\beta'
 def normalize_formula[B: cat.Datatype, A: cat.Axis](target: cat.Broadcasted[B, A]) -> str:
     letters = consumed_letters(target)
     operator = target.operator
-    scaled = (rf'x \left(\frac{{1}}{{{write_index_notation.element_count(letters)}}}'
+    scaled = (rf'\frac{{x}}{{\sqrt{{'
+              rf'\frac{{1}}{{{write_index_notation.element_count(letters)}}}'
               rf'{write_index_notation.sum_over(letters)}'
               rf'{write_index_notation.read_at("x", letters)}^{{2}} + '
-              rf'{operator.epsilon.to_latex()}\right)^{{-1/2}}')
+              rf'{operator.epsilon.to_latex()}}}}}')
     if operator.gain:
         scaled = rf'{scaled} \odot {GAIN_SYMBOL}'
     if operator.bias:
@@ -169,9 +170,8 @@ def layer_norm_formula[B: cat.Datatype, A: cat.Axis](
     count = write_index_notation.element_count(letters)
     total = write_index_notation.sum_over(letters)
     centred_read = rf'({write_index_notation.read_at("x", letters)} - {MEAN_SYMBOL})'
-    scaled = (rf'(x - {MEAN_SYMBOL}) \left(\frac{{1}}{{{count}}}{total}'
-              rf'{centred_read}^{{2}}{added_epsilon_latex(operator.epsilon)}'
-              rf'\right)^{{-1/2}}')
+    scaled = (rf'\frac{{x - {MEAN_SYMBOL}}}{{\sqrt{{\frac{{1}}{{{count}}}{total}'
+              rf'{centred_read}^{{2}}{added_epsilon_latex(operator.epsilon)}}}}}')
     if operator.gain:
         scaled = rf'{scaled} \odot {GAIN_SYMBOL}'
     if operator.bias:
@@ -246,7 +246,7 @@ def expand_l1_norms(target):
 
 INVERSE_ROOT = ops.Arithmetic(
     formula=nm.x ** (nm.Integer(-1) / nm.Integer(2)),
-    name=fd.DynamicName('x^{-1/2}'))
+    name=fd.DynamicName('1 / \\sqrt{x}'))
 
 
 @standard_expansions.register(
@@ -256,7 +256,7 @@ INVERSE_ROOT = ops.Arithmetic(
 def expand_l2_norm[B: cat.Datatype, A: cat.Axis](
     target: cat.Broadcasted[B, A],
 ) -> cat.BroadcastedCategory[B, A]:
-    '''`copy ; ((square ; sum ; x^{-1/2}) * id) ; scale`, at the norm's own degree.
+    '''`copy ; ((square ; sum ; 1 / sqrt(x)) * id) ; scale`, at the norm's own degree.
     Anything that is not an `L2Norm` comes back unchanged.
 
     The rule is `expand_normalize` without the division by the number of values,
@@ -434,8 +434,8 @@ def inverse_root_of_mean(
         formula=((nm.x / element_count + epsilon)
                  ** (nm.Integer(-1) / nm.Integer(2))),
         name=fd.DynamicName(
-            f'(x / {element_count.to_latex()}'
-            f'{added_epsilon_latex(epsilon)})^{{-1/2}}'))
+            f'1 / \\sqrt{{x / {element_count.to_latex()}'
+            f'{added_epsilon_latex(epsilon)}}}'))
 
 
 @standard_expansions.register(

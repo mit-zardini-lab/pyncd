@@ -435,7 +435,7 @@ def signed_root_gate() -> cat.Broadcasted:
     '''The gate of one stream from its normalised dot product: the sign of the product
     times the square root of its magnitude held at or above epsilon, through a
     sigmoid.'''
-    scaled = nm.x * nm.Power.template(m.local_size(), nm.Integer(-1) / nm.Integer(2))
+    scaled = nm.x / nm.SquareRoot(m.local_size())
     magnitude = nm.LargerOf(nm.AbsoluteValue(scaled), ENGRAM_GATE_FLOOR)
     return ops.Arithmetic.template(
         nm.Sigmoid(nm.Sign(scaled) * nm.SquareRoot(magnitude)), name=GATE_NAME)
@@ -452,7 +452,7 @@ def gate_every_stream(layer: int) -> cat.Block:
             '{\\mathrm{rms}(X[i_{x}, i_{n}])\\, \\mathrm{rms}(k[i_{x}, i_{n}])}, '
             '\\quad g[i_{x}, i_{n}] = '
             '\\sigma\\Big( \\mathrm{sign}(y) \\sqrt{\\max(\\lvert y \\rvert '
-            '\\lvert m \\rvert^{-1/2}, \\varepsilon_{\\mathrm{g}})} \\Big)'),
+            '/ \\sqrt{\\lvert m \\rvert}, \\varepsilon_{\\mathrm{g}})} \\Big)'),
         description=text.ENGRAM_GATE_WITHOUT_THE_MODALITY_DESCRIPTION,
         references=(model_lines(347, 348), model_lines(356, 362),
                     model_lines(363, 364)))

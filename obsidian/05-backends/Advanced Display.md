@@ -1,6 +1,6 @@
 ---
 tags: [layer/backends, tool]
-code: websocket_transfer/auxiliary_information.py, notebooks/display/advanced_display.py, notebooks/display/explain_operators.py, notebooks/display/explain_reindexings.py, notebooks/display/expand_with_parameters.py, notebooks/display/explain_cached_reads.py, algebra/factor_out_lift.py, algebra/registries/standard_expansions.py, algebra/write_index_notation.py, para/processing/write_linear_formula.py, data_transfer/broadcast_occurrences.py
+code: websocket_transfer/auxiliary_information.py, websocket_transfer/letter_formula_indices.py, notebooks/display/advanced_display.py, notebooks/display/explain_operators.py, notebooks/display/explain_reindexings.py, notebooks/display/expand_with_parameters.py, notebooks/display/explain_cached_reads.py, algebra/factor_out_lift.py, algebra/registries/standard_expansions.py, algebra/write_index_notation.py, para/processing/write_linear_formula.py, data_transfer/broadcast_occurrences.py
 status: stable
 ---
 
@@ -78,6 +78,27 @@ inside a box as it reaches a box from the figure. Until 2026-09-17 the figure's 
 was registered nowhere, so a slot locked in the figure lit its boxes while a slot
 locked inside a box left the figure dark. The user found the difference on the slot
 `mod` of Engram.
+
+A second table under the axes lists the naturals of the term, as the user asked on
+2026-09-27. [[Naturals in the Legend]] is the main note for it. A `cat.Natural` is the datatype of an array of positions, such as the token
+identifiers `Natural(|v|)`, and it is drawn as a wire of its own below the axes of its
+array, labelled with its bound. The table has one row per natural that is the datatype
+of an array or a weave of the term, or that the quantisation of such a datatype holds,
+with the bound on the left, the integer it comes to in the middle, and the bound written
+in the code names of its symbols on the right, as `new_tokens_size + earlier_tokens_size`.
+`auxiliary_information.natural_legend_rows` builds it. The size travels as a string of
+digits, because the bound of a 64-bit integer, $2^{63}$, is larger than the largest
+integer a JavaScript number holds exactly.
+
+A natural has no uid, so a row names its natural by the structure of the bound:
+`auxiliary_information.natural_key` writes a symbol as `#` and its uid, an integer as its
+digits, and a sum, a product and a power as `+`, `*` and `^` over the keys of their
+parts, and tsncd's `src/data_structure_processing/find_naturals_by_key.ts` writes the same key for the
+natural of every wire. A row halos and locks the wires of its natural as a row of the
+first table does the wires of its axes, under the highlight token `natural:<key>`, and the
+label on the left is the one tsncd writes on those wires. The token reaches the arrow of a
+natural array in the two arrow forms and a tape that carries a natural. One note under
+both tables reads "click a row to lock its wires".
 
 The label an axis carries on its wire is drawn at `DiagramSettings.axis_label_font_size`,
 in em, which is the `axisLabelFontSize` display setting. tsncd's default is 0.8, where the
@@ -176,7 +197,11 @@ class to the rule, the formula it writes out in LaTeX, and a sentence of descrip
 extended by the `register` decorator the rules carry. `expansion_for` walks the MRO as
 `algebra.registries.accumulator.accumulator_for` does. The display asks the registry
 which operators of a term can be opened. The registry is filled when
-`algebra.operator_expansion` is imported, so `auxiliary_information` imports it.
+`algebra.operator_expansion` is imported, so `auxiliary_information` imports it. The row of
+a `Caching` is registered by `caching/registries/standard_expansions.py`, and
+`auxiliary_information` imports that module too since 2026-09-27. Until then a notebook
+drew a box over a cache only where something it ran happened to import the rule, and the
+caches of Mixtral-8x7B opened no box. The user asked for every cache to open one.
 
 The formula and the description of a row are each one text, or a function that writes the text from the `cat.Broadcasted` that carries the operator, and `StandardExpansion.formula_of` and `description_of` read either. The six rows of the package hold functions, so a formula names the axes of the operator it is shown over. For an operator over an axis $m$, and a linear map from $m$ onto $o$ named $Q$, the six rows write
 
@@ -185,20 +210,31 @@ The formula and the description of a row are each one text, or a function that w
 | `SoftMax` | $\mathrm{softmax}_{m}(s) = \frac{e^{s}}{\sum_{i_{m} \in m} e^{s[i_{m}]}}$ |
 | `L1Norm` | $L^{1}_{m}(v) = \frac{v}{\sum_{i_{m} \in m} v[i_{m}]}$ |
 | `L2Norm` | $L^{2}_{m}(v) = \frac{v}{\sqrt{\sum_{i_{m} \in m} v[i_{m}]^{2}}}$ |
-| `Normalize` | $\mathrm{RMSNorm}_{m}(x) = x \left(\frac{1}{|m|}\sum_{i_{m} \in m} x[i_{m}]^{2} + \epsilon\right)^{-1/2} \odot \gamma$ |
-| `LayerNorm` | $\mathrm{LayerNorm}_{m}(x) = (x - \mu) \left(\frac{1}{|m|}\sum_{i_{m} \in m} (x[i_{m}] - \mu)^{2} + \epsilon\right)^{-1/2} \odot \gamma + \beta$, with $\mu = \frac{1}{|m|}\sum_{i_{m} \in m} x[i_{m}]$ |
+| `Normalize` | $\mathrm{RMSNorm}_{m}(x) = \frac{x}{\sqrt{\frac{1}{|m|}\sum_{i_{m} \in m} x[i_{m}]^{2} + \epsilon}} \odot \gamma$ |
+| `LayerNorm` | $\mathrm{LayerNorm}_{m}(x) = \frac{x - \mu}{\sqrt{\frac{1}{|m|}\sum_{i_{m} \in m} (x[i_{m}] - \mu)^{2} + \epsilon}} \odot \gamma + \beta$, with $\mu = \frac{1}{|m|}\sum_{i_{m} \in m} x[i_{m}]$ |
 | `Linear` | $y[i_{o}] = \sum_{i_{m} \in m} x[i_{m}]\, W_{Q}[i_{m}, i_{o}]$, and $+\, b_{Q}[i_{o}]$ after it where the map has a bias |
 
 The user ruled on the notation of a formula on 2026-09-17. A sum names the index it iterates and the axis the index ranges over, $\sum_{i_{m} \in m}$, where it was written $\sum_{m}$. An array is read at an index in brackets, $x[i_{m}]$, where it was written with a subscript, so the top-k selection of the V4.1 table reads $\{(j, s[j]) : \ldots\}$. The gain of the RMSNorm is the last factor, $\odot \gamma$, as the expansion multiplies it in last.
 
 `caching/registries/standard_expansions.py` registers one more row, for a `Caching`, whose formula and sentence stand in `caching/registries/cache_wording.json`. Its expansion loads the earlier tokens from the tape, lays the tokens of the pass after them and appends the tokens of the pass to the tape, per [[Caching Between Passes]]. A module that draws a cache imports the registry for its side effect.
 
+The user ruled on 2026-09-27 that a square root is written with a radical, so the RMSNorm divides by $\sqrt{\ldots}$ where it multiplied by $(\ldots)^{-1/2}$, and the scale of attention is built with `nm.SquareRoot` and reads $x / \sqrt{|d|}$. [[Representing Models]] records the ruling.
+
+### The indices of a formula take their own letters
+
+The same day the user ruled that the indices of one formula take different letters, $i$, $j$, $k$, $l$, $m$ and $n$ in the order the formula first names them, each keeping its axis as its subscript. The formulas above are written in the source with every index as $i_{m}$. `websocket_transfer/letter_formula_indices.py` letters the formula of every block and every expansion as it is packaged, so the linear map from $m$ onto $o$ reads $y[i_{o}] = \sum_{j_{m} \in m} x[j_{m}]\, W_{Q}[j_{m}, i_{o}]$ in its box. A letter the formula already writes as a symbol, such as the array $k$ or a bare index $i$, is passed over, as is a letter in the name of an axis the formula indexes, so no index reads $m_{m}$. A description names indices in plain text, `i_x`, and is written with the letters of its formula, by the name of the axis up to a `|`. A subscript of more than one character written without braces, `x_new`, is braced, because KaTeX reads `x_new` as $x_{n}$ followed by `ew`.
+
+[[Indices of Inspection Box Formulas]] is the main note for the lettering, the line of free indices and the ranges of guarded indices.
+
+A box also lists under its formula each index the formula holds for every position of its axis, as $\forall i_{x} \in x,\; j_{d} \in d$. Since 2026-09-28 a guarded index is written over the positions of its axis that hold a value, $j_{w|x} \in [0, i_{x}]$, where the stride of the axis is 1 or -1, and its tooltip adds the condition under which a position holds a value. An index is bound in a clause of the formula where the clause names its range, as $\sum_{j_{d} \in d}$ does, or where it stands inside a set $\{\ldots\}$, and an index some clause uses unbound is listed. The clauses are the lines of a `gathered` block and the parts separated by `\quad`. The indices travel as the `indices` field of the record, per [[Diagram Wire Format]], and tsncd draws the line. Resting the pointer on one clause, or tapping it, shows "The axis $x$ carries a set of indexes, in $[0, |x|)$".
+
 The shifted softmax of `expand_shifted_softmax` is a second form of the same operator
 and is not the standard one, so it is not registered. The row of a `Linear` is registered
 when `algebra.linear_expansion` is imported, which
 `notebooks/display/expand_with_parameters.py` does. `websocket_transfer` imports `algebra`
-alone, so a caller that packages the auxiliary information without the notebook layer
-gets the first four rows. `display/` still imports nothing above it.
+and the rule of a cache, so a caller that packages the auxiliary information without the
+notebook layer gets the first five rows and the cache. `display/` still imports nothing
+above it.
 
 ### An operator is written out with its parameters on the tape
 
@@ -362,7 +398,12 @@ and where a second operand $q$ holds the position of each entry, the position ha
 
 An elementwise map is an `ops.Arithmetic` over a formula, and its name in the figure is
 the LaTeX of the formula unless the model gives it a shorter one. A map named after its
-formula, such as $e^{x}$, shows everything in the figure and opens no box.
+formula, such as $e^{x}$, shows everything in the figure and opens no box, unless the
+model's table gives it a role. A role says what the map is for, which the figure does not
+show, so the division $x / 448$ of the V4.1 caches opens a box saying that 448 is the
+largest E4M3 value. That exception dates from 2026-09-27, when a product began to print
+its reciprocal factors after a slash and the three divisions of the V4.1 tables, named
+$x / 448$, $x / 6$ and $x / \tau$ by hand, came to be named after their formulas.
 `explain_operators.explain_named_arithmetic` is the row for the others: a map whose name
 is not its formula, as the square root of the softplus is named $\sqrt{s^{+}}$, and a map
 whose formula holds a function the primitive numerics spell out, as a sigmoid is spelt.
@@ -377,7 +418,10 @@ says what each of the six such maps of the model is for, by the text of its name
 sentence comes first in the box. `nm.Power.to_latex` writes a power of one half as a
 root and `nm.Logarithm.to_latex` writes a logarithm to the base $e$ as $\ln$ since the
 same day, so the box over the router's score function reads $y = \sqrt{\ln(1 + e^{x})}$
-where it would have read `log_{e}(1 + e^{x})^{2^{-1}}`.
+where it would have read `log_{e}(1 + e^{x})^{2^{-1}}`. A power of minus one half is
+still written as a power, so a scale is built with `nm.SquareRoot` and prints
+$x / \sqrt{|d|}$, because `nm.Multiplication.to_latex` writes a factor raised to the
+power -1 after a slash since 2026-09-27.
 
 An operator standing as the body of a `ParaWrap` is wrapped as every other is. The
 explaining block has the operands and the results of the operator it holds, so the

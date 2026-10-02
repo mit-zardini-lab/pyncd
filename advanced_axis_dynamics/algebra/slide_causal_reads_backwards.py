@@ -26,6 +26,12 @@ reindexing of that operand, and slides on outside, so the box then reads the arr
 read returns. A read at a domain position of a wrap that the wrap grabs from the tape
 stops there, because a slot holds its array whole.
 
+A repeated block that receives no read and holds no causal read passes whole, and no
+read reaches its operands. The loop of a scan over the tokens is the case: its
+iterations read their operands at the counter, which is no causal read, and its operands
+have more wires than its results, so the crawl would otherwise refuse it for handing its
+operands a guide different from the one its results received.
+
 The position of the causal read on its path is the placement of a cache. The operators
 before the read compute once for every token, and a cache of the array the read reads
 serves every later pass. The operators after the read compute once for every token and
@@ -49,6 +55,7 @@ import data_structure.Term as fd
 import para.data_structure.Para as Para
 import para.data_structure.ParaBlockOperator as ParaBlockOperator
 import para.data_structure.ParaWrap as para_wrap
+import term_utilities.term_utilities as tutil
 
 import advanced_axis_dynamics.algebra.move_reads_backwards as move_reads_backwards
 
@@ -89,6 +96,12 @@ def causal_read_of(target: cat.BroadcastedCategory) -> sc.StrideMorphism | None:
     return None
 
 
+def holds_a_causal_read(term: cat.BroadcastedCategory) -> bool:
+    '''Whether `term`, or the body of a box inside it, holds a causal read.'''
+    return any(causal_read_of(node) is not None
+               for node in tutil.type_search(cat.Broadcasted, term))
+
+
 @dataclass
 class CausalReadCrawler[B: cat.Datatype, A: cat.Axis](
         move_reads_backwards.ReadCrawler[B, A]):
@@ -96,6 +109,16 @@ class CausalReadCrawler[B: cat.Datatype, A: cat.Axis](
     every operator, or past the operators of `operators_passed` alone where it names
     any, a box named there passing its whole body.'''
     operators_passed: frozenset[cat.Operator] | None = None
+
+    def propagate_category(self, target: cat.BroadcastedCategory[B, A],
+                           guide: Sequence[move_reads_backwards.Read]
+                           ) -> tuple[cat.BroadcastedCategory[B, A],
+                                      Sequence[move_reads_backwards.Read]]:
+        if (isinstance(target, cat.Block) and target.block_tag.repetition != nm.Integer(1)
+                and all(read is None for read in guide)
+                and not holds_a_causal_read(target.body)):
+            return target, tuple(None for _ in target.dom())
+        return super().propagate_category(target, guide)
 
     def slid_inside_wrap(self, wrap: para_wrap.ParaWrap
                          ) -> tuple[para_wrap.ParaWrap, Sequence[move_reads_backwards.Read]]:

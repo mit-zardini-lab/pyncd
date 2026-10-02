@@ -201,6 +201,14 @@ Each has an entry under *The rulings* with the rejected form.
     the expression is lifted over, so a lift over `x` repeats its grab along `x`. A plain
     `Para.TapeSlot` holds one array per index, so a lift over `x` enlarges the array read
     by its grab, per [[Outer and Inner Tape Slots]].
+38. **A square root is an `nm.SquareRoot`, and a scale by its reciprocal is a division.**
+    The scale of attention is `nm.x / nm.SquareRoot(d.local_size())`, which prints
+    `x / \sqrt{|d|}`, and its name is written with the radical as well.
+39. **Write a repeat that an operation reads as a deletion in that operation's
+    reindexing.** A repeat is a view whose reindexing has a stride of zero over the
+    repeated axis, so it is an identity over the other axes and a deletion of the
+    repeated one. The operation reads its operand through the deletion, and
+    `reindexing_absorption.absorb` returns the same operation.
 
 ## The rulings
 
@@ -1161,6 +1169,29 @@ Each has an entry under *The rulings* with the rejected form.
   `\mathrm{Diagonal}`, `\mathrm{Transpose}`, `\mathrm{ScaleGroup}`, `\mathrm{Candidate}`
   and `\mathrm{Lookback}`.
 
+- A repeat read by an operation broadcast over the repeated axis is written as a
+  deletion in the reindexing through which that operation reads its operand. The repeat
+  is a view whose reindexing has a stride of zero over the repeated axis, so it is an
+  identity over the other axes and a deletion of the repeated one. The deletion moves
+  into the reindexing of the operation, and the view is removed. The user ruled on this
+  on 2026-09-29 for the keys and values of GLM-5.3, whose turned key is one vector per
+  token and is joined to the unturned channels of each of the 64 heads. In the cached
+  pass the view had been an identity over `x_old + x_new` and a deletion of `h`, and the
+  join now reads the turned key cached on `x_old + x_new` at every head. The ruling
+  applies the repeat ruling under *Operators and what they stand for*, where a degree
+  axis that no operand's reindexing names is one the output is repeated along, and the
+  parameter-table ruling under *Weights and Linears*, which drops the degree in the
+  reindexing of the consumer. `reindexing_absorption.absorb` of the view into the join
+  returns the join written in the replacement form, and
+  `notebooks/sota/GLM53/validate_glm53.py` checks the equality.
+  Rejected: `ops.View.template(reindexing=cat.Rearrangement((0, 2), (x, h, p)),
+  name=REPEAT_VIEW_NAME)` followed by
+  `aops.ConcatenateAxes.template(((x, h, n), (x, h, p)), concatenated=a)`.
+  Replacement: the `aops.ConcatenateAxes` broadcast over `(x, h)` whose turned operand
+  has the weave `(T, p)` and the reindexing `cat.Rearrangement((0,), (x, h))`, as
+  `multi_latent_attention.join_key_channels_at_every_head` builds it.
+  Ruled on 2026-09-29.
+
 ### Blocks, repetitions and presentation
 
 - Present compactly with `ops.BlockOperator`, which draws as one bold named box whose body
@@ -1507,6 +1538,17 @@ Each has an entry under *The rulings* with the rejected form.
   `y = \sigma(x) = (1 + e^{-x})^{-1}` that appends the expansion.
   Replacement: `nm.Sigmoid(nm.Sign(d) * nm.SquareRoot(nm.LargerOf(nm.AbsoluteValue(d),
   EPSILON)))`, and the box formula `y = \sigma(x)`.
+
+- A constant square root is written with `nm.SquareRoot` too, and a scale by its
+  reciprocal is a division by it, so the scale of attention reads `x / \sqrt{|d|}` in its
+  box and in its name. A power of minus one half printed as `|d|^{-2^{-1}}`, and a name
+  written as a power stood beside it because a root in a name did not draw in August.
+  tsncd draws `\sqrt` and `\frac` in a name since.
+  Rejected: `ops.Arithmetic.template(nm.x * d.local_size() ** MINUS_HALF,
+  name='|d|^{-1/2} x')`, whose box read `y = x |d|^{-2^{-1}}`.
+  Replacement: `ops.Arithmetic.template(nm.x / nm.SquareRoot(d.local_size()),
+  name='x / \\sqrt{|d|}')`, whose box reads `y = x / \sqrt{|d|}`. Ruled on
+  2026-09-27.
 
 - An elementwise map given by a formula is an `ops.Arithmetic` over `nm.x`. The algebra
   differentiates the formula and `torch_compile` evaluates it, so a derived backward pass is

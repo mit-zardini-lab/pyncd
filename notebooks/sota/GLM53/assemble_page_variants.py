@@ -31,11 +31,13 @@ import notebooks.sota.GLM53.whole_model as whole_model
 PAGE_SLUG = 'GLM53'
 PAGE_TITLE = 'GLM-5.3'
 INITIAL_VARIANT = 'decode-quantised'
-QUANTISED_WIDTH = 2600
-UNQUANTISED_WIDTH = 2300
-'''The wrap widths that keep every block of the whole model whole, one for the forms
-carrying a quantisation on every wire and one for the forms in the reals, whose labels
-are shorter. Each holds for the decode form and for the cached form.'''
+QUANTISED_WIDTH = 1500
+UNQUANTISED_WIDTH = 1325
+'''The target widths of the rows, which are planned to keep every block whole. One is
+for the forms carrying a quantisation on every wire, and one is for the forms in the
+reals, whose labels are shorter. In all four forms the embedding and the layers with a
+dense MLP take the first row, each IndexShare group takes a row of its own, and the
+output logits take the last row. The widths were chosen on 2026-10-02.'''
 
 DECODE_GROUP = notebook_diagrams.PageVariantGroup('decode', 'Decode')
 CACHED_GROUP = notebook_diagrams.PageVariantGroup('cached', 'Cached')

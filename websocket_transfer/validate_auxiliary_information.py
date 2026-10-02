@@ -16,9 +16,14 @@ operator said first, that an operator with no expansion is wrapped
 in a block drawn as the operator alone, that a row of the table of explanations can
 write the explanation from the operator, that an operator fed from the tape is explained
 inside its wrap, that an elementwise map opens a box only where its name or a sigmoid
-hides part of its formula, that a plain box fed from the tape holds the tape as a seed
+hides part of its formula or the model gives it a role, that a plain box fed from the
+tape holds the tape as a seed
 inside its block, that a named reindexing is wrapped in a block
-drawn as the reindexing alone with a formula written from its rows, that the messages
+drawn as the reindexing alone with a formula written from its rows, that the indices of
+a formula take their own letters and those it holds for every position of their axes
+are listed, that a reciprocal is written after a slash, that the second table of the
+legend lists the naturals of the arrays, that every cache opens a box, that a guarded
+index carries the positions of its axis that hold a value, that the messages
 carry the field only when
 there is one, and that the notebook setting converts the term once and keys the
 expansions off what is sent.
@@ -34,7 +39,9 @@ from collections.abc import Callable
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
+import advanced_axis_dynamics.algebra.mark_sparse_domains as mark_sparse_domains  # noqa: E402
 import algebra.registries.standard_expansions as standard_expansions  # noqa: E402
+import caching.data_structure.Caching as Caching  # noqa: E402
 import construction_helpers as ch  # noqa: E402,F401
 import data_structure.Category as cat  # noqa: E402
 import data_structure.Numeric as nm  # noqa: E402
@@ -50,7 +57,9 @@ import term_utilities.code_references as code_references  # noqa: E402
 import term_utilities.generate_config as gc  # noqa: E402
 import term_utilities.term_utilities as tutil  # noqa: E402
 import websocket_transfer.auxiliary_information as auxiliary_information  # noqa: E402
+import websocket_transfer.letter_formula_indices as letter_formula_indices  # noqa: E402
 import websocket_transfer.send_morphism as send_morphism  # noqa: E402
+import websocket_transfer.write_formula_index_ranges as write_formula_index_ranges  # noqa: E402,E501
 import websocket_transfer.websockets_transfer as wst  # noqa: E402
 
 import notebooks.display.advanced_display as advanced_display  # noqa: E402
@@ -117,11 +126,14 @@ def importer_walk_operator_names(exported: str) -> list[str]:
     return names
 
 
-def check_the_registry_writes_out_six_operators() -> None:
+def check_the_registry_writes_out_seven_operators() -> None:
+    '''The registry holds the rule of a cache, which
+    `websocket_transfer/auxiliary_information.py` imports for its registration, so
+    every cache a figure holds opens a box.'''
     registered = standard_expansions.registered_operators()
     if set(registered) != {
             ops.SoftMax, ops.L1Norm, ops.L2Norm, ops.Normalize, ops.LayerNorm,
-            ops.Linear}:
+            ops.Linear, Caching.Caching}:
         raise AssertionError(f'registered {registered}')
     m = cat.RawAxis.named('m')
     for template, expected in (
@@ -150,7 +162,7 @@ def check_the_registry_writes_out_six_operators() -> None:
     l2 = standard_expansions.expand_standard(ops.L2Norm.template((m,)))
     names = {b.operator.name.to_latex() for b in tutil.type_search(cat.Broadcasted, l2)
              if isinstance(b.operator, ops.Arithmetic)}
-    if names != {'x^{2}', 'x^{-1/2}'}:
+    if names != {'x^{2}', '1 / \\sqrt{x}'}:
         raise AssertionError(
             f'the L2 norm squares and takes an inverse root, got {names}')
     linear = ops.Linear.template((m,), (m,))
@@ -369,8 +381,13 @@ def check_a_formula_is_written_from_the_operator_it_is_shown_over() -> None:
         raise AssertionError(f'the role comes first: {expansion["description"]}')
     if [r['label'] for r in expansion['references']] != ['declared', 'linear']:
         raise AssertionError(f'the references of the role come first: {expansion["references"]}')
-    if expansion['formula'] != biased:
-        raise AssertionError(f'the expansion carries the generated formula: {expansion["formula"]}')
+    lettered = ('y[i_{d}] = \\sum_{j_{m} \\in m} x[j_{m}]\\, W_\\bold{Q}[j_{m}, i_{d}] '
+                '+ b_\\bold{Q}[i_{d}]')
+    if expansion['formula'] != lettered:
+        raise AssertionError(
+            f'the expansion carries the generated formula lettered: {expansion["formula"]}')
+    if expansion['indices'] != [{'index': 'i_{d}', 'axis': 'd'}]:
+        raise AssertionError(f'the formula holds i_{{d}} for every d: {expansion["indices"]}')
 
 
 def check_an_explained_operator_is_wrapped_in_a_block_drawn_in_place() -> None:
@@ -451,6 +468,13 @@ def check_an_explanation_is_written_from_the_operator() -> None:
     hidden = explain(root_of_softplus)
     if hidden is None or hidden.formula != 'y = \\sqrt{\\ln(1 + e^{x})}':
         raise AssertionError(f'a map named more shortly than its formula: {hidden}')
+    divided = ops.Arithmetic.template(nm.x / nm.Integer(448))
+    if explain(divided) is not None:
+        raise AssertionError('a map the figure shows the whole of opens no box')
+    with_a_role = explain_operators.explain_named_arithmetic(
+        {'x / 448': 'Divides by the largest E4M3 value.'})(divided)
+    if with_a_role is None or with_a_role.formula != 'y = x / 448':
+        raise AssertionError(f'a map the model gives a role opens a box: {with_a_role}')
 
 
 def check_a_taped_box_holds_its_tape_as_a_seed() -> None:
@@ -535,7 +559,7 @@ def check_a_named_reindexing_is_wrapped_in_a_block_drawn_in_place() -> None:
                 if isinstance(b.body, cat.StrideMorphism))
     record = auxiliary['blocks'][str(wrapped.block_tag.uid._id)]
     if (record['title'], record['formula'], record['description']) != (
-            'win', formula, 'A window.'):
+            'win', 'y[i_{x}, j_{w}] = x[i_{x} - j_{w} + 2]', 'A window.'):
         raise AssertionError(f'the block record carries the explanation: {record}')
     if sorted(e['operator'] for e in auxiliary['expansions'].values()) != ['SoftMax']:
         raise AssertionError('the expansions are assembled before the reindexings are wrapped')
@@ -585,6 +609,145 @@ def check_a_cast_is_explained_by_the_quantisations_it_reads_and_writes() -> None
         raise AssertionError('a figure that opens no box wraps no cast')
 
 
+def check_the_indices_of_a_formula_take_their_own_letters() -> None:
+    '''The indices of one formula take i, j, k and onwards in the order the formula
+    names them, passing over a letter the formula writes as a symbol or in the name of
+    an axis, and a subscript of several characters is braced. The indices listed under
+    the formula are those some clause uses without a range or a set around them.'''
+    lettered = letter_formula_indices.lettered_formula(
+        'y[i_{x}] = \\sum_{i_{d} \\in d} q[i_{x}, i_{d}]\\, k[i_{d}]')
+    if lettered.formula != 'y[i_{x}] = \\sum_{j_{d} \\in d} q[i_{x}, j_{d}]\\, k[j_{d}]':
+        raise AssertionError(f'the indices of x and d: {lettered.formula}')
+    if lettered.free_indices() != [{'index': 'i_{x}', 'axis': 'x'}]:
+        raise AssertionError(f'i_{{x}} alone is free: {lettered.free_indices()}')
+    skipping = letter_formula_indices.lettered_formula(
+        'y[i_{h}, i_{k}] = \\sum_{i_{m} \\in m} x[i_{m}]\\, W[i_{m}, i_{h}, i_{k}]')
+    if skipping.formula != ('y[i_{h}, j_{k}] = \\sum_{l_{m} \\in m} x[l_{m}]\\, '
+                            'W[l_{m}, i_{h}, j_{k}]'):
+        raise AssertionError(f'k and m name axes and are passed over: {skipping.formula}')
+    gathered = letter_formula_indices.lettered_formula(
+        '\\begin{gathered} a[i_{E}] = \\max_{i_{y} \\in y} v[i_{E}, i_{y}] \\\\ '
+        'w[i_{E}, i_{y}] = v[i_{E}, i_{y}] / a[i_{E}] \\end{gathered}')
+    if [record['axis'] for record in gathered.free_indices()] != ['E', 'y']:
+        raise AssertionError(
+            f'an index bound on one line is free on the next: {gathered.free_indices()}')
+    selection = letter_formula_indices.lettered_formula(
+        '\\{p[i_{s}]\\} = \\{i_{r} : s[i_{r}] \\text{ is among the largest}\\}')
+    if selection.free_indices():
+        raise AssertionError(f'a set ranges over its indices: {selection.free_indices()}')
+    braced = letter_formula_indices.lettered_formula('y[i_{x_new}] = x[i_{x_new} + |x_old|]')
+    if braced.formula != 'y[i_{x_{new}}] = x[i_{x_{new}} + |x_{old}|]':
+        raise AssertionError(f'a long subscript is braced: {braced.formula}')
+    window = letter_formula_indices.lettered_formula('y[i_{x}, i_{w|x}] = x[i_{x} - i_{w|x}]')
+    described = letter_formula_indices.lettered_description(
+        'Slot i_w of token i_x reads token i_x - i_w.', window)
+    if described != 'Slot j_w of token i_x reads token i_x - j_w.':
+        raise AssertionError(f'a description takes the letters of its formula: {described}')
+
+
+def check_a_reciprocal_is_written_after_a_slash() -> None:
+    '''A factor raised to the power -1 is written after a slash, so the scale of
+    attention reads `x / \\sqrt{|d|}`, and a reciprocal alone keeps its exponent.'''
+    d = cat.RawAxis.named('d')
+    written = {
+        'x / \\sqrt{|d|}': nm.x / nm.SquareRoot(d.local_size()),
+        '3 x / 2': nm.x * nm.Integer(3) / nm.Integer(2),
+        '-x / 2': nm.Integer(-1) * nm.x / nm.Integer(2),
+        '\\sqrt{|d|}^{-1}': nm.Integer(1) / nm.SquareRoot(d.local_size()),
+        'x^{-1}': nm.Integer(1) / nm.x}
+    wrong = {expected: numeric.to_latex() for expected, numeric in written.items()
+             if numeric.to_latex() != expected}
+    if wrong:
+        raise AssertionError(f'written otherwise: {wrong}')
+
+
+def check_the_legend_lists_the_naturals_of_the_arrays() -> None:
+    '''The second table of the legend has a row for each `Natural` that is the
+    datatype of an array, with its size in digits, its bound in code names, and the key
+    tsncd writes for the `Natural` of a wire.'''
+    x = cat.RawAxis.named('x', code_form='tokens')
+    v = cat.RawAxis.named('v', code_form='vocabulary')
+    w = cat.RawAxis.named('w', code_form='window')
+    identifiers = cat.Array(cat.Natural(v.local_size()), (x,))
+    positions = cat.Array(cat.Natural(v.local_size() + w.local_size()), (x,))
+    long_integers = cat.Array(
+        cat.Natural(nm.Power(base=nm.Integer(2), exponent=nm.Integer(63))), (x,))
+    model = send_morphism.to_morphism(
+        ops.Arithmetic.template(nm.x, base=identifiers, output_datatype=cat.Reals())
+        * ops.Arithmetic.template(nm.x, base=positions, output_datatype=cat.Reals())
+        * ops.Arithmetic.template(nm.x, base=long_integers, output_datatype=cat.Reals()),
+        recycle=True)
+    rows = auxiliary_information.auxiliary_information(
+        model, assigned_sizes={'v': 32000})['naturals']
+    found = sorted((row['latex'], row['size'], row['codeName']) for row in rows)
+    expected = sorted([
+        ('|v|', '32000', 'vocabulary_size'),
+        ('|v| + |w|', None, 'vocabulary_size + window_size'),
+        ('2^{63}', str(2 ** 63), '2 ** 63')])
+    if found != expected:
+        raise AssertionError(f'the naturals are {found}')
+    keys = {row['latex']: row['key'] for row in rows}
+    if (keys['|v|'] != f'#{v.local_size().uid._id}' or keys['2^{63}'] != '^(2,63)'
+            or not keys['|v| + |w|'].startswith('+(#')):
+        raise AssertionError(f'the keys are {keys}')
+
+
+def check_every_cache_opens_a_box() -> None:
+    '''The box over a cache writes the cache out. Its formula and its description name
+    the token axes of the cache, the earlier tokens `x_old` and the new tokens `x_new`
+    of a derived pass, and the formula holds the index of each for every position of
+    its axis.'''
+    past = cat.RawAxis.named(fd.DynamicName('x', fd.DynamicName('old')))
+    tokens = cat.RawAxis.named(fd.DynamicName('x', fd.DynamicName('new')))
+    width = cat.RawAxis.named('d')
+    cache = Caching.Caching.template(
+        (tokens, width), Caching.cached_token_axis(past, tokens), 'K')
+    auxiliary = auxiliary_information.auxiliary_information(
+        send_morphism.to_morphism(cache, recycle=True))
+    expansion, = auxiliary['expansions'].values()
+    if expansion['operator'] != 'Caching':
+        raise AssertionError(f'the cache opens the box of {expansion["operator"]}')
+    if expansion['indices'] != [{'index': 'i_{x_{old}}', 'axis': 'x_{old}'},
+                                {'index': 'j_{x_{new}}', 'axis': 'x_{new}'}]:
+        raise AssertionError(f'the box over a cache ranges over {expansion["indices"]}')
+    if not expansion['formula'].startswith('y[i_{x_{old}}] = \\mathrm{cache}[i_{x_{old}}]'):
+        raise AssertionError(f'the formula names the earlier tokens: {expansion["formula"]}')
+    if 'stands at position |x_old| + j_x_new of the result' not in expansion['description']:
+        raise AssertionError(
+            f'the description names the token axes: {expansion["description"]}')
+
+
+def check_a_guarded_index_carries_the_positions_holding_a_value() -> None:
+    '''The index of a guarded axis on the line under a formula carries the interval of
+    the positions of its axis that hold a value and the condition under which they do,
+    and a guide the formula does not name stands before it under a spare letter.'''
+    tokens = cat.RawAxis.named('x')
+    slots = cat.RawAxis.named('w')
+    channels = cat.RawAxis.named('c')
+    window = cat.StrideMorphism(
+        _dom=(tokens, slots),
+        _cod_stride_shift=((tokens, (nm.Integer(1), nm.Integer(-1)), nm.Integer(0)),),
+        name=fd.DynamicName('win'))
+    view = mark_sparse_domains.guarded_view(
+        reindexing=(window, cat.ProdObject((channels,)).identity()), name='win')
+    axes = tuple(tutil.type_search(cat.Axis, view))
+    with_guide = write_formula_index_ranges.index_records_with_ranges(
+        letter_formula_indices.lettered_formula('y[i_{x}, i_{w|x}] = x[i_{x} - i_{w|x}]'),
+        axes)
+    if with_guide != [{'index': 'i_{x}', 'axis': 'x'},
+                      {'index': 'j_{w|x}', 'axis': 'w|x',
+                       'range': '[0, \\min(i_{x}, |w| - 1)]',
+                       'condition': 'j_{w|x} \\le i_{x}'}]:
+        raise AssertionError(f'the window slots range over {with_guide}')
+    without_guide = write_formula_index_ranges.index_records_with_ranges(
+        letter_formula_indices.lettered_formula('y[i_{w|x}] = v[i_{w|x}]'), axes)
+    if without_guide != [{'index': 'j_{x}', 'axis': 'x'},
+                         {'index': 'i_{w|x}', 'axis': 'w|x',
+                          'range': '[0, \\min(j_{x}, |w| - 1)]',
+                          'condition': 'i_{w|x} \\le j_{x}'}]:
+        raise AssertionError(f'the guide is introduced before the slots: {without_guide}')
+
+
 def check_the_messages_carry_the_field_only_when_given() -> None:
     settings = send_morphism.display_settings(legend=True, inspectionBoxes=True)
     if settings != {'legend': True, 'inspectionBoxes': True}:
@@ -602,6 +765,11 @@ def check_the_messages_carry_the_field_only_when_given() -> None:
     if send_morphism.display_settings(controls=wst.PageControls.HIDDEN) != {
             'controls': 'hidden'}:
         raise AssertionError('the page controls are sent as their value')
+    for sizing, dynamic in [(wst.MultilineSizing.DYNAMIC, True),
+                            (wst.MultilineSizing.FIXED, False)]:
+        sent = send_morphism.display_settings(multilineSizing=sizing)
+        if sent != {'dynamicMultilineSizing': dynamic}:
+            raise AssertionError(f'{sizing} is sent as {sent}')
     message = {'msgType': 'dataUpdate', 'data': '{}', 'settings': {}}
     if wst.with_auxiliary(message, None) is not message:
         raise AssertionError('no auxiliary leaves the message as it stands')
@@ -651,7 +819,7 @@ def check_the_notebook_setting_converts_once() -> None:
 
 
 CHECKS: tuple[Callable[[], None], ...] = (
-    check_the_registry_writes_out_six_operators,
+    check_the_registry_writes_out_seven_operators,
     check_the_numbering_reproduces_the_importer_walk,
     check_the_auxiliary_information_is_packaged,
     check_an_operator_is_written_out_with_its_parameters_on_the_tape,
@@ -662,6 +830,11 @@ CHECKS: tuple[Callable[[], None], ...] = (
     check_a_taped_box_holds_its_tape_as_a_seed,
     check_a_named_reindexing_is_wrapped_in_a_block_drawn_in_place,
     check_a_cast_is_explained_by_the_quantisations_it_reads_and_writes,
+    check_the_indices_of_a_formula_take_their_own_letters,
+    check_a_reciprocal_is_written_after_a_slash,
+    check_the_legend_lists_the_naturals_of_the_arrays,
+    check_every_cache_opens_a_box,
+    check_a_guarded_index_carries_the_positions_holding_a_value,
     check_the_messages_carry_the_field_only_when_given,
     check_the_notebook_setting_converts_once,
 )

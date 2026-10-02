@@ -76,7 +76,7 @@ def check_the_operations_are_the_dot_product_the_scale_the_softmax_and_the_sum()
 
 def check_the_scale_multiplies_by_the_inverse_root_of_the_key_width() -> None:
     scale, = nodes_of(ops.Arithmetic, ATTENTION)
-    expected = nm.x * express_attention.key_width.local_size() ** express_attention.MINUS_HALF
+    expected = nm.x / nm.SquareRoot(express_attention.key_width.local_size())
     require(scale.operator.formula == expected,
             f'the scale computes {scale.operator.formula.to_latex()}')
 

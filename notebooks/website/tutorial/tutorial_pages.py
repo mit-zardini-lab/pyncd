@@ -60,7 +60,7 @@ def attention_with_weights_and_residual_page(
     page: notebook_diagrams.DiagramSettings,
 ) -> list[notebook_diagrams.PageVariant]:
     return [forward_variant(displayed, CAUSAL_SLIDE_DETAIL, page, 1400),
-            training_variant(step, page, 2600)]
+            training_variant(step, page, 900)]
 
 
 def multi_head_attention_page(

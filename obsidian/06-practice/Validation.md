@@ -152,18 +152,19 @@ model and about its quantisations. [[SOTA Model Notebooks]] states what each ass
 
 Each notebook under `notebooks/website/` holds prose and figures and no checks, and a
 validator beside it holds one `check_` function per claim, in the order the notebook
-states them. There are nine, one per page, and the following command runs them with the
-notebooks.
+states them. There are eleven, one per page, and the following command runs them with
+the notebooks.
 
 ```bash
 python validations/run_validations.py --name website
 ```
 
 The four tutorial validators compare each training step with `torch.autograd` in float64
-through `notebooks/website/tutorial/check_gradients_in_torch.py`. The five model
-validators check the model against its released code, its quantisations, its cached pass
-where the page has one, that stripping the quantisations returns the model in the reals,
-and that every legend row of every variant of the page carries a code name.
+through `notebooks/website/tutorial/check_gradients_in_torch.py`. The seven model
+validators check the model against its released code, its quantisations and the model
+in the reals returned by stripping them where the page carries them, its cached pass
+where the page has one, and that every legend row of every variant of the page carries
+a code name.
 [[Website Notebooks]] lists every notebook with its validator.
 
 ## The caching check
@@ -207,17 +208,21 @@ validation in the repository, an import graph over the repository's source files
 runner that executes the selected validations at once as subprocesses.
 
 ```bash
-python validations/run_validations.py                  # what the change reaches
+python validations/run_validations.py algebra/x.py caching/  # what these paths reach
+python validations/run_validations.py --plan algebra/x.py    # the selection, not run
+python validations/run_validations.py                  # what git reports as modified
 python validations/run_validations.py --all            # every target
 python validations/run_validations.py --kind validator # the validate_*.py scripts
 python validations/run_validations.py --name Attention # by name, matched loosely
 python validations/run_validations.py --since main     # what changed since a ref
 python validations/run_validations.py --list           # targets and dependencies
 python validations/run_validations.py --dependencies-of BuildingAModel
+python validations/run_validations.py --reach-by-folder # how far a change reaches
 ```
 
-A validation the registry knows about is a target, and there are fifty-six of them:
-four repository checks, thirty-three validators and nineteen notebooks. A validator is a
+A validation the registry knows about is a target, and on 2026-10-01 there were
+sixty-one of them: four repository checks, thirty-six validators and twenty-one
+notebooks. A validator is a
 `validate_*.py` script, found by that name at a feature root or under a feature, so a new
 feature's validator is run as soon as the file exists and no list has to be edited. A
 notebook is every `.ipynb` under one of the two folders `NOTEBOOK_FOLDERS` names,
@@ -230,7 +235,7 @@ assertions hold with the diagrams turned off. A repository check is one of the c
 A target may carry a reason it is left out of a default run, and `--list` prints the reason
 beside the name. `--include-excluded` runs it anyway. No target carries one at present.
 
-### Only the targets that import a modified file are run
+### Only the targets that depend on a modified file are run
 
 Each feature sits in its own folder, so a validator or a notebook imports the feature
 it demonstrates and the features that feature is built on, and nothing else. A
@@ -245,6 +250,14 @@ of `a.b` too.
 `ImportGraph.files_reached_by` closes the relation transitively, visiting each node
 once, so an import cycle terminates.
 
+A file also depends on the data files it reads. A string literal outside a docstring
+that ends in `.json` or `.ipynb`, and that names an indexed file read relative to the
+folder of the file or to one of its ancestors, is recorded as a data file read by the
+file. A module imported by a file and no longer present is recorded too, so a deleted
+or renamed module selects every file still importing it. The parse of each file is
+stored in `.cache/validations/`, which git ignores, and a run parses again only the
+files changed since the last run, so the selection takes under a second.
+
 `validations/list_modified_files.py` reads the modified paths from
 `git status --porcelain --untracked-files=all` and from `git diff --name-only <ref>`.
 Both print a repository-relative path with forward slashes, which is the form the
@@ -258,7 +271,19 @@ among the files its entry point reaches. A notebook's dependencies include
 there changes how every notebook runs. Three repository checks have no entry point
 whose imports say what they read, so each carries a `DependencyRule` instead:
 `imports` reads every module, `notebooks` and `calls` read every module and every
-notebook, and `vault` reads every note and tests every path a note mentions.
+notebook, and `vault` reads every note and tests every path a note mentions. When a run
+is selected by modified files, the runner passes them to the `imports`, `notebooks` and
+`calls` checks, and each then checks only the files whose own dependencies include one
+of them. Windows refuses a command line longer than 32,767 characters, so when the
+modified files would take more than `MODIFIED_FILES_ARGUMENT_CHARACTERS` of it the check
+is passed nothing and checks every file.
+
+Paths given as arguments replace what git reports, so that an agent working beside
+other sessions validates its own change alone. A path may be relative to the repository
+root or absolute, with either kind of slash, and a folder stands for every file in it.
+The runner lists each modified file reached by no validator or notebook, which only the
+repository checks cover. `validations/validate_target_selection.py` checks the
+selection on a repository built in a temporary folder.
 
 ### The runner is a thread per subprocess
 
@@ -277,10 +302,14 @@ notebook can leave a kernel behind.
 
 ### What a run costs
 
-Running the validator scripts at once takes a few seconds of wall time against several
-times that one after another. `MEASURED_COSTS` in `validations/validation_targets.py`
-names every target that took longer than ten seconds, and a target it does not name took
-seconds.
+The runner records the duration of every target that passed in `.cache/validations/`,
+through `validations/order_targets_by_duration.py`, and the next run starts the longest
+targets first, so the length of a run is set by the total work over its jobs. `--plan`
+prints the selection in that order with the wall time it expects. A target that has not
+run on the machine is ordered by its cost class, which `MEASURED_COSTS` in
+`validations/validation_targets.py` gives for every target measured at more than ten
+seconds. A run of every public target on 2026-10-01 took 130 seconds of wall time over
+1,020 seconds of target time.
 
 ## What none of this covers
 

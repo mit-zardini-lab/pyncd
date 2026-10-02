@@ -337,10 +337,9 @@ def check_the_score_scales() -> None:
         assert isinstance(scale.operator, ops.Arithmetic)
         assert axes(scale) == ([[]], [[]])
         assert nm.contains_free_input(scale.operator.formula)
-    assert score_scale.operator.formula == nm.x * nm.Power.template(
-        c.local_size(), nm.Integer(-1) / nm.Integer(2))
-    assert head_weight_scale.operator.formula == nm.x * nm.Power.template(
-        d.local_size() * i.local_size(), nm.Integer(-1) / nm.Integer(2))
+    assert score_scale.operator.formula == nm.x / nm.SquareRoot(c.local_size())
+    assert head_weight_scale.operator.formula == nm.x / nm.SquareRoot(
+        d.local_size() * i.local_size())
     assert score_scale.operator.name.to_bodies() == (
         scaled_attention_core.SCORE_SCALE_NAME)
     assert head_weight_scale.operator.name.to_bodies() == (

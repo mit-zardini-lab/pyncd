@@ -77,7 +77,7 @@ def gate_every_stream(layer: int) -> cat.Block:
             '{\\mathrm{rms}(X[i_{x}, i_{n}])\\, \\mathrm{rms}(k[i_{x}, i_{n}])}, '
             '\\quad g[i_{x}, i_{n}] = (1 - \\mathrm{mod}[i_{x}])\\, '
             '\\sigma\\Big( \\mathrm{sign}(y) \\sqrt{\\max(\\lvert y \\rvert '
-            '\\lvert m \\rvert^{-1/2}, \\varepsilon_{\\mathrm{g}})} \\Big)'),
+            '/ \\sqrt{\\lvert m \\rvert}, \\varepsilon_{\\mathrm{g}})} \\Big)'),
         description=text.GATE_EVERY_STREAM_DESCRIPTION,
         references=(model_lines(347, 348), model_lines(356, 362),
                     model_lines(363, 364)))

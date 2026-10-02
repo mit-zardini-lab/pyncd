@@ -1,6 +1,6 @@
 ---
 tags: [layer/practice, reference]
-code: notebooks/website/, notebooks/website/website_output.py, notebooks/website/rewrite_website_pages.py, notebooks/website/tutorial/derive_training_step.py, notebooks/classic/, notebooks/sota/GLM53/, notebooks/caching/CachedGLM53/
+code: notebooks/website/, notebooks/website/website_output.py, notebooks/website/rewrite_website_pages.py, notebooks/website/tutorial/derive_training_step.py, notebooks/classic/, notebooks/sota/GLM53/, notebooks/caching/CachedGLM53/, notebooks/sota/KimiK3/, notebooks/sota/MiMoV26Pro/, notebooks/caching/mamba/
 status: evolving
 written: Claude Opus 5.5 (1M context), effort 40, on 2026-09-27.
 ---
@@ -21,10 +21,11 @@ them.
 python validations/run_validations.py --name website
 ```
 
-The nine notebooks stand in three folders. `tutorial/` holds attention, attention with
+The eleven notebooks stand in three folders. `tutorial/` holds attention, attention with
 weights and a residual connection, multi-head attention and grouped-query attention.
 `classic/` holds the transformer of *Attention Is All You Need*, Mixtral-8x7B and
-DeepSeek-V3. `modern/` holds GLM-5.3 and DeepSeek-V4.1-Flash. Every figure and every page
+DeepSeek-V3. `modern/` holds GLM-5.3, DeepSeek-V4.1-Flash, Kimi K3 and MiMo-V2.6-Pro.
+Every figure and every page
 draws its model in the CausalSlide form, in which each causal read stands at the copy
 that feeds the keys and the values, per [[Yoneda and Cartesian Tricks]].
 
@@ -36,11 +37,14 @@ validator, its page and its variants.
 | path | what it holds |
 |---|---|
 | `notebooks/website/tutorial/` | the four tutorial notebooks and their validators, and the modules imported by them: `express_attention.py` builds the four expressions, `derive_training_step.py` derives the training step, `tutorial_pages.py` holds the variants of each page, `tutorial_wording.json` the titles and the descriptions, and `check_gradients_in_torch.py` compares a training step with `torch.autograd` |
-| `notebooks/website/classic/`, `notebooks/website/modern/` | the five model notebooks and their validators |
+| `notebooks/website/classic/`, `notebooks/website/modern/` | the seven model notebooks and their validators |
 | `notebooks/classic/` | the classic models: a module building each model, a module quantising it, a module deriving its cached pass, a module holding its page variants, a wording file of its block titles and descriptions, `shared_mechanisms.py`, which holds the causal read, the rotation of channel pairs, the broadcast of a box once per head and the residual connection shared by the three models, and `reference_links.py` |
 | `notebooks/sota/GLM53/` | GLM-5.3 from its reference implementation, one module per mechanism, with `validate_glm53.py` and `validate_quantised_glm53.py` |
 | `notebooks/caching/CachedGLM53/` | the cached pass of GLM-5.3, written by hand and derived, per [[Caching Between Passes]] |
 | `notebooks/sota/DeepSeekV41Flash/` | the DeepSeek-V4.1-Flash package of [[SOTA Model Notebooks]] |
+| `notebooks/sota/KimiK3/` | Kimi K3 from the released code of its checkpoint, one module per mechanism |
+| `notebooks/sota/MiMoV26Pro/` | MiMo-V2.6-Pro from the remote code of its checkpoint, one module per mechanism, with the derivation of its cached pass |
+| `notebooks/caching/mamba/` | the selective scan of a Mamba layer as a loop over the tokens and its evaluation in `torch.float64`, which the delta-rule scan of Kimi K3 follows, per [[Carrying the State of a Scan Between Passes]] |
 | `notebooks/website/output/` | the pages, one folder per page |
 | `notebooks/website/website_output.py` | the folders holding the pages |
 | `notebooks/website/rewrite_website_pages.py` | the script that writes every page again |
@@ -118,6 +122,8 @@ notebooks/website/output/
               Mixtral8x7B/index.html                      Mixtral8x7B.html
   modern/     DeepSeekV41Flash/index.html                 DeepSeekV41Flash.html
               GLM53/index.html                            GLM53.html
+              KimiK3/index.html                           KimiK3.html
+              MiMoV26Pro/index.html                       MiMoV26Pro.html
 ```
 
 A page is one HTML file that opens with no server and no network. It holds the tsncd
@@ -174,17 +180,32 @@ model holds a mask operator.
 |---|---|---|---|
 | `modern/GLM53.ipynb` | `modern/validate_glm53.py` | `notebooks/sota/GLM53/`, with `slide_causal_reads.py` and `assemble_page_variants.py`, and `notebooks/caching/CachedGLM53/derive_cached_glm53.py` | Decode and Cached, each quantised and unquantised, the unquantised variants derived |
 | `modern/DeepSeekV41Flash.ipynb` | `modern/validate_deepseek_v41_flash.py` | `notebooks/sota/DeepSeekV41Flash/` | Decode, quantised and unquantised, the unquantised variant embedded |
+| `modern/KimiK3.ipynb` | `modern/validate_kimi_k3.py` | `notebooks/sota/KimiK3/`, with `slide_causal_reads.py` and `assemble_page_variants.py` | Decode, in the reals alone, named Unquantised |
+| `modern/MiMoV26Pro.ipynb` | `modern/validate_mimo_v26_pro.py` | `notebooks/sota/MiMoV26Pro/`, with `slide_causal_reads.py`, `derive_cached_mimo_v26_pro.py` and `assemble_page_variants.py` | Decode and Cached, each in the reals alone, named Unquantised |
 
 The GLM-5.3 notebook draws the model in the CausalSlide, with the read back from each
 query standing once at the copy of the hidden state in every attention mode and once
 inside the indexer. It draws the quantisations of the FP8 checkpoint as `transformers`
 runs it, and the pass over new tokens derived from the model, whose caches hold the
 normalised latent, the turned key and the indexer key, 47,616 values per token, in BF16
-as the dynamic cache of `transformers` holds them. The DeepSeek-V4.1-Flash notebook draws
+as the dynamic cache of `transformers` holds them. Its keys hold no repeat of the turned
+key over the heads: the join of the key reads the one turned key of a token at every
+head through a deletion of the heads in its reindexing, per [[Representing Models]]. The DeepSeek-V4.1-Flash notebook draws
 the text-only model of [[SOTA Model Notebooks]] part by part in the CausalSlide form with
 its quantisations, and its validator compares the quantised model taken through
 `strip_quantisations` with the model in the reals. Its page holds the two variants of
 the group Decode and no cached pass.
+
+Kimi K3 and MiMo-V2.6-Pro carry no quantised variant, and each variant in the reals is
+named Unquantised so that a quantised variant can join it under the same address. The
+checkpoint of Kimi K3 stores the weights of its routed experts in MXFP4, and the
+quantised form needs the path by which `compressed-tensors` runs them and the
+precisions inside the kernels of `fla`. Kimi K3 carries no pass over new tokens either,
+because `derive_cached_pass` has no rule for the loop over the tokens of its delta
+attention. `transformers` 5.3.0, which wrote the configuration of MiMo-V2.6-Pro, does
+not run its MXFP4 experts. The cached pass of MiMo-V2.6-Pro keeps every earlier token
+in its ten full attention layers and the last 127 in its sixty sliding window layers,
+which is what `DynamicSlidingWindowLayer` of `transformers` keeps.
 
 ## Every axis in a legend carries a code name
 
@@ -214,20 +235,21 @@ non-zero when one did. `websocket_transfer.headless.find_dist` finds the bundle,
 
 ## Gaps
 
-- A wrap width that leaves every block whole lies in a window a few tens of pixels wide,
-  and the window moves whenever a block of the figure changes width. Each variant's width
-  was found by writing the page at a sweep of widths and counting the fills of its
-  blocks, and a change to a model can leave a block split across two rows.
+- Since 2026-10-01 the rows of every page are planned to keep each block whole, with the
+  width of the variant as their target, per [[Diagram Display]]. A block wider than that
+  target stands on a row of its own, so the Cached variant of *Attention Is All You
+  Need* draws the output embedding alone on its first row. The widths were found for
+  rows filled until the width ran out, and they have not been chosen again.
 - The cached pass of the transformer of *Attention Is All You Need* runs the encoder and
   the projections of the encoded input in every step, per
   [[Deriving Caches by Dragging the New Tokens]] and [[Open Gaps]].
 - No cached pass of DeepSeek-V4.1-Flash has been derived, so its page has no Cached
-  group.
+  group. Kimi K3 has none either, for the reason given above.
 
 ## See also
 
 - [[Notebooks]] — every other notebook, and how to run one
-- [[SOTA Model Notebooks]] — the DeepSeek-V4.1-Flash and GLM-5.3 packages
+- [[SOTA Model Notebooks]] — the packages of the modern models
 - [[Caching Between Passes]] — the cached passes drawn by the pages
 - [[Diagram Display]] — `show_page_variants`, the page folders and the redirect
 - [[Diagram Wire Format]] — the embedded form of a page of variants

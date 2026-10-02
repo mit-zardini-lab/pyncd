@@ -1,8 +1,8 @@
 # Claude Opus 5.5 (1M context), reasoning effort 40.
 '''The four attention mechanisms of the tutorial pages, each as a morphism in Br.
 
-`scaled_dot_product_attention` is dot-product attention with its scores multiplied by
-`|d|^{-1/2}`. It reads queries over `q`, and keys and values over `x`, and it has no
+`scaled_dot_product_attention` is dot-product attention with its scores divided by
+`\\sqrt{|d|}`. It reads queries over `q`, and keys and values over `x`, and it has no
 weights.
 
 `attention_with_weights_and_residual` reads one state over the tokens `x` and the width
@@ -46,7 +46,6 @@ from notebooks.sota.DeepSeekV41Flash.construction_idioms import hold, route
 from notebooks.website.tutorial.tutorial_wording import TEXT as text
 
 R = cat.Reals()
-MINUS_HALF = nm.Integer(-1) / nm.Integer(2)
 
 queries = cat.RawAxis.named('q', code_form='queries')
 keys = cat.RawAxis.named('x', code_form='keys')
@@ -68,7 +67,7 @@ CORE_COLOUR = '#C5BEDF'
 ATTENTION_COLOUR = '#FFE2BB'
 RESIDUAL_COLOUR = '#F1F4C1'
 
-SCORE_SCALE_NAME = '|d|^{-1/2} x'
+SCORE_SCALE_NAME = 'x / \\sqrt{|d|}'
 MASK_VIEW_NAME = '\\mathrm{Mask}'
 
 CORE_FORMULA = (
@@ -96,18 +95,17 @@ def grouped_query_section(section: str) -> cat.CodeReference:
 
 
 def scale_scores(scored_width: cat.RawAxis) -> cat.Broadcasted:
-    '''Every score multiplied by `|d|^{-1/2}`, for the width `d` the dot product sums
-    over, named with the power rather than with a root, because a root in the name of an
-    operator does not draw.'''
+    '''Every score divided by `\\sqrt{|d|}`, for the width `d` the dot product sums
+    over.'''
     return ops.Arithmetic.template(
-        nm.x * scored_width.local_size() ** MINUS_HALF, name=SCORE_SCALE_NAME)
+        nm.x / nm.SquareRoot(scored_width.local_size()), name=SCORE_SCALE_NAME)
 
 
 def scaled_dot_product[A: cat.Axis](
     query_shape: tuple[A, ...], key_shape: tuple[A, ...], value_shape: tuple[A, ...],
     score_shape: tuple[A, ...], result_shape: tuple[A, ...], scored_width: A,
 ) -> cat.Block:
-    '''softmax(Q K^T |d|^{-1/2}) V over the shapes given, where `scored_width` is the
+    '''softmax(Q K^T / \\sqrt{|d|}) V over the shapes given, where `scored_width` is the
     axis `d` the dot product sums over. The scores end with the axis of the keys, which
     the softmax normalises over, and every contraction is written over the declared
     axes.'''

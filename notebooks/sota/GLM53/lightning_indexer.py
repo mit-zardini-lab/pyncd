@@ -59,8 +59,8 @@ INDEXER_BOX = 'Idx'
 SCORE_BOX = 'Sco'
 INDEXER_QUERIES = cat.Array(R, (x, i, d))
 HEAD_WEIGHTS = cat.Array(R, (x, i))
-SCORE_SCALE_NAME = '\\lvert d \\rvert^{-1/2} x'
-HEAD_WEIGHT_SCALE_NAME = '\\lvert i \\rvert^{-1/2} x'
+SCORE_SCALE_NAME = 'x / \\sqrt{\\lvert d \\rvert}'
+HEAD_WEIGHT_SCALE_NAME = 'x / \\sqrt{\\lvert i \\rvert}'
 BACK_VIEW_NAME = '\\mathrm{Back}'
 
 SCORE_REFERENCES = (modeling_lines(239, 244),)
@@ -115,18 +115,16 @@ def rectify() -> cat.Broadcasted:
 
 def scale_by_inverse_square_root[A: cat.Axis](axis: A, name: str) -> cat.Broadcasted:
     '''The factor one over the square root of the size of `axis`.'''
-    return ops.Arithmetic.template(
-        nm.x * nm.Power.template(axis.local_size(), nm.Integer(-1) / nm.Integer(2)),
-        name=name)
+    return ops.Arithmetic.template(nm.x / nm.SquareRoot(axis.local_size()), name=name)
 
 
 def score_every_query() -> cat.Block:
     '''Every query's combined score against each token at or before it, from the indexer
     queries, the keys already read back from every query and the hidden state.
 
-    Each of the 32 heads scores the query against the key, the score is multiplied by
-    `|d|^{-1/2}`, and the product is rectified. A weight read off the hidden state by
-    `w^{I}` and multiplied by `|i|^{-1/2}`, one number per token and head, says how much
+    Each of the 32 heads scores the query against the key, the score is divided by
+    `\\sqrt{|d|}`, and the quotient is rectified. A weight read off the hidden state by
+    `w^{I}` and divided by `\\sqrt{|i|}`, one number per token and head, says how much
     each head's score counts, so the combine is a contraction between two wires.
     '''
     keys = cat.Array(R, (x, reach, d))

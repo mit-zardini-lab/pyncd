@@ -20,9 +20,16 @@ not registered, because the validator scripts are targets in their own right and
 registering the check that runs them would run each of them twice.
 
 `MEASURED_COSTS` names every target measured to take longer than ten seconds, and a
-target it does not name took seconds. Each figure was taken with several targets in
-flight, so it is an upper bound on what the target costs alone. The validators finish
-in seconds and the notebooks take longer, so the notebooks are what a full run costs.
+target missing from it took seconds. Each figure was taken with several targets in
+flight, so it is an upper bound on what the target costs alone. The runner orders
+targets by the duration of the last run of each on the machine, as recorded by
+`order_targets_by_duration`, and reads a cost class only for a target that has not run
+there yet.
+
+A repository check reads every module or every notebook, so it depends on all of them.
+Each file it checks has its own dependencies, though, so the runner passes it the
+modified files after `modified_files_option`, and the check then checks only the files
+whose dependencies include one of them.
 
 `obsidian/06-practice/Validation.md` describes what each validation covers.
 '''
@@ -40,6 +47,9 @@ import validations.module_import_graph as module_import_graph
 REPOSITORY_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 type RepositoryPath = module_import_graph.RepositoryPath
+type FileFilter = Callable[[RepositoryPath], bool]
+
+MODIFIED_FILES_OPTION = '--reaching'
 
 
 class TargetKind(Enum):
@@ -73,6 +83,11 @@ class ValidationTarget:
     script itself for a validator and the notebook for a notebook. `exclusion` holds
     the reason a target is left out of a default run, and is `None` for a target that
     runs by default.
+
+    `modified_files_option` is the option through which a target that checks many
+    files takes the modified files, and is `None` for a target that checks one thing.
+    `checked_files_reach` holds the modified files passed through that option by a
+    run, and is empty when the target checks everything.
     '''
 
     name: str
@@ -82,16 +97,41 @@ class ValidationTarget:
     dependency_rule: DependencyRule
     cost: CostClass
     exclusion: str | None = None
+    modified_files_option: str | None = None
+    checked_files_reach: tuple[RepositoryPath, ...] = ()
+
+    def arguments(self) -> tuple[str, ...]:
+        '''`command`, followed by the modified files when the target checks only the
+        files that reach them.'''
+        if self.modified_files_option is None or not self.checked_files_reach:
+            return self.command
+        return (*self.command, self.modified_files_option, *self.checked_files_reach)
+
+    def duration_key(self) -> str:
+        '''The key under which the duration of a run of this target is recorded.
+
+        A run that checked only the files reaching a modification took a time that
+        depends on the modification and is much shorter than a full run, so its time
+        is kept apart from the time of a full run.
+        '''
+        if self.modified_files_option is None or not self.checked_files_reach:
+            return self.name
+        return f'{self.name} {self.modified_files_option}'
 
 
 @dataclass(frozen=True)
 class RepositoryCheck:
-    '''A check of `validate_repository.py`, as its decorator registered it.'''
+    '''A check of `validate_repository.py`, as its decorator registered it.
+
+    `can_check_a_subset` holds whether the check reads each file on its own, so
+    that it can check only the files reaching a modification.
+    '''
 
     name: str
-    check: Callable[[], list[str]]
+    check: Callable[[FileFilter], list[str]]
     dependency_rule: DependencyRule
     cost: CostClass
+    can_check_a_subset: bool
 
 
 REPOSITORY_CHECKS: dict[str, RepositoryCheck] = {}
@@ -99,22 +139,53 @@ REPOSITORY_CHECKS: dict[str, RepositoryCheck] = {}
 
 def repository_check(
     name: str, dependency_rule: DependencyRule, cost: CostClass,
-) -> Callable[[Callable[[], list[str]]], Callable[[], list[str]]]:
-    '''Register a check of `validate_repository.py` under `name`.'''
-    def register(check: Callable[[], list[str]]) -> Callable[[], list[str]]:
+    can_check_a_subset: bool = True,
+) -> Callable[[Callable[[FileFilter], list[str]]], Callable[[FileFilter], list[str]]]:
+    '''Register a check of `validate_repository.py` under `name`.
+
+    A check takes a filter and checks only the files the filter accepts.
+    '''
+    def register(
+        check: Callable[[FileFilter], list[str]],
+    ) -> Callable[[FileFilter], list[str]]:
         REPOSITORY_CHECKS[name] = RepositoryCheck(
-            name=name, check=check, dependency_rule=dependency_rule, cost=cost)
+            name=name, check=check, dependency_rule=dependency_rule, cost=cost,
+            can_check_a_subset=can_check_a_subset)
         return check
     return register
 
 
 MEASURED_COSTS: dict[RepositoryPath, CostClass] = {
+    'algebra/validate_simplification.py': CostClass.TENS_OF_SECONDS,
+    'notebooks/sota/DeepSeekV41Flash/validate_deepseek_v41_flash.py':
+        CostClass.TENS_OF_SECONDS,
+    'notebooks/sota/DeepSeekV41Flash/validate_omitted_mechanisms.py':
+        CostClass.TENS_OF_SECONDS,
+    'notebooks/sota/GLM53/validate_glm53.py': CostClass.TENS_OF_SECONDS,
+    'notebooks/sota/GLM53/validate_quantised_glm53.py': CostClass.TENS_OF_SECONDS,
+    'notebooks/website/classic/validate_attention_is_all_you_need.py':
+        CostClass.TENS_OF_SECONDS,
+    'notebooks/website/classic/validate_deepseek_v3.py': CostClass.TENS_OF_SECONDS,
+    'notebooks/website/classic/validate_mixtral_8x7b.py': CostClass.TENS_OF_SECONDS,
+    'notebooks/website/modern/validate_deepseek_v41_flash.py': CostClass.MINUTES,
+    'notebooks/website/modern/validate_glm53.py': CostClass.MINUTES,
+    'notebooks/website/tutorial/validate_attention.py': CostClass.TENS_OF_SECONDS,
+    'notebooks/website/tutorial/validate_attention_with_weights_and_residual.py':
+        CostClass.TENS_OF_SECONDS,
+    'notebooks/website/tutorial/validate_grouped_query_attention.py':
+        CostClass.TENS_OF_SECONDS,
+    'notebooks/website/tutorial/validate_multi_head_attention.py':
+        CostClass.TENS_OF_SECONDS,
+    'para/validate_backward.py': CostClass.TENS_OF_SECONDS,
+    'websocket_transfer/validate_auxiliary_information.py': CostClass.TENS_OF_SECONDS,
+    'websocket_transfer/validate_page_variants.py': CostClass.TENS_OF_SECONDS,
+    'websocket_transfer/validate_standalone_page.py': CostClass.TENS_OF_SECONDS,
     'notebooks/sota/DeepSeekV41Flash.ipynb': CostClass.TENS_OF_SECONDS,
     'notebooks/sota/DeepSeekV41Flash/validate_deepseek_v41_flash_integrated.py':
-        CostClass.TENS_OF_SECONDS,
+        CostClass.MINUTES,
     'notebooks/sota/DeepSeekV41Flash/validate_quantised_text_only_model.py':
-        CostClass.TENS_OF_SECONDS,
-    'quantization/validate_quantization.py': CostClass.TENS_OF_SECONDS,
+        CostClass.MINUTES,
+    'quantization/validate_quantization.py': CostClass.MINUTES,
 }
 
 DIAGRAMS_SENT_TO_THE_OPEN_PAGE = (
@@ -220,7 +291,9 @@ def repository_check_targets() -> tuple[ValidationTarget, ...]:
             kind=TargetKind.REPOSITORY_CHECK,
             command=('validate_repository.py', registered.name),
             entry_point=None, dependency_rule=registered.dependency_rule,
-            cost=registered.cost)
+            cost=registered.cost,
+            modified_files_option=(MODIFIED_FILES_OPTION
+                                   if registered.can_check_a_subset else None))
         for registered in sorted(REPOSITORY_CHECKS.values(), key=lambda r: r.name))
 
 

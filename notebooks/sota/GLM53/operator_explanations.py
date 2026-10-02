@@ -170,9 +170,6 @@ REINDEXING_EXPLANATIONS: dict[str, ReindexingExplanation] = {
     lightning_indexer.BACK_VIEW_NAME: ReindexingExplanation(
         description=text.BACK_VIEW_DESCRIPTION,
         references=(modeling_lines(246, 250), modeling_lines(430, 443))),
-    multi_latent_attention.REPEAT_VIEW_NAME: ReindexingExplanation(
-        description=text.REPEAT_VIEW_DESCRIPTION,
-        references=(modeling_lines(373),)),
     mixture_of_experts.DIAGONAL_VIEW_NAME: ReindexingExplanation(
         description=text.DIAGONAL_VIEW_DESCRIPTION,
         references=(modeling_lines(551, 555),)),

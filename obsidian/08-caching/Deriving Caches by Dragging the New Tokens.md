@@ -199,15 +199,17 @@ the fewest bytes.
 
 ## The narrowest placement of GLM-5.3 is the cache of the reference
 
-`placements_by_sliding_caches_back` derives 104 placements of the whole uncached GLM-5.3
+`placements_by_sliding_caches_back` derives 80 placements of the whole uncached GLM-5.3
 of `notebooks/sota/GLM53/`. The placement on the operands of the causal reads holds
 2,558,592 values per token over the 78 layers. The narrowest holds 47,616. Every layer
 caches the normalised latent (512) and the turned key (64), and every Full layer also
 caches the indexer key (128). These arrays are the cache of `modeling_glm_moe_dsa.py` and of the
 pass written by hand in [[Caching Between Passes]], derived from the uncached expression.
-`derive_cached_glm53.py` names the four operators computed over the cache by the reference,
-the two expansions of the latent, the repeat of the turned key over the heads and the
-join of the key, and derives the pass with them. The selection passed from a Full layer
+`derive_cached_glm53.py` names the three operators computed over the cache by the
+reference, the two expansions of the latent and the join of the key, which reads the one
+turned key of a token at every head, and derives the pass with them. The placements
+numbered 104 until 2026-09-29, when the repeat of the turned key over the heads was
+absorbed into the join, per [[Representing Models]]. The selection passed from a Full layer
 to the Shared layers of its group is not cached. It travels on the tape slot `sel` within
 one pass, and the crawl requires that the grab of a slot reads the new tokens written by
 its drop.

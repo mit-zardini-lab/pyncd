@@ -13,18 +13,26 @@ what they read. `imports` imports every module, `notebooks` and `calls` read eve
 module and every notebook, and `vault` reads every note and tests every path a note
 mentions. Each of those carries the `DependencyRule` that states the set it reads.
 
+A repository check that takes the modified files is passed them, and checks only the
+files whose own dependencies include one of them. Windows refuses a command line longer
+than 32,767 characters, so when the modified files would take more than
+`MODIFIED_FILES_ARGUMENT_CHARACTERS` of it the check is passed nothing and checks every
+file.
+
 `obsidian/06-practice/Validation.md` states how the selection is used.
 '''
 
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import validations.module_import_graph as module_import_graph
 import validations.validation_targets as validation_targets
 
 type RepositoryPath = module_import_graph.RepositoryPath
+
+MODIFIED_FILES_ARGUMENT_CHARACTERS = 24_000
 
 
 @dataclass(frozen=True)
@@ -33,11 +41,14 @@ class TargetSelection:
 
     `modified_files_reached` gives, per selected target's name, the modified files
     that target imports, so that a run can say why each target is in it.
+    `modified_files_no_validator_or_notebook_reaches` holds the modified files
+    covered only by a repository check or by nothing.
     '''
 
     selected: tuple[validation_targets.ValidationTarget, ...]
     skipped: tuple[validation_targets.ValidationTarget, ...]
     modified_files_reached: dict[str, tuple[RepositoryPath, ...]]
+    modified_files_no_validator_or_notebook_reaches: tuple[RepositoryPath, ...]
 
 
 class UnknownDependencyRule(Exception):
@@ -48,17 +59,18 @@ def dependencies_of_target(
     target: validation_targets.ValidationTarget,
     graph: module_import_graph.ImportGraph,
 ) -> frozenset[RepositoryPath]:
-    '''Every repository file whose modification would select `target`.
+    '''Every repository path whose modification would select `target`.
 
     For a validator or a notebook this is the entry point together with everything it
-    imports, plus the script the runner invokes it through, because a change to
-    `notebooks/execute_notebook.py` changes how every notebook runs.
+    imports and reads, plus the script the runner invokes it through, because a change
+    to `notebooks/execute_notebook.py` changes how every notebook runs. It includes
+    the absent modules imported by those files, which are paths and not files.
     '''
     match target.dependency_rule:
         case validation_targets.DependencyRule.IMPORTS_OF_THE_ENTRY_POINT:
-            reached = set(graph.files_reached_by(target.command[0]))
+            reached = set(graph.paths_depended_on(target.command[0]))
             if target.entry_point is not None:
-                reached |= graph.files_reached_by(target.entry_point)
+                reached |= graph.paths_depended_on(target.entry_point)
             return frozenset(reached)
         case validation_targets.DependencyRule.EVERY_MODULE:
             return graph.module_files
@@ -81,6 +93,32 @@ def feature_folders_of(
         path.split('/')[0] if '/' in path else path for path in dependencies}))
 
 
+def number_of_targets_depending_on_each_module(
+    targets: Iterable[validation_targets.ValidationTarget],
+    graph: module_import_graph.ImportGraph,
+) -> dict[RepositoryPath, int]:
+    '''For every module, how many of `targets` depend on it, which is how many of them
+    a change to the module selects.'''
+    counts = dict.fromkeys(graph.module_files, 0)
+    for target in targets:
+        for path in dependencies_of_target(target, graph) & graph.module_files:
+            counts[path] += 1
+    return counts
+
+
+def narrowed_to_modification(
+    target: validation_targets.ValidationTarget,
+    modified: frozenset[RepositoryPath],
+) -> validation_targets.ValidationTarget:
+    '''`target` passed the modified files, when it takes them and the command line
+    has room for them, so that it checks only the files reaching one of them.'''
+    if target.modified_files_option is None:
+        return target
+    if sum(len(path) + 1 for path in modified) > MODIFIED_FILES_ARGUMENT_CHARACTERS:
+        return target
+    return replace(target, checked_files_reach=tuple(sorted(modified)))
+
+
 def targets_affected_by(
     targets: Iterable[validation_targets.ValidationTarget],
     modified: Iterable[RepositoryPath],
@@ -91,13 +129,18 @@ def targets_affected_by(
     selected = []
     skipped = []
     reached: dict[str, tuple[RepositoryPath, ...]] = {}
+    reached_by_a_validator_or_notebook: set[RepositoryPath] = set()
     for target in targets:
         overlap = dependencies_of_target(target, graph) & wanted
-        if overlap:
-            selected.append(target)
-            reached[target.name] = tuple(sorted(overlap))
-        else:
+        if not overlap:
             skipped.append(target)
+            continue
+        selected.append(narrowed_to_modification(target, wanted))
+        reached[target.name] = tuple(sorted(overlap))
+        if target.kind is not validation_targets.TargetKind.REPOSITORY_CHECK:
+            reached_by_a_validator_or_notebook |= overlap
     return TargetSelection(
         selected=tuple(selected), skipped=tuple(skipped),
-        modified_files_reached=reached)
+        modified_files_reached=reached,
+        modified_files_no_validator_or_notebook_reaches=tuple(
+            sorted(wanted - reached_by_a_validator_or_notebook)))

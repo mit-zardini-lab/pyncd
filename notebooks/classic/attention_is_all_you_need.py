@@ -65,7 +65,6 @@ from notebooks.sota.DeepSeekV41Flash.construction_idioms import (
     boxed, hold, named_slot, route)
 
 R = cat.Reals()
-MINUS_HALF = nm.Integer(-1) / nm.Integer(2)
 HALF = nm.Integer(1) / nm.Integer(2)
 
 x = cat.RawAxis.named('x', code_form='source_positions')
@@ -107,8 +106,8 @@ OUTPUT_COLOUR = '#DBDFEF'
 SOFTMAX_COLOUR = '#CCE7CF'
 
 OUTPUT_PROJECTION_NAME = 'E^{\\top}'
-EMBEDDING_SCALE_NAME = '|m|^{1/2} x'
-SCORE_SCALE_NAME = '|k|^{-1/2} x'
+EMBEDDING_SCALE_NAME = 'x \\sqrt{|m|}'
+SCORE_SCALE_NAME = 'x / \\sqrt{|k|}'
 POSITIONAL_ENCODING_NAME = '\\mathrm{PE}'
 POSITIONAL_ENCODING_BOX = 'PE'
 SINE_FIRST_NAME = '\\mathrm{i}\\,\\overline{x}'
@@ -152,7 +151,6 @@ def relu() -> cat.Broadcasted:
 
 
 def scale_by(factor: nm.Numeric, name: str) -> cat.Broadcasted:
-    '''Every value multiplied by `factor`, named so that a root prints as a power.'''
     return ops.Arithmetic.template(nm.x * factor, name=name)
 
 
@@ -180,7 +178,7 @@ def embed[A: cat.Axis](positions: A, title: str, description: str) -> cat.Block:
     '''The tokens of one sentence embedded, scaled by the root of the model width, added
     to the positional encoding and passed through dropout.'''
     embedded = ((positions >> ops.Embedding.template(TOKEN, (m,)))
-                @ scale_by(m.local_size() ** HALF, EMBEDDING_SCALE_NAME))
+                @ scale_by(nm.SquareRoot(m.local_size()), EMBEDDING_SCALE_NAME))
     return cat.Block.template(
         (positional_encoding(positions) * embedded)
         @ ops.AdditionOp.template() @ dropout(),
@@ -237,7 +235,7 @@ def scaled_dot_product_attention[A: cat.Axis](
     scores = (head, query, *slot_variables)
     return cat.Block.template(
         ((contract((query_shape, key_shape), scores)
-          @ scale_by(k.local_size() ** MINUS_HALF, SCORE_SCALE_NAME)
+          @ scale_by(nm.Integer(1) / nm.SquareRoot(k.local_size()), SCORE_SCALE_NAME)
           @ ops.SoftMax.template())
          * hold(cat.Array(R, keys)))
         @ contract((scores, key_shape), query_shape),
