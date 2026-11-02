@@ -877,11 +877,12 @@ read there as a diagonal.
 `einops_simplification.einsum` builds a morphism from shapes of `IndexVariable`s, which
 `index_shapes` reads off a morphism, one per degree position and one per contraction
 group, and every rule in `para/registries/derivative.py`, `operator_expansion`,
-`pathway_collapse` and `einops_rearrange.merge_einops` writes its shapes in them. A target
-position of an operator that states no grouping, meaning a `Linear`, a `SoftMax` or a
-`Maximum`, is related to the other side's target by its axis, because the operator
-declares nothing else, and `obsidian/06-practice/Open Gaps.md` lists that fallback with
-the one construction that still relates a new operand by axis, in `sparse_expansion`.
+`pathway_collapse` and `einops_rearrange.merge_einops` writes its shapes in them.
+`linear_indices_by_position` labels every target position of a `Linear` or a
+`Transpose` separately. The weight pairs contracted and produced positions in its
+declared order, and tiled positions retain their reindexing variables. Other opaque
+operators, including `SoftMax` and `Maximum`, still relate target positions by axis
+identity because they declare no target grouping.
 
 ### Preserving sharing
 

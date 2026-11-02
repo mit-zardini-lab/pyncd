@@ -32,6 +32,7 @@ from typing import Iterable
 import data_structure.Term as fd
 import data_structure.Category as cat
 import data_structure.Operators as ops
+import para.data_structure.transpose as transpose
 import term_utilities.term_utilities as tutil
 
 
@@ -89,8 +90,10 @@ def index_shapes(
     `Einops` carries its contraction group's variable, read off the signature
     the way `einops_rearrange.segment_group_axes` reads it. A target position
     of any other operator carries a variable labelled by its axis, because the
-    operator states no grouping, and a `Linear` or a `SoftMax` shares its
-    target axis between an input and the output by that identity.
+    operator states no grouping, so a `SoftMax` shares its target axis between
+    its input and its output by that identity. `linear_indices_by_position`
+    reads the targets of a `Linear` or a `Transpose` by position and pairs
+    the weight's positions with the operand and result positions they index.
 
     Every reindexing must select, permute or repeat degree positions, so that
     `term_utilities.get_mapping` reads it as a mapping. A strided reindexing
@@ -126,7 +129,67 @@ def index_shapes(
         inputs.append(variables(
             weave, read, signature[i] if signature is not None else None))
     output = variables(target.output_weaves[0], degree, None)
+    if isinstance(target.operator, (ops.Linear, transpose.Transpose)):
+        inputs, output = linear_indices_by_position(target, inputs, output)
     return tuple(inputs), output, degree
+
+
+def linear_indices_by_position(
+    target: cat.Broadcasted,
+    inputs: list[tuple[IndexVariable, ...]],
+    output: tuple[IndexVariable, ...],
+) -> tuple[list[tuple[IndexVariable, ...]], tuple[IndexVariable, ...]]:
+    '''The index variables of a linear map, pairing weight positions with data
+    and result positions. Tiled positions keep their reindexing's variables.
+
+    A parametrised map reads its weight first, an optional bias next, selection
+    indices next, and the data last. The weight holds selection axes followed
+    by contracted and produced target positions. A transpose exchanges those
+    two target groups while keeping the selection axes and weight order.
+    '''
+    def label_target_positions(weave: cat.Weave, variables: tuple[IndexVariable, ...],
+                   label: object) -> tuple[IndexVariable, ...]:
+        return tuple(
+            variable if isinstance(entry, cat.WeaveMode)
+            else IndexVariable((label, position), variable.axis)
+            for position, (entry, variable) in enumerate(zip(weave._shape, variables)))
+
+    def replace_targets(weave: cat.Weave, variables: tuple[IndexVariable, ...],
+                        labels: Iterable[IndexVariable]) -> tuple[IndexVariable, ...]:
+        replacements = iter(labels)
+        return tuple(
+            variable if isinstance(entry, cat.WeaveMode)
+            else IndexVariable(next(replacements).label, variable.axis)
+            for entry, variable in zip(weave._shape, variables))
+
+    result = label_target_positions(target.output_weaves[0], output, 'result')
+    operands = [label_target_positions(weave, variables, ('operand', position))
+                for position, (weave, variables) in enumerate(
+                    zip(target.input_weaves, inputs))]
+    if len(operands) < 2 or isinstance(target.input_weaves[0].datatype, cat.Natural):
+        return operands, result
+    produced = tuple(target.output_weaves[0].select_target(result))
+    biased = isinstance(target.operator, ops.Linear) and target.operator.bias
+    data_positions = range(2 if biased else 1, len(operands))
+    contracted = tuple(variable for position in data_positions
+                       for variable in target.input_weaves[position].select_target(
+                           operands[position]))
+    weight_weave = target.input_weaves[0]
+    weight_variables = tuple(weight_weave.select_target(operands[0]))
+    selected_count = len(weight_variables) - len(contracted) - len(produced)
+    if selected_count < 0:
+        raise ValueError(
+            f'the weight of {target.operator} has {len(weight_variables)} target '
+            f'positions for {len(contracted)} contracted and {len(produced)} '
+            'produced positions')
+    selected = weight_variables[:selected_count]
+    weight_labels = (selected + produced + contracted
+                     if isinstance(target.operator, transpose.Transpose)
+                     else selected + contracted + produced)
+    operands[0] = replace_targets(weight_weave, operands[0], weight_labels)
+    if biased:
+        operands[1] = replace_targets(target.input_weaves[1], operands[1], produced)
+    return operands, result
 
 
 def unique[A: cat.Axis](axes: Iterable[A]) -> Shape[A]:

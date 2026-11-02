@@ -24,6 +24,7 @@ import einops
 import torch_compile.bcast as bcast
 import torch_compile.torch_utilities as torch_utilities
 import para.data_structure.transpose as ptr
+import algebra.einops_simplification as einops_simplification
 
 @dataclass(frozen=True)
 class TorchFunctionInfo:
@@ -403,43 +404,32 @@ ConstructedModule.add_function(ops.WeightedTriangularLower, weighted_triangular_
 def axis_einsum_signature(
     target: cat.Broadcasted, operands: fd.Prod[int] | None = None,
 ) -> str:
-    '''
-    An einsum signature read off AXIS IDENTITY rather than off an `Einops`
-    signature. The parametrised `Linear` and `Transpose`
-    (`para.show_grabbed_parameters`, `para.derivative._parametrised_linear`)
-    build their weight operand from the seed's own weave targets, so an axis
-    the operands share is the same axis object, and which axes contract is
-    determined by which coincide - `... q m, ... m d -> ... q d` for a
-    linear, `... m d, ... q m -> ... q d` for a weight-first linear.
+    '''The einsum signature of a parametrised `Linear` or `Transpose`, read
+    from the positional index variables of `einops_simplification.index_shapes`.
+    A square map reads `... i j, ... i -> ... j` even when both positions
+    carry the same axis object.
+
     `operands` selects the input weaves by position, so a bias, which is added
     rather than multiplied, can be left out of the einsum.
     '''
     assert tutil.is_mappable_broadcast(target)
-    tags: dict[Any, str] = {}
+    inputs, output, _ = einops_simplification.index_shapes(target)
+    tags: dict[einops_simplification.IndexVariable, str] = {}
 
-    def tag(axis) -> str:
-        return tags.setdefault(axis, f'x{len(tags)}')
+    def tag(variable: einops_simplification.IndexVariable) -> str:
+        return tags.setdefault(variable, f'x{len(tags)}')
 
-    degree_tags = tuple(f'y{i}' for i, _ in enumerate(target.degree()))
-    pairs = tuple(zip(target.input_weaves, target.reindexings))
-    if operands is not None:
-        pairs = tuple(pairs[i] for i in operands)
-    segments = (
-        weave.imprint_axes(
-            (degree_tags[i] for i in tutil.get_mapping(eta)),
-            (tag(axis) for axis in weave.target().shape()))
-        for weave, eta in pairs)
-    output = target.output_weaves[0].imprint_axes(
-        degree_tags,
-        (tag(axis) for axis in target.output_weaves[0].target().shape()))
-    return (', '.join('... ' + ' '.join(segment) for segment in segments)
-            + ' -> ... ' + ' '.join(output))
+    selected = tuple(range(len(inputs))) if operands is None else tuple(operands)
+    segments = (' '.join(tag(variable) for variable in inputs[i]) for i in selected)
+    return (', '.join('... ' + segment for segment in segments)
+            + ' -> ... ' + ' '.join(tag(variable) for variable in output))
 
 
 def parametrised_linear_func(target: cat.Broadcasted) -> Callable:
-    '''`(W[, b], x) -> y` with the weight as the FIRST operand: one einsum by
-    axis identity, the bias broadcast on afterwards (its target axes are the
-    output's trailing dims, so plain torch broadcasting right-aligns it).
+    '''`(W[, b], x) -> y` with the weight as the FIRST operand: one einsum
+    read off the index variables of `axis_einsum_signature`, the bias broadcast
+    on afterwards (its target axes are the output's trailing dims, so plain
+    torch broadcasting right-aligns it).
 
     `show_grabbed_parameters` puts the parameters in the first slots, so the
     bias sits between the weight and the data and the einsum names the two
@@ -484,8 +474,9 @@ class ConstructedLinear[
 class ConstructedTranspose(ConstructedModule, operation_key=ptr.Transpose):
     '''
     The 2-operand transpose `para.derivative._parametrised_linear` writes:
-    the cotangent against the same weight, over the axes they share, again
-    one einsum by axis identity. A bare 1-operand `Transpose` cannot compile:
+    the cotangent against the same weight, over the positions they share,
+    again one einsum read off the index variables of `axis_einsum_signature`.
+    A bare 1-operand `Transpose` cannot compile:
     its weight is inside the operator, and the *values* live in whatever
     `ConstructedLinear` its forward became, so parametrise first.
     '''

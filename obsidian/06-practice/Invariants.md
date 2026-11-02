@@ -93,8 +93,10 @@ for membership in a shape, keying a dictionary by an axis or calling `shape.inde
 identifies an axis with an index variable, and reads one token axis at two positions of
 the scores as a diagonal. `einops_simplification.einsum` takes shapes of `IndexVariable`s, which `index_shapes` reads
 off a morphism, and the derivative rules, `operator_expansion`, `pathway_collapse` and
-`merge_einops` write their shapes in them. A target position of an operator that states no
-grouping is related to the other side's target by its axis, which [[Open Gaps]] records.
+`merge_einops` write their shapes in them. A `Linear` or `Transpose` gives each target
+position its own variable and pairs weight positions with data and result positions.
+Tiled positions retain their reindexing variables even when interleaved with targets.
+Other opaque operators still relate target positions by axis identity.
 → [[Expression Simplification]], [[Open Gaps]]
 
 ## Hypergraphs
@@ -184,9 +186,14 @@ gives the same term in a worker process as in the parent. Before the change a wo
 ## What must not import what
 
 **`display` imports nothing above it.** Every layer above the backends may import
-`display`, so an import in the other direction forms a cycle. The rule holds for
-`agent_display`, `torch_compile`, `data_transfer` and `websocket_transfer` as well. →
-[[Diagram Display]]
+`display`, so an import in the other direction forms a cycle. → [[Diagram Display]]
+
+Other backends have explicit algebra dependencies. `torch_compile` reads shared
+index variables from `algebra.einops_simplification`, whose dependencies include
+core structures and the `Transpose` definition but no compiler.
+`websocket_transfer.auxiliary_information` imports registered algebra expansions.
+Keep these dependencies acyclic rather than applying the display restriction to
+every backend.
 
 **Write `import construction_helpers as ch` for its side effects**, even when the name is
 unused, because the `@`, `*` and `>>` overloads do not exist without it. →

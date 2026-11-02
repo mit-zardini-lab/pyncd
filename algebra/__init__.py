@@ -50,7 +50,12 @@ were never factored out of.
 The package sits on `data_structure`, `construction_helpers`, `term_utilities` and
 `graphs`, so that every feature above them can depend on it.
 
-`linear_expansion` is the one module that imports `para`, for
+`einops_simplification` imports the `Transpose` operator definition from
+`para.data_structure.transpose` to read its weight positions. That definition
+imports core structures and term utilities and has no dependency on the index
+reader or Torch compiler.
+
+`linear_expansion` also imports `para`, for
 `para.processing.write_linear_formula`, which writes the formula an inspection box
 shows for an expanded weight. `linear_expansion` registers the standard expansion of
 a `Linear` that the display reads, and `einops_rearrange` is half of the pass
