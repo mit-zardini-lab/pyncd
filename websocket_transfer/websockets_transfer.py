@@ -7,6 +7,7 @@ import websockets
 from collections.abc import Mapping
 from typing import TypedDict, Literal, Any, NotRequired
 import json
+import os
 import data_transfer.term_json as dtj
 import data_structure.Term as fd
 import random
@@ -33,9 +34,23 @@ The wire format is written up in `obsidian/05-backends/Diagram Wire Format.md`,
 mirrored at `tsncd/PROTOCOL.md`. Keep the two in step.
 '''
 
-SERVER_HOST = 'localhost'
-SERVER_PORT = 8765
-SERVER_URI = f'ws://{SERVER_HOST}:{SERVER_PORT}'
+def _server_port_from_environment() -> int:
+    port_text = os.environ.get('PORT') or '8765'
+    if not port_text.isascii() or not port_text.isdecimal():
+        raise ValueError(f'PORT must be an integer from 1 to 65535: {port_text!r}')
+    try:
+        port = int(port_text)
+    except ValueError as error:
+        raise ValueError(f'PORT must be an integer from 1 to 65535: {port_text!r}') from error
+    if not 1 <= port <= 65535:
+        raise ValueError(f'PORT must be an integer from 1 to 65535: {port_text!r}')
+    return port
+
+
+SERVER_HOST = os.environ.get('HOST') or 'localhost'
+SERVER_PORT = _server_port_from_environment()
+SERVER_URI = f'ws://[{SERVER_HOST}]:{SERVER_PORT}' if ':' in SERVER_HOST else (
+    f'ws://{SERVER_HOST}:{SERVER_PORT}')
 
 '''
 A captured PNG runs to several megabytes once base64'd, and `websockets`

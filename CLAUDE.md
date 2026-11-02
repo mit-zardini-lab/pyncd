@@ -471,7 +471,8 @@ Raise a typed exception carrying a message. Do not use a bare `assert`, and do n
 
 **Do not read an environment variable.** Pass an argument instead. When a whole file needs
 a mode, declare a variable at the top of the file and pass it to the functions that use
-it. Two variables are read, and no others. `TSNCD_DIST`, read in
+it. The Python relay and its data client read `HOST` and `PORT` to select their
+address. The other exceptions are `TSNCD_DIST`, read in
 `websocket_transfer/headless.py`, names a built tsncd bundle. `PYNCD_DIAGRAMS`, read in
 `notebooks/display/notebook_diagrams.py`, lets an agent executing a notebook in the
 background replace its diagrams with listings without editing the notebook.
