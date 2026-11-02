@@ -16,7 +16,11 @@ declaration across a structure.
 Three objects do it:
 
 - **`EqualityClass`** — a bucket of UIDs, a canonical term, and a priority. Applying it
-  to a term replaces any `UTerm` whose UID is in the bucket with the canonical one.
+  to a term replaces any term whose UID is in the bucket with the canonical one. The
+  term may be a `UTerm` or another UID-bearing term such as `FreeNumeric`. A size
+  symbol may therefore be replaced with an `Integer` that carries no UID.
+  `UIDEquipped` declares the shared identity as a read-only property and supports
+  runtime checks.
 - **`UIDRenaming`** — a bucket of UIDs and a canonical UID. Applying it keeps a matching
   term's fields and replaces its uid alone. A wire splice is the renaming case, because
   each occurrence of a `HypergraphObject` must keep the object it carries.

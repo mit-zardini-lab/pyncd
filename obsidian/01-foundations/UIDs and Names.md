@@ -8,11 +8,12 @@ status: stable
 
 ## What it is
 
-A `UID` is a term's **identity**, independent of its structure. Two `UTerm`s with the
-same `uid` are "the same in every way" as far as the package is concerned. Each `UTerm`
-with a UID acts as a **degree of freedom** in an expression: substituting one UTerm for
-another is how axes are aligned, how blocks are tracked across a rewrite, and how a wire
-spliced into a graph takes the identity of the wire it replaces.
+A `UID` is a term's **identity**, independent of its structure. A `UTerm` carries a UID,
+and `FreeNumeric` declares one without inheriting from `UTerm`. Each UID-bearing term
+acts as a **degree of freedom** in an expression: substituting one term for another is
+how axes are aligned, how blocks are tracked across a rewrite, and how a size symbol
+can be replaced by an integer. A wire spliced into a graph takes the identity of the
+wire it replaces.
 
 A `DynamicName` is the *decoration*: a body, an optional subscript (itself a
 `DynamicName`), and aesthetic settings (bold, overline, absolute bars). Names exist so
