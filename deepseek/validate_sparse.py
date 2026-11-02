@@ -55,6 +55,10 @@ import deepseek.sparse_expansion as dse
 import graphs.processing.Hypergraph2Morphism as h2m
 import para.algebra.para_sparse_expansion as para_sparse_expansion
 import para.data_structure.Para as Para
+import para.data_structure.inject as inject
+import para.processing.backprop as backprop
+import para.registries.derivative as derivative
+import deepseek.registries.derivative as selection_derivative
 import advanced_axis_dynamics.data_structure.AffineGuards as AffineGuards
 import advanced_axis_dynamics.data_structure.Operators as aops
 from advanced_axis_dynamics import (
@@ -649,6 +653,96 @@ def check_selection_over_guarded_slots() -> None:
     assert para_sparse_expansion.expand_sparse_onto_tape(model) is model
 
 
+def check_scalar_selection_reverse() -> None:
+    parent_axis = cat.RawAxis.named('n')
+    index = cat.Weave(cat.Natural(parent_axis.local_size()), ())
+    value = cat.Weave(cat.Reals(), ())
+    parent = cat.Weave(cat.Reals(), (parent_axis,))
+
+    selected = ds.IndexSelect.template(parent_axis)
+    injected = inject.inject_onto(cat.ProdObject(), index, value, parent)
+    assert derivative.rule_for(selected.operator) is selection_derivative.index_select
+    assert derivative.rule_for(injected.operator) is selection_derivative.scalar_inject
+    for forward_seed, reverse_operator in (
+        (selected, inject.Inject), (injected, ds.IndexSelect)):
+        assert isinstance(forward_seed, cat.Broadcasted)
+        residual, reverse = derivative.rule_for(forward_seed.operator)(forward_seed)
+        assert residual == derivative.Residual(inputs=(0,))
+        assert isinstance(reverse, cat.Broadcasted)
+        assert isinstance(reverse.operator, reverse_operator)
+        passes = backprop.forward_backward(forward_seed)
+        assert tuple(passes.backward.dom()) == tuple(passes.forward.cod())
+        assert tuple(passes.backward.cod()) == (forward_seed.dom()[1],)
+        assert the(tutil.type_search(
+            Para.Grab, passes.backward)).size == forward_seed.dom()[0]
+        assert the(tutil.type_search(
+            Para.Drop, passes.forward)).size == forward_seed.dom()[0]
+        assert not any(isinstance(seed.operator, ops.GenericOperator)
+                       for seed in roots(passes.backward))
+    print('scalar selection and injection reverse: saved Natural index, native duals')
+
+
+def check_broadcast_selection_reverse() -> None:
+    selected_axis = cat.RawAxis.named('k')
+    parent_axis = cat.RawAxis.named('n')
+    degree = cat.ProdObject[cat.Axis]((selected_axis,))
+    shared_payload = cat.Broadcasted[cat.Datatype, cat.Axis, ds.IndexSelect](
+        operator=ds.IndexSelect(),
+        input_weaves=(
+            cat.Weave(cat.Natural(parent_axis.local_size()),
+                      (cat.WeaveMode.TILED,)),
+            cat.Weave(cat.Reals(), (parent_axis,))),
+        output_weaves=(cat.Weave(cat.Reals(), (cat.WeaveMode.TILED,)),),
+        reindexings=(degree.identity(), cat.Rearrangement((), (selected_axis,))),
+    )
+    shared_scalar = cat.Broadcasted[cat.Datatype, cat.Axis, inject.Inject](
+        operator=inject.Inject(),
+        input_weaves=(
+            cat.Weave(cat.Natural(parent_axis.local_size()),
+                      (cat.WeaveMode.TILED,)),
+            cat.Weave(cat.Reals(), ())),
+        output_weaves=(cat.Weave(
+            cat.Reals(), (cat.WeaveMode.TILED, parent_axis)),),
+        reindexings=(degree.identity(), cat.Rearrangement((), (selected_axis,))),
+    )
+    for forward_seed, reverse_operator, intermediate in (
+        (shared_payload, inject.Inject, (selected_axis, parent_axis)),
+        (shared_scalar, ds.IndexSelect, (selected_axis,)),
+    ):
+        passes = backprop.forward_backward(forward_seed)
+        backward = passes.backward
+        assert tuple(backward.dom()) == tuple(passes.forward.cod())
+        assert tuple(backward.cod()) == (forward_seed.dom()[1],)
+        assert the(tutil.type_search(Para.Grab, backward)).size == forward_seed.dom()[0]
+        assert the(tutil.type_search(
+            Para.Drop, passes.forward)).size == forward_seed.dom()[0]
+        dual = the(seed for seed in roots(backward)
+                   if isinstance(seed.operator, reverse_operator))
+        summation = the(seed for seed in roots(backward)
+                        if isinstance(seed.operator, ops.Einops))
+        assert tuple(dual.cod()[0].shape()) == intermediate
+        assert tuple(summation.dom()[0].shape()) == intermediate
+        assert tuple(summation.cod()[0].shape()) == tuple(forward_seed.dom()[1].shape())
+        assert not any(isinstance(seed.operator, ops.GenericOperator)
+                       for seed in roots(backward))
+    print('broadcast selection and injection reverse: sum shared gradients over k')
+
+
+def check_slab_injection_reverse_remains_unsupported() -> None:
+    parent_axis = cat.RawAxis.named('n')
+    channel_axis = cat.RawAxis.named('channel')
+    index = cat.Weave(cat.Natural(parent_axis.local_size()), ())
+    slab = cat.Weave(cat.Reals(), (channel_axis,))
+    try:
+        backprop.forward_backward(inject.inject_slab(
+            cat.ProdObject(), index, slab, parent_axis, 0))
+    except NotImplementedError as error:
+        assert 'slab/selected-axis forms are unsupported' in str(error)
+    else:
+        raise AssertionError('a non-scalar Inject slab unexpectedly acquired a rule')
+    print('non-scalar injection remains explicitly unsupported')
+
+
 if __name__ == '__main__':
     import agent_display as ad
     moe = compressed_moe()
@@ -672,4 +766,7 @@ if __name__ == '__main__':
     check_positions_pool()
     check_positions_gather()
     check_selection_over_guarded_slots()
+    check_scalar_selection_reverse()
+    check_broadcast_selection_reverse()
+    check_slab_injection_reverse_remains_unsupported()
     print('all sparse expansion checks passed')

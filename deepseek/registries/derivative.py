@@ -20,6 +20,7 @@ import data_structure.Category as cat
 import deepseek.data_structure as ds
 import para.data_structure.Para as Para
 import para.data_structure.inject as inject
+import para.data_structure.transpose as transpose
 import para.registries.derivative as derivative
 import advanced_axis_dynamics.registries.derivative  # the reverse of a merge
 from construction_helpers import simple_helper as chsh
@@ -109,3 +110,49 @@ def complete_top_k(
     '''The `WEIGHTS_SELECT` form: the index output is the residual.'''
     index = target.output_weaves[1].target().datatype
     return derivative.Residual(outputs=(1,)), inject.inject(target, index)
+
+
+@derivative.register(ds.IndexSelect)
+def index_select(
+    target: cat.Broadcasted,
+) -> tuple[derivative.Residual, cat.BroadcastedCategory]:
+    '''Scatter the scalar cotangent onto the indexed position of the payload.'''
+    if not transpose.is_cleanly_broadcast(target):
+        raise ValueError('IndexSelect reverse expects an expanded clean core')
+    index, payload = target.input_weaves
+    value, = target.output_weaves
+    payload_shape = tuple(payload.target().shape())
+    if (tuple(index.target().shape()) or len(payload_shape) != 1
+            or tuple(value.target().shape())
+            or value.datatype != payload.datatype
+            or index.datatype != cat.Natural(payload_shape[0].local_size())):
+        raise NotImplementedError(
+            'IndexSelect reverse supports scalar index and vector payload')
+    return derivative.Residual(inputs=(0,)), inject.inject_onto(
+        target.degree(), index, value, payload)
+
+
+@derivative.register(inject.Inject)
+def scalar_inject(
+    target: cat.Broadcasted,
+) -> tuple[derivative.Residual, cat.BroadcastedCategory]:
+    '''Read the cotangent of an injected scalar at its saved index.'''
+    if not transpose.is_cleanly_broadcast(target):
+        raise ValueError('Inject reverse expects an expanded clean core')
+    index, value = target.input_weaves
+    parent, = target.output_weaves
+    parent_shape = tuple(parent.target().shape())
+    if (tuple(index.target().shape()) or tuple(value.target().shape())
+            or len(parent_shape) != 1
+            or index.datatype != cat.Natural(parent_shape[0].local_size())
+            or value.datatype != parent.datatype):
+        raise NotImplementedError(
+            'Inject reverse supports only rank-0 index and scalar value into a '
+            'vector; slab/selected-axis forms are unsupported')
+    selected = cat.Broadcasted(
+        operator=ds.IndexSelect(),
+        input_weaves=(index, parent),
+        output_weaves=(value,),
+        reindexings=(target.degree().identity(),) * 2,
+    )
+    return derivative.Residual(inputs=(0,)), selected

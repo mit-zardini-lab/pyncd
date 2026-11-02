@@ -36,7 +36,7 @@ the `n` was chosen. [[Selection and the Reverse Pass]] covers both reasons.
 
 *Touches: [[Stride Category]], [[Operators]], [[Sparse Axes]], [[Training]].*
 
-### 2. The reverse functor has no rule for `IndexSelect`, and there is no loss or optimiser
+### 2. The reverse functor has incomplete selection rules and no loss or optimiser
 
 The duals of the seed operators exist, described in [[Backpropagation]]. The affine half of
 the scatter problem closed on 2026-08-20 as `transpose.ReindexTranspose`, and the
@@ -44,8 +44,10 @@ data-dependent half closed on 2026-09-04 as `Inject` followed by a sum over the 
 for a complete `TopK` and for a `Linear` that selects a weight, per
 [[Selection and the Reverse Pass]] and [[DeepSeek-V3 Backward Pass]].
 
-`IndexSelect` has no rule, and its rule is the same pair at the payload's degree. A `TopK`
-in the `ONLY_WEIGHTS` or `ONLY_SELECTION` form of `ds.SelectionForm` has no rule either.
+Scalar `IndexSelect` has a rule: `Inject` followed by the payload node's sum over its
+broadcast degree. Scalar `Inject` has the reverse gather rule. Non-scalar selections and
+slab injections still have no such rule. A `TopK` in the `ONLY_WEIGHTS` or
+`ONLY_SELECTION` form of `ds.SelectionForm` has no rule either.
 `ONLY_WEIGHTS` hands out no positions to say where its cotangents land. `ONLY_SELECTION`
 hands out positions alone, which carry no cotangent, so its rule would return zero to the
 scores. `deepseek.registries.derivative` raises `SelectionFormHasNoReverseRule` for both,
@@ -60,8 +62,9 @@ raises `SelectionOverPositionsHasNoReverseRule` for it.
 
 Whether the reverse functor steps over a node whose inputs and outputs are all `Natural`,
 meaning `deepseek.MergedPositions` and the `IndexSelect` that composes two selections, has
-not been run. Neither rule is checked numerically, because `torch_compile` has no module
-for a complete `TopK`, for `Inject`, or for a `Linear` with an index operand. There is no
+not been run. The selection rules are checked structurally rather than numerically,
+because `torch_compile` has no module for a complete `TopK`, for `Inject`, or for a
+`Linear` with an index operand. There is no
 loss function and no optimiser.
 
 *Touches: [[Selection and the Reverse Pass]], [[Training]], [[Torch Compile]].*

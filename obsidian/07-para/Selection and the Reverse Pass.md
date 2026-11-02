@@ -42,7 +42,7 @@ It is the same rewrite that [[Open Gaps]] item 1 requires before anything analys
 dependency a gather introduces. The rewrite that makes a selection legible to that
 analysis is the rewrite that makes it reversible.
 
-## The dual of `IndexSelect` is a scatter, and it does not exist
+## The scalar dual of `IndexSelect` is a scatter
 
 After expansion a `Select` is
 `hold(values) × IndexSelect(index, payload) ; einops('k, k -> k')`. `IndexSelect` is the pure
@@ -70,8 +70,10 @@ contraction and a scatter is not one, and it is not a reindexing, because a rein
 affine and $k \to n$ through a runtime index is not. `Inject` takes the index as an operand
 and writes each value at the position the index names. The accumulation is the sum over the
 degree that follows it, which a weight's node transpose already writes, so a scatter-add is
-`Inject` followed by an `Einops`. `IndexSelect` has no rule registered, and the rule would
-be that pair at the payload's degree.
+`Inject` followed by an `Einops`. The registered `IndexSelect` rule saves its scalar
+`Natural` index and emits an `Inject` into a vector payload. When the payload is shared
+across a broadcast degree, its node transpose sums the injected cotangents over that
+degree. The rule has no case for a payload with a non-scalar target beyond that vector.
 
 The index form is also the one that does not materialise $n \cdot k$, which is the same
 reason [[Sparse Axes]] prefers it in the forward direction. A scatter written as a one-hot
@@ -107,6 +109,14 @@ everywhere else. The rule is the forward selection's weaves swapped, which is th
 construction `transpose.transpose` uses and is this short for the same reason: every
 reindexing of a cleanly broadcast operator is the degree identity, so exchanging the input
 and output weaves exchanges the domain and the codomain exactly.
+
+The scalar `Inject` reverse rule saves its rank-0 `Natural` index and uses `IndexSelect`
+to read the incoming cotangent at that position. When the injected scalar is shared over
+a broadcast degree, its node transpose sums those gathered cotangents. An injection of a
+slab, including a selecting `Linear`'s weight gradient, has no reverse rule: the scalar
+gather cannot preserve the slab's other target axes. Both rules are registered in the
+DeepSeek registry because their implementations require DeepSeek's `IndexSelect`, while
+the Para registry is lower in the import dependency order.
 
 It is an operator for the reason `Select` and `IndexSelect` are. A reindexing is affine, and
 the map from a slot to the position it selected is runtime data. An `Einops` signature
@@ -218,8 +228,10 @@ it is the order a whole layer is derived in.
 ## Gaps
 
 - ~~There is no scatter operator~~. Closed 2026-09-04 for `TopK.complete` and for a
-  selecting `Linear`, as `Inject` followed by the node transpose's sum. `IndexSelect` still
-  has no rule, and its rule is the same pair at the payload's degree.
+  selecting `Linear`, as `Inject` followed by the node transpose's sum. The scalar
+  `IndexSelect` reverse rule uses the same pair at the payload's degree. The scalar
+  `Inject` reverse rule reads the cotangent at its saved index. Non-scalar/slab injection
+  and selection have no such rules.
 - **Nothing checks that a composition composes.** `cat.Composed` does not compare its
   neighbours' codomain and domain, and no validator does either, so the two incompatible
   links `Inject` removed were found by walking the morphism by hand. A checker is a small
