@@ -62,6 +62,26 @@ These utilities build on the core data structure. They feed into a "web" of tool
  - For diagrammatic visualization, the [`tsncd`](https://github.com/mit-zardini-lab/tsncd) package is required. We run `python run_server.py` (requires `pip install websockets`) in an independent terminal. `tsncd` carries the same relay under `npm run server`, which needs no Python package and answers the same messages. Either will do. Only one of them may hold port 8765. When the server is running, the browser connects on refresh. As in `example_notebooks/Transformer.ipynb`, we connect from Python, updating the data in the server. The wire format between the two packages is documented in
 [`obsidian/05-backends/Diagram Wire Format.md`](obsidian/05-backends/Diagram%20Wire%20Format.md).
 
+The Python relay and its Python data clients read `HOST` and `PORT`, with defaults
+`localhost` and `8765`. See [Python relay configuration](#configure-the-python-relay-address)
+for examples and the supported values.
+
+## Configure the Python relay address
+
+The Python relay and its Python clients read `HOST` and `PORT` when their process
+starts. Empty values use the defaults. `PORT` must be a decimal integer from 1
+to 65535. Supply an IPv6 host without brackets in `HOST`; the Python client
+brackets it in the WebSocket URL.
+
+```sh
+HOST=0.0.0.0 PORT=8765 python run_server.py
+HOST=192.168.1.20 PORT=8765 python example.py
+```
+
+Run one relay. A Python client needs the relay's reachable address; a server
+bound to a wildcard address does not give clients a usable destination. The
+TypeScript relay and browser code remain unchanged by this Python setting.
+
 # Diagrams in the notebook
 
 `send_morphism` puts a diagram in the browser window, and nothing of it survives
