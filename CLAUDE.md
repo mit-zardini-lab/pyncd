@@ -987,9 +987,9 @@ so an import in the other direction forms a cycle.
 ### A wiring diagnostic
 
 When `hypergraph_to_morphism` raises `ValueError: HypergraphObject(...) is not in list`,
-the wiring is wrong and the conversion is correct. Some wire is required on the right of a
-branch and nothing on the left produces it. Two real bugs in a splicing pass were found
-this way.
+a wire required on the right of a branch is absent on its left. Check the graph wiring
+and the branch construction. Invalid splices can cause the error, and valid consecutive
+blocks with pass-through wires have also exposed a conversion defect.
 
 # Conventions
 

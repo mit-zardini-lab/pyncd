@@ -97,10 +97,11 @@ hg.flat_subgraphs(g, remove_blocks=True)
 
 ## Diagnostics
 
-> [!warning] `ValueError: HypergraphObject(...) is not in list` from `hypergraph_to_morphism` means the wiring is wrong
-> The conversion is correct. Some node is required on the right of a branch and nothing on
-> the left produces it. Two real bugs in a splicing pass surfaced exactly that way.
-> Look at what was spliced and at which container's `dom` or `cod` went unrebuilt.
+> [!warning] A requested wire is absent on the left of a branch
+> `ValueError: HypergraphObject(...) is not in list` can report an invalid splice or
+> a conversion defect. Check the splice and each container's `dom` and `cod`. Valid
+> consecutive blocks with pass-through wires also exposed an incorrect identity hold
+> in the branch construction, per [[Hypergraph to Morphism]].
 > `leaf_splicing.rescope` exists because a loop that gains a domain wire needs the
 > containers around it rebuilt, and nothing else works that out.
 
