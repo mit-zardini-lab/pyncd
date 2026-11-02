@@ -181,7 +181,7 @@ class TieTapes:
         self.analyze(graph)
         tied = self._rebuild(graph)
         if self.splices.equality_classes:
-            tied = functor.reduce_nodes(self.splices, tied)
+            tied = functor.apply_context_to_wires(self.splices, tied)
         return tied
 
 

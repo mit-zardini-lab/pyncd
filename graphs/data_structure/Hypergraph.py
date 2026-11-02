@@ -101,27 +101,27 @@ class Hypergraph[L, M:cat.Morphism](fd.UTerm):
 
 @dataclass(frozen=True)
 class HypergraphRoot[L, M: cat.Morphism](Hypergraph[L, M]):
-    wraps: M = None # type: ignore
+    wraps: M | cat.Rearrangement[L] = None # type: ignore
 
     @classmethod
     def template(cls,
-                 target: M,
+                 target: M | cat.Rearrangement[L],
                  dom: Sequence[HypergraphObject[Any]] | None = None,
                  cod: Sequence[HypergraphObject[Any]] | None = None
                  ) -> HypergraphRoot[L, M] | Multigraph[L, M]:
-        '''A leaf wrapping `target`, or a `Multigraph` when `target` rewires.
+        '''A leaf wrapping `target`, with explicit output wires when supplied.
 
         `dom` and `cod` name the wires the leaf sits on, and a wire missing from
         them is fresh. A `cat.Rearrangement` permutes, copies and deletes wires and
-        computes nothing, so it becomes an empty `Multigraph` whose codomain names
-        the wires the rearrangement sends its domain wires to. The wiring is then
-        carried by wire identity alone.
+        computes nothing. Without distinct output wires it becomes an empty
+        `Multigraph` whose codomain names the mapped input wires. Distinct output
+        wires retain the rearrangement as a root so block ports stay ordered.
         '''
         if isinstance(target, cat.Rearrangement):
             dom_objects = HypergraphObject.template(target.dom(), dom)
             cod_objects = target.apply(dom_objects)
-            assert cod is None or tuple(cod) == cod_objects
-            return Multigraph.template(dom=dom_objects, cod=cod_objects)
+            if cod is None or tuple(cod) == cod_objects:
+                return Multigraph.template(dom=dom_objects, cod=cod_objects)
         return cls(
             uid=fd.UID(HypergraphRoot),
             dom=HypergraphObject.template(target.dom(), dom),
@@ -148,21 +148,41 @@ class HypergraphBlock[L, M: cat.Morphism](Hypergraph[L, M]):
         The body's own domain is left as it is, so a wire entering the block twice is
         listed once on the block and twice on the body. A guide crossing between the
         two is realigned by wire in `hypergraph_crawler.realign_guide`.
+        Pass-through and repeated output positions receive distinct wires through
+        an identity root inside the body. The body and block share those wires.
         '''
         dom = (
             body.dom if not reduce
             else util.unique_tuple(body.dom)
         )
+        connected_body = separate_block_outputs(body)
         return cls(
             uid=fd.UID(HypergraphBlock),
             dom=dom,
-            cod=body.cod,
-            body=body,
+            cod=connected_body.cod,
+            body=connected_body,
             block_tag=block_tag
         )
 
     def subgraphs(self) -> fd.Prod[Hypergraph[L, M]]:
         return (self.body,)
+
+
+def separate_block_outputs[L, M: cat.Morphism](
+    body: Hypergraph[L, M],
+) -> Hypergraph[L, M]:
+    selected = tuple(
+        output for output in body.cod
+        if output in body.dom or body.cod.count(output) > 1)
+    if not selected:
+        return body
+    identity = cat.ProdObject.from_iter(output.obj for output in selected).identity()
+    identity_root = HypergraphRoot.template(
+        identity, selected, HypergraphObject.template(identity.cod()))
+    outputs = iter(identity_root.cod)
+    cod = tuple(next(outputs) if output in selected else output for output in body.cod)
+    return Multigraph.template(
+        body.dom, cod, (*flat_subgraphs(body), identity_root))
 
 @dataclass(frozen=True)
 class Multigraph[L, M: cat.Morphism](Hypergraph[L, M]):
@@ -196,10 +216,18 @@ class Multigraph[L, M: cat.Morphism](Hypergraph[L, M]):
 
         match target:
             case cat.Block():
+                block_dom = dom
+                if (target.repetition != nm.Integer(1)
+                        and len(set(dom)) != len(dom)):
+                    entry = HypergraphRoot.template(
+                        target.dom().identity(), dom,
+                        HypergraphObject.template(target.dom()))
+                    subgraphs = (entry,)
+                    block_dom = entry.cod
                 block = HypergraphBlock.template(
-                    body=cls.from_morphism(target.body, dom, reduce=reduce),
-                    block_tag=target.block_tag)
-                subgraphs = (block,)
+                    body=cls.from_morphism(target.body, block_dom, reduce=False),
+                    block_tag=target.block_tag, reduce=reduce)
+                subgraphs = (*subgraphs, block)
                 cod = block.cod
             case cat.ProductOfMorphisms():
                 for m, _dom in target.partition(dom):

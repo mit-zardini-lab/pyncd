@@ -10,18 +10,18 @@ from construction_helpers import simple_helper as chsh
 
 import utilities.utilities as util
 
-def reduce_nodes[L, M: cat.Morphism](context: fd.Context, target: hg.Hypergraph[L, M]) -> hg.Hypergraph[L, M]:
+def apply_context_to_wires[L, M: cat.Morphism](context: fd.Context, target: hg.Hypergraph[L, M]) -> hg.Hypergraph[L, M]:
     if isinstance(target, hg.HypergraphRoot):
         return context.apply(target)
-    new_dom = util.unique_tuple(context.apply(d) for d in target.dom)
-    new_cod = util.unique_tuple(context.apply(c) for c in target.cod)
+    new_dom = tuple(context.apply(d) for d in target.dom)
+    new_cod = tuple(context.apply(c) for c in target.cod)
     match target:
         case hg.HypergraphBlock(body=body):
-            new_body = reduce_nodes(context, body)
+            new_body = apply_context_to_wires(context, body)
             return target.reconstruct(body=new_body, dom=new_dom, cod=new_cod)
         case hg.Multigraph(_subgraphs=subgraphs):
             new_subgraphs = tuple(
-                reduce_nodes(context, subgraph) for subgraph in subgraphs
+                apply_context_to_wires(context, subgraph) for subgraph in subgraphs
             )
             return target.reconstruct(_subgraphs=new_subgraphs, dom=new_dom, cod=new_cod)
     raise NotImplementedError(f"Cannot reduce nodes for {type(target).__name__}.")
@@ -55,7 +55,7 @@ class Functor[L1, M1: cat.Morphism, L2, M2: cat.Morphism](ABC):
         if new_block_tag is None:
             return new_body, equality_classes
         return hg.HypergraphBlock.template(
-            new_body, target.block_tag
+            new_body, new_block_tag, reduce=target.dom != target.body.dom
         ), equality_classes
 
     # Derived Operations
@@ -76,11 +76,15 @@ class Functor[L1, M1: cat.Morphism, L2, M2: cat.Morphism](ABC):
                 return self.apply_root(target)
 
     def apply_hypergraph_root(self, target: hg.HypergraphRoot[L1, M1]) -> tuple[hg.Hypergraph[L2, M2], fd.Context]:
-        new_body = self.apply_root(target.wraps)
-        as_graph = hg.Multigraph.from_morphism(
+        new_body = self.apply_category(target.wraps)
+        if isinstance(new_body, cat.Rearrangement):
+            return hg.HypergraphRoot.template(
+                new_body, target.dom, target.cod), fd.Context()
+        as_graph = hg.separate_block_outputs(hg.Multigraph.from_morphism(
             new_body,
-            hg.HypergraphObject.template(new_body.dom(), target.dom)
-        )
+            hg.HypergraphObject.template(new_body.dom(), target.dom),
+            reduce=False,
+        ))
         # An input may appear more than once here.
         equality_classes = fd.Context().append_buckets(
             fd.UIDRenaming.set_canonical(final, original)
@@ -116,7 +120,6 @@ class Functor[L1, M1: cat.Morphism, L2, M2: cat.Morphism](ABC):
                     if not isinstance(subgraph, hg.Multigraph)
                     else subgraph._subgraphs
                     for subgraph, _ in new_subgraphs_eq
-                    if not hg.is_rearrangement(subgraph)
                 )
                 return hg.Multigraph[L2, M2].template(
                     dom, cod, new_subgraphs
@@ -128,7 +131,7 @@ class Functor[L1, M1: cat.Morphism, L2, M2: cat.Morphism](ABC):
 
     def apply_hypergraph(self, target: hg.Hypergraph[L1, M1]) -> hg.Hypergraph[L2, M2]:
         new_graph, context = self.apply_hypergraph_with_eq(target)
-        contextualized_graph = reduce_nodes(context, new_graph)
+        contextualized_graph = apply_context_to_wires(context, new_graph)
         return contextualized_graph
 
     @overload

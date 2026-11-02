@@ -105,7 +105,9 @@ def find_duplicate_roots[L, M: cat.Morphism](
         placed = _PlacedRoot(root, blocks)
         for wire in root.cod:
             produced_at.setdefault(wire, placed.chain())
-        key = (root.wraps, root.dom, placed.loop_chain())
+        scope = (placed.chain() if isinstance(root.wraps, cat.Rearrangement)
+                 else placed.loop_chain())
+        key = (root.wraps, root.dom, scope)
         groups.setdefault(key, []).append(placed)
     return tuple(util.concat(
         tuple(_merges_of(tuple(group), produced_at))

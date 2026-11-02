@@ -93,6 +93,15 @@ def with_datatypes(morphism: cat.Morphism,
                    cod_datatypes: tuple[cat.Datatype, ...]) -> cat.Morphism:
     '''One operation with the datatypes of its operands and its results replaced.'''
     match morphism:
+        case cat.Rearrangement():
+            expected_cod = morphism.apply(dom_datatypes)
+            if expected_cod != cod_datatypes:
+                raise ImpositionError(
+                    f'Rearrangement outputs have datatypes {cod_datatypes}, '
+                    f'expected {expected_cod}')
+            return morphism.reconstruct(_dom=tuple(
+                array.reconstruct(datatype=datatype)
+                for array, datatype in zip(morphism.dom(), dom_datatypes)))
         case cat.Broadcasted():
             operator = morphism.operator
             if isinstance(operator, Quantization.TypeConvert):

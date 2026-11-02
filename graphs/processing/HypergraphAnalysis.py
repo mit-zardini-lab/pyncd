@@ -233,6 +233,14 @@ class ReverseCrawler[L, M: cat.Morphism, G](ABC):
               target: hg.Hypergraph[L, M],
               guide: fd.Prod[G]) -> tuple[hg.Hypergraph[L, M], fd.Prod[G]]:
         match target:
+            case hg.HypergraphRoot(wraps=cat.Rearrangement() as rearrangement):
+                inputs = tuple(
+                    tuple(guide[output] for output, source
+                          in enumerate(rearrangement.mapping) if source == position)
+                    for position in range(len(rearrangement.dom())))
+                return target, tuple(
+                    self.coalesce(values) if values else self.generate_zero((obj,))
+                    for obj, values in zip(rearrangement.dom(), inputs))
             case hg.HypergraphRoot(wraps=wraps):
                 new_wraps, new_guide = self.seed_processor(wraps, guide)
                 # TODO: do we keep the UID?

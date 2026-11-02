@@ -365,6 +365,15 @@ and copy it, and is not written.
 
 ## Closed
 
+### Wiring blocks retain their ports and their order during recycling
+
+Closed 2026-11-01. [[Hypergraphs]] retain explicit connections for block outputs
+that pass inputs through or copy another output. Aliased initial loop inputs
+are separated before the loop. [[Hypergraph to Morphism]] preserves the
+requested mapping when no computation is present, places discarded blocks,
+and retains identity blocks during normalisation. The validators check values,
+ports, repetitions, nested block occurrences, and graph-pass compatibility.
+
 ### Every sentence of a page reads from a wording file
 
 The three wording files, the model's, the expansions' and the display's, hold every

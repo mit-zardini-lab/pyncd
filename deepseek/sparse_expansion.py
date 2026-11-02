@@ -137,8 +137,10 @@ def _target_sparse(weaves: fd.Prod[cat.Weave]) -> ds.SparseAxis | None:
     return None
 
 
-def classify(target: cat.Broadcasted) -> tuple[str, ds.SparseAxis | None]:
+def classify(target: cat.Morphism) -> tuple[str, ds.SparseAxis | None]:
     '''What role this seed morphism plays in the expansion.'''
+    if not isinstance(target, cat.Broadcasted):
+        return 'generic', None
     operator = target.operator
     if isinstance(operator, ops.BlockOperator):
         if any(True for _ in tutil.type_search(ds.SparseAxis, operator.block)):
@@ -800,7 +802,7 @@ class _Expansion:
             + ', '.join(uid.to_latex() for uid in unmet))
         new_graph = self._rebuild(graph)
         if self.splices.equality_classes:
-            new_graph = functor.reduce_nodes(self.splices, new_graph)
+            new_graph = functor.apply_context_to_wires(self.splices, new_graph)
         return new_graph
 
 

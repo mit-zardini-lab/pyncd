@@ -62,14 +62,23 @@ def outputs_with_a_new_quantisation(broadcasted: cat.Broadcasted) -> tuple[bool,
 
 
 def wires_with_a_new_quantisation(graph: hg.Hypergraph) -> frozenset[fd.UID]:
-    '''The uid of every wire of `graph` whose quantisation is new where it is
-    written, with the wires entering `graph` among them.'''
+    '''The wires whose quantisation labels are kept, including structural copies
+    of the inputs and of results written at a new quantisation.'''
     new = {node.uid for node in graph.dom}
+    copies: dict[fd.UID, set[fd.UID]] = {}
     for root in tutil.type_search(hg.HypergraphRoot, graph):
         if isinstance(root.wraps, cat.Broadcasted):
             new.update(
                 node.uid for node, is_new
                 in zip(root.cod, outputs_with_a_new_quantisation(root.wraps)) if is_new)
+        elif isinstance(root.wraps, cat.Rearrangement):
+            for source, output in zip(root.wraps.apply(root.dom), root.cod):
+                copies.setdefault(source.uid, set()).add(output.uid)
+    pending = list(new)
+    while pending:
+        copied = copies.get(pending.pop(), set()) - new
+        new.update(copied)
+        pending.extend(copied)
     return frozenset(new)
 
 
@@ -87,6 +96,12 @@ def operation_as_its_wires[M: cat.Morphism](
     '''The morphism `root` wraps, with the quantisation left on each operand and
     result exactly where it is left on its wire.'''
     match root.wraps:
+        case cat.Rearrangement(mapping=mapping):
+            return cat.Rearrangement(
+                mapping=mapping,
+                _dom=tuple(wire.obj if wire.uid in new
+                           else array_without_quantisation(wire.obj)
+                           for wire in root.dom))
         case cat.Broadcasted(input_weaves=inputs, output_weaves=outputs):
             return root.wraps.reconstruct(
                 input_weaves=tuple(weave_as_its_wire(weave, wire, new)

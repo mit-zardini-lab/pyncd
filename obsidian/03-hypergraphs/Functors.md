@@ -18,7 +18,7 @@ terms, a functor applies one *rule* everywhere.
 |---|---|
 | `Functor[L1, M1, L2, M2]` | object map plus morphism map, walked over a morphism or a hypergraph |
 | `Endofunctor[L, M]` | source and target the same category |
-| `reduce_nodes(context, graph)` | apply a `Context` to a graph, deduplicating the dom and cod by wire |
+| `apply_context_to_wires(context, graph)` | apply a `Context` to graph wires while preserving ordered input and output positions |
 
 Subclass it and override the object and morphism handlers. The base provides the traversal.
 
@@ -40,8 +40,8 @@ the others produced onto its wires with `fd.UIDRenaming`. The kept root is place
 innermost `Multigraph` whose enclosing blocks are a prefix of every duplicate's, which is the
 lowest common ancestor of the readers. It is inserted after the last child of that scope
 producing a wire it reads. Every block's domain and codomain are then recomputed from the
-roots inside it, so the kept root's wire enters each block that reads it, and a block whose
-every root was merged away is removed. The outermost graph keeps its domain and codomain,
+roots inside it, so the kept root's wire enters each block that reads it. Blocks retain
+their tags when their roots are removed. The outermost graph keeps its domain and codomain,
 because they are the morphism's.
 
 A loop block, meaning a `BlockTag` whose `repetition` is not 1, is a boundary. The grouping
@@ -49,6 +49,12 @@ key includes the tuple of loop blocks enclosing a root, so a root inside a loop 
 merged with a root outside it, and two roots inside the same loop merge within its body. A
 root inside a loop computes once per iteration, and a value outside the loop is one value,
 so the two are not the same computation even when their morphisms and wires agree.
+
+An explicit rearrangement root retains a block's output positions. Its grouping
+key includes every enclosing block, so duplicate elimination cannot move it out
+of that block and remove the block's wiring. Functors retain these roots and
+their distinct output wires. A block tag is removed only through the explicit
+`apply_block_tag` hook.
 
 Merging two roots makes their readers read one wire, so two readers wrapping equal morphisms
 become duplicates in turn. The merge is repeated until a round finds none, and every round
@@ -70,7 +76,10 @@ where each wire is produced and where it is consumed. A wire produced at one blo
 consumed at another flows out through the codomain of every block below their common prefix
 on the producer's side and in through the domain of every block below it on the consumer's
 side. A wire keeps its position in a boundary it already had, a wire new to a boundary is
-appended in walk order, and a block emptied by a rewrite is removed.
+appended in walk order, and a block emptied by a rewrite retains its tag. A
+rootless block's inputs count as reads, including a block that discards every
+input. A repeated block retains its full iteration state even when an outer
+projection discards some final results.
 `replace_roots.replace_roots` accepts a tuple of subgraphs as a replacement and splices them
 in place of the root.
 
