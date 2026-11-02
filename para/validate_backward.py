@@ -30,6 +30,7 @@ and an unknown name raises rather than silently reluing.
 '''
 from __future__ import annotations
 import sys
+from types import ModuleType
 
 import construction_helpers as ch  # noqa: F401 - operator overloads
 import data_structure.Term as fd
@@ -48,6 +49,7 @@ import para.data_structure.Para as para
 import para.processing.backprop as bp
 import para.data_structure.contraction as pcon
 import para.algebra.pathway_collapse as pc
+from notebooks.website.tutorial import derive_training_step
 
 
 SIZES = {'q': 3, 'd': 4, 'v': 5, 'x': 6, 'w': 2, 'm': 7}
@@ -298,7 +300,37 @@ def cases(torch) -> dict[str, bool]:
           'ok' if everything['softmax collapse fired'] else 'FAIL')
     everything.update(check_pointwise_formulas(torch, simplified))
     everything.update(check_parametrised(torch))
+    everything.update(check_zero_cotangent_outputs(torch))
     return everything
+
+
+def check_zero_cotangent_outputs(torch: ModuleType) -> dict[str, bool]:
+    '''Constant and indicator derivatives remain zero; the square remains nonzero.'''
+    compiler = _named_elementwise(torch)
+    results: dict[str, bool] = {}
+    for name, formula, input_value, output_value, gradient_value in (
+            ('constant derivative', nm.Integer(1), 1.5, 1.0, 0.0),
+            ('indicator derivative', nm.IsPositive(nm.x), -1.5, 0.0, 0.0),
+            ('square derivative', nm.x**2, 1.5, 2.25, 3.0)):
+        model = ops.Arithmetic.template(formula)
+        pair = derive_training_step.derive_training_step(model).recomputed
+        forward, forward_tape = detape(pair.forward)
+        backward, backward_tape = detape(pair.backward)
+        inputs = (torch.tensor(input_value),)
+        outputs = _run(compiler.construct(forward), *inputs)
+        gradient, = _run(compiler.construct(backward),
+                         torch.ones_like(outputs[0]), *outputs[1:])
+        results[name] = (
+            tuple(forward.dom()) == tuple(model.dom())
+            and tuple(forward.cod()[:len(model.cod())]) == tuple(model.cod())
+            and tuple(backward.dom()[:len(model.cod())]) == tuple(model.cod())
+            and tuple(backward.cod()) == tuple(model.dom())
+            and [slot for slot, _ in forward_tape]
+            == [slot for slot, _ in backward_tape]
+            and torch.allclose(outputs[0], torch.tensor(output_value))
+            and torch.allclose(gradient, torch.tensor(gradient_value)))
+        print(f'  {name:34}', 'ok' if results[name] else 'FAIL')
+    return results
 
 
 def pointwise(formula: nm.Numeric) -> cat.Broadcasted:

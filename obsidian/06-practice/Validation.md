@@ -80,7 +80,9 @@ changes no value. The shifted softmax and shifted attention are each checked as 
 after `dedup_and_collapse`. The collapsed backward pass is checked to hold no
 `Arithmetic<0>`, which is the zero map the rule for `Maximum` writes and
 `prune_zero_cotangents` removes, and the collapsed forward pass of the shifted softmax is
-checked to keep its `Maximum`.
+checked to keep its `Maximum`. The tutorial training-step passes for a constant, an
+indicator and a square are compiled and evaluated on scalars. Their gradients must be
+zero, zero and nonzero respectively, while each pass keeps its input and output shapes.
 
 ## The indexed tape seed check
 

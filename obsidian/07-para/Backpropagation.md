@@ -152,12 +152,12 @@ pass dropped the maximum for the negation in that chain, and the pruning removed
 as well. The negation multiplies by the constant $-1$, and a multiplication by a constant
 has been reversed with no residual since then, so the shifted softmax drops nothing for its
 maximum and keeps its four slots through the pruning.
-`pathway_collapse.collapse` runs it before its other rewrites. It deletes every pointwise
-map whose formula is the constant zero and every `contraction.Zero`, together with the
-`View`s that only reindex a zero wire. Every addition that read a deleted wire is rebuilt
-without that operand, and an addition left with one operand of its own shape becomes a
-rename of that operand. The roots whose outputs nothing then reads are removed to a
-fixed point, and the forward pass loses the `Drop` of any slot no remaining `Grab` reads.
+`pathway_collapse.collapse` runs it before its other rewrites. Every addition that reads
+a zero wire loses that operand, and an addition left with one operand of its own shape
+becomes a rename of that operand. A zero map still read by multiplication or returned as
+an input gradient remains. Roots whose outputs nothing reads are removed to a fixed
+point, including unused zero maps and `View`s that only reindex them. The forward pass
+loses the `Drop` of any slot no remaining `Grab` reads.
 The collapsed pair of a shifted softmax then has the unshifted pair's form, and its
 forward pass keeps the `Maximum`, which `para/validate_backward.py` checks.
 
