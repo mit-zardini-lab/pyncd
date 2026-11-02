@@ -348,8 +348,8 @@ def recompute_contraction_slots[L, M: cat.Morphism](
                 roots, renaming = _rebuilt_grab(chain, old, side_slots)
                 edits[old] = roots
                 renamings.append(renaming)
-        backward_graph = fd.Context(renamings).apply(
-            rewire_blocks.recompute_block_boundaries(
+        backward_graph = rewire_blocks.recompute_block_boundaries(
+            fd.Context(renamings).apply(
                 replace_roots.replace_roots(backward_graph, edits)))
     else:
         raise RuntimeError(f'{RECOMPUTE_LIMIT} recomputations without a fixed point')

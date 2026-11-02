@@ -121,6 +121,10 @@ two taped values, so neither reaches it.
 `para.algebra.recompute_contraction_slots.recompute_contraction_slots` reaches one
 contraction further. Where the forward pass drops $f(\mathrm{Einops}(a, b))$, with $f$ a chain of pointwise maps and additions, and $a$ and $b$ are already on the tape, it deletes the drop and replaces every grab of it by $\mathrm{Grab}(a), \mathrm{Grab}(b) \to \mathrm{Einops} \to f$, rebuilt onto the wire the grab produced so that its readers do not move. On attention it removes `s4`, leaves the five slots FlashAttention stores, and adds one `Einops` and one `Arithmetic` to the backward pass, which is the FlashAttention backward with its recomputed $QK^{\top}$.
 
+When a grab sits inside a block, replacement creates new wire identities. The backward
+rewrite replaces the roots, renames the resulting wire, and then recomputes the block's
+input and output ports. Ports computed before the rename can name a wire with no producer.
+
 An addition in the chain has side operands, such as the negated maximum a shifted
 softmax adds to its scores before the exponent. A side operand is rebuilt from a slot of
 its own. The wire it is a pointwise image of is grabbed where the forward pass drops it
