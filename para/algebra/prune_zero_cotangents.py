@@ -6,11 +6,12 @@ computes the cotangent of the maximum, multiplies it by zero, and adds the resul
 to the cotangent of the scores. The chain is arithmetic that contributes nothing,
 and the tape it reads, the maximum itself, is stored for nothing.
 
-This pass removes it. Every pointwise map whose formula is the constant zero is
-deleted, every addition it fed loses that operand, an addition left with one
-operand of its own shape is replaced by a rename of that operand, and the roots
-whose outputs nothing then reads are collected to a fixed point, which removes
-the chain and the drop of any slot only the chain grabbed.
+This pass removes unused zero maps. Every addition fed by a zero map loses that
+operand, an addition left with one operand of its own shape is replaced by a
+rename of that operand. Roots whose outputs nothing reads are collected to a
+fixed point. The sweep removes the unused chain and the drop of any slot only
+that chain grabbed. Zero maps still consumed by other operations or returned
+as gradients remain in place.
 
 `pathway_collapse.collapse` runs it first. `obsidian/07-para/Backpropagation.md`
 records the rule for the maximum it exists for.
@@ -134,15 +135,14 @@ def collect_dead_roots(graph: hg.Multigraph) -> hg.Multigraph:
 def prune_zero_cotangents[L, M: cat.Morphism](
     taped: backprop.Taped[L, M],
 ) -> backprop.Taped[L, M]:
-    '''`taped` with every zero cotangent, the chain that computed it, and the
-    slots only that chain read removed from both passes.'''
+    '''`taped` with unused zero chains and their unread slots removed from both
+    passes, retaining zero maps needed by other operations or output gradients.'''
     backward_graph = hg.Multigraph.from_morphism(taped.backward)
     zeros, zero_wires = zero_closure(backward_graph)
     if not zeros:
         return taped
     backward_graph, _ = _without_zero_operands(backward_graph, zero_wires)
-    backward_graph = collect_dead_roots(replace_roots.replace_roots(
-        backward_graph, {root: None for root in zeros}))
+    backward_graph = collect_dead_roots(backward_graph)
     grabbed = {root.wraps.tape for root in replace_roots.walk_roots(backward_graph)
                if isinstance(root.wraps, para.Grab)}
     forward_graph = hg.Multigraph.from_morphism(taped.forward)
