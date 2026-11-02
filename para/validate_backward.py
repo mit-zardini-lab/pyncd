@@ -379,11 +379,19 @@ def check_parametrised(torch) -> dict[str, bool]:
         @ ops.Linear.template('f', 'm', name='2'))
     base = pc.dedup_roots(pc.dedup_slots(sgp.collapse_grabbed_residuals(
         bp.forward_backward(sgp.grab_parameters(ffn)))))
+    width = cat.RawAxis.named('m')
+    square_ffn = cat.RawAxis.named('q') >> (
+        ops.Linear.template((width,), (width,), name='1')
+        @ ops.ReLU.template(name='ReLU')
+        @ ops.Linear.template((width,), (width,), name='2'))
+    square = pc.dedup_roots(pc.dedup_slots(sgp.collapse_grabbed_residuals(
+        bp.forward_backward(sgp.grab_parameters(square_ffn)))))
     # The recompute variant saves the pre-activation alone and re-runs the
     # ReLU in the backward pass, giving one residual fewer and the same
     # gradients.
     variants = {'parametrised ffn': base,
-                'ffn, relu recomputed': pc.recompute_elementwise_slots(base)}
+                'ffn, relu recomputed': pc.recompute_elementwise_slots(base),
+                'square ffn': square}
     everything = {}
     for label, taped in variants.items():
         taped = bp.Taped.from_passes(

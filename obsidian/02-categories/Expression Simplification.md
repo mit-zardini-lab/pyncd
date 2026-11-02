@@ -190,8 +190,11 @@ result keeps, so the weaves, the reindexings and the contraction groups are all
 recoverable from them. A shape is a tuple of `IndexVariable`s, each carrying the axis that
 sizes it, and two variables are equal when their labels are. `index_shapes` is the
 direction back: it reads a morphism's operands and result as variables, one per degree
-position and one per contraction group of an `Einops`, and one per target axis of an
-operator that states no grouping. `positional_shape` writes an array with one variable per
+position and one per contraction group of an `Einops`. For a `Linear` or `Transpose`,
+it gives every target position its own variable and pairs the positions of the weight
+with the contracted and produced targets. Tiled positions keep the variables selected
+by their reindexings. Other opaque operators still label targets by axis identity.
+`positional_shape` writes an array with one variable per
 position, for a map applied to it pointwise. A shape may also be given as axes, in which
 case each axis is its own variable, which is the reading `Einops.template` gives a fresh
 expression and the one a rewrite of an existing morphism must not use, per the invariant

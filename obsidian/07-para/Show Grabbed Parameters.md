@@ -182,10 +182,16 @@ walks the graph through its blocks, by `graphs.processing.replace_roots`, and it
 a grabbed index the same way, so a selecting `Linear`'s transpose grabs the slot the model
 dropped the index to, per [[DeepSeek-V3 Backward Pass]].
 
-It is checked numerically. `para/validate_backward.py` compiles the parametrised FFN and
-matches $dx$, $dW_1$ and $dW_2$ against `torch.autograd`. `torch_compile` gained the
-parametrised `Linear` and `Transpose` as one einsum, read off axis identity, which the
-transform guarantees by building the weight from the seed's own weave targets.
+It is checked numerically. [Backward validation](../../para/validate_backward.py)
+compares ordinary and square parametrised FFNs with `torch.autograd`.
+[Positional Linear validation](../../para/validate_linear_positions.py) also checks
+repeated input and output axes, interleaved tiled positions, bias, and transposes.
+The compiler reads its einsum from `einops_simplification.index_shapes`.
+`linear_indices_by_position` pairs the weight's contracted and produced positions
+with the data and result positions, preserving each position's axis and each tiled
+position's reindexing variable. Sharing an axis object therefore does not select a
+weight diagonal. The transpose exchanges the contracted and produced groups while
+reading the same weight array.
 
 A gradient is a chain read by nothing but its `Drop`, which the demand frontier of
 [[Hypergraph to Morphism]] never reaches, because the frontier starts at the `cod`. The
