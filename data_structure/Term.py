@@ -23,6 +23,7 @@ from typing import (
     Hashable,
     TypedDict,
     Protocol,
+    runtime_checkable,
 )
 import hashlib
 import random
@@ -549,20 +550,27 @@ def deep_reconstruct(target, func):
             return target
 
 
+@runtime_checkable
 class UIDEquipped(Protocol):
-    uid: UID
+    '''A term that carries an identity: a `UTerm`, or a term such as `FreeNumeric`
+    that declares its own `uid` field. Identity is structural, so a rewrite keyed on
+    uids addresses both alike. The identity is read-only here, so a term whose uid is
+    typed to itself, `UID[FreeNumeric]`, satisfies the protocol.'''
+    @property
+    def uid(self) -> UID: ...
 @dataclass
-class EqualityClass[T:UTerm]:
+class EqualityClass[T: UIDEquipped]:
     '''A declaration that every uid in `bucket` denotes the term `canonical`.
 
-    Applying the class to a term replaces any `UTerm` whose uid is in the bucket with
-    `canonical`. Every structural change in the package is made this way. Merging two
-    overlapping classes keeps the canonical term of the one with the higher
-    `priority`.
+    Applying the class to a term replaces any term whose uid is in the bucket with
+    `canonical`, which may carry no identity of its own, as a size symbol replaced by
+    an `Integer` does. Every structural change in the package is made this way.
+    Merging two overlapping classes keeps the canonical term of the one with the
+    higher `priority`.
     '''
     _type: Type[T]
     bucket: set[UID[T]]
-    canonical: T
+    canonical: Term
     priority: int = 0
 
     def apply[S: GeneralTerm](self, target: S, iterate: bool = True) -> S:
