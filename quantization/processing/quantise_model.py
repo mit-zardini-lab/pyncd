@@ -352,6 +352,10 @@ def _assign_quantisations(
         morphism = leaf.wraps
         name = enclosing.get(leaf.uid, scope.enclosing_box)
         match morphism:
+            case cat.Rearrangement():
+                results = morphism.apply(tuple(assigned.get(obj) for obj in leaf.dom))
+                for obj, result in zip(leaf.cod, results):
+                    assigned[obj] = result
             case Para.Grab():
                 assigned[leaf.cod[0]] = _slot_quantisation(
                     Para.entry_of(morphism), morphism.size, written, policy)

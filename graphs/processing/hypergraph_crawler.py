@@ -94,7 +94,11 @@ class Crawler[L, M: cat.Morphism, G](ABC):
     def propagate_graph(self, target: hg.Hypergraph[L, M], guide: Sequence[G]) -> tuple[hg.Hypergraph[L, M], Sequence[G]]:
         match target:
             case hg.HypergraphRoot(wraps=wraps):
-                new_wraps, new_guide = self.root_processor(wraps, guide)
+                new_wraps, new_guide = (
+                    self.propagate_category(wraps, guide)
+                    if isinstance(wraps, cat.Rearrangement)
+                    else self.root_processor(wraps, guide)
+                )
                 new_graph = hg.HypergraphRoot.template(
                     new_wraps,
                     target.dom,
@@ -107,18 +111,19 @@ class Crawler[L, M: cat.Morphism, G](ABC):
                 # block's dom is realigned by wire, never by position: a
                 # wire that enters the block twice has one guide at the
                 # block's dom and two, which must agree, at the body's.
-                new_body, new_guide = self.propagate_graph(
-                    body,
-                    realign_guide(guide, self.entry_nodes(target), self.entry_nodes(body),
-                                  merge=self.merge_guides))
+                body_guide = realign_guide(
+                    guide, self.entry_nodes(target), self.entry_nodes(body),
+                    merge=self.merge_guides)
+                new_body, new_guide = self.propagate_graph(body, body_guide)
+                require_the_guide_kept_by_a_loop(block_tag, body_guide, new_guide)
                 new_graph = hg.HypergraphBlock.template(
                     body=new_body,
-                    block_tag=block_tag
+                    block_tag=block_tag,
+                    reduce=target.dom != body.dom,
                 )
                 new_guide = realign_guide(
                     new_guide, self.exit_nodes(new_body), self.exit_nodes(new_graph),
                     merge=self.merge_guides)
-                require_the_guide_kept_by_a_loop(block_tag, guide, new_guide)
                 return new_graph, new_guide
             case hg.Multigraph():
                 return self.propagate_multigraph(target, guide)
@@ -218,7 +223,7 @@ class ForwardCrawler[L, M: cat.Morphism, G](Crawler[L, M, G]):
                     final_object: final_object
                     for final_object in (*new_subgraph.dom, *new_subgraph.cod)
                 }
-                for original_object in (*subgraph.dom, *subgraph.cod):
+                for original_object in util.unique_tuple((*subgraph.dom, *subgraph.cod)):
                     if original_object in object_guide:
                         final_object = final_by_wire[original_object]
                         assert object_guide[original_object] is None

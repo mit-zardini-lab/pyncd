@@ -117,13 +117,26 @@ A `BlockTag` with `repetition != 1` denotes a loop, which carries a running valu
 iteration to the next. An `aesthetics` field says how the block is drawn and says nothing
 about the semantics of its body. → [[Product Categories]]
 
+**Block outputs keep distinct positions through explicit wiring roots.**
+Pass-through outputs and repeated output positions receive fresh wires inside the
+body. The block and body still share those wires. Repeated blocks also separate
+aliased initial inputs before entering the body, because subsequent iterations
+may give those positions different values. → [[Hypergraphs]]
+
+**Reconstruction retains wiring blocks and their full interfaces.**
+An empty stack still implements the requested output mapping. A discarded result
+does not discard its block, and rearrangement normalisation retains blocks whose
+bodies compute identities. Loop scope rebuilding retains all iteration state,
+including a final result discarded by an outer projection. → [[Hypergraph to Morphism]]
+
 **A loop block bounds the merging of duplicate roots.**
 `merge_duplicate_roots` merges two roots that wrap equal morphisms on the same wires, and
 keys the grouping on the loop blocks enclosing each root. A root inside a loop computes once
 per iteration, so it is never merged with a root outside the loop, and two roots inside one
 loop merge within its body. A block with `repetition == 1` is transparent, and the kept root
 is placed in the innermost block enclosing every reader, with the block domains recomputed
-so its wire reaches them. → [[Functors]]
+so its wire reaches them. Explicit wiring roots retain their complete block scope
+because their output wires preserve the block's positions. → [[Functors]]
 
 **A root outside a block may not read the block's output and feed its input.**
 The block and the root then read each other, no order of the scope carries the pair, and
@@ -145,9 +158,9 @@ producer and consumer lookup by wire. → [[Hypergraph Analysis]]
 alone.** Rewriting the whole region wires the consumers to the value from before the splice
 and bypasses the node just inserted. → [[Rewriting]], [[Leaf Splicing]]
 
-**`ValueError: HypergraphObject(...) is not in list`** from `hypergraph_to_morphism` means
-the wiring is wrong and the conversion is correct. Some wire is required on the right of a
-branch and nothing on the left produces it. → [[Hypergraph to Morphism]]
+**A missing wire in `hypergraph_to_morphism` requires inspecting both the graph and its
+reconstruction.** Some wire is required on the right of a branch and nothing on the left
+supplies it. Valid block compositions have also caused this failure. → [[Hypergraph to Morphism]]
 
 **Merging equality classes has to accumulate.** A bucket can overlap several existing classes,
 and each merge has to fold into the union so far. → [[Rewriting]]

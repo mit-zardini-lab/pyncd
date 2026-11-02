@@ -26,6 +26,10 @@ A subclass supplies `object_processor` and `root_processor`. The base provides t
 traversals over `Composed`, `ProductOfMorphisms`, `Block`, `Rearrangement` and the
 hypergraph forms.
 
+An explicit rearrangement root follows the structural traversal, so it maps or
+merges guides without invoking the seed processor. Its output wire identities
+remain distinct during rebuilding.
+
 ## Two reverse crawls carry an index or a read towards the inputs
 
 A rewrite whose rule depends on what the surrounding expression requires cannot be written
@@ -108,6 +112,10 @@ unchanged. `require_the_guide_kept_by_a_loop` checks the condition for a `cat.Bl
 `HypergraphBlock` in both directions, and raises `RepeatedBlockChangesTheGuide` with the
 repetition and the number of wires where the body changes the guide. Three bare `assert`
 statements stood in its place until 2026-09-26.
+
+For a hypergraph block, the comparison uses the body's entry and exit guides
+before realignment with the outer ports. Deduplicating an outer input does not
+change the number of positions carried between iterations.
 
 ## See also
 

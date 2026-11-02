@@ -135,8 +135,9 @@ def make_rearrangement(
 class SinkPlacement:
     '''The sinks of one conversion, each waiting to be injected into a column.
 
-    A sink is a subgraph with an empty codomain. `Para.Drop` is the case. It
-    saves a value to a tape slot and returns no wire.
+    A sink is a subgraph with no output required by another subgraph or the
+    enclosing codomain. `Para.Drop` saves a value to a tape slot and returns
+    no wire. A block followed by a complete discard also has no required output.
 
     The demand frontier starts at the graph's codomain and walks left, and a
     sink is never demanded, so `exclusive` never emits one. Each sink is
@@ -318,7 +319,8 @@ class ComposedBranch[L, M: cat.Morphism](Branch[L, M]):
     _right_override: fd.Prod[hg.HypergraphObject] | None = None
 
     def left_nodes(self):
-        return self._left_nodes or util.unique_tuple(self._stacks[0].left_nodes())
+        return (self._left_nodes if self._left_nodes is not None
+                else util.unique_tuple(self._stacks[0].left_nodes()))
     def right_nodes(self):
         return (self._right_override if self._right_override is not None
                 else self._stacks[-1].right_nodes())
@@ -345,9 +347,9 @@ class ComposedBranch[L, M: cat.Morphism](Branch[L, M]):
                            self._analysis),
                        branch.morphism())
             previous_right = branch.right_nodes()
-        if self._right_override is not None and self._stacks:
+        if self._right_override is not None:
             content = (*content, *make_rearrangement(
-                self._stacks[-1].right_nodes(),
+                previous_right,
                 self._right_override, self._analysis))
 
         expanded = util.concat(map(expand_composed, content))
@@ -465,7 +467,7 @@ def make_root_branch(
     target = analysis.target
     sinks = tuple(
         subgraph for subgraph in target.subgraphs()
-        if not analysis.tag_cod(subgraph))
+        if not boundary_cod(subgraph, analysis))
     for sink in sinks:
         placement.register(sink, make_subbranch(sink, analysis, placement))
 
@@ -530,11 +532,16 @@ def graph_to_branch[L, M: cat.Morphism](
                 _newly_processed=(target,)
             )
         case hg.HypergraphBlock(body=body, block_tag=block_tag):
+            body_morphism: cat.ProdCategory[L, M] = cat.Block(
+                body=hypergraph_to_morphism(body), block_tag=block_tag)
+            if target.dom != body.dom:
+                body_morphism = compose_retaining_blocks(
+                    cat.Rearrangement(
+                        mapping=tuple(target.dom.index(node) for node in body.dom),
+                        _dom=tuple(node.obj for node in target.dom)),
+                    body_morphism)
             return RootBranch(
-                _morphism=cat.Block(
-                    body=hypergraph_to_morphism(body),
-                    block_tag=block_tag
-                ),
+                _morphism=body_morphism,
                 _right_nodes=target.cod,
                 _left_nodes=target.dom,
                 _newly_processed=(target,) # type: ignore
@@ -570,6 +577,38 @@ def _fuse_rearrangements[L](
         _dom=first._dom)
 
 
+def is_unblocked_identity[L, M: cat.Morphism](
+    target: cat.ProdCategory[L, M],
+) -> bool:
+    match target:
+        case cat.Rearrangement():
+            return tutil.is_identity(target)
+        case cat.Composed(content=content) | cat.ProductOfMorphisms(content=content):
+            return all(is_unblocked_identity(child) for child in content)
+        case _:
+            return False
+
+
+def compose_retaining_blocks[L, M: cat.Morphism](
+    *content: cat.ProdCategory[L, M],
+) -> cat.ProdCategory[L, M]:
+    expanded = chsh.expand_content(cat.Composed, *content)
+    kept = tuple(child for child in expanded if not is_unblocked_identity(child))
+    if not kept:
+        return expanded[0].dom().identity()
+    return kept[0] if len(kept) == 1 else cat.Composed(content=kept)
+
+
+def product_retaining_blocks[L, M: cat.Morphism](
+    *content: cat.ProdCategory[L, M],
+) -> cat.ProdCategory[L, M]:
+    expanded = chsh.expand_content(cat.ProductOfMorphisms, *content)
+    if len(expanded) == 1:
+        return expanded[0]
+    product = cat.ProductOfMorphisms(content=expanded)
+    return product.dom().identity() if is_unblocked_identity(product) else product
+
+
 def _leading_split[L, M: cat.Morphism](
     child: cat.ProdCategory[L, M],
 ) -> tuple[cat.Rearrangement[L] | None, cat.ProdCategory[L, M]]:
@@ -579,7 +618,8 @@ def _leading_split[L, M: cat.Morphism](
         case cat.Rearrangement() if not tutil.is_identity(child):
             return child, cat.ProdObject(child.apply(child._dom)).identity()
         case cat.Composed(content=(cat.Rearrangement() as lead, *rest)):
-            return lead, chsh.make_composed(*rest)
+            return lead, (compose_retaining_blocks(*rest)
+                          if rest else lead.cod().identity())
         case _:
             return None, child
 
@@ -603,7 +643,7 @@ def _hoist_product[L, M: cat.Morphism](
             dom.extend(lead._dom)
             mapping.extend(offset + i for i in lead.mapping)
     combined = cat.Rearrangement(tuple(mapping), tuple(dom))
-    return combined, chsh.make_product(*(rest for _, rest in splits))
+    return combined, product_retaining_blocks(*(rest for _, rest in splits))
 
 
 def _hoist_once[L, M: cat.Morphism](
@@ -617,7 +657,7 @@ def _hoist_once[L, M: cat.Morphism](
             new_content = tuple(_hoist_once(m) for m in ms)
             if all(new is old for new, old in zip(new_content, ms)):
                 return target
-            return chsh.make_product(*new_content)
+            return product_retaining_blocks(*new_content)
         case cat.Composed(content=ms):
             new_content: fd.Prod[cat.ProdCategory[L, M]] = ()
             for element in ms:
@@ -643,7 +683,7 @@ def _hoist_once[L, M: cat.Morphism](
                 new_content = (*new_content, element)
             if not new_content:
                 return target.dom().identity()
-            return chsh.make_composed(*new_content)
+            return compose_retaining_blocks(*new_content)
         case _:
             return target
 

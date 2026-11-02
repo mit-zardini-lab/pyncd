@@ -5,7 +5,8 @@ the block's domain and codomain stale. `recompute_block_boundaries` rederives
 both for every block from where each wire is produced and where it is
 consumed, so a wire produced inside one block and read inside another flows
 out through the first block's codomain, up to their common ancestor, and in
-through the second block's domain. A block emptied by a rewrite is removed.
+through the second block's domain. Blocks retain their tags when a rewrite
+empties them.
 
 `insert_roots` appends roots to the scope named by a chain of block uids, and
 `walk_roots_with_blocks` yields every root with the blocks enclosing it. A
@@ -101,9 +102,8 @@ def _ordered(existing: fd.Prod[Wire], needed: Iterable[Wire]) -> fd.Prod[Wire]:
 def recompute_block_boundaries[L, M: cat.Morphism](
     graph: hg.Multigraph[L, M],
 ) -> hg.Multigraph[L, M]:
-    '''Every block's domain and codomain rederived from the roots, and every
-    emptied block removed. The outermost graph keeps its own domain and
-    codomain, because they are the morphism's.
+    '''Every block's domain and codomain rederived from the roots. The outermost
+    graph keeps its own domain and codomain, because they are the morphism's.
 
     A wire produced at one block chain and consumed at another flows through
     the codomain of every block below their common prefix on the producer's
@@ -111,6 +111,10 @@ def recompute_block_boundaries[L, M: cat.Morphism](
     side. A wire's position in a block's boundary is kept where it already
     had one, and a wire new to a boundary is appended in the order the roots
     are walked.
+
+    A repeated block keeps every carried input and output for the next iteration,
+    including outputs discarded after the final iteration. Newly required inputs
+    precede the carried inputs.
     '''
     produced_at: dict[Wire, BlockChain] = {wire: () for wire in graph.dom}
     consumed_at: dict[Wire, list[BlockChain]] = defaultdict(list)
@@ -123,6 +127,26 @@ def recompute_block_boundaries[L, M: cat.Morphism](
         for wire in root.dom:
             consumed_at[wire].append(chain)
             in_walk_order.setdefault(wire)
+
+    def record_block_reads(target: hg.Hypergraph, chain: BlockChain) -> None:
+        match target:
+            case hg.HypergraphBlock(body=body):
+                own_chain = (*chain, target.uid)
+                if is_loop(target) or (
+                        isinstance(body, hg.Multigraph) and not body.subgraphs()):
+                    for wire in target.dom:
+                        consumed_at[wire].append(own_chain)
+                        in_walk_order.setdefault(wire)
+                if is_loop(target):
+                    for wire in target.cod:
+                        consumed_at[wire].append(own_chain)
+                        in_walk_order.setdefault(wire)
+                record_block_reads(body, own_chain)
+            case hg.Multigraph():
+                for child in target.subgraphs():
+                    record_block_reads(child, chain)
+
+    record_block_reads(graph, ())
     for wire in graph.cod:
         consumed_at[wire].append(())
 
@@ -140,28 +164,42 @@ def recompute_block_boundaries[L, M: cat.Morphism](
                 needs_dom[consumer[:depth]].append(wire)
 
     def rebuild(target: hg.Hypergraph[L, M], chain: BlockChain,
-                ) -> hg.Hypergraph[L, M] | None:
+                ) -> hg.Hypergraph[L, M]:
         match target:
             case hg.HypergraphRoot():
                 return target
             case hg.HypergraphBlock(body=body):
                 own_chain = (*chain, target.uid)
                 rebuilt_body = rebuild(body, own_chain)
-                if rebuilt_body is None or not rebuilt_body.subgraphs():
-                    return None
-                dom = _ordered(target.dom, needs_dom[own_chain])
-                cod = _ordered(target.cod, needs_cod[own_chain])
+                if isinstance(body, hg.Multigraph) and not body.subgraphs():
+                    return target
+                if is_loop(target):
+                    added = tuple(
+                        wire for wire in util.unique_tuple(needs_dom[own_chain])
+                        if wire not in target.dom)
+                    carried = len(target.cod)
+                    split = len(target.dom) - carried
+                    dom = (*target.dom[:split], *added, *target.dom[split:])
+                    body_split = len(body.dom) - carried
+                    body_dom = (*body.dom[:body_split], *added, *body.dom[body_split:])
+                    cod = target.cod
+                else:
+                    dom = _ordered(target.dom, needs_dom[own_chain])
+                    body_dom = dom
+                    cod = _ordered(target.cod, needs_cod[own_chain])
                 if rebuilt_body is body and dom == target.dom and cod == target.cod:
                     return target
+                children = (
+                    rebuilt_body._subgraphs
+                    if isinstance(rebuilt_body, hg.Multigraph) else (rebuilt_body,))
                 return target.reconstruct(
-                    body=rebuilt_body.reconstruct(dom=dom, cod=cod),
+                    body=hg.Multigraph.template(
+                        dom=body_dom, cod=cod, subgraphs=children),
                     dom=dom, cod=cod)
             case hg.Multigraph():
                 children: list[hg.Hypergraph[L, M]] = []
                 for child in target._subgraphs:
                     rebuilt = rebuild(child, chain)
-                    if rebuilt is None:
-                        continue
                     if isinstance(rebuilt, hg.Multigraph):
                         children.extend(rebuilt._subgraphs)
                     else:
@@ -173,7 +211,4 @@ def recompute_block_boundaries[L, M: cat.Morphism](
                     _subgraphs=tuple(children))
         raise NotImplementedError(f'cannot rewrite {type(target).__name__}')
 
-    rebuilt = rebuild(graph, ())
-    if rebuilt is None:
-        return graph.reconstruct(_subgraphs=())
-    return rebuilt
+    return rebuild(graph, ())
