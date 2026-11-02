@@ -362,6 +362,7 @@ and copy it, and is not written.
 | The pass of [[Quantization]] assigns a quantisation to every wire from one policy, and a model already carrying quantisations is assigned again from that policy rather than having the two reconciled | [[Quantization]] |
 | A weight carries no wire, so the table of weight quantisations `quantise_model` returns beside the model is not part of the expression, and [[Stripping Quantisations]] does not touch it | [[Stripping Quantisations]] |
 | Whether running [[Expression Simplification]] before a derivation helps or hurts is untested | [[Expression Simplification]] |
+| Consecutive wiring-only blocks can make `recycle` recurse. A single wiring block can retain its title while changing values or arity. Fixing this generally requires the graph to retain the ordered binding between each block's external ports and its body ports. The pass-through producer fix does not address these cases. | [[Hypergraph to Morphism]], [[Hypergraphs]] |
 
 ## Closed
 

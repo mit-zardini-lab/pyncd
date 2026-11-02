@@ -74,13 +74,11 @@ Every validator passes with it in place.
 
 ## The rules
 
-> [!warning] `HypergraphObject(...) is not in list` means a wiring bug upstream
-> The conversion is where a wiring error surfaces rather than where it is. Some node is
-> required on the right of a branch and nothing on the left produces it. Check the splice
-> that last touched the region, and check whether a container's `dom` or `cod` needed
-> rebuilding, through `leaf_splicing.rescope`, per [[Leaf Splicing]]. One systematic cause that was not a bug is fixed,
-> in the session recorded as, and the next warning
-> describes it. If the error reappears on a valid morphism, suspect that family first.
+> [!warning] `HypergraphObject(...) is not in list` reports a missing branch input
+> Some node is required on the right of a branch and absent on its left. Check the
+> graph and the branch construction. A splice may need its containers rebuilt through
+> `leaf_splicing.rescope`, per [[Leaf Splicing]]. Valid morphisms with pass-through
+> blocks have also exposed the scheduling defects described below.
 
 > [!warning] Pass-through wires and dropped wires used to break the branch walk
 > A wire a block passes through untouched keeps its node, so the node sits in that graph's
@@ -97,6 +95,14 @@ Every validator passes with it in place.
 > emitted branch must not also be held by an identity, or the copy rides the whole
 > composition unused before being deleted, which draws full-length stub wires. The
 > Every validator passes across both fixes.
+>
+> An identity hold also used to treat a block that passes a wire through as the wire's
+> producer. For two recurrence blocks, the second passes on a wire written by the first.
+> Holding the wire beside the first block requested it before anything produced it.
+> `rolled_subbranches` now considers only a graph with the node in its codomain and
+> absent from its domain as a producer. The recurrence and retained block titles are
+> checked in `graphs/validate_hypergraphs.py`. Consecutive wiring-only blocks remain
+> unresolved, per [[Open Gaps]].
 
 > [!warning] Stacks used to be aligned to what a stack requested rather than to what the previous one emits
 > `ComposedBranch.morphism` aligned each stack to `unique_tuple` of its own left nodes,

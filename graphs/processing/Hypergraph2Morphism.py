@@ -99,6 +99,18 @@ def gating_right(
         for edge in analysis.nodes_right(*boundary_cod(graph, analysis))
     ))
 
+def produces(
+        graph: hga.GraphTag,
+        node: hg.HypergraphObject,
+        analysis: hga.HypergraphAnalysis) -> bool:
+    '''Whether `graph` writes `node`, as opposed to passing it through.
+
+    A block passes a wire through when its node appears in both its domain
+    and codomain.
+    '''
+    return (node in analysis.tag_cod(graph)
+            and node not in set(analysis.tag_dom(graph)))
+
 def exclusive(
         nodes: fd.Prod[hg.HypergraphObject],
         local: fd.Prod[hga.GraphTag],
@@ -218,11 +230,12 @@ def rolled_subbranches(
         used_elsewhere = tuple(
             graph for graph, _, _
             in analysis.nodes_left(current_node)
-            if graph == hga.HypergraphSpecialTag.LEFT
-            or any(
-                next_graph not in local
-                for next_graph in gating_right(graph, analysis)
-            )
+            if produces(graph, current_node, analysis)
+            and (graph == hga.HypergraphSpecialTag.LEFT
+                 or any(
+                     next_graph not in local
+                     for next_graph in gating_right(graph, analysis)
+                 ))
         )
 
         if (not exclusive_subgraphs) and used_elsewhere:

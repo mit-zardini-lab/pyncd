@@ -146,8 +146,9 @@ alone.** Rewriting the whole region wires the consumers to the value from before
 and bypasses the node just inserted. → [[Rewriting]], [[Leaf Splicing]]
 
 **`ValueError: HypergraphObject(...) is not in list`** from `hypergraph_to_morphism` means
-the wiring is wrong and the conversion is correct. Some wire is required on the right of a
-branch and nothing on the left produces it. → [[Hypergraph to Morphism]]
+a required wire is absent on the left of a branch. The graph may be malformed, or the
+branch construction may have held a wire beside its producer. Valid consecutive blocks
+with pass-through wires exposed the latter case. → [[Hypergraph to Morphism]]
 
 **Merging equality classes has to accumulate.** A bucket can overlap several existing classes,
 and each merge has to fold into the union so far. → [[Rewriting]]
